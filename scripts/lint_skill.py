@@ -12,7 +12,7 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parent.parent / "SKILL.md"
+SKILL = Path(__file__).resolve().parent.parent / "skills" / "prefect-skill" / "SKILL.md"
 REQUIRED_KEYS = ("name", "description", "license")
 LINE_BUDGET = 120
 DESC_MAX = 1024

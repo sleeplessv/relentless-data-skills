@@ -15,7 +15,7 @@ import urllib.request
 from pathlib import Path
 
 DURABLE = ["https://docs.prefect.io/llms.txt"]
-DOCS_MAP = Path(__file__).resolve().parent.parent / "references" / "docs-map.md"
+DOCS_MAP = Path(__file__).resolve().parent.parent / "skills" / "prefect-skill" / "references" / "docs-map.md"
 URL_RE = re.compile(r"=>\s*(https://\S+)")
 TIMEOUT = 30
 

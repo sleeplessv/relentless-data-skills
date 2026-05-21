@@ -48,20 +48,19 @@ Update later with `/plugin marketplace update relentless-data-skills-prefect`.
 ### Manual clone (any SKILL.md-aware agent)
 
 ```bash
-git clone https://github.com/sleeplessv/relentless-data-skills-prefect.git \
-  ~/.claude/skills/relentless-data-skills-prefect
-# or symlink an existing checkout:
-ln -s "$(pwd)" ~/.claude/skills/relentless-data-skills-prefect
+git clone https://github.com/sleeplessv/relentless-data-skills-prefect.git
+# the skill lives in skills/prefect-skill/ — symlink (or copy) just that dir:
+ln -s "$(pwd)/relentless-data-skills-prefect/skills/prefect-skill" \
+  ~/.claude/skills/prefect-skill
 ```
 
 ## Files
 
-- `SKILL.md` — core: response contract, lookup protocol, routing table, greenfield + audit workflows, guardrails, portable patterns.
-- `references/greenfield-checklist.md` — the four-area standards / audit rubric.
-- `references/docs-map.md` — durable doc entry points + a topic→URL cache (CI-checked).
-- `scripts/` — CI integrity checks (doc-URL liveness, SKILL.md lint).
+- `skills/prefect-skill/SKILL.md` — core: response contract, lookup protocol, routing table, greenfield + audit workflows, guardrails, portable patterns.
+- `skills/prefect-skill/references/greenfield-checklist.md` — the four-area standards / audit rubric.
+- `skills/prefect-skill/references/docs-map.md` — durable doc entry points + a topic→URL cache (CI-checked).
+- `scripts/` — CI integrity checks (doc-URL liveness, SKILL.md lint). Repo tooling only; not installed with the skill.
 - `.claude-plugin/` — `marketplace.json` + `plugin.json` so the repo doubles as a one-plugin Claude Code marketplace.
-- `PRD.md` — the originating spec.
 
 ## Maintenance / CI
 

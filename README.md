@@ -23,8 +23,29 @@ specific URLs in the docs map are a CI-checked convenience cache.
 
 ## Install
 
-This is a standard agent skill (a directory containing a `SKILL.md`). Install it
-where your agent discovers skills:
+Pick whichever fits your agent. All three install the same skill; it activates
+automatically when you do Prefect 3 work or ask about Prefect.
+
+### `npx skills` (cross-agent: Claude Code, Cursor, Codex, OpenCode, …)
+
+```bash
+npx skills add sleeplessv/relentless-data-skills-prefect
+```
+
+`npx skills list` / `update` / `remove` manage it afterward.
+
+### Claude Code plugin
+
+```text
+/plugin marketplace add sleeplessv/relentless-data-skills-prefect
+/plugin install prefect-skill@relentless-data-skills-prefect
+```
+
+(Or from the shell: `claude plugin marketplace add sleeplessv/relentless-data-skills-prefect`
+then `claude plugin install prefect-skill@relentless-data-skills-prefect`.)
+Update later with `/plugin marketplace update relentless-data-skills-prefect`.
+
+### Manual clone (any SKILL.md-aware agent)
 
 ```bash
 git clone https://github.com/sleeplessv/relentless-data-skills-prefect.git \
@@ -33,14 +54,13 @@ git clone https://github.com/sleeplessv/relentless-data-skills-prefect.git \
 ln -s "$(pwd)" ~/.claude/skills/relentless-data-skills-prefect
 ```
 
-It activates automatically when you do Prefect 3 work or ask about Prefect.
-
 ## Files
 
 - `SKILL.md` — core: response contract, lookup protocol, routing table, greenfield + audit workflows, guardrails, portable patterns.
 - `references/greenfield-checklist.md` — the four-area standards / audit rubric.
 - `references/docs-map.md` — durable doc entry points + a topic→URL cache (CI-checked).
 - `scripts/` — CI integrity checks (doc-URL liveness, SKILL.md lint).
+- `.claude-plugin/` — `marketplace.json` + `plugin.json` so the repo doubles as a one-plugin Claude Code marketplace.
 - `PRD.md` — the originating spec.
 
 ## Maintenance / CI

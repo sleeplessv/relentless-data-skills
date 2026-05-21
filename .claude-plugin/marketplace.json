@@ -1,0 +1,30 @@
+{
+  "name": "relentless-data-skills-prefect",
+  "description": "Prefect 3 greenfield-and-audit agent skill with a live docs-lookup protocol.",
+  "version": "0.1.0",
+  "owner": {
+    "name": "sleeplessv"
+  },
+  "plugins": [
+    {
+      "name": "prefect-skill",
+      "source": "./",
+      "description": "Opinionated Prefect 3 guidance: greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills-prefect",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills-prefect",
+      "license": "Apache-2.0",
+      "keywords": [
+        "prefect",
+        "prefect-3",
+        "orchestration",
+        "data-engineering",
+        "workflows",
+        "audit"
+      ]
+    }
+  ]
+}

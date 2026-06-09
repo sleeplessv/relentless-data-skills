@@ -13,6 +13,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes by affected area, create one conventional commit per group, then push — with safety rules against force-pushes, skipped hooks, and committed secrets. |
 | [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
 | [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the `snow` CLI: schema discovery, profiling, hypothesis testing, data-quality investigation. Bootstraps a committed per-project context; a wrapper hard-enforces read-only. |
+| [`orchestrator-mode`](skills/orchestrator-mode/) | Turns the main thread into a pure coordinator that delegates ALL work to subagents — plan, parallel-dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor. |
 
 ## External skills (references)
 

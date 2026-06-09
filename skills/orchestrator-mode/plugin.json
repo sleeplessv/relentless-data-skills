@@ -1,0 +1,20 @@
+{
+  "name": "orchestrator-mode",
+  "version": "0.1.0",
+  "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/orchestrator-mode",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "orchestration",
+    "subagents",
+    "delegation",
+    "multi-agent",
+    "task-tool",
+    "parallel",
+    "workflow"
+  ]
+}

@@ -5,8 +5,8 @@
   "author": {
     "name": "sleeplessv"
   },
-  "homepage": "https://github.com/sleeplessv/relentless-data-skills-prefect",
-  "repository": "https://github.com/sleeplessv/relentless-data-skills-prefect",
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/prefect-skill",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
   "license": "Apache-2.0",
   "keywords": [
     "prefect",

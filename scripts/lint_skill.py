@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
 """SKILL.md linter.
 
-Checks the skill's own integrity: required frontmatter keys, a "Use when"
-trigger clause in the description, the 1024-char description cap, and the
-SKILL.md line budget. Standard library only.
+Lints every ``skills/*/SKILL.md`` for its own integrity: required frontmatter
+keys, a "Use when" trigger clause in the description, the 1024-char description
+cap, and the SKILL.md line budget. Standard library only.
 
-Exit code 0 = clean, 1 = lint errors.
+Exit code 0 = all clean, 1 = at least one skill has lint errors.
 """
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-SKILL = Path(__file__).resolve().parent.parent / "skills" / "prefect-skill" / "SKILL.md"
+SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 REQUIRED_KEYS = ("name", "description", "license")
 LINE_BUDGET = 120
 DESC_MAX = 1024
 
 
-def parse_frontmatter(text: str) -> dict[str, str]:
+def parse_frontmatter(text: str, where: str) -> dict[str, str]:
     if not text.startswith("---"):
-        raise SystemExit("SKILL.md must open with a YAML frontmatter block (---).")
+        raise SystemExit(f"{where}: must open with a YAML frontmatter block (---).")
     parts = text.split("---", 2)
     if len(parts) < 3:
-        raise SystemExit("SKILL.md frontmatter is not closed with ---.")
+        raise SystemExit(f"{where}: frontmatter is not closed with ---.")
     fm: dict[str, str] = {}
     for line in parts[1].strip().splitlines():
         if ":" in line and not line.startswith((" ", "\t", "#", "-")):
@@ -32,11 +32,12 @@ def parse_frontmatter(text: str) -> dict[str, str]:
     return fm
 
 
-def main() -> int:
-    text = SKILL.read_text(encoding="utf-8")
+def lint(skill_md: Path) -> list[str]:
+    rel = skill_md.relative_to(SKILLS_DIR.parent)
+    text = skill_md.read_text(encoding="utf-8")
     errors: list[str] = []
 
-    fm = parse_frontmatter(text)
+    fm = parse_frontmatter(text, str(rel))
     for key in REQUIRED_KEYS:
         if not fm.get(key):
             errors.append(f"missing/empty frontmatter key: {key}")
@@ -52,11 +53,27 @@ def main() -> int:
         errors.append(f"SKILL.md is {n_lines} lines (budget {LINE_BUDGET})")
 
     if errors:
-        print("SKILL.md lint FAILED:")
+        print(f"{rel}: FAILED")
         for err in errors:
             print(f"  - {err}")
+    else:
+        print(f"{rel}: OK ({n_lines} lines, description {len(desc)} chars)")
+    return errors
+
+
+def main() -> int:
+    skill_files = sorted(SKILLS_DIR.glob("*/SKILL.md"))
+    if not skill_files:
+        raise SystemExit(f"no skills found under {SKILLS_DIR}/*/SKILL.md")
+
+    total_errors = 0
+    for skill_md in skill_files:
+        total_errors += len(lint(skill_md))
+
+    if total_errors:
+        print(f"\nSKILL.md lint FAILED ({total_errors} error(s) across {len(skill_files)} skill(s)).")
         return 1
-    print(f"SKILL.md lint OK ({n_lines} lines, description {len(desc)} chars)")
+    print(f"\nSKILL.md lint OK ({len(skill_files)} skill(s)).")
     return 0
 
 

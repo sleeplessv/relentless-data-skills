@@ -1,10 +1,6 @@
 ---
 name: snowman
-description: "Use when exploring Snowflake data, profiling tables, testing hypotheses, investigating data-quality issues, or discovering schemas and warehouses via the snow CLI. Strictly read-only — never writes, never mutates production."
-license: Apache-2.0
-metadata:
-  author: sleeplessv
-  version: 0.1.0
+description: Use when exploring Snowflake data, profiling tables, testing hypotheses, investigating data-quality issues, or discovering schemas and warehouses via the snow CLI. Strictly read-only - never writes, never mutates production.
 ---
 
 # snowman

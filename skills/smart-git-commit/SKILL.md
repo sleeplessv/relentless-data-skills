@@ -1,7 +1,6 @@
 ---
 name: smart-git-commit
 description: Groups changed files by affected area, creates one conventional commit per group, then pushes to remote. Use when the user asks to commit changes, create commits, stage and commit, or commit and push. Follows conventional commit format with lowercase type prefixes.
-license: Apache-2.0
 ---
 
 # Smart Git Commit

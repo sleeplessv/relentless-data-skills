@@ -1,7 +1,6 @@
 ---
 name: orchestrator-mode
 description: Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself. Use when the user says "orchestrator mode", "use subagents", "delegate everything", "swarm this", or otherwise asks the main thread to coordinate rather than execute. Agent-neutral — works on Claude Code, Cursor, and any agent with a delegation tool.
-license: Apache-2.0
 ---
 
 # Orchestrator Mode

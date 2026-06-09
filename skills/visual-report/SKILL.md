@@ -1,10 +1,8 @@
 ---
 name: visual-report
 description: Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG. Use when the user wants a visual report, an explainer, a single-file HTML writeup of a system/process/findings, or asks to visualize or diagram something as a shareable document.
-license: Apache-2.0
 metadata:
   author: sleeplessv
-  version: 0.1.0
 ---
 
 # Visual Report

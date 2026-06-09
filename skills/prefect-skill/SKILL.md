@@ -1,10 +1,7 @@
 ---
 name: prefect-skill
 description: Use when building, scaffolding, reviewing, or debugging Prefect 3 projects — flows, tasks, deployments, work pools, workers, schedules, blocks, results/retries/caching — or diagnosing failed, crashed, stuck, late, or zombie flow runs — or whenever unsure about a Prefect API or current best practice. Provides greenfield-build, existing-project-audit, and run-debugging modes, and always confirms version-sensitive details against the live Prefect docs.
-license: Apache-2.0
 metadata:
-  author: sleeplessv
-  version: 0.1.0
   prefect: "3.x"
 ---
 

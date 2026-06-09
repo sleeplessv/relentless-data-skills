@@ -1,73 +1,59 @@
-# relentless-data-skills-prefect
+# relentless-data-skills
 
-The **`prefect-skill`** agent skill for **Prefect 3**: scaffolding greenfield
-projects against current best practice, auditing existing projects for drift,
-and looking up the live Prefect docs whenever the agent is unsure — so advice
-tracks the latest docs instead of stale training data.
+A collection of [agent skills](https://docs.claude.com/en/docs/claude-code/skills)
+maintained by **Relentless Data**. Each skill lives in its own directory under
+`skills/` and installs independently — pick the ones you want.
 
-## What it does
+## Skills
 
-- **Greenfield mode** — an opinionated workflow plus a four-area standards checklist (scaffolding · authoring + reliability · deployment + execution · config/secrets/observability/testing).
-- **Audit mode** — runs the same checklist as a rubric against an existing project and flags drift, including Prefect 2.x leftovers.
-- **Doc-lookup protocol** — resolves a topic via `docs.prefect.io/llms.txt`, then fetches the page as markdown (`<page>.md`); web search is fallback only. Works under network sandboxing (uses the agent's web-fetch, not shell `curl`).
-- **Response contract** — every answer states its assumptions/target, the recommendation + tradeoff, the doc page consulted, and a validation step.
-
-Targets the **Prefect 3.x** generation (no patch pin). Prefect 2.x is out of scope.
-
-## How it works
-
-The skill is intentionally thin: it carries opinions, a workflow, a checklist,
-and a docs map, and delegates topic *detail* to the live docs so it never goes
-stale. The durable contract is the lookup protocol (`llms.txt` → `<page>.md`);
-specific URLs in the docs map are a CI-checked convenience cache.
+| Skill | What it does |
+| --- | --- |
+| [`prefect-skill`](skills/prefect-skill/) | Prefect 3 greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope. |
 
 ## Install
 
-Pick whichever fits your agent. All three install the same skill; it activates
-automatically when you do Prefect 3 work or ask about Prefect.
+Every skill installs the same three ways. Substitute `<skill>` with a skill
+directory name from the table above (e.g. `prefect-skill`).
 
 ### `npx skills` (cross-agent: Claude Code, Cursor, Codex, OpenCode, …)
 
 ```bash
-npx skills add sleeplessv/relentless-data-skills-prefect
+npx skills add sleeplessv/relentless-data-skills/skills/<skill>
 ```
 
-`npx skills list` / `update` / `remove` manage it afterward.
+`npx skills list` / `update` / `remove` manage installed skills afterward.
 
 ### Claude Code plugin
 
 ```text
-/plugin marketplace add sleeplessv/relentless-data-skills-prefect
-/plugin install prefect-skill@relentless-data-skills-prefect
+/plugin marketplace add sleeplessv/relentless-data-skills
+/plugin install <skill>@relentless-data-skills
 ```
 
-(Or from the shell: `claude plugin marketplace add sleeplessv/relentless-data-skills-prefect`
-then `claude plugin install prefect-skill@relentless-data-skills-prefect`.)
-Update later with `/plugin marketplace update relentless-data-skills-prefect`.
+(Or from the shell: `claude plugin marketplace add sleeplessv/relentless-data-skills`
+then `claude plugin install <skill>@relentless-data-skills`.)
+Update later with `/plugin marketplace update relentless-data-skills`.
 
 ### Manual clone (any SKILL.md-aware agent)
 
 ```bash
-git clone https://github.com/sleeplessv/relentless-data-skills-prefect.git
-# the skill lives in skills/prefect-skill/ — symlink (or copy) just that dir:
-ln -s "$(pwd)/relentless-data-skills-prefect/skills/prefect-skill" \
-  ~/.claude/skills/prefect-skill
+git clone https://github.com/sleeplessv/relentless-data-skills.git
+# symlink (or copy) just the skill dir you want:
+ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 ```
 
-## Files
+## Repo layout
 
-- `skills/prefect-skill/SKILL.md` — core: response contract, lookup protocol, routing table, greenfield + audit workflows, guardrails, portable patterns.
-- `skills/prefect-skill/references/greenfield-checklist.md` — the four-area standards / audit rubric.
-- `skills/prefect-skill/references/docs-map.md` — durable doc entry points + a topic→URL cache (CI-checked).
-- `scripts/` — CI integrity checks (doc-URL liveness, SKILL.md lint). Repo tooling only; not installed with the skill.
-- `.claude-plugin/` — `marketplace.json` + `plugin.json` so the repo doubles as a one-plugin Claude Code marketplace.
+- `skills/<skill>/` — each skill is self-contained: `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`.
+- `scripts/` — CI integrity checks. Repo tooling only; not installed with any skill.
+- `.claude-plugin/marketplace.json` — declares the repo as a Claude Code marketplace, one plugin entry per skill.
 
 ## Maintenance / CI
 
-Two GitHub Actions integrity checks run on push, PR, and weekly:
+GitHub Actions runs integrity checks on push, PR, and weekly:
 
-- **`scripts/check_doc_urls.py`** — fetches `llms.txt` and every URL in the docs map, failing if any no longer resolves (catches Prefect moving/renaming pages).
-- **`scripts/lint_skill.py`** — verifies SKILL.md frontmatter, that the description carries a "Use when" trigger, and that the file stays within its line budget.
+- **`scripts/lint_skill.py`** — lints every `skills/*/SKILL.md`: required frontmatter, a "Use when" trigger in the description, and the per-file line budget.
+- **`scripts/check_doc_urls.py`** — for skills that ship a `references/docs-map.md`, fetches every doc URL and fails if any no longer resolves (catches upstream docs moving/renaming pages).
 
 Both use the Python standard library only — no dependencies to install.
 

@@ -8,6 +8,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 
 | Skill | What it does |
 | --- | --- |
+| [`implement-issue`](skills/implement-issue/) | Take a GitHub issue from open to draft PR: claim, branch, implement, run tests + a runtime smoke check, with explicit stop conditions. |
 | [`prefect-skill`](skills/prefect-skill/) | Prefect 3 greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope. |
 
 ## Install

@@ -87,6 +87,27 @@
       ]
     },
     {
+      "name": "orchestrator-mode",
+      "source": "./skills/orchestrator-mode",
+      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/orchestrator-mode",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "orchestration",
+        "subagents",
+        "delegation",
+        "multi-agent",
+        "task-tool",
+        "parallel",
+        "workflow"
+      ]
+    },
+    {
       "name": "snowman",
       "source": "./skills/snowman",
       "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only.",

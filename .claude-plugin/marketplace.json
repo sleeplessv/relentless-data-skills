@@ -85,6 +85,27 @@
         "explainer",
         "documentation"
       ]
+    },
+    {
+      "name": "snowman",
+      "source": "./skills/snowman",
+      "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/snowman",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "snowflake",
+        "snow-cli",
+        "data-exploration",
+        "data-profiling",
+        "sql",
+        "read-only",
+        "data-engineering"
+      ]
     }
   ]
 }

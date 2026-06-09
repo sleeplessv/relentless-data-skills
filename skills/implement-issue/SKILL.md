@@ -1,5 +1,6 @@
 ---
 name: implement-issue
+argument-hint: "[issue-number]"
 description: 'Implement a GitHub issue end-to-end on a feature branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement issue #N", "ship issue #N", "work issue #N", "implement the next issue", "grab the next ready issue", or otherwise asks to take an issue from open to PR.'
 license: Apache-2.0
 metadata:

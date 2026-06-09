@@ -12,6 +12,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | [`prefect-skill`](skills/prefect-skill/) | Prefect 3 greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope. |
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes by affected area, create one conventional commit per group, then push — with safety rules against force-pushes, skipped hooks, and committed secrets. |
 | [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
+| [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the `snow` CLI: schema discovery, profiling, hypothesis testing, data-quality investigation. Bootstraps a committed per-project context; a wrapper hard-enforces read-only. |
 
 ## Install
 

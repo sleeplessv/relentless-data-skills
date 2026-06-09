@@ -14,6 +14,16 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
 | [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the `snow` CLI: schema discovery, profiling, hypothesis testing, data-quality investigation. Bootstraps a committed per-project context; a wrapper hard-enforces read-only. |
 
+## External skills (references)
+
+Skills we use alongside this collection but don't maintain here — install them
+from their upstream repos:
+
+| Skill | Upstream | Install |
+| --- | --- | --- |
+| `terraform-skill` | [antonbabenko/terraform-skill](https://github.com/antonbabenko/terraform-skill) | `npx skills add antonbabenko/terraform-skill` |
+| `llm-council` | based on [karpathy/llm-council](https://github.com/karpathy/llm-council) (methodology) | local SKILL.md adaptation; no upstream package |
+
 ## Install
 
 Every skill installs the same three ways. Substitute `<skill>` with a skill

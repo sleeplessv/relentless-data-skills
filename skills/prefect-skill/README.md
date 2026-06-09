@@ -9,6 +9,8 @@ tracks the latest docs instead of stale training data.
 
 - **Greenfield mode** — an opinionated workflow plus a four-area standards checklist (scaffolding · authoring + reliability · deployment + execution · config/secrets/observability/testing).
 - **Audit mode** — runs the same checklist as a rubric against an existing project and flags drift, including Prefect 2.x leftovers.
+- **Debug mode** — triages failed/crashed/stuck/late flow runs: read the run's state and logs, classify code vs infra failure, check worker/pool health, validate the fix with a retry.
+- **CLI-first protocol** — queries the live instance (`uv run prefect deployment ls`, `flow-run inspect`, …) instead of guessing state; checks auth via `prefect config view` first. Read-only commands run eagerly; state-changing ones require confirmed intent.
 - **Doc-lookup protocol** — resolves a topic via `docs.prefect.io/llms.txt`, then fetches the page as markdown (`<page>.md`); web search is fallback only. Works under network sandboxing (uses the agent's web-fetch, not shell `curl`).
 - **Response contract** — every answer states its assumptions/target, the recommendation + tradeoff, the doc page consulted, and a validation step.
 
@@ -39,7 +41,7 @@ It activates automatically when you do Prefect 3 work or ask about Prefect.
 
 ## Files
 
-- `SKILL.md` — core: response contract, lookup protocol, routing table, greenfield + audit workflows, guardrails, portable patterns.
+- `SKILL.md` — core: response contract, doc-lookup + CLI-first protocols, routing table, greenfield + audit + debug workflows, guardrails, portable patterns.
 - `references/greenfield-checklist.md` — the four-area standards / audit rubric.
 - `references/docs-map.md` — durable doc entry points + a topic→URL cache (CI-checked).
 

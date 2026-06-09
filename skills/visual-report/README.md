@@ -2,14 +2,15 @@
 
 The **`visual-report`** agent skill turns a subject — a system, a process,
 research findings, a decision — into a **single self-contained HTML document
-that carries its meaning in visuals**, not paragraphs. One file: portable,
-openable anywhere, no build step.
+that carries its meaning in visuals**, not paragraphs. One file: portable, no
+build step — though Tailwind and Mermaid load from CDNs, so it renders fully
+only with network access.
 
 ## What it does
 
 - **Explore** — gathers the substance worth drawing (walks the codebase via an `Explore` subagent, organizes what's already in the conversation, or reads the sources you point it at) instead of dumping files into the report.
-- **Visualize** — writes one self-contained HTML file (Tailwind + Mermaid via CDN, plus hand-built CSS/SVG) and opens it. Every major idea earns a visual; if a section needs a paragraph to be understood, the visual gets redrawn.
-- **Grill loop** — iterates on the same file as you refine sections, diagram patterns, and emphasis.
+- **Visualize** — writes one self-contained HTML file (Tailwind + Mermaid via CDN, plus hand-built CSS/SVG), verifies the diagrams actually render, and opens it. Every major idea earns a visual; if a section needs a paragraph to be understood, the visual gets redrawn.
+- **Grill loop** — interviews you about what the report gets wrong or underweights, one question at a time with a recommended answer, iterating on the same file.
 
 The only runtime dependencies are the Tailwind CDN and the Mermaid ESM import;
 light interactivity is inline vanilla JS only — no extra libraries, no build step.
@@ -17,8 +18,8 @@ light interactivity is inline vanilla JS only — no extra libraries, no build s
 ## How it works
 
 The skill carries a small, named **visual language** (Mermaid graph,
-boxes-and-arrows, cross-section, mass diagram, collapse) and an editorial house
-style, so reports stay consistent and don't drift into a corporate-dashboard
+boxes-and-arrows, cross-section, mass diagram, collapse, comparison matrix,
+timeline, proportion bars) and an editorial house style, so reports stay consistent and don't drift into a corporate-dashboard
 look. It's ADR-aware: in a repo it reads `docs/adr/`, cites a governing ADR in a
 callout when one applies, and offers to record a load-bearing decision the
 visualization made explicit.

@@ -10,6 +10,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | --- | --- |
 | [`implement-issue`](skills/implement-issue/) | Take a GitHub issue from open to draft PR: claim, branch, implement, run tests + a runtime smoke check, with explicit stop conditions. |
 | [`prefect-skill`](skills/prefect-skill/) | Prefect 3 greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope. |
+| [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
 
 ## Install
 

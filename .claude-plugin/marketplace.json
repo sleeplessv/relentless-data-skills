@@ -7,6 +7,26 @@
   },
   "plugins": [
     {
+      "name": "implement-issue",
+      "source": "./skills/implement-issue",
+      "description": "Implement a GitHub issue end-to-end: claim it, branch, code in small commits, run tests + a runtime smoke check, and open a draft PR — with explicit stop conditions instead of improvising.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/implement-issue",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "github",
+        "issues",
+        "pull-requests",
+        "workflow",
+        "automation",
+        "gh-cli"
+      ]
+    },
+    {
       "name": "prefect-skill",
       "source": "./skills/prefect-skill",
       "description": "Opinionated Prefect 3 guidance: greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope.",

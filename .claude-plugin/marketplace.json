@@ -47,6 +47,25 @@
       ]
     },
     {
+      "name": "smart-git-commit",
+      "source": "./skills/smart-git-commit",
+      "description": "Groups changed files by affected area, creates one conventional commit per group, then pushes to remote — conventional commit format with lowercase type prefixes.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/smart-git-commit",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "git",
+        "commits",
+        "conventional-commits",
+        "workflow",
+        "automation"
+      ]
+    },
+    {
       "name": "visual-report",
       "source": "./skills/visual-report",
       "description": "Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind + Mermaid via CDN plus hand-crafted CSS/SVG. Use when you want a shareable single-file visual writeup of a system, process, or findings.",

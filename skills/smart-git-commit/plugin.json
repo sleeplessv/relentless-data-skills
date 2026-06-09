@@ -1,0 +1,18 @@
+{
+  "name": "smart-git-commit",
+  "version": "0.1.0",
+  "description": "Groups changed files by affected area, creates one conventional commit per group, then pushes to remote — conventional commit format with lowercase type prefixes.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/smart-git-commit",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "git",
+    "commits",
+    "conventional-commits",
+    "workflow",
+    "automation"
+  ]
+}

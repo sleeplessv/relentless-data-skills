@@ -49,6 +49,14 @@ The URLs below are a convenience cache, validated by CI. **If any 404s, re-fetch
 - events / triggers => https://docs.prefect.io/v3/concepts/events.md
 - testing => https://docs.prefect.io/v3/how-to-guides/testing/index.md
 
+## 5. Debugging & states
+- states => https://docs.prefect.io/v3/concepts/states.md
+- detect zombie flows => https://docs.prefect.io/v3/advanced/detect-zombie-flows.md
+- worker healthchecks => https://docs.prefect.io/v3/advanced/worker-healthchecks.md
+- manually retry a flow run => https://docs.prefect.io/v3/how-to-guides/workflows/retry-flow-runs.md
+- state-change hooks => https://docs.prefect.io/v3/how-to-guides/workflows/state-change-hooks.md
+- troubleshoot Prefect Cloud => https://docs.prefect.io/v3/how-to-guides/cloud/troubleshoot-cloud.md
+
 ## Integrations
 - prefect-dbt => https://docs.prefect.io/integrations/prefect-dbt/index.md
 - prefect-dbt runner (PrefectDbtRunner) => https://docs.prefect.io/integrations/prefect-dbt/runner.md

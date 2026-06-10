@@ -1,14 +1,16 @@
 ---
 name: snowman
-description: Use when exploring Snowflake data, profiling tables, testing hypotheses, investigating data-quality issues, or discovering schemas and warehouses via the snow CLI. Strictly read-only - never writes, never mutates production.
+description: Use when exploring Snowflake data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or preparing a data/schema change via the snow CLI. Never executes writes - DML/DDL the user asks for is staged as a script under .snowman/staged/ for manual execution by the user.
 ---
 
 # snowman
 
 Read-only Snowflake exploration via the `snow` CLI — schema discovery, data
 profiling, hypothesis testing, and data-quality investigation. **It never
-writes and never mutates production.** Every query runs through a guardrail
-wrapper that hard-rejects anything that isn't a single read-only statement.
+executes writes and never mutates production.** Every executed query runs
+through a guardrail wrapper that hard-rejects anything that isn't a single
+read-only statement. When the user asks for a change, the DML/DDL is *staged*
+as a script for them to run manually — snowman itself never runs it.
 
 ## First action, every invocation
 
@@ -36,8 +38,28 @@ python3 <skill-dir>/scripts/snowman.py "<SQL>"
 from `.snowman/context.md`, so you never pass `--connection` yourself.
 
 If the wrapper exits with `BLOCKED: …`, **do not work around it** — the
-statement was non-read-only. Rephrase as a read-only query or tell the user
-why their request can't be served by this skill.
+statement was non-read-only. If the user asked a read-only question, rephrase
+the query. If the user genuinely asked for a data/schema change, use staging
+(below). **Never stage SQL the user didn't ask to have run** — staging is
+driven by the user's stated intent, not by a block you want to get past.
+
+## Staging writes (DML/DDL) — never executed
+
+When the user explicitly asks for a change (add a column, backfill, create a
+table…), write the SQL but **stage it instead of running it**:
+
+```bash
+python3 <skill-dir>/scripts/snowman.py --stage "<SQL>" --name <purpose-slug>
+```
+
+- The wrapper writes `.snowman/staged/<timestamp>__<slug>.sql` (gitignored,
+  multi-statement fine, any keywords allowed) with a header containing the
+  exact `snow sql -f … --connection …` command to run it.
+- **Nothing is executed** — relay the file path and run command to the user;
+  executing, and deleting the file afterwards, is entirely their business.
+- `--name` is the purpose in kebab-case; it becomes the filename the user
+  reviews, so make it say what the script does.
+- Staging still requires `.snowman/context.md` (bootstrap first).
 
 ## Guardrails (summary)
 
@@ -69,8 +91,9 @@ matching the user's intent; don't load all of it pre-emptively.
 
 **Use for:** exploring schemas, profiling tables, validating a transformation
 hypothesis as a SELECT before building it in dbt, investigating data-quality
-issues, discovering Snowflake objects.
+issues, discovering Snowflake objects, staging user-requested DML/DDL as
+scripts for manual execution.
 
-**Don't use for:** anything that writes (DML/DDL), creating connections or
-handling credentials (the user does that with `snow connection add`), or
-non-Snowflake databases.
+**Don't use for:** *executing* writes (there is no execute path for DML/DDL —
+only staging), creating connections or handling credentials (the user does
+that with `snow connection add`), or non-Snowflake databases.

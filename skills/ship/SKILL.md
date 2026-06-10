@@ -65,6 +65,7 @@ EOF
 
 - **Title** — the conventional-commit subject of the dominant change (e.g. `feat: add ship skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
 - **Body** — `## Summary` with 2–4 bullets, one per commit group. No test-plan boilerplate.
+- **No em dashes (—)** in the title or body — use a comma, colon, or parentheses, or rewrite the sentence. Same rule as the commit messages.
 
 ## Step 5: Merge and clean up
 

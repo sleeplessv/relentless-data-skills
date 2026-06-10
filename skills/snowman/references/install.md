@@ -11,6 +11,10 @@ recommended answer. All discovery here is read-only and goes through the
 wrapper (`python3 <skill-dir>/scripts/snowman.py "<SQL>"`) — except the
 connection-listing step, which uses the `snow` CLI directly.
 
+All `snow` commands need network access to reach Snowflake — run them with
+sandboxing disabled. In a sandboxed shell they fail with DNS/connection
+errors that masquerade as a broken connection config.
+
 ## Step 0 — pick the connection (the only thing not via the wrapper)
 
 snowman uses **named `snow` CLI connections only**. It never creates

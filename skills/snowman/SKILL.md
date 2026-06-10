@@ -37,6 +37,13 @@ python3 <skill-dir>/scripts/snowman.py "<SQL>"
 `<skill-dir>` is this skill's directory. The wrapper reads the connection
 from `.snowman/context.md`, so you never pass `--connection` yourself.
 
+**Run outside the sandbox.** The `snow` CLI needs network access to reach
+Snowflake; a sandboxed shell blocks it, and the failure surfaces as a
+DNS/connection error that looks like a broken connection config. Run every
+wrapper (and `snow`) command with sandboxing disabled. If a query fails with
+a connection/DNS error, suspect the sandbox first — do not start debugging
+the connection setup.
+
 If the wrapper exits with `BLOCKED: …`, **do not work around it** — the
 statement was non-read-only. If the user asked a read-only question, rephrase
 the query. If the user genuinely asked for a data/schema change, use staging

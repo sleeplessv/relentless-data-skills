@@ -132,7 +132,9 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
         if not sep:
             continue
         key = key.strip()
-        value = value.strip().strip("'\"")
+        # YAML inline comments: `#` at the start of the value or after
+        # whitespace ends it. Values here are bare names, never contain `#`.
+        value = re.sub(r"(?:^|\s)#.*$", "", value.strip()).strip().strip("'\"")
         if indent == 0:
             in_environments = key == "environments" and not value
             current_env = None

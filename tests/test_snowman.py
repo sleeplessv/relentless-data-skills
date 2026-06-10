@@ -214,6 +214,22 @@ class TestParseFrontmatter(SnowmanTestCase):
         top, _ = snowman.parse_frontmatter(context)
         self.assertEqual(top.get("connection"), "quoted_conn")
 
+    def test_inline_comments_stripped_from_values(self):
+        context = self.write_context(
+            "---\n"
+            "environments:  # one per account\n"
+            "  dev:\n"
+            "    connection: acme_dev  # key-pair auth\n"
+            "  prod:\n"
+            "    connection: acme_prod\n"
+            "default_env: dev  # prod needs --env\n"
+            "---\n"
+        )
+        top, environments = snowman.parse_frontmatter(context)
+        self.assertEqual(top.get("default_env"), "dev")
+        self.assertEqual(environments["dev"]["connection"], "acme_dev")
+        self.assertEqual(environments["prod"]["connection"], "acme_prod")
+
     def test_missing_frontmatter_blocks(self):
         context = self.write_context("# just a heading\n")
         self.assert_blocked(snowman.parse_frontmatter, context, match="frontmatter")

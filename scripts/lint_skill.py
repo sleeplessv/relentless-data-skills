@@ -13,7 +13,7 @@ import sys
 from pathlib import Path
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
-REQUIRED_KEYS = ("name", "description", "license")
+REQUIRED_KEYS = ("name", "description")
 LINE_BUDGET = 120
 DESC_MAX = 1024
 

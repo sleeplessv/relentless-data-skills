@@ -65,6 +65,7 @@ EOF
 - Max ~72 chars on the subject line
 - No period at the end of the subject line
 - Body only when the why isn't obvious from the subject
+- No em dashes (—) anywhere in the message — use a comma, colon, or parentheses, or rewrite the sentence
 
 **Examples:**
 

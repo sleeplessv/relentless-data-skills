@@ -17,6 +17,8 @@ If no number is given AND no eligible `ready-for-agent` issue exists, ask the us
 
 ## Workflow
 
+**No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, issue comments. Use a comma, colon, or parentheses, or rewrite the sentence.
+
 **Run network commands outside the sandbox.** Every `gh` call and `git fetch`/`pull`/`push` needs network access to reach GitHub; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. Run these commands with sandboxing disabled, and if one fails with a connection error, suspect the sandbox first.
 
 ### 0. Resolve the issue number

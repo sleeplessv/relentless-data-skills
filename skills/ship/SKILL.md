@@ -57,7 +57,6 @@ gh pr create --base main --title "<conventional subject>" --body "$(cat <<'EOF'
 ## Summary
 - one bullet per commit group
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code)
 EOF
 )"
 ```

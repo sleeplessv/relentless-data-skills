@@ -17,6 +17,8 @@ Run in parallel:
 - `git status` — if the tree is clean and there is nothing to commit, say so and stop.
 - `gh auth status` and `git remote get-url origin` — if `gh` is missing or unauthenticated, or there is no `origin` remote, stop with a clear message before touching anything.
 
+**Run network commands outside the sandbox.** Every `gh` call and `git fetch`/`pull`/`push` needs network access to reach GitHub; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. Run these commands with sandboxing disabled, and if one fails with a connection error, suspect the sandbox first — do not start debugging `gh` auth or the remote URL.
+
 ## Step 1: Group the changes, detect unrelated work
 
 Form the commit groups **before** any branching (the `smart-git-commit` grouping pass: inspect `git status`/`git diff`, group by affected area) — branch decisions depend on them.

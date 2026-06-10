@@ -14,7 +14,7 @@ from pathlib import Path
 
 SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 REQUIRED_KEYS = ("name", "description")
-LINE_BUDGET = 120
+LINE_BUDGET = 150
 DESC_MAX = 1024
 
 

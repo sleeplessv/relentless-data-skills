@@ -17,6 +17,8 @@ If no number is given AND no eligible `ready-for-agent` issue exists, ask the us
 
 ## Workflow
 
+**Run network commands outside the sandbox.** Every `gh` call and `git fetch`/`pull`/`push` needs network access to reach GitHub; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. Run these commands with sandboxing disabled, and if one fails with a connection error, suspect the sandbox first.
+
 ### 0. Resolve the issue number
 
 If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` issue, **excluding PRDs** (spec documents, not tickets — filter primarily by the `prd` label, with the body-heading regex as fallback for older PRDs):

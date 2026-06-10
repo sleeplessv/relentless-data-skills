@@ -45,3 +45,5 @@ or commit and push.
 ## Requirements
 
 - `git`, with a remote configured if you want the final push to succeed.
+- Network access to the remote — the final `git push` must run outside any
+  sandboxed shell, or it fails with a misleading DNS/connection error.

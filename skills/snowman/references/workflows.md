@@ -53,10 +53,14 @@ table"), produce the script and stage it for their manual execution:
 
 1. **Verify read-only first.** Confirm the target exists (`DESCRIBE`), and
    where the change is data-bearing, dry-run the logic as a `SELECT` — e.g.
-   preview the rows an `UPDATE` would touch, or count them.
+   preview the rows an `UPDATE` would touch, or count them. In a
+   multi-environment project, run these checks with the same `--env` the
+   change targets.
 2. **Stage it:**
    `python3 <skill-dir>/scripts/snowman.py --stage "<SQL>" --name <purpose-slug>`
    — multi-statement is fine; pick a `--name` that says what the script does.
+   Multi-environment projects also require `--env <name>`; if the user didn't
+   say which environment the change targets, ask first — never infer.
 3. **Hand it over.** Relay the staged file path and the `run with:` command
    from the wrapper's output. If the header carries a `WARNING:` line
    (destructive keywords), point it out explicitly.

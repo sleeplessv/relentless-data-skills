@@ -21,6 +21,15 @@ executes writes itself.
   `.snowman/context.md` in the project root — **names only, no secrets** —
   committed so it doubles as project documentation. The skill refuses to run
   without it.
+- **Multi-account environments.** When dev and prod are separate Snowflake
+  accounts, the context maps named environments to connections
+  (`environments:` + `default_env:`), each with its own warehouses and
+  databases. Selection is stateless and per-query: reads hit the default
+  environment unless `--env <name>` is passed, so `--env prod` in the command
+  line is itself the audit trail. Staging in these projects always requires
+  an explicit `--env`, and the target environment lands in the staged
+  filename and header. Single-account projects keep the plain `connection:`
+  form.
 - **Hard read-only guardrail.** Every query goes through `scripts/snowman.py`,
   which strips comments/strings, rejects multi-statements, requires a
   read-only leading keyword (`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`), and
@@ -51,6 +60,9 @@ your connection uses key-pair auth with an encrypted private key, put the
 passphrase in the project root `.env` (e.g. `PRIVATE_KEY_PASSPHRASE=...`).
 The wrapper loads `.env` into the `snow` subprocess on every query — existing
 shell environment always wins over `.env`. Keep `.env` gitignored as usual.
+With several key-pair connections whose passphrases differ (e.g. separate
+dev/prod accounts), use `snow`'s per-connection form in `.env` instead:
+`SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...`.
 
 ## Install
 

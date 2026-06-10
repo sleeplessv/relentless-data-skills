@@ -63,6 +63,22 @@ the query. If the user genuinely asked for a data/schema change, use staging
 (below). **Never stage SQL the user didn't ask to have run** — staging is
 driven by the user's stated intent, not by a block you want to get past.
 
+## Environments (dev/prod in separate accounts)
+
+When the context frontmatter has an `environments:` map (one entry per
+account, each with its own connection — see
+[references/install.md](references/install.md)), selection is **stateless and
+per-query**:
+
+- Queries hit `default_env` unless you pass `--env <name>`. Do that only when
+  the user explicitly asks about another environment, and say which
+  environment you're querying when it isn't the default.
+- **Staging requires explicit `--env`** in these projects. If the user didn't
+  say which environment a change targets, **ask** — never infer. The env
+  lands in the staged filename and header so the reviewer sees the target.
+- Single-account projects keep the plain `connection:` form; `--env` is
+  rejected there.
+
 ## Staging writes (DML/DDL) — never executed
 
 When the user explicitly asks for a change (add a column, backfill, create a

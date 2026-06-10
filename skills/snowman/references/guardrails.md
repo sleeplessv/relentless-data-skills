@@ -20,7 +20,13 @@ Every query runs through the wrapper. Before anything reaches Snowflake it:
    `WITH … INSERT` and similar. Present → refused.
 5. **Injects** `--connection <from context>` and `--format JSON`; reads the
    connection from `.snowman/context.md` and **refuses to run with no context
-   file**.
+   file**. In a multi-environment context (`environments:` map, separate
+   dev/prod accounts) it resolves `--env <name>`, falling back to
+   `default_env` — and blocks an unknown environment name, `--env` against a
+   single-`connection:` context, a context defining both forms, and a
+   multi-environment context with no `default_env` when no `--env` is given.
+   Environment selection is per-query; there is no sticky "current
+   environment" state.
 
 On refusal the wrapper prints `BLOCKED: <reason>` to stderr and **exits
 non-zero**. When you see that, do **not** work around it — the request was not
@@ -48,6 +54,13 @@ What stage mode enforces and what it deliberately doesn't:
 - **Requires the context file**, same as the execute path — the staged file's
   header embeds the exact `snow sql -f <file> --connection <conn>` run
   command, which needs the connection name from `.snowman/context.md`.
+- **Multi-environment projects require an explicit `--env`** — no
+  `default_env` fallback for staging, because the header's run command
+  targets a real account. The environment lands in the filename
+  (`<timestamp>__<env>__<slug>.sql`) and in a `-- target environment:` header
+  line, so the reviewing human sees the target twice before the run command.
+  If the user didn't say which environment a change targets, ask — never
+  infer.
 - **No read-only check, no single-statement check.** A real migration is
   several statements; the execute-path rules exist to protect execution, and
   nothing executes here. Only an empty script is refused.
@@ -78,8 +91,13 @@ runaway scan from a cheap aggregate needs real parsing, and false rejects on
 - **Start broad, narrow fast.** databases → schemas → tables → DESCRIBE →
   SAMPLE. Several focused queries beat one sprawling one.
 - **Production is read-only forever.** Even though everything is read-only,
-  treat `env: prod` databases with extra care: smaller samples, tighter
-  filters, no expensive scans.
+  treat `env: prod` databases — and prod *environments* in multi-account
+  projects — with extra care: smaller samples, tighter filters, no expensive
+  scans.
+- **Say when you're on prod.** Querying a non-default environment is taught
+  etiquette, not wrapper-enforced: mention it ("querying **prod**") so the
+  user always knows which account answered. The wrapper stays silent because
+  prod reads are safe by construction — the discipline is yours.
 
 ## Database scope
 

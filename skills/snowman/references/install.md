@@ -15,7 +15,7 @@ All `snow` commands need network access to reach Snowflake — run them with
 sandboxing disabled. In a sandboxed shell they fail with DNS/connection
 errors that masquerade as a broken connection config.
 
-## Step 0 — pick the connection (the only thing not via the wrapper)
+## Step 0 — pick the connection(s) (the only thing not via the wrapper)
 
 snowman uses **named `snow` CLI connections only**. It never creates
 connections, handles credentials, key-pairs, or `account/user/password`.
@@ -25,11 +25,16 @@ snow connection list
 ```
 
 - **Exactly one** → propose it, ask the user to confirm.
-- **Several** → list them, ask which one this project should use.
+- **Several** → list them and ask **which connection(s) this project uses —
+  and if more than one, what environment each one is** (e.g.
+  `acme-dev → dev`, `acme-prod → prod`). One connection → single-environment
+  flow below; several → multi-environment, with separate accounts mapped as
+  named environments. Environment names are the user's choice
+  (`dev`/`staging`/`prod`…).
 - **None** → **stop.** Tell the user to run `snow connection add` themselves
   (interactive auth — SSO/MFA may open a browser), then re-invoke snowman.
 
-The chosen connection *name* is the only auth detail that ever lands in the
+The chosen connection *names* are the only auth detail that ever lands in the
 context file.
 
 If the chosen connection uses key-pair auth with an **encrypted private key**,
@@ -37,7 +42,10 @@ its passphrase must live in the project root `.env` (e.g.
 `PRIVATE_KEY_PASSPHRASE=...`) — the wrapper relays `.env` to the `snow`
 subprocess automatically. If the first query fails mentioning a private
 key/passphrase/JWT, tell the user to add that line to `.env`; never ask for
-the passphrase or print `.env` contents.
+the passphrase or print `.env` contents. With several key-pair connections
+whose passphrases differ, one `PRIVATE_KEY_PASSPHRASE` can't serve both —
+point the user at `snow`'s per-connection form instead
+(`SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...`), still in `.env`.
 
 > From here on, every command is the read-only wrapper. The wrapper needs the
 > connection, but the context file doesn't exist yet — so for the discovery
@@ -48,9 +56,12 @@ the passphrase or print `.env` contents.
 ## Step 1 — announce the read-only sweep, then run it (one gate)
 
 Tell the user: *"I'll run these read-only `SHOW`/`SELECT` commands to map the
-account — nothing is written. OK?"* Gate **once** for the whole batch, not per
-statement. Then run them — one wrapper call per statement (the wrapper
-rejects multi-statement submissions):
+account — nothing is written. OK?"* (multi-environment: *"…against each
+account…"*). Gate **once** for the whole batch — not per statement, not per
+account. Then run them — one wrapper call per statement (the wrapper rejects
+multi-statement submissions), and in a multi-environment project run the
+whole sweep **once per environment**, passing that environment's connection
+via `--connection`:
 
 ```sql
 SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_REGION();
@@ -61,14 +72,22 @@ SHOW ROLES;
 
 ## Step 2 — decisions (ask these; recommend an answer each)
 
+In a multi-environment project, ask 1 and 3 **per environment** — each
+account has its own databases and warehouses.
+
 1. **Which databases** to include in scope? Recommend the ones the current
    role can actually read; let the user trim.
-2. **Which databases are production** (`env: prod`)? Recommend flagging
-   anything named/described as prod or raw. snowman **never executes writes**
-   anywhere (DML/DDL is only ever staged for the user to run manually), but
-   the flag documents intent and powers cost/safety warnings.
+2. *Single-environment only:* **which databases are production**
+   (`env: prod`)? Recommend flagging anything named/described as prod or raw.
+   In a multi-environment project the environment a database sits under *is*
+   its env — skip this. snowman **never executes writes** anywhere (DML/DDL
+   is only ever staged for the user to run manually), but the flag documents
+   intent and powers cost/safety warnings.
 3. **Default warehouse** for ad-hoc queries? Recommend the smallest
    ad-hoc/analytics warehouse you saw.
+4. *Multi-environment only:* **`default_env`** — which environment queries
+   hit when none is named? Recommend the non-prod one; the user may
+   legitimately prefer prod (snowman is read-only either way).
 
 For each in-scope database, enumerate schemas (still read-only):
 
@@ -82,7 +101,9 @@ Compose `.snowman/context.md` (template below), **show it to the user**, get
 approval, then write it to the **project root** (`.snowman/context.md`). It is
 safe to commit — names only, no secrets. Suggest the user commit it.
 
-```markdown
+**Single-environment frontmatter** (one account; per-database `env:` flags):
+
+```yaml
 ---
 connection: <chosen-connection-name>
 default_warehouse: <warehouse>
@@ -92,7 +113,34 @@ databases:
 # snowman never executes writes; user-requested DML/DDL is staged to
 # .snowman/staged/ (gitignored) for manual execution.
 ---
+```
 
+**Multi-environment frontmatter** (separate accounts; the environment name
+*is* the env — no per-database flags, and each environment carries its own
+connection and default warehouse). The two forms are mutually exclusive:
+
+```yaml
+---
+default_env: <env>            # queries hit this unless --env says otherwise
+environments:
+  dev:
+    connection: <dev-connection-name>
+    default_warehouse: <warehouse>
+    databases: [<db>, <db>]
+  prod:
+    connection: <prod-connection-name>
+    default_warehouse: <warehouse>
+    databases: [<db>, <db>]
+# snowman never executes writes; user-requested DML/DDL is staged to
+# .snowman/staged/ (gitignored) for manual execution. Staging here always
+# needs an explicit --env.
+---
+```
+
+**Body** (multi-environment: repeat the sections per environment, e.g.
+`## Databases (dev)` / `## Databases (prod)`):
+
+```markdown
 # Snowflake context for <project>
 
 _Discovered <by snowman bootstrap>. Names only — no credentials. Edit freely;

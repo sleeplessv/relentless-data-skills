@@ -8,12 +8,17 @@ Cost discipline (LIMIT/SAMPLE, full-scan avoidance) is taught in
 
 Usage:
     python3 snowman.py "<SQL>"
+    python3 snowman.py --env <name> "<SQL>"
     python3 snowman.py --connection <name> "<SQL>"
-    python3 snowman.py --stage "<SQL>" --name <purpose-slug>
+    python3 snowman.py --stage "<SQL>" --name <purpose-slug> [--env <name>]
 
 Execute mode (default):
   * resolves the project's ``.snowman/context.md`` (walks up from CWD) and
-    reads the ``connection`` from its YAML frontmatter;
+    reads the connection from its YAML frontmatter. Two frontmatter forms:
+    a single ``connection:`` (one account), or an ``environments:`` map plus
+    ``default_env:`` (dev/prod in separate accounts). With environments,
+    ``--env <name>`` picks one per query and ``default_env`` is the fallback —
+    selection is stateless, never sticky;
   * refuses to run if no context file exists (bootstrap not done) — unless
     ``--connection <name>`` overrides it, which is how the bootstrap routes
     its discovery queries through the guardrail before the context exists;
@@ -38,7 +43,9 @@ Stage mode (``--stage``):
     check is non-emptiness. Destructive keywords add a warning line to the
     file header, they never block;
   * still requires ``.snowman/context.md`` (the header's run command needs
-    the connection name);
+    the connection name). In a multi-environment project ``--env`` is
+    REQUIRED — the run command targets a real account, so the environment
+    must be explicit; it also lands in the filename and a header line;
   * keeps ``.snowman/staged/`` gitignored via a ``.gitignore`` it maintains.
 
 Standard library only.
@@ -97,20 +104,101 @@ def find_context() -> Path:
     )
 
 
-def read_connection(context: Path) -> str:
-    """Pull `connection:` from the context file's YAML frontmatter."""
+def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Parse the context file's YAML frontmatter (stdlib, schema-specific).
+
+    Returns ``(top, environments)``: top-level scalar keys, and the
+    ``environments:`` map of env name -> {key: value}. Only the shapes the
+    snowman templates produce are understood; anything nested deeper is
+    ignored.
+    """
     text = context.read_text(encoding="utf-8")
     if not text.startswith("---"):
         die(f"{context} has no YAML frontmatter — cannot find the connection.")
     _, _, rest = text.partition("---")
     front, _, _ = rest.partition("---")
-    for line in front.splitlines():
-        key, sep, value = line.partition(":")
-        if sep and key.strip() == "connection":
-            conn = value.strip().strip("'\"")
-            if conn:
-                return conn
-    die(f"{context} frontmatter has no `connection:` value.")
+
+    top: dict[str, str] = {}
+    environments: dict[str, dict[str, str]] = {}
+    in_environments = False
+    current_env: str | None = None
+    env_indent: int | None = None
+
+    for raw in front.splitlines():
+        if not raw.strip() or raw.lstrip().startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip(" "))
+        key, sep, value = raw.strip().partition(":")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if indent == 0:
+            in_environments = key == "environments" and not value
+            current_env = None
+            env_indent = None
+            if not in_environments and value:
+                top[key] = value
+        elif in_environments:
+            if not value and (env_indent is None or indent <= env_indent):
+                env_indent = indent
+                current_env = key
+                environments[key] = {}
+            elif value and current_env is not None and env_indent is not None and indent > env_indent:
+                environments[current_env][key] = value
+    return top, environments
+
+
+def resolve_connection(
+    context: Path, env: str | None, *, for_stage: bool = False
+) -> tuple[str, str | None]:
+    """Resolve ``(connection, environment-or-None)`` from the frontmatter.
+
+    Legacy form (single ``connection:``): ``--env`` is rejected. Multi-env
+    form (``environments:``): queries fall back to ``default_env``; staging
+    always needs an explicit ``--env`` because the staged file's run command
+    targets a real account.
+    """
+    top, environments = parse_frontmatter(context)
+
+    if environments:
+        if top.get("connection"):
+            die(
+                f"{context} defines both `connection:` and `environments:` — "
+                "keep exactly one form."
+            )
+        if for_stage and not env:
+            die(
+                "staging in a multi-environment project requires --env <name> "
+                "— the staged file's run command targets a real account, so "
+                f"the environment must be explicit. Defined: {', '.join(environments)}."
+            )
+        chosen = env or top.get("default_env")
+        if not chosen:
+            die(
+                f"{context} has `environments:` but no `default_env:` — add "
+                "one to the frontmatter, or pass --env <name>."
+            )
+        if chosen not in environments:
+            die(
+                f"unknown environment {chosen!r} — {context} defines: "
+                f"{', '.join(environments)}."
+            )
+        connection = environments[chosen].get("connection")
+        if not connection:
+            die(f"environment {chosen!r} in {context} has no `connection:` value.")
+        return connection, chosen
+
+    if env:
+        die(
+            f"--env was given but {context} defines a single `connection:` "
+            "with no `environments:` map — drop --env, or convert the "
+            "frontmatter to the multi-environment form."
+        )
+    connection = top.get("connection")
+    if not connection:
+        die(f"{context} frontmatter has no `connection:` value.")
+    return connection, None
 
 
 def find_env_file(start: Path) -> Path | None:
@@ -198,7 +286,7 @@ def enforce_read_only(sql: str) -> None:
         die(f"write/DDL keyword(s) present: {', '.join(sorted(found))}.")
 
 
-def stage(sql: str, name: str) -> int:
+def stage(sql: str, name: str, env: str | None) -> int:
     """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
     if not sql.strip():
         die("empty script — nothing to stage.")
@@ -208,7 +296,7 @@ def stage(sql: str, name: str) -> int:
         die(f"--name {name!r} reduces to an empty slug — use letters, digits, hyphens.")
 
     context = find_context()
-    connection = read_connection(context)
+    connection, env_name = resolve_connection(context, env, for_stage=True)
     project_root = context.parent.parent
 
     staged_dir = context.parent / "staged"
@@ -218,7 +306,8 @@ def stage(sql: str, name: str) -> int:
         gitignore.write_text("*\n", encoding="utf-8")
 
     now = datetime.now()
-    base = f"{now:%Y%m%d-%H%M%S}__{slug}"
+    env_part = f"{env_name}__" if env_name else ""
+    base = f"{now:%Y%m%d-%H%M%S}__{env_part}{slug}"
     path = staged_dir / f"{base}.sql"
     bump = 1
     while path.exists():
@@ -234,6 +323,10 @@ def stage(sql: str, name: str) -> int:
     header = [
         "-- staged by snowman — NOT executed",
         f"-- purpose: {slug}",
+    ]
+    if env_name:
+        header.append(f"-- target environment: {env_name} (connection: {connection})")
+    header += [
         f"-- staged at: {now:%Y-%m-%d %H:%M:%S}",
         f"-- run with: {run_cmd}",
     ]
@@ -248,7 +341,9 @@ def stage(sql: str, name: str) -> int:
     return 0
 
 
-def execute(sql: str, connection_override: str | None = None) -> int:
+def execute(
+    sql: str, connection_override: str | None = None, env: str | None = None
+) -> int:
     if not sql.strip():
         die("empty query.")
     enforce_read_only(sql)
@@ -259,7 +354,7 @@ def execute(sql: str, connection_override: str | None = None) -> int:
         env_file = find_env_file(Path.cwd())
     else:
         context = find_context()
-        connection = read_connection(context)
+        connection, _ = resolve_connection(context, env)
         project_env = context.parent.parent / ".env"
         env_file = project_env if project_env.is_file() else None
 
@@ -310,6 +405,11 @@ def main(argv: list[str]) -> int:
         help="connection name override for bootstrap, before "
         ".snowman/context.md exists (execute mode only)",
     )
+    parser.add_argument(
+        "--env", metavar="NAME",
+        help="environment to target in a multi-environment project (falls "
+        "back to default_env for queries; required with --stage there)",
+    )
     args = parser.parse_args(argv[1:])
 
     if args.stage:
@@ -317,10 +417,12 @@ def main(argv: list[str]) -> int:
             parser.error("--stage requires --name <purpose-slug>")
         if args.connection:
             parser.error("--connection is not valid with --stage")
-        return stage(args.sql, args.name)
+        return stage(args.sql, args.name, args.env)
     if args.name:
         parser.error("--name is only valid with --stage")
-    return execute(args.sql, connection_override=args.connection)
+    if args.connection and args.env:
+        parser.error("--env resolves via the context file; --connection bypasses it — use one")
+    return execute(args.sql, connection_override=args.connection, env=args.env)
 
 
 if __name__ == "__main__":

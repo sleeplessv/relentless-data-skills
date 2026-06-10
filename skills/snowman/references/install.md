@@ -32,16 +32,25 @@ snow connection list
 The chosen connection *name* is the only auth detail that ever lands in the
 context file.
 
+If the chosen connection uses key-pair auth with an **encrypted private key**,
+its passphrase must live in the project root `.env` (e.g.
+`PRIVATE_KEY_PASSPHRASE=...`) — the wrapper relays `.env` to the `snow`
+subprocess automatically. If the first query fails mentioning a private
+key/passphrase/JWT, tell the user to add that line to `.env`; never ask for
+the passphrase or print `.env` contents.
+
 > From here on, every command is the read-only wrapper. The wrapper needs the
 > connection, but the context file doesn't exist yet — so for the discovery
-> sweep only, run `snow sql -q "<SQL>" --connection <chosen> --format JSON`
-> directly. Switch to the wrapper as soon as the context file is written.
+> sweep only, pass it explicitly:
+> `python3 <skill-dir>/scripts/snowman.py --connection <chosen> "<SQL>"`.
+> Drop `--connection` as soon as the context file is written.
 
 ## Step 1 — announce the read-only sweep, then run it (one gate)
 
 Tell the user: *"I'll run these read-only `SHOW`/`SELECT` commands to map the
 account — nothing is written. OK?"* Gate **once** for the whole batch, not per
-statement. Then run:
+statement. Then run them — one wrapper call per statement (the wrapper
+rejects multi-statement submissions):
 
 ```sql
 SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_REGION();

@@ -35,7 +35,14 @@ python3 <skill-dir>/scripts/snowman.py "<SQL>"
 ```
 
 `<skill-dir>` is this skill's directory. The wrapper reads the connection
-from `.snowman/context.md`, so you never pass `--connection` yourself.
+from `.snowman/context.md`, so you never pass `--connection` yourself (the
+only exception is the bootstrap, before the context file exists — see
+[references/install.md](references/install.md)).
+
+The wrapper also relays the project root `.env` (if present) into the `snow`
+subprocess — this is how key-pair connections with an encrypted private key
+get their passphrase. Never source `.env` yourself, and never print its
+contents.
 
 **Run outside the sandbox.** The `snow` CLI needs network access to reach
 Snowflake; a sandboxed shell blocks it, and the failure surfaces as a
@@ -43,6 +50,12 @@ DNS/connection error that looks like a broken connection config. Run every
 wrapper (and `snow`) command with sandboxing disabled. If a query fails with
 a connection/DNS error, suspect the sandbox first — do not start debugging
 the connection setup.
+
+If a query fails mentioning a private key, passphrase, or JWT, the connection
+uses key-pair auth and the passphrase belongs in the project root `.env`
+(e.g. `PRIVATE_KEY_PASSPHRASE=...`) — the wrapper prints a hint saying
+whether a `.env` was found. Relay that to the user; do not debug
+`connections.toml` or ask for the passphrase.
 
 If the wrapper exits with `BLOCKED: …`, **do not work around it** — the
 statement was non-read-only. If the user asked a read-only question, rephrase
@@ -102,5 +115,7 @@ issues, discovering Snowflake objects, staging user-requested DML/DDL as
 scripts for manual execution.
 
 **Don't use for:** *executing* writes (there is no execute path for DML/DDL —
-only staging), creating connections or handling credentials (the user does
-that with `snow connection add`), or non-Snowflake databases.
+only staging), creating connections or storing credentials (the user does
+that with `snow connection add`), or non-Snowflake databases. The only
+credential handling snowman does is relaying the project root `.env` to the
+`snow` subprocess, opaquely — it never stores, prints, or asks for secrets.

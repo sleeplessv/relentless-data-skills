@@ -42,9 +42,15 @@ executes writes itself.
 ## Credentials
 
 snowman uses **named `snow` CLI connections only** — it never creates
-connections or handles credentials. If you have none, run `snow connection add`
+connections or stores credentials. If you have none, run `snow connection add`
 yourself (interactive SSO/MFA), then invoke snowman. The context file only ever
 stores the connection *name*.
+
+The one credential snowman *relays* (never stores, prints, or asks for): if
+your connection uses key-pair auth with an encrypted private key, put the
+passphrase in the project root `.env` (e.g. `PRIVATE_KEY_PASSPHRASE=...`).
+The wrapper loads `.env` into the `snow` subprocess on every query — existing
+shell environment always wins over `.env`. Keep `.env` gitignored as usual.
 
 ## Install
 

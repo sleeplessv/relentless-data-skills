@@ -91,6 +91,8 @@ If the branch has no upstream yet:
 git push -u origin HEAD
 ```
 
+**Run the push outside the sandbox.** `git push` needs network access to reach the remote; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. If the push fails with a connection error, suspect the sandbox first.
+
 ## Safety Rules
 
 - NEVER amend commits that have already been pushed

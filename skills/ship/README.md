@@ -53,4 +53,7 @@ npx skills add sleeplessv/relentless-data-skills/skills/ship
 
 - `git` with an `origin` remote.
 - `gh` (GitHub CLI), authenticated.
+- Network access to GitHub — `gh` and `git fetch`/`pull`/`push` must run
+  outside any sandboxed shell, or they fail with misleading DNS/connection
+  errors.
 - The `smart-git-commit` skill installed (a condensed fallback is built in).

@@ -45,3 +45,6 @@ next ready issue".
 ## Requirements
 
 - `git` and the [`gh` CLI](https://cli.github.com/), authenticated against the target repo.
+- Network access to GitHub — `gh` and `git fetch`/`pull`/`push` must run
+  outside any sandboxed shell, or they fail with misleading DNS/connection
+  errors.

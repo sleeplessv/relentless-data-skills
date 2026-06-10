@@ -9,6 +9,21 @@ on:
   workflow_dispatch:
 
 jobs:
+  snowman-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.9 = oldest interpreter likely on a user machine (macOS system
+        # python); 3.13 = current. The script is stdlib-only, so no installs.
+        python-version: ["3.9", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Run snowman tests
+        run: python -m unittest discover -s tests -v
+
   skill-lint:
     runs-on: ubuntu-latest
     steps:

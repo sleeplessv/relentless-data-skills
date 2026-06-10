@@ -1,0 +1,20 @@
+{
+  "name": "ship",
+  "version": "0.1.0",
+  "description": "Take working-tree changes from branch to merged PR in one pass — branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches/PRs.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/ship",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "git",
+    "github",
+    "pull-requests",
+    "branching",
+    "workflow",
+    "automation",
+    "gh-cli"
+  ]
+}

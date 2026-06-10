@@ -51,9 +51,9 @@ SHOW ROLES;
 1. **Which databases** to include in scope? Recommend the ones the current
    role can actually read; let the user trim.
 2. **Which databases are production** (`env: prod`)? Recommend flagging
-   anything named/described as prod or raw. Prod is **read-only forever** in
-   snowman (there is no write path at all in v1), but the flag documents
-   intent and powers cost/safety warnings.
+   anything named/described as prod or raw. snowman **never executes writes**
+   anywhere (DML/DDL is only ever staged for the user to run manually), but
+   the flag documents intent and powers cost/safety warnings.
 3. **Default warehouse** for ad-hoc queries? Recommend the smallest
    ad-hoc/analytics warehouse you saw.
 
@@ -76,7 +76,8 @@ default_warehouse: <warehouse>
 databases:
   - name: <db>
     env: dev        # or prod
-# snowman is read-only in v1; no write-allowed schemas are recorded.
+# snowman never executes writes; user-requested DML/DDL is staged to
+# .snowman/staged/ (gitignored) for manual execution.
 ---
 
 # Snowflake context for <project>

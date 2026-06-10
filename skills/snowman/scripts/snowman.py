@@ -8,8 +8,9 @@ Cost discipline (LIMIT/SAMPLE, full-scan avoidance) is taught in
 
 Usage:
     python3 snowman.py "<SQL>"
+    python3 snowman.py --stage "<SQL>" --name <purpose-slug>
 
-Behaviour:
+Execute mode (default):
   * resolves the project's ``.snowman/context.md`` (walks up from CWD) and
     reads the ``connection`` from its YAML frontmatter;
   * refuses to run if no context file exists (bootstrap not done);
@@ -19,13 +20,26 @@ Behaviour:
     and forwards snow's stdout/stderr/exit code;
   * on refusal prints ``BLOCKED: <reason>`` to stderr and exits non-zero.
 
+Stage mode (``--stage``):
+  * never executes anything — writes the SQL to
+    ``.snowman/staged/<timestamp>__<slug>.sql`` for the user to review and
+    run manually;
+  * accepts any SQL, including DML/DDL and multi-statement scripts; the only
+    check is non-emptiness. Destructive keywords add a warning line to the
+    file header, they never block;
+  * still requires ``.snowman/context.md`` (the header's run command needs
+    the connection name);
+  * keeps ``.snowman/staged/`` gitignored via a ``.gitignore`` it maintains.
+
 Standard library only.
 """
 from __future__ import annotations
 
+import argparse
 import re
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 # Leading keyword must be one of these (read-only statements only).
@@ -38,6 +52,12 @@ WRITE_KEYWORDS = {
     "CREATE", "ALTER", "REPLACE", "RENAME", "GRANT", "REVOKE", "CALL",
     "EXECUTE", "COPY", "PUT", "GET", "REMOVE", "UNDROP", "USE", "SET",
     "UNSET", "BEGIN", "COMMIT", "ROLLBACK",
+}
+
+# Stage mode only warns (never blocks) when one of these appears — the human
+# reviewing the staged file should have the destructive bits flagged.
+DESTRUCTIVE_KEYWORDS = {
+    "DROP", "TRUNCATE", "DELETE", "REPLACE", "GRANT", "REVOKE", "REMOVE",
 }
 
 BLOCK = 2  # exit code for a guardrail refusal
@@ -116,12 +136,59 @@ def enforce_read_only(sql: str) -> None:
         die(f"write/DDL keyword(s) present: {', '.join(sorted(found))}.")
 
 
-def main(argv: list[str]) -> int:
-    if len(argv) != 2 or not argv[1].strip():
-        print('usage: snowman.py "<SQL>"', file=sys.stderr)
-        return 1
+def stage(sql: str, name: str) -> int:
+    """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
+    if not sql.strip():
+        die("empty script — nothing to stage.")
 
-    sql = argv[1]
+    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")
+    if not slug:
+        die(f"--name {name!r} reduces to an empty slug — use letters, digits, hyphens.")
+
+    context = find_context()
+    connection = read_connection(context)
+    project_root = context.parent.parent
+
+    staged_dir = context.parent / "staged"
+    staged_dir.mkdir(exist_ok=True)
+    gitignore = staged_dir / ".gitignore"
+    if not gitignore.is_file():
+        gitignore.write_text("*\n", encoding="utf-8")
+
+    now = datetime.now()
+    base = f"{now:%Y%m%d-%H%M%S}__{slug}"
+    path = staged_dir / f"{base}.sql"
+    bump = 1
+    while path.exists():
+        path = staged_dir / f"{base}-{bump}.sql"
+        bump += 1
+    rel = path.relative_to(project_root)
+
+    run_cmd = f"snow sql -f {rel} --connection {connection}"
+    destructive = sorted(
+        kw for kw in DESTRUCTIVE_KEYWORDS
+        if re.search(rf"\b{kw}\b", strip_for_analysis(sql), flags=re.I)
+    )
+    header = [
+        "-- staged by snowman — NOT executed",
+        f"-- purpose: {slug}",
+        f"-- staged at: {now:%Y-%m-%d %H:%M:%S}",
+        f"-- run with: {run_cmd}",
+    ]
+    if destructive:
+        header.append(
+            f"-- WARNING: contains {', '.join(destructive)} — review carefully before running"
+        )
+    path.write_text("\n".join(header) + "\n\n" + sql.strip() + "\n", encoding="utf-8")
+
+    print(f"STAGED (not executed): {rel}")
+    print(f"run with: {run_cmd}")
+    return 0
+
+
+def execute(sql: str) -> int:
+    if not sql.strip():
+        die("empty query.")
     enforce_read_only(sql)
 
     context = find_context()
@@ -133,6 +200,32 @@ def main(argv: list[str]) -> int:
     except FileNotFoundError:
         print("BLOCKED: `snow` CLI not found on PATH.", file=sys.stderr)
         return BLOCK
+
+
+def main(argv: list[str]) -> int:
+    parser = argparse.ArgumentParser(
+        prog="snowman.py",
+        description="Read-only Snowflake query wrapper; --stage writes DML/DDL "
+        "to .snowman/staged/ for manual execution instead of running anything.",
+    )
+    parser.add_argument("sql", help="the SQL to run (read-only) or stage")
+    parser.add_argument(
+        "--stage", action="store_true",
+        help="write the SQL to .snowman/staged/ instead of executing it",
+    )
+    parser.add_argument(
+        "--name", metavar="PURPOSE-SLUG",
+        help="kebab-case purpose for the staged file (required with --stage)",
+    )
+    args = parser.parse_args(argv[1:])
+
+    if args.stage:
+        if not args.name:
+            parser.error("--stage requires --name <purpose-slug>")
+        return stage(args.sql, args.name)
+    if args.name:
+        parser.error("--name is only valid with --stage")
+    return execute(args.sql)
 
 
 if __name__ == "__main__":

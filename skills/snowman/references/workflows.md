@@ -1,8 +1,8 @@
 # snowman — workflows
 
-Read-only playbooks. Pull the one matching the user's intent. Every query runs
-through the wrapper: `python3 <skill-dir>/scripts/snowman.py "<SQL>"`. Start
-broad, narrow fast, keep queries small.
+Playbooks — pull the one matching the user's intent. Every query runs through
+the wrapper: `python3 <skill-dir>/scripts/snowman.py "<SQL>"`. Start broad,
+narrow fast, keep queries small.
 
 ## Exploration — discover what's there
 
@@ -45,3 +45,21 @@ dbt or a pipeline.
   the surprising buckets with a filtered `SAMPLE`.
 - Narrow with `WHERE` and `SAMPLE` before pulling detail rows; quote concrete
   example rows back to the user.
+
+## Staging a change — write the script, never run it
+
+When the user asks for DML/DDL ("add a column", "backfill X", "create a
+table"), produce the script and stage it for their manual execution:
+
+1. **Verify read-only first.** Confirm the target exists (`DESCRIBE`), and
+   where the change is data-bearing, dry-run the logic as a `SELECT` — e.g.
+   preview the rows an `UPDATE` would touch, or count them.
+2. **Stage it:**
+   `python3 <skill-dir>/scripts/snowman.py --stage "<SQL>" --name <purpose-slug>`
+   — multi-statement is fine; pick a `--name` that says what the script does.
+3. **Hand it over.** Relay the staged file path and the `run with:` command
+   from the wrapper's output. If the header carries a `WARNING:` line
+   (destructive keywords), point it out explicitly.
+4. **Verify after, on request.** Once the user says they've run it, offer
+   read-only follow-ups to confirm the effect (counts, DESCRIBE, samples).
+   Don't delete the staged file — cleanup is the user's.

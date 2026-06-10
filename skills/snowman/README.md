@@ -4,7 +4,9 @@ The **`snowman`** agent skill: **read-only Snowflake exploration** via the
 `snow` CLI — schema discovery, data profiling, hypothesis testing, and
 data-quality investigation. Built for ad-hoc exploration and investigations
 where you want the agent poking around Snowflake **without any risk of it
-writing or mutating anything**.
+writing or mutating anything**. When a change *is* wanted, the agent stages
+the DML/DDL as a script for you to review and run manually — it never
+executes writes itself.
 
 ## What it does
 
@@ -24,7 +26,13 @@ writing or mutating anything**.
   read-only leading keyword (`SELECT`/`WITH`/`SHOW`/`DESCRIBE`/`EXPLAIN`), and
   refuses any write/DDL keyword anywhere. On refusal it exits non-zero with a
   `BLOCKED: …` reason. This is enforcement, not advice — it can't be talked out
-  of it. There is **no write path at all** in v1.
+  of it. There is **no execute path for writes at all**.
+- **Staged writes, executed only by you.** When you ask for a change, the
+  agent stages the DML/DDL via `snowman.py --stage` into
+  `.snowman/staged/<timestamp>__<slug>.sql` (gitignored) with a header
+  carrying the exact `snow sql -f …` run command and a warning line when
+  destructive keywords are present. Running the script — and deleting it
+  afterwards — is always your manual act.
 - **Cost discipline (taught).** Bounding scans with `LIMIT`/`SAMPLE`, avoiding
   full scans, and minding the warehouse are taught in `references/guardrails.md`
   rather than hard-blocked (reliable cost detection needs real parsing).
@@ -61,7 +69,9 @@ It activates when you explore Snowflake data or ask to profile/investigate it.
 - `references/guardrails.md` — full guardrail policy (hard-enforced vs taught).
 - `references/workflows.md` — exploration / profiling / hypothesis / investigation.
 - `scripts/snowman.py` — the read-only wrapper (stdlib only). Ships with the
-  skill; reads the per-project context to resolve the connection.
+  skill; reads the per-project context to resolve the connection. Also owns
+  `--stage`, which writes (never executes) DML/DDL scripts to
+  `.snowman/staged/`.
 
 ## Maintenance / CI
 

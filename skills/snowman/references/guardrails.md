@@ -24,8 +24,9 @@ Every query runs through the wrapper. Before anything reaches Snowflake it:
 
 On refusal the wrapper prints `BLOCKED: <reason>` to stderr and **exits
 non-zero**. When you see that, do **not** work around it — the request was not
-read-only. Rephrase as a read-only query, or tell the user this skill can't
-serve a write/DDL request (that's by design; snowman has no write path in v1).
+read-only. If the user asked a read-only question, rephrase the query. If the
+user explicitly asked for a data/schema change, stage it (below) — but never
+stage SQL as a way to make a block go away on a read-only request.
 
 ### Note on the keyword scan
 
@@ -34,6 +35,32 @@ Identifiers like `update_date` or `created_at` do **not** trigger it (the `_`
 keeps them part of the same word). If a *legitimate* read-only query is
 wrongly blocked because a write keyword appears as a bare word, rephrase it —
 do not bypass the wrapper.
+
+## Staging writes — `--stage` (never executed)
+
+`python3 scripts/snowman.py --stage "<SQL>" --name <purpose-slug>` writes the
+SQL to `.snowman/staged/<timestamp>__<slug>.sql` instead of running it.
+Execution is **always** the user's manual act — snowman has no execute path
+for writes, by design.
+
+What stage mode enforces and what it deliberately doesn't:
+
+- **Requires the context file**, same as the execute path — the staged file's
+  header embeds the exact `snow sql -f <file> --connection <conn>` run
+  command, which needs the connection name from `.snowman/context.md`.
+- **No read-only check, no single-statement check.** A real migration is
+  several statements; the execute-path rules exist to protect execution, and
+  nothing executes here. Only an empty script is refused.
+- **Destructive keywords warn, never block.** `DROP`, `TRUNCATE`, `DELETE`,
+  `REPLACE`, `GRANT`, `REVOKE`, `REMOVE` add a `-- WARNING:` line to the file
+  header so the reviewing human sees the dangerous bits flagged.
+- **Gitignored scratch.** The wrapper maintains `.snowman/staged/.gitignore`
+  (`*`), so staged scripts never land in the repo. There is no lifecycle
+  machinery — after the user runs a script, cleanup is theirs. Never delete a
+  staged file yourself.
+
+The intent rule (also in SKILL.md): stage **only** when the user explicitly
+asked for a change. A `BLOCKED` execute is not an invitation to stage.
 
 ## Applied by you (taught, not blocked)
 

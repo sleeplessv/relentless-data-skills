@@ -24,6 +24,11 @@ slot in wherever you have them.
   highest-effort coding model available; research and verification dispatches
   inherit the parent model. Skipped automatically if your agent has no
   per-subagent model control.
+- **Worktree-isolated parallel writes.** When two or more write-intent subagents
+  run in parallel, each works in its own git worktree + branch (native isolation
+  on Claude Code, prompt-driven `git worktree add` elsewhere). A dedicated
+  integration dispatch merges the branches back — resolving mechanical conflicts,
+  escalating semantic ones — and verification then runs on the unified tree.
 - **Separate verification.** Implementation and verification are always
   different subagent calls — no "the implementer said it worked".
 - **Handoff-grade prompts.** Subagents are stateless, so dispatch prompts are

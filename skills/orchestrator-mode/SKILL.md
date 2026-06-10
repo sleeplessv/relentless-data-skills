@@ -24,6 +24,9 @@ Agent-neutral: it names *roles* (search agent, coding agent), not tools — map 
    dispatches (models, SQL, refactors, file edits) get the best coding model your agent
    allows; research / verification dispatches inherit the parent (leave model unset).
 6. **Verify with a separate subagent** — implementation and verification are always separate dispatches.
+7. **Isolated worktrees for parallel writers.** When two or more write-intent dispatches
+   run in parallel, each gets its own worktree + branch, and integration is a separate
+   dispatch — see [Parallel Writes (Worktrees)](#parallel-writes-worktrees).
 
 ## Workflow
 
@@ -74,6 +77,28 @@ verbatim — no lossy summary); **constraints** (conventions, files to leave unt
 cause of rework); reference long artifacts by path/URL but name the specific lines to
 read; carry a cumulative "Decisions made" block into every dispatch after the first.
 
+## Parallel Writes (Worktrees)
+
+Read-only fan-outs and single writers skip this — isolation pays off only when two
+or more writers would otherwise share one working tree.
+
+1. **Precondition** — fold a `git status` check into the planning fan-out's read-only
+   dispatch. Dirty tree → ask the user (commit / stash / proceed): worktrees branch
+   from HEAD, so uncommitted changes are invisible to the writers. Not a git repo, or
+   no worktree mechanism available → fall back to sequential writes.
+2. **Dispatch** — partition tasks so writers touch disjoint files where possible. Each
+   writer works in an isolated worktree and commits to its own branch (native isolation,
+   or worktree creation as the prompt's first step — see [Tool Mapping](#tool-mapping)).
+3. **Integrate** — after all writers return, one dedicated dispatch merges the branches:
+   it resolves mechanical conflicts (imports, lockfiles, formatting) itself and
+   **escalates semantic ones**, reporting the conflicting branches/files/hunks so the
+   orchestrator can dispatch a resolver with both writers' goals and decisions pasted
+   verbatim. On success it removes worktrees and merged branches; on escalation it
+   leaves everything in place, and the resolver performs the same cleanup once its
+   merge succeeds. Return contract: `conflicts_found`, `worktrees_cleaned`.
+4. **Verify** — on the unified tree, as a separate dispatch (Hard Rule 6); mandatory
+   whenever any conflict was resolved, by anyone.
+
 ## Tool Mapping
 
 Map the roles above to concrete tools (built-in rosters are minimal — custom agents fill the rest):
@@ -85,6 +110,7 @@ Map the roles above to concrete tools (built-in rosters are minimal — custom a
 | Read-only search / explore agent | `Explore` | `explore` |
 | Implementation / general agent | `general-purpose` | general / custom agent |
 | Coding model for write intent | `model: opus` (research: `inherit`/unset) | highest-effort coding model |
+| Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` |
 | Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools |
 
 Built-in specialists are minimal (Claude Code → `Explore`, `Plan`, `general-purpose`;
@@ -104,11 +130,15 @@ Refactor a function and verify it — the canonical good-practice shape:
 4. **Verify** in a *separate* read-only dispatch (model unset): *"Run tests for the changed
    files; report pass/fail and failing test names."* The implementer never self-certifies.
 
+(Two parallel writers instead of one? Each gets a worktree + branch, and an integration
+dispatch precedes verification — see [Parallel Writes (Worktrees)](#parallel-writes-worktrees).)
+
 ## Anti-Patterns
 
 - Reading a file in the main thread "just to check something" — delegate.
 - A single megaprompt asking one subagent to do everything — split it.
 - Sequential dispatch of independent tasks — parallelize.
+- Two write-intent subagents sharing one working tree in parallel — isolate in worktrees.
 - Summarizing prior findings instead of quoting verbatim — loss compounds.
 - Tier 1 prompts for verification/implementation subagents — they need intent + rationale.
 

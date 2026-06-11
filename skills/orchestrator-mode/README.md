@@ -40,8 +40,9 @@ CLI). Custom specialists in your own setup slot in wherever you have them.
 
 Triggers on "orchestrator mode", "use subagents", "delegate everything", "swarm
 this", or any request for the main thread to coordinate rather than execute.
-It stays on for the whole session until you say "exit orchestrator mode" or
-"stop delegating".
+A single named delegation ("use a subagent to check X") gets one dispatch, not
+the mode. Once on, it stays on for the whole session until you say "exit
+orchestrator mode" or "stop delegating".
 
 ## Install
 
@@ -62,6 +63,10 @@ npx skills add sleeplessv/relentless-data-skills/skills/orchestrator-mode
 - `SKILL.md` — the orchestration policy: hard rules, workflow, capability-based
   subagent selection, model selection, prompt tiers, and the Claude Code /
   Cursor / Cortex Code tool-mapping table.
+
+  `SKILL.md` is **intentionally self-contained** (no `REFERENCE.md`): orchestrator
+  mode forbids `Read` in the main thread, so a reference file would be unreadable
+  the moment the mode activates. Don't "fix" the length by splitting it.
 
 ## Maintenance / CI
 

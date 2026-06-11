@@ -37,15 +37,26 @@ snow connection list
 The chosen connection *names* are the only auth detail that ever lands in the
 context file.
 
-If the chosen connection uses key-pair auth with an **encrypted private key**,
-its passphrase must live in the project root `.env` (e.g.
-`PRIVATE_KEY_PASSPHRASE=...`) — the wrapper relays `.env` to the `snow`
-subprocess automatically. If the first query fails mentioning a private
-key/passphrase/JWT, tell the user to add that line to `.env`; never ask for
-the passphrase or print `.env` contents. With several key-pair connections
-whose passphrases differ, one `PRIVATE_KEY_PASSPHRASE` can't serve both —
-point the user at `snow`'s per-connection form instead
-(`SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...`), still in `.env`.
+**Check each chosen connection's `authenticator`** in the
+`snow connection list` output before running anything — the auth method
+decides one setup step:
+
+- **Browser auth** (`OAUTH_AUTHORIZATION_CODE` or `EXTERNALBROWSER`): have
+  the user run `snow connection test -c <name>` **in their own terminal,
+  before the discovery sweep** — a browser opens, they complete the login,
+  and `snow` caches the token; wrapper queries then run silently. Don't rely
+  on the browser opening mid-query: wrapper calls run non-interactively and
+  time out while the user is still logging in.
+- **Key-pair auth** (`SNOWFLAKE_JWT` / a `private_key_file`) with an
+  **encrypted private key**: its passphrase must live in the project root
+  `.env` (e.g. `PRIVATE_KEY_PASSPHRASE=...`) — the wrapper relays `.env` to
+  the `snow` subprocess automatically. If the first query fails mentioning a
+  private key/passphrase/JWT, tell the user to add that line to `.env`;
+  never ask for the passphrase or print `.env` contents. With several
+  key-pair connections whose passphrases differ, one `PRIVATE_KEY_PASSPHRASE`
+  can't serve both — point the user at `snow`'s per-connection form instead
+  (`SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...`), still in
+  `.env`.
 
 > From here on, every command is the read-only wrapper. The wrapper needs the
 > connection, but the context file doesn't exist yet — so for the discovery

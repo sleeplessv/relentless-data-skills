@@ -51,11 +51,14 @@ wrapper (and `snow`) command with sandboxing disabled. If a query fails with
 a connection/DNS error, suspect the sandbox first — do not start debugging
 the connection setup.
 
-If a query fails mentioning a private key, passphrase, or JWT, the connection
-uses key-pair auth and the passphrase belongs in the project root `.env`
-(e.g. `PRIVATE_KEY_PASSPHRASE=...`) — the wrapper prints a hint saying
-whether a `.env` was found. Relay that to the user; do not debug
-`connections.toml` or ask for the passphrase.
+On an auth-looking failure (private key, passphrase, JWT, OAuth, token) the
+wrapper looks up the connection's authenticator and prints a hint matched to
+it: browser auth (OAuth/SSO) needs the user to run
+`snow connection test -c <name>` in their own terminal once — a browser
+opens and `snow` caches the token; key-pair auth needs the passphrase in the
+project root `.env` (e.g. `PRIVATE_KEY_PASSPHRASE=...`). Relay the hint to
+the user; do not debug `connections.toml`, ask for the passphrase, or try to
+drive the browser flow from inside the session.
 
 If the wrapper exits with `BLOCKED: …`, **do not work around it** — the
 statement was non-read-only. If the user asked a read-only question, rephrase

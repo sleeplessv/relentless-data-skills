@@ -64,6 +64,13 @@ With several key-pair connections whose passphrases differ (e.g. separate
 dev/prod accounts), use `snow`'s per-connection form in `.env` instead:
 `SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...`.
 
+Browser-auth connections (`authenticator` = `OAUTH_AUTHORIZATION_CODE` or
+`EXTERNALBROWSER`) need no `.env` at all — complete the login once with
+`snow connection test -c <name>` in your own terminal; `snow` caches the
+token and wrapper queries then run silently. On an auth failure the wrapper
+looks up the connection's authenticator via `snow connection list` and
+prints a hint matched to the actual auth method.
+
 ## Install
 
 See the [repo root README](../../README.md) for the general install patterns.

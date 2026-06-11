@@ -109,7 +109,7 @@ Map the roles above to concrete tools (built-in rosters are minimal — custom a
 | Plan / todo tool | `TaskCreate`/`TaskUpdate` (or `TodoWrite`) | todo tool | `EnterPlanMode`/`ExitPlanMode` (no todo tool — track in replies) |
 | Read-only search / explore agent | `Explore` | `explore` | `Explore` |
 | Implementation / general agent | `general-purpose` | general / custom agent | `general-purpose` |
-| Coding model for write intent | `model: opus` (research: `inherit`/unset) | highest-effort coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
+| Coding model for write intent | `model:` set to the strongest coding model available (research: unset) | highest-effort coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
 | Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` | request worktree isolation in the dispatch (branch `agent/<agentId>`) |
 | Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools | `Read Grep Glob Edit Write Bash WebFetch WebSearch SnowflakeSqlExecute` |
 
@@ -143,7 +143,8 @@ dispatch precedes verification — see [Parallel Writes (Worktrees)](#parallel-w
 - Summarizing prior findings instead of quoting verbatim — loss compounds.
 - Tier 1 prompts for verification/implementation subagents — they need intent + rationale.
 
-## Exit Criteria
+## Activation & Exit
 
-Mode applies for the whole session unless the user says "exit orchestrator mode" or
-"stop delegating".
+A single named delegation ("use a subagent to check X") is one dispatch, not this mode;
+the mode engages when delegation is asked for as a way of working, then applies for the
+whole session unless the user says "exit orchestrator mode" or "stop delegating".

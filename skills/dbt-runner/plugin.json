@@ -1,0 +1,20 @@
+{
+  "name": "dbt-runner",
+  "version": "0.1.0",
+  "description": "Invocation discipline and failure triage for running dbt — a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/dbt-runner",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "dbt",
+    "dbt-fusion",
+    "snowflake",
+    "data-engineering",
+    "troubleshooting",
+    "preflight",
+    "analytics-engineering"
+  ]
+}

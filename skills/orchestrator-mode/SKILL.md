@@ -1,6 +1,6 @@
 ---
 name: orchestrator-mode
-description: Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself. Use when the user says "orchestrator mode", "use subagents", "delegate everything", "swarm this", or otherwise asks the main thread to coordinate rather than execute. Agent-neutral — works on Claude Code, Cursor, and any agent with a delegation tool.
+description: Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself. Use when the user says "orchestrator mode", "use subagents", "delegate everything", "swarm this", or otherwise asks the main thread to coordinate rather than execute. Agent-neutral — works on Claude Code, Cursor, Cortex Code, and any agent with a delegation tool.
 ---
 
 # Orchestrator Mode
@@ -103,18 +103,19 @@ or more writers would otherwise share one working tree.
 
 Map the roles above to concrete tools (built-in rosters are minimal — custom agents fill the rest):
 
-| Role (body language) | Claude Code | Cursor |
-|---|---|---|
-| Spawn a subagent | `Agent` (formerly `Task`) | `Task` (in modes that grant it) |
-| Plan / todo tool | `TaskCreate`/`TaskUpdate` (or `TodoWrite`) | todo tool |
-| Read-only search / explore agent | `Explore` | `explore` |
-| Implementation / general agent | `general-purpose` | general / custom agent |
-| Coding model for write intent | `model: opus` (research: `inherit`/unset) | highest-effort coding model |
-| Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` |
-| Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools |
+| Role (body language) | Claude Code | Cursor | Cortex Code |
+|---|---|---|---|
+| Spawn a subagent | `Agent` (formerly `Task`) | `Task` (in modes that grant it) | `RunSubagent` |
+| Plan / todo tool | `TaskCreate`/`TaskUpdate` (or `TodoWrite`) | todo tool | `EnterPlanMode`/`ExitPlanMode` (no todo tool — track in replies) |
+| Read-only search / explore agent | `Explore` | `explore` | `Explore` |
+| Implementation / general agent | `general-purpose` | general / custom agent | `general-purpose` |
+| Coding model for write intent | `model: opus` (research: `inherit`/unset) | highest-effort coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
+| Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` | request worktree isolation in the dispatch (branch `agent/<agentId>`) |
+| Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools | `Read Grep Glob Edit Write Bash WebFetch WebSearch SnowflakeSqlExecute` |
 
 Built-in specialists are minimal (Claude Code → `Explore`, `Plan`, `general-purpose`;
-Cursor → `explore`, `bash`, `browser`). Everything else (SQL, BI, CI, docs agents) is
+Cursor → `explore`, `bash`, `browser`; Cortex Code → `Explore`, `Plan`, `general-purpose`,
+all with native Snowflake SQL tools). Everything else (SQL, BI, CI, docs agents) is
 custom to your setup — use it if present, else route to general-purpose.
 
 ## Worked Example (agent-neutral)

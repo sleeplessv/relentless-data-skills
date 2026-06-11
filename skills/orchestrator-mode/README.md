@@ -7,8 +7,8 @@ dispatches, verifies, and synthesizes.
 
 It is **agent-neutral**: the body talks in roles ("delegate", "search agent",
 "coding agent") and a single mapping table maps those roles to the concrete
-tools on **Claude Code** and **Cursor**. Custom specialists in your own setup
-slot in wherever you have them.
+tools on **Claude Code**, **Cursor**, and **Cortex Code** (Snowflake's `cortex`
+CLI). Custom specialists in your own setup slot in wherever you have them.
 
 ## What it does
 
@@ -26,7 +26,8 @@ slot in wherever you have them.
   per-subagent model control.
 - **Worktree-isolated parallel writes.** When two or more write-intent subagents
   run in parallel, each works in its own git worktree + branch (native isolation
-  on Claude Code, prompt-driven `git worktree add` elsewhere). A dedicated
+  on Claude Code, requested worktree isolation on Cortex Code, prompt-driven
+  `git worktree add` elsewhere). A dedicated
   integration dispatch merges the branches back — resolving mechanical conflicts,
   escalating semantic ones — and verification then runs on the unified tree.
 - **Separate verification.** Implementation and verification are always
@@ -60,7 +61,7 @@ npx skills add sleeplessv/relentless-data-skills/skills/orchestrator-mode
 
 - `SKILL.md` — the orchestration policy: hard rules, workflow, capability-based
   subagent selection, model selection, prompt tiers, and the Claude Code /
-  Cursor tool-mapping table.
+  Cursor / Cortex Code tool-mapping table.
 
 ## Maintenance / CI
 

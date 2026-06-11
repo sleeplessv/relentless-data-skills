@@ -30,9 +30,11 @@ Execute mode (default):
     private key work: the passphrase lives in ``.env``, not in any config
     snowman touches;
   * on success runs ``snow sql -q <SQL> --connection <conn> --format JSON``
-    and forwards snow's stdout/stderr/exit code; if snow fails with an error
-    that looks key/passphrase-related, appends a one-line hint saying whether
-    a ``.env`` was found;
+    and forwards snow's stdout/stderr/exit code; if snow fails with an
+    auth-looking error, looks up the connection's authenticator via
+    ``snow connection list`` (local config read, no secrets) and appends a
+    one-line hint matched to the auth method — complete the browser login
+    (OAuth/SSO) vs put the key-pair passphrase in ``.env``;
   * on refusal prints ``BLOCKED: <reason>`` to stderr and exits non-zero.
 
 Stage mode (``--stage``):
@@ -53,6 +55,7 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import re
 import subprocess
@@ -80,10 +83,20 @@ DESTRUCTIVE_KEYWORDS = {
 
 BLOCK = 2  # exit code for a guardrail refusal
 
-# A snow failure matching this is likely a key-pair auth problem (encrypted
-# private key, missing/wrong passphrase) — worth a hint, not worth debugging
-# the connection config.
-AUTH_ERROR_RE = re.compile(r"private[ _]?key|passphrase|decrypt|jwt", re.I)
+# A snow failure matching this is likely an auth problem — worth a hint, not
+# worth debugging the connection config. Deliberately broad (it only ever
+# adds a line to an already-failed query) but avoids bare "token", which
+# parser errors use. The hint itself is matched to the connection's real
+# authenticator, so a false trigger still prints true advice.
+AUTH_ERROR_RE = re.compile(
+    r"private[ _]?key|passphrase|decrypt|jwt|oauth|access token|authenticat", re.I
+)
+
+# Authenticators whose remedy is a human completing a browser login once —
+# snow caches the token afterwards. Error text alone can't discriminate
+# (key-pair auth is itself JWT-based and OAuth failures also mention tokens),
+# hence the authenticator lookup.
+BROWSER_AUTHENTICATORS = {"OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER"}
 
 
 def die(reason: str) -> "NoReturn":  # type: ignore[name-defined]
@@ -249,6 +262,69 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
     return merged
 
 
+def connection_params(connection: str, env: dict[str, str]) -> dict | None:
+    """Look up a connection's parameters via ``snow connection list``.
+
+    Reads local snow config only — never reaches Snowflake, and the listing
+    shows names/paths, not key material. Returns None when the lookup fails
+    or the connection isn't listed; callers fall back to generic guidance.
+    """
+    try:
+        result = subprocess.run(
+            ["snow", "connection", "list", "--format", "JSON"],
+            capture_output=True, env=env, timeout=30,
+        )
+        for item in json.loads(result.stdout.decode(errors="replace")):
+            if item.get("connection_name") == connection:
+                params = item.get("parameters")
+                return params if isinstance(params, dict) else {}
+    except Exception:
+        pass
+    return None
+
+
+def classify_auth(params: dict | None) -> str:
+    """Map a connection's parameters to 'browser', 'keypair', or 'unknown'."""
+    if params is None:
+        return "unknown"
+    authenticator = str(params.get("authenticator", "")).upper()
+    if authenticator in BROWSER_AUTHENTICATORS:
+        return "browser"
+    if authenticator == "SNOWFLAKE_JWT" or params.get("private_key_file"):
+        return "keypair"
+    return "unknown"
+
+
+def auth_hint(kind: str, connection: str, env_file: Path | None) -> str:
+    env_note = (
+        f"a .env was loaded from {env_file}" if env_file is not None
+        else "no .env file was found"
+    )
+    browser = (
+        f"run `snow connection test -c {connection}` in your own terminal to "
+        "complete the browser login (snow caches the token), then retry"
+    )
+    keypair = (
+        "if its private key is encrypted, the passphrase belongs in the "
+        "project root .env (e.g. PRIVATE_KEY_PASSPHRASE=...) — snowman passes "
+        f".env to snow automatically; this run: {env_note}. If a .env was "
+        "loaded and it still fails, the variable name is probably wrong for "
+        "this connection"
+    )
+    if kind == "browser":
+        return (
+            f"hint: connection {connection!r} authenticates in a browser "
+            f"(OAuth/SSO) — {browser}."
+        )
+    if kind == "keypair":
+        return f"hint: this looks like a key-pair auth failure — {keypair}."
+    return (
+        "hint: this looks like an auth failure. If the connection uses "
+        f"key-pair auth: {keypair}. If it authenticates in a browser "
+        f"(OAuth/SSO): {browser}."
+    )
+
+
 def strip_for_analysis(sql: str) -> str:
     """Remove block comments, line comments, and string literals.
 
@@ -361,8 +437,9 @@ def execute(
         env_file = project_env if project_env.is_file() else None
 
     cmd = ["snow", "sql", "-q", sql, "--connection", connection, "--format", "JSON"]
+    sub_env = snow_env(env_file)
     try:
-        result = subprocess.run(cmd, env=snow_env(env_file), stderr=subprocess.PIPE)
+        result = subprocess.run(cmd, env=sub_env, stderr=subprocess.PIPE)
     except FileNotFoundError:
         print("BLOCKED: `snow` CLI not found on PATH.", file=sys.stderr)
         return BLOCK
@@ -371,19 +448,8 @@ def execute(
     if stderr:
         sys.stderr.write(stderr)
     if result.returncode != 0 and AUTH_ERROR_RE.search(stderr):
-        env_note = (
-            f"a .env was loaded from {env_file}" if env_file is not None
-            else "no .env file was found"
-        )
-        print(
-            "hint: this looks like a key-pair auth failure. If the connection "
-            "uses an encrypted private key, put its passphrase in the project "
-            "root .env (e.g. PRIVATE_KEY_PASSPHRASE=...) — snowman passes .env "
-            f"to snow automatically. This run: {env_note}. If a .env was "
-            "loaded and it still fails, the variable name is probably wrong "
-            "for this connection.",
-            file=sys.stderr,
-        )
+        kind = classify_auth(connection_params(connection, sub_env))
+        print(auth_hint(kind, connection, env_file), file=sys.stderr)
     return result.returncode
 
 

@@ -15,6 +15,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
 | [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the `snow` CLI: schema discovery, profiling, hypothesis testing, data-quality investigation. Bootstraps a committed per-project context; a wrapper hard-enforces read-only. |
 | [`orchestrator-mode`](skills/orchestrator-mode/) | Turns the main thread into a pure coordinator that delegates ALL work to subagents — plan, parallel-dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor. |
+| [`dbt-runner`](skills/dbt-runner/) | Invocation discipline and failure triage for running dbt: a static preflight script catches environment failures before the first command, invocation rules prevent self-inflicted ones, and a signature-indexed catalogue maps error strings to ranked causes and fixes (including dbt-fusion quirks). Bootstraps a committed per-project context. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped (only the toolkits the project needs), then commit house conventions (Snowflake, Prefect, DuckDB dev loop) as an always-on rule. Idempotent re-runs add new source types. |
 
 ## External skills (references)
@@ -71,6 +72,7 @@ GitHub Actions runs integrity checks on push, PR, and weekly:
 
 - **`scripts/lint_skill.py`** — lints every `skills/*/SKILL.md`: required frontmatter, a "Use when" trigger in the description, and the per-file line budget.
 - **`scripts/check_doc_urls.py`** — for skills that ship a `references/docs-map.md`, fetches every doc URL and fails if any no longer resolves (catches upstream docs moving/renaming pages).
+- **`scripts/check_registry.py`** — every skill must have a row in the README table and a marketplace.json entry, and the marketplace entry must mirror the skill's `plugin.json` (name, version, description). Catches skills landing unregistered and registry drift.
 
 Both use the Python standard library only — no dependencies to install.
 

@@ -20,14 +20,9 @@ SKILLS_DIR = Path(__file__).resolve().parent.parent / "skills"
 URL_RE = re.compile(r"=>\s*(https://\S+)")
 TIMEOUT = 30
 
-# Durable entry points a skill should always check, keyed by skill name. These
-# are roots the docs-map itself is derived from (e.g. an llms.txt index).
-DURABLE: dict[str, list[str]] = {}
 
-
-def collect_urls(docs_map: Path, skill_name: str) -> list[str]:
-    urls = list(DURABLE.get(skill_name, []))
-    urls += URL_RE.findall(docs_map.read_text(encoding="utf-8"))
+def collect_urls(docs_map: Path) -> list[str]:
+    urls = URL_RE.findall(docs_map.read_text(encoding="utf-8"))
     seen: set[str] = set()
     ordered: list[str] = []
     for u in urls:
@@ -59,7 +54,7 @@ def main() -> int:
     failures: list[tuple[str, str, str]] = []
     for docs_map in docs_maps:
         skill_name = docs_map.relative_to(SKILLS_DIR).parts[0]
-        urls = collect_urls(docs_map, skill_name)
+        urls = collect_urls(docs_map)
         print(f"\n{skill_name} ({len(urls)} URLs):")
         for url in urls:
             ok, info = check(url)

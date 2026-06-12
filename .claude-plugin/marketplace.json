@@ -27,14 +27,14 @@
       ]
     },
     {
-      "name": "prefect-skill",
-      "source": "./skills/prefect-skill",
-      "description": "Opinionated Prefect 3 guidance: greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope.",
-      "version": "0.1.0",
+      "name": "prefect",
+      "source": "./skills/prefect",
+      "description": "Version-aware Prefect 3 guidance: a live docs-lookup protocol, CLI-first instance queries, and house standards. Prefect 2.x out of scope.",
+      "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
       },
-      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/prefect-skill",
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/prefect",
       "repository": "https://github.com/sleeplessv/relentless-data-skills",
       "license": "Apache-2.0",
       "keywords": [

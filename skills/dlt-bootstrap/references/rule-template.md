@@ -36,7 +36,7 @@ toolkits or source types change; do not delete it.
 ## Hardening and shipping
 
 - Production pipelines are wrapped in a **Prefect flow** and deployed per the
-  `prefect-skill` conventions — do **not** use dltHub-platform deployment
+  `prefect` conventions — do **not** use dltHub-platform deployment
   (`setup-runtime`) in this project.
 - Add incremental loading before calling a pipeline production-ready.
 - Ship via the `/ship` flow (branch → conventional commits → PR →

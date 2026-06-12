@@ -1,8 +1,8 @@
 # dltHub AI Workbench / dlt Docs Map
 
 **Durable contract (won't rot):**
-- OSS dlt docs index: `https://dlthub.com/docs/llms.txt`
-- dltHub (platform + workbench) docs index: `https://dlthub.com/docs/hub/llms.txt`
+- OSS dlt docs index => https://dlthub.com/docs/llms.txt
+- dltHub (platform + workbench) docs index => https://dlthub.com/docs/hub/llms.txt
 - Any docs page as clean markdown: append `.md` to its URL.
 - The workbench repo's README/TOOLKITS.md (raw, `master` branch) are the
   source of truth for CLI commands and the toolkit list.

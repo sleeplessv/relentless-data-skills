@@ -109,7 +109,7 @@ matching the interview answer:
   (`/find-source`, ...) and the MCP server are not active until they do.
 - Tell the user the working loop: `/find-source` → scaffold → secrets via the
   MCP secrets tools → debug → validate on DuckDB → harden (incremental
-  loading, remove dev limits) → wrap in a Prefect flow (`prefect-skill`) →
+  loading, remove dev limits) → wrap in a Prefect flow (`prefect`) →
   ship via `/ship` → inspect what landed in Snowflake with `snowman`.
 
 ## Guardrails

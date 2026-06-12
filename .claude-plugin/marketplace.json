@@ -108,6 +108,28 @@
       ]
     },
     {
+      "name": "dlt-bootstrap",
+      "source": "./skills/dlt-bootstrap",
+      "description": "Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped, then layer Relentless Data house conventions (Snowflake, Prefect, DuckDB dev loop) as a committed always-on rule.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/dlt-bootstrap",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "dlt",
+        "dlthub",
+        "data-ingestion",
+        "pipelines",
+        "bootstrap",
+        "data-engineering",
+        "snowflake",
+        "prefect"
+      ]
+    },
+    {
       "name": "snowman",
       "source": "./skills/snowman",
       "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only.",

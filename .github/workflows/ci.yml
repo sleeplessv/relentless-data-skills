@@ -34,6 +34,16 @@ jobs:
       - name: Lint SKILL.md files
         run: python scripts/lint_skill.py
 
+  registry-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check README/marketplace registry consistency
+        run: python scripts/check_registry.py
+
   doc-url-liveness:
     runs-on: ubuntu-latest
     steps:

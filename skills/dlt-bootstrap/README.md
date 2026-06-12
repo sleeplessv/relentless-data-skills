@@ -28,7 +28,7 @@ bootstrap and the per-project conventions layer.
   idempotent incremental re-runs (e.g. adding a second source type later).
 - **Verify and hand off** — `dlthub ai status` + MCP registration check, then
   day-to-day work runs through the workbench's own commands; hardening
-  composes with `prefect-skill`, `/ship`, and `snowman`.
+  composes with `prefect`, `/ship`, and `snowman`.
 
 ## How it works
 

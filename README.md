@@ -9,7 +9,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | Skill | What it does |
 | --- | --- |
 | [`implement-issue`](skills/implement-issue/) | Take a GitHub issue from open to draft PR: claim, branch, implement, run tests + a runtime smoke check, with explicit stop conditions. |
-| [`prefect-skill`](skills/prefect-skill/) | Prefect 3 greenfield scaffolding, existing-project audit, and a live docs-lookup protocol. Prefect 2.x out of scope. |
+| [`prefect`](skills/prefect/) | Version-aware Prefect 3 guidance: a live docs-lookup protocol, CLI-first instance queries, and house standards. Prefect 2.x out of scope. |
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes by affected area, create one conventional commit per group, then push — with safety rules against force-pushes, skipped hooks, and committed secrets. |
 | [`ship`](skills/ship/) | Command-only (`/ship`): take working-tree changes from branch to merged PR — branch off main, commit via smart-git-commit, open a PR, then squash-merge and delete local + remote branch (asks first, unless `/ship clean`). Detects unrelated changes and offers to split them into separate branches/PRs. |
 | [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
@@ -31,7 +31,7 @@ from their upstream repos:
 ## Install
 
 Every skill installs the same three ways. Substitute `<skill>` with a skill
-directory name from the table above (e.g. `prefect-skill`).
+directory name from the table above (e.g. `prefect`).
 
 ### `npx skills` (cross-agent: Claude Code, Cursor, Codex, OpenCode, …)
 

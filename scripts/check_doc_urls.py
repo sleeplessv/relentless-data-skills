@@ -22,9 +22,7 @@ TIMEOUT = 30
 
 # Durable entry points a skill should always check, keyed by skill name. These
 # are roots the docs-map itself is derived from (e.g. an llms.txt index).
-DURABLE: dict[str, list[str]] = {
-    "prefect-skill": ["https://docs.prefect.io/llms.txt"],
-}
+DURABLE: dict[str, list[str]] = {}
 
 
 def collect_urls(docs_map: Path, skill_name: str) -> list[str]:

@@ -70,7 +70,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 
 GitHub Actions runs integrity checks on push, PR, and weekly:
 
-- **`scripts/lint_skill.py`** — lints every `skills/*/SKILL.md`: required frontmatter, a "Use when" trigger in the description, and the per-file line budget.
+- **`scripts/lint_skill.py`** — lints every `skills/*/SKILL.md`: required frontmatter, a "Use when" trigger in the description, the per-file line budget, and YAML-safe frontmatter values (an unquoted `: ` or ` #` makes `npx skills` drop the skill silently).
 - **`scripts/check_doc_urls.py`** — for skills that ship a `references/docs-map.md`, fetches every doc URL and fails if any no longer resolves (catches upstream docs moving/renaming pages).
 - **`scripts/check_registry.py`** — every skill must have a row in the README table and a marketplace.json entry, and the marketplace entry must mirror the skill's `plugin.json` (name, version, description). Catches skills landing unregistered and registry drift.
 

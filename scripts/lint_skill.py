@@ -3,7 +3,9 @@
 
 Lints every ``skills/*/SKILL.md`` for its own integrity: required frontmatter
 keys, a "Use when" trigger clause in the description, the 1024-char description
-cap, and the SKILL.md line budget. Standard library only.
+cap, the SKILL.md line budget, and YAML-safe frontmatter values (an unquoted
+``: `` or `` #`` makes the YAML block unparseable, and ``npx skills`` then
+drops the skill silently). Standard library only.
 
 Exit code 0 = all clean, 1 = at least one skill has lint errors.
 """
@@ -41,6 +43,13 @@ def lint(skill_md: Path) -> list[str]:
     for key in REQUIRED_KEYS:
         if not fm.get(key):
             errors.append(f"missing/empty frontmatter key: {key}")
+
+    for key, value in fm.items():
+        if not value.startswith(('"', "'")) and (": " in value or " #" in value):
+            errors.append(
+                f"frontmatter {key} is not YAML-safe: unquoted ': ' or ' #' breaks "
+                "the YAML block and npx skills drops the skill silently — quote the value"
+            )
 
     desc = fm.get("description", "")
     if "use when" not in desc.lower():

@@ -6,17 +6,22 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 
 ## Skills
 
+<!-- skills-table:begin -->
 | Skill | What it does |
 | --- | --- |
-| [`implement-issue`](skills/implement-issue/) | Take a GitHub issue from open to draft PR: claim, branch, implement, run tests + a runtime smoke check, with explicit stop conditions. |
+| [`dbt-runner`](skills/dbt-runner/) | Invocation discipline and failure triage for running dbt — a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file. |
+| [`dlt-bootstrap`](skills/dlt-bootstrap/) | Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped (only the toolkits the project needs), then layer Relentless Data house conventions (Snowflake, Prefect, DuckDB dev loop) as a committed always-on rule. Idempotent re-runs add new source types. |
+| [`implement-issue`](skills/implement-issue/) | Implement a GitHub issue end-to-end: claim it, branch, code in small commits, run tests + a runtime smoke check, and open a draft PR — with explicit stop conditions instead of improvising. |
+| [`orchestrator-mode`](skills/orchestrator-mode/) | Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, and Cortex Code. |
 | [`prefect`](skills/prefect/) | Version-aware Prefect 3 guidance: a live docs-lookup protocol, CLI-first instance queries, and house standards. Prefect 2.x out of scope. |
-| [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes by affected area, create one conventional commit per group, then push — with safety rules against force-pushes, skipped hooks, and committed secrets. |
-| [`ship`](skills/ship/) | Command-only (`/ship`): take working-tree changes from branch to merged PR — branch off main, commit via smart-git-commit, open a PR, then squash-merge and delete local + remote branch (asks first, unless `/ship clean`). Detects unrelated changes and offers to split them into separate branches/PRs. |
-| [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
-| [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the `snow` CLI: schema discovery, profiling, hypothesis testing, data-quality investigation. Bootstraps a committed per-project context; a wrapper hard-enforces read-only. |
-| [`orchestrator-mode`](skills/orchestrator-mode/) | Turns the main thread into a pure coordinator that delegates ALL work to subagents — plan, parallel-dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor. |
-| [`dbt-runner`](skills/dbt-runner/) | Invocation discipline and failure triage for running dbt: a static preflight script catches environment failures before the first command, invocation rules prevent self-inflicted ones, and a signature-indexed catalogue maps error strings to ranked causes and fixes (including dbt-fusion quirks). Bootstraps a committed per-project context. |
-| [`dlt-bootstrap`](skills/dlt-bootstrap/) | Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped (only the toolkits the project needs), then commit house conventions (Snowflake, Prefect, DuckDB dev loop) as an always-on rule. Idempotent re-runs add new source types. |
+| [`ship`](skills/ship/) | Take working-tree changes from branch to merged PR in one pass — branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches/PRs. |
+| [`smart-git-commit`](skills/smart-git-commit/) | Groups changed files by affected area, creates one conventional commit per group, then pushes to remote — with safety rules against force-pushes, skipped hooks, and committed secrets. |
+| [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only execution and stages user-requested DML/DDL as scripts for manual execution. |
+| [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG. |
+<!-- skills-table:end -->
+
+This table is generated from each skill's `plugin.json` — edit there, then
+run `python scripts/sync_registry.py --write`.
 
 ## External skills (references)
 
@@ -64,7 +69,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 
 - `skills/<skill>/` — each skill is self-contained: `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`.
 - `scripts/` — CI integrity checks. Repo tooling only; not installed with any skill.
-- `.claude-plugin/marketplace.json` — declares the repo as a Claude Code marketplace, one plugin entry per skill.
+- `.claude-plugin/marketplace.json` — declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
 ## Maintenance / CI
 
@@ -72,9 +77,9 @@ GitHub Actions runs integrity checks on push, PR, and weekly:
 
 - **`scripts/lint_skill.py`** — lints every `skills/*/SKILL.md`: required frontmatter, a "Use when" trigger in the description, the per-file line budget, and YAML-safe frontmatter values (an unquoted `: ` or ` #` makes `npx skills` drop the skill silently).
 - **`scripts/check_doc_urls.py`** — for skills that ship a `references/docs-map.md`, fetches every doc URL and fails if any no longer resolves (catches upstream docs moving/renaming pages).
-- **`scripts/check_registry.py`** — every skill must have a row in the README table and a marketplace.json entry, and the marketplace entry must mirror the skill's `plugin.json` (name, version, description). Catches skills landing unregistered and registry drift.
+- **`scripts/sync_registry.py`** — generates the marketplace.json `plugins` array and the README skills table from each skill's `plugin.json` (the source of truth). CI runs `--check` to fail on drift or hand-edits; after changing a `plugin.json`, run `python scripts/sync_registry.py --write` and commit.
 
-Both use the Python standard library only — no dependencies to install.
+All scripts use the Python standard library only — no dependencies to install.
 
 ## License
 

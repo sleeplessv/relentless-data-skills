@@ -1,7 +1,7 @@
 {
   "name": "smart-git-commit",
   "version": "0.1.0",
-  "description": "Groups changed files by affected area, creates one conventional commit per group, then pushes to remote — conventional commit format with lowercase type prefixes.",
+  "description": "Groups changed files by affected area, creates one conventional commit per group, then pushes to remote — with safety rules against force-pushes, skipped hooks, and committed secrets.",
   "author": {
     "name": "sleeplessv"
   },

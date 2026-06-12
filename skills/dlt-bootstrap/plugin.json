@@ -1,7 +1,7 @@
 {
   "name": "dlt-bootstrap",
   "version": "0.1.0",
-  "description": "Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped, then layer Relentless Data house conventions (Snowflake, Prefect, DuckDB dev loop) as a committed always-on rule.",
+  "description": "Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped (only the toolkits the project needs), then layer Relentless Data house conventions (Snowflake, Prefect, DuckDB dev loop) as a committed always-on rule. Idempotent re-runs add new source types.",
   "author": {
     "name": "sleeplessv"
   },

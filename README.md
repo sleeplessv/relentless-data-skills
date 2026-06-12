@@ -15,6 +15,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | [`visual-report`](skills/visual-report/) | Produce a single self-contained HTML visual report — an explainer or diagram-heavy writeup of a system, process, or findings, built with Tailwind + Mermaid. |
 | [`snowman`](skills/snowman/) | Read-only Snowflake exploration via the `snow` CLI: schema discovery, profiling, hypothesis testing, data-quality investigation. Bootstraps a committed per-project context; a wrapper hard-enforces read-only. |
 | [`orchestrator-mode`](skills/orchestrator-mode/) | Turns the main thread into a pure coordinator that delegates ALL work to subagents — plan, parallel-dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor. |
+| [`dbt-runner`](skills/dbt-runner/) | Invocation discipline and failure triage for running dbt: a static preflight script catches environment failures before the first command, invocation rules prevent self-inflicted ones, and a signature-indexed catalogue maps error strings to ranked causes and fixes (including dbt-fusion quirks). Bootstraps a committed per-project context. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped (only the toolkits the project needs), then commit house conventions (Snowflake, Prefect, DuckDB dev loop) as an always-on rule. Idempotent re-runs add new source types. |
 
 ## External skills (references)

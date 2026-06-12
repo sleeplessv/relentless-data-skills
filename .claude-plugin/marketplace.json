@@ -66,9 +66,30 @@
       ]
     },
     {
+      "name": "ship",
+      "source": "./skills/ship",
+      "description": "Take working-tree changes from branch to merged PR in one pass — branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches/PRs.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/ship",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "git",
+        "github",
+        "pull-requests",
+        "branching",
+        "workflow",
+        "automation",
+        "gh-cli"
+      ]
+    },
+    {
       "name": "visual-report",
       "source": "./skills/visual-report",
-      "description": "Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind + Mermaid via CDN plus hand-crafted CSS/SVG. Use when you want a shareable single-file visual writeup of a system, process, or findings.",
+      "description": "Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG. Use when the user wants a visual report, an explainer, a single-file HTML writeup of a system/process/findings, or asks to visualize or diagram something as a shareable document.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -89,8 +110,8 @@
     {
       "name": "orchestrator-mode",
       "source": "./skills/orchestrator-mode",
-      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code and Cursor.",
-      "version": "0.1.0",
+      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, and Cortex Code.",
+      "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
       },
@@ -105,6 +126,27 @@
         "task-tool",
         "parallel",
         "workflow"
+      ]
+    },
+    {
+      "name": "dbt-runner",
+      "source": "./skills/dbt-runner",
+      "description": "Invocation discipline and failure triage for running dbt — a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/dbt-runner",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "dbt",
+        "dbt-fusion",
+        "snowflake",
+        "data-engineering",
+        "troubleshooting",
+        "preflight",
+        "analytics-engineering"
       ]
     },
     {
@@ -132,7 +174,7 @@
     {
       "name": "snowman",
       "source": "./skills/snowman",
-      "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only.",
+      "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only execution and stages user-requested DML/DDL as scripts for manual execution.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"

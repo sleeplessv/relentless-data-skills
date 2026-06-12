@@ -24,6 +24,11 @@ Search the project for a committed `dlt-house-conventions.md`.
   additional toolkit for a new source type and updating the frontmatter.
 - **Absent** → full bootstrap (below).
 
+If invoked proactively (the user was working on something else and the rule is
+merely missing), don't start the bootstrap — note that the project lacks
+`dlt-house-conventions.md`, offer to run the setup, and return to the user's
+actual task unless they accept.
+
 ## Detect, never ask
 
 Establish by inspection, creating what's missing in the install step:

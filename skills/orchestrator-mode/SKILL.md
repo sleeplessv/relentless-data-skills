@@ -20,9 +20,9 @@ Agent-neutral: it names *roles* (search agent, coding agent), not tools — map 
 3. **Parallelize when independent.** Dispatch data-independent subtasks together in one
    message; collect each result (returned inline, or via background output files).
 4. **Pick the right subagent** — a specialist if your agent offers one, else general-purpose. See [Subagent Selection](#subagent-selection).
-5. **Highest-effort coding model for any subagent that writes code.** Write-intent
-   dispatches (models, SQL, refactors, file edits) get the best coding model your agent
-   allows; research / verification dispatches inherit the parent (leave model unset).
+5. **Strongest coding model for any subagent that writes code** — pick the model *tier*
+   (best coding model your agent allows). Not a cue to raise the reasoning/thinking budget — leave that at the agent/user default. Write-intent dispatches
+   (models, SQL, refactors, edits) set the model; research / verification inherit the parent (leave model unset).
 6. **Verify with a separate subagent** — implementation and verification are always separate dispatches.
 7. **Isolated worktrees for parallel writers.** When two or more write-intent dispatches
    run in parallel, each gets its own worktree + branch, and integration is a separate
@@ -109,7 +109,7 @@ Map the roles above to concrete tools (built-in rosters are minimal — custom a
 | Plan / todo tool | `TaskCreate`/`TaskUpdate` (or `TodoWrite`) | todo tool | `EnterPlanMode`/`ExitPlanMode` (no todo tool — track in replies) |
 | Read-only search / explore agent | `Explore` | `explore` | `Explore` |
 | Implementation / general agent | `general-purpose` | general / custom agent | `general-purpose` |
-| Coding model for write intent | `model:` set to the strongest coding model available (research: unset) | highest-effort coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
+| Coding model for write intent | `model:` = strongest coding model available; don't raise thinking (research: unset) | strongest coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
 | Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` | request worktree isolation in the dispatch (branch `agent/<agentId>`) |
 | Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools | `Read Grep Glob Edit Write Bash WebFetch WebSearch SnowflakeSqlExecute` |
 
@@ -125,7 +125,7 @@ Refactor a function and verify it — the canonical good-practice shape:
 1. **Plan** TODO: find callers, list configs, refactor, verify.
 2. **Parallel dispatch** (one message, independent search agents): *"List callers of `foo()` as
    `file:line`"* and *"List config files setting DB timeouts; return path + value"*.
-3. **Synthesize**, then **dispatch a coding agent** (write intent → highest-effort model):
+3. **Synthesize**, then **dispatch a coding agent** (write intent → strongest model):
    *"Refactor `foo()` per <findings pasted verbatim>; Decisions made: <…>; touch only <files>;
    return `files_changed`."*
 4. **Verify** in a *separate* read-only dispatch (model unset): *"Run tests for the changed

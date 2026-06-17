@@ -21,8 +21,9 @@ CLI). Custom specialists in your own setup slot in wherever you have them.
   needs (search, web research, SQL, build, coding, review), preferring a custom
   specialist if you have one and falling back to general-purpose.
 - **Model discipline.** Subagents with write/implementation intent get the
-  highest-effort coding model available; research and verification dispatches
-  inherit the parent model. Skipped automatically if your agent has no
+  strongest (most capable) coding model available — that's the model *tier*, not
+  a cue to raise the reasoning/thinking budget (leave that at the agent/user default);
+  research and verification dispatches inherit the parent model. Skipped automatically if your agent has no
   per-subagent model control.
 - **Worktree-isolated parallel writes.** When two or more write-intent subagents
   run in parallel, each works in its own git worktree + branch (native isolation

@@ -34,9 +34,6 @@ snow connection list
 - **None** → **stop.** Tell the user to run `snow connection add` themselves
   (interactive auth — SSO/MFA may open a browser), then re-invoke snowman.
 
-The chosen connection *names* are the only auth detail that ever lands in the
-context file.
-
 **Check each chosen connection's `authenticator`** in the
 `snow connection list` output before running anything — the auth method
 decides one setup step:

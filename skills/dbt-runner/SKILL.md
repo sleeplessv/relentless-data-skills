@@ -59,8 +59,10 @@ environment change (new shell, edited `.env`, switched target).
 
 ## Reading the result
 
-`dbt build` exiting non-zero does **not** mean models failed to build —
-distinguish three outcomes from the log before reacting:
+`dbt build` exiting non-zero does **not** mean models failed to build.
+Read the summary line — `PASS=… WARN=… ERROR=…` — and distinguish three
+outcomes before reacting (this trichotomy is the authoritative reference;
+failures.md points here):
 
 - **Run error** — a model errored; its SQL or upstream is broken.
 - **Test failure** — models built fine, a data test failed. Fix data or

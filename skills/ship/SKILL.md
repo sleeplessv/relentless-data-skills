@@ -17,7 +17,7 @@ Run in parallel:
 - `git status` — if the tree is clean and there is nothing to commit, say so and stop.
 - `gh auth status` and `git remote get-url origin` — if `gh` is missing or unauthenticated, or there is no `origin` remote, stop with a clear message before touching anything.
 
-**Run network commands outside the sandbox.** Every `gh` call and `git fetch`/`pull`/`push` needs network access to reach GitHub; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. Run these commands with sandboxing disabled, and if one fails with a connection error, suspect the sandbox first — do not start debugging `gh` auth or the remote URL.
+**Run all `gh` and `git fetch`/`pull`/`push` outside the sandbox** — it blocks network and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
 
 ## Step 1: Group the changes, detect unrelated work
 
@@ -51,6 +51,8 @@ Fresh-branch mechanics: `git checkout main && git pull && git checkout -b <branc
 ## Step 3: Commit
 
 Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group, then push. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group, pushed with `git push -u origin HEAD`.
+
+Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), stop and report — do not open the PR.
 
 ## Step 4: Open the PR
 

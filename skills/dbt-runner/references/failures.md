@@ -29,10 +29,9 @@ Key-pair auth failed. In order:
 
 ## DNS / connection errors — `Could not connect`, `getaddrinfo`, `Failed to resolve`, TLS/certificate errors
 
-1. **Sandboxed shell.** Network egress is blocked and the failure
-   masquerades as a connection/auth problem. Suspect this *first*: re-run
-   the same command with sandboxing disabled. Do not debug credentials,
-   proxies, or account URLs until you've ruled this out.
+1. **Sandboxed shell** — see SKILL.md invocation rule 1 (sandbox-first).
+   Suspect and rule this out before debugging credentials, proxies, or
+   account URLs.
 2. Genuinely wrong account identifier/host — only after (1) is excluded.
    Discriminate with `--connect` (live `dbt debug`) outside the sandbox.
 
@@ -90,11 +89,11 @@ Snowflake deliberately doesn't say which. In order:
 
 ## Non-zero exit but every model shows `OK created`
 
-Not a build problem — read the summary line (`PASS=… WARN=… ERROR=…`):
+Not a build problem. Classify run-error vs test-failure vs warning from the
+summary line — see SKILL.md "Reading the result". Triage notes for the
+test-failure case specifically:
 
-1. **Test failure** (`ERROR` on a test node) — data or test definition,
-   not the invocation. `relationships` orphans usually mean build order
-   (fact built before its dim/seed); `accepted_values` usually means a
-   new raw value needs a seed row + an accepted-values entry.
-2. **Warnings only** (`WARN`, exit 0) — `severity: warn` tests do *not*
-   fail the run; don't report a warned run as broken.
+- `relationships` orphans usually mean build order (fact built before its
+  dim/seed).
+- `accepted_values` usually means a new raw value needs a seed row + an
+  accepted-values entry.

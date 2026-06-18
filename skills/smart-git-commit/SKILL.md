@@ -1,11 +1,9 @@
 ---
 name: smart-git-commit
-description: Groups changed files by affected area, creates one conventional commit per group, then pushes to remote. Use when the user asks to commit changes, create commits, stage and commit, or commit and push. Follows conventional commit format with lowercase type prefixes.
+description: Groups changed files by affected area, creates one conventional commit per group, then pushes to remote. Use when the user asks to commit changes or commit and push.
 ---
 
 # Smart Git Commit
-
-Inspect all changes, group them by affected area, create one commit per group using conventional commit format, then push to remote.
 
 ## Workflow
 
@@ -22,13 +20,15 @@ If there is nothing to commit, say so and stop.
 
 ### Step 2: Group files by area
 
-Split the changes into logical groups, each independently reviewable:
+Split the changes into atomic commits — one logical change per commit:
 
 - Group by subsystem or top-level directory (e.g. `api/`, `docs/`, `.github/workflows/`, a service, a model layer).
 - Keep a change together with its own tests and docs when they belong to the same logical change.
 - Take area names from the repo's own conventions — recent commit subjects, `CLAUDE.md`, `README` — rather than inventing new ones.
 - Bundle files that don't fit neatly with the closest related group.
 - Treat already-staged files like any other change: they join their group and are re-staged with it.
+
+Done when every changed file from `git status` is assigned to exactly one group, and no group spans two unrelated top-level areas.
 
 ### Step 3: Determine commit type per group
 
@@ -42,7 +42,7 @@ Split the changes into logical groups, each independently reviewable:
 | `chore` | Config, dependency, CI/CD, tooling changes |
 | `style` | Formatting, whitespace, no logic change |
 
-History wins on flavor, the skill wins on format: if recent commits use scopes (`feat(api): …`), use the same scopes; otherwise use bare types. Always produce conventional commits, even when the repo's history doesn't.
+If recent commits use scopes (`feat(api): …`), use the same scopes; otherwise use bare types. Always produce conventional commits, even when the repo's history doesn't.
 
 ### Step 4: Commit each group
 
@@ -79,6 +79,8 @@ chore: update CI workflow schedule
 ```
 
 ### Step 5: Push to remote
+
+Before pushing, confirm `git status` is clean, so no changed file was silently dropped from a commit.
 
 After all commits are created:
 

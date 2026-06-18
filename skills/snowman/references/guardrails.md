@@ -31,8 +31,7 @@ Every query runs through the wrapper. Before anything reaches Snowflake it:
 On refusal the wrapper prints `BLOCKED: <reason>` to stderr and **exits
 non-zero**. When you see that, do **not** work around it — the request was not
 read-only. If the user asked a read-only question, rephrase the query. If the
-user explicitly asked for a data/schema change, stage it (below) — but never
-stage SQL as a way to make a block go away on a read-only request.
+user explicitly asked for a data/schema change, stage it (below).
 
 ### Note on the keyword scan
 

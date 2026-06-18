@@ -12,11 +12,16 @@ stale 3.x knowledge, unqueried instance state, and house standards. Topic
 detail is fetched from the live docs, never memorized. Prefect 2.x is out of
 scope — recommend migrating up.
 
+**Verify gate (completion criterion):** Before emitting any version-sensitive
+claim, you MUST either cite a fetched `.md` doc page or label the claim
+"baseline knowledge". No exceptions.
+
 Two obligations on every Prefect answer:
 
 1. **State assumptions when they fork the answer** — Cloud vs self-hosted,
    work-pool type (process / docker / kubernetes / managed). Never silently assume.
-2. **Name the doc page you fetched** — or say "baseline knowledge" explicitly.
+2. **Pass the verify gate above** — cite the fetched doc page, or say "baseline
+   knowledge" explicitly.
 
 ## Doc-Lookup Protocol
 
@@ -30,13 +35,15 @@ for current/best practice:
 5. Prefer the agent's web-fetch capability over shell `curl` (works under
    network sandboxing). Avoid `llms-full.txt` (whole corpus; context-heavy).
 
-Anchors for the guardrails below — verify against these before advising:
+Anchors for the guardrails below:
 
 - states => https://docs.prefect.io/v3/concepts/states.md
 - deployments => https://docs.prefect.io/v3/concepts/deployments.md
 - prefect.yaml => https://docs.prefect.io/v3/how-to-guides/deployments/prefect-yaml.md
 - caching => https://docs.prefect.io/v3/concepts/caching.md
 - results => https://docs.prefect.io/v3/advanced/results.md
+
+**Anchors are authoritative — cite or fetch before advising.**
 
 ## CLI-First Protocol (query, don't guess state)
 
@@ -91,7 +98,6 @@ Two moves that aren't obvious:
 - **No `Deployment` object.** Create deployments via `prefect.yaml`,
   `flow.deploy()`, `flow.from_source(...).deploy()`, or `flow.serve()` — not
   `prefect.deployments.Deployment` or `prefect deployment build`.
-- **Don't guess `prefect.yaml` shape or CLI flags** — confirm via the anchors or `--help`.
-- **Results, caching, and transactions changed in 3.x** — verify against the
-  anchors before advising.
-- When unsure whether an API is current, **look it up** (protocol above) rather than recalling.
+- **Don't guess `prefect.yaml` shape or CLI flags** — anchors are authoritative
+  (or `--help` for flags).
+- **Results, caching, and transactions changed in 3.x** — anchors are authoritative.

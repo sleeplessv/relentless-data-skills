@@ -1,6 +1,6 @@
 ---
 name: dlt-bootstrap
-description: Bootstrap a dlt ingestion project with the dltHub AI Workbench plus Relentless Data house conventions (Snowflake destination, Prefect orchestration, DuckDB dev loop). Use when setting up dlt in a new or existing project, when adding a new source type or workbench toolkit to a dlt project, or when a dlt project is missing the house-conventions rule.
+description: Bootstrap a dlt ingestion project with the dltHub AI Workbench plus Relentless Data house conventions (Snowflake destination, Prefect orchestration, DuckDB dev loop). Use when setting up dlt in a new or existing project, or when adding a new source type or workbench toolkit to a dlt project; also fires proactively when a dlt project lacks the house-conventions rule.
 metadata:
   dlt: "dlt[hub]"
 ---
@@ -10,10 +10,9 @@ metadata:
 Set a project up for dlt pipeline development the house way: install dltHub's
 official **AI Workbench** project-scoped, then layer Relentless Data
 conventions on top as an always-on rule. The workbench's toolkits own pipeline
-building — never re-teach or duplicate what they cover. After bootstrap, step
-aside: day-to-day work runs through the workbench's own entry points
-(`/find-source`, `/explore-data`, ...), with the house rule applying
-automatically because it is a rule, not skill-mediated.
+building. After bootstrap, step aside: day-to-day work runs through the
+workbench's own entry points (`/find-source`, `/explore-data`, ...), with the
+house rule applying automatically because it is a rule, not skill-mediated.
 
 ## First: check for the house rule
 
@@ -119,10 +118,11 @@ matching the interview answer:
 
 ## Guardrails
 
-- This skill **sets up**; it does not build pipelines. If asked to build one
-  before bootstrap, bootstrap first, then route to the workbench's skills.
-- Don't ask for credentials in chat, ever — the user edits secrets directly
-  (the MCP secrets tools exist for this).
-- Don't fork workbench skill content into this repo; upstream owns it.
+- This skill **sets up**; it does not build pipelines, and it does not fork or
+  re-teach workbench skill content — upstream owns that. If asked to build a
+  pipeline before bootstrap, bootstrap first, then route to the workbench's
+  skills.
+- Credential safety is enforced at runtime by the house rule's Secrets section;
+  see [references/rule-template.md](references/rule-template.md).
 - Incremental re-runs must be idempotent: re-installing an existing toolkit or
   re-writing an unchanged rule is a no-op, not an error.

@@ -1,6 +1,6 @@
 # HTML Report Format
 
-The report is a single self-contained HTML file. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped relationships reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections, collapses). Mix the two — don't lean on Mermaid for everything, it'll start to look generic. Pattern names are defined in [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
+The report is a single self-contained HTML file. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped relationships reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections, collapses). This file is the **build recipes** — *how* to construct each pattern. For *which* pattern to pick (and the rule to mix them, not default to Mermaid), see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
 
 ## Scaffold
 
@@ -63,15 +63,13 @@ The visuals carry the weight. Prose is sparse and plain. Each major idea is one 
 - **Takeaways** — bullets, ≤6 words each.
 - **ADR callout** (if applicable) — one line in an amber-tinted box (_"follows ADR-0012"_).
 
-If a section needs a paragraph to be understood, redraw the visual.
-
 ## Diagram patterns
 
-Pick the pattern that fits. Mix them — don't make every visual look the same; variety is part of the point.
+Build recipes for each pattern. For *when* to pick each — and the rule to mix them rather than default to Mermaid — see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
 
-### Mermaid graph (the workhorse for relationships / flow)
+### Mermaid graph
 
-Use a Mermaid `flowchart`, `graph`, or `sequenceDiagram` when the point is "X connects to Y connects to Z." Wrap it in a Tailwind card so it doesn't feel parachuted in. Use `classDef` to colour the edges that matter (accent indigo, red for the problem path). Sequence diagrams work well for "before: 6 round-trips; after: 1."
+A Mermaid `flowchart`, `graph`, or `sequenceDiagram`. Wrap it in a Tailwind card so it doesn't feel parachuted in. Use `classDef` to colour the edges that matter (accent indigo, red for the problem path).
 
 Quote any node label containing parentheses, colons, or HTML (`A["Store (cache)"]`) — unquoted, they break the parse and the diagram renders as an error blob instead of failing loudly.
 
@@ -88,40 +86,40 @@ Quote any node label containing parentheses, colons, or HTML (`A["Store (cache)"
 </div>
 ```
 
-### Hand-built boxes-and-arrows (when Mermaid's layout fights you)
+### Hand-built boxes-and-arrows
 
-Things as `<div>`s with borders and labels; arrows as inline SVG `<line>`/`<path>` positioned absolutely over a `relative` container. Reach for this when you want one element to read as thick and dominant with greyed-out internals — weight Mermaid won't render.
+Things as `<div>`s with borders and labels; arrows as inline SVG `<line>`/`<path>` positioned absolutely over a `relative` container. One element reads as thick and dominant with greyed-out internals.
 
-### Cross-section (good for layers a thing passes through)
+### Cross-section
 
-Stack horizontal bands (`h-12 border-l-4`) to show the layers a request/call/process traverses. Before: 6 thin layers each doing little. After: 1 thick band with the consolidated responsibility.
+Stack horizontal bands (`h-12 border-l-4`) for the layers a request/call/process traverses. Before: many thin layers; after: one thick band with the consolidated responsibility.
 
-### Mass diagram (good for "surface vs substance")
+### Mass diagram
 
-Two rectangles per item — one for surface area, one for what's behind it. Before: the surface rectangle is nearly as tall as the substance (shallow). After: surface short, substance tall (deep).
+Two rectangles per item — one for surface area, one for what's behind it. Shallow: surface nearly as tall as substance. Deep: surface short, substance tall.
 
-### Collapse (good for "this whole tree becomes one thing")
+### Collapse
 
 Before: a tree of nested boxes. After: the same tree collapsed into one box with the now-internal pieces faded inside. A CSS `max-height` transition on a `.collapse` element, triggered by an inline-JS toggle, lets the reader play it.
 
-### Comparison matrix (good for weighing options or findings)
+### Comparison matrix
 
-A styled `<table>`: options as columns, criteria as rows, cells as compact verdict chips (emerald/amber/red dots or ✓/△/✗) rather than sentences. Tint or bold the winning column. Use when the message is "we weighed A against B against C."
+A styled `<table>`: options as columns, criteria as rows, cells as compact verdict chips (emerald/amber/red dots or ✓/△/✗) rather than sentences. Tint or bold the winning column.
 
-### Timeline (good for sequence over time)
+### Timeline
 
-A horizontal spine (`border-t-2`) with positioned event markers, or a vertical `border-l-2` list with offset cards. Use for incident chronologies, rollout phases, migration history. The pivotal event gets the accent colour; everything else stays slate.
+A horizontal spine (`border-t-2`) with positioned event markers, or a vertical `border-l-2` list with offset cards. The pivotal event gets the accent colour; everything else stays slate.
 
-### Proportion bars (good for "how much" without a chart library)
+### Proportion bars
 
-Plain `<div>` bars sized with inline `style="width: 64%"`, value labelled at the end of each bar. Use for counts, durations, cost — anywhere a number's magnitude is the point. No chart libraries; if the data needs axes and gridlines, simplify the message instead.
+Plain `<div>` bars sized with inline `style="width: 64%"`, value labelled at the end of each bar. No chart libraries; if the data needs axes and gridlines, simplify the message instead.
 
 ## Interactivity
 
 Allowed, kept minimal and self-contained:
 
 - **CSS only** for motion where possible — keyframes, `transition`, `:hover`/`:target` reveals.
-- **Inline vanilla JS** for collapsibles, tabs, and before→after toggles. No frameworks, no extra CDN libraries beyond Tailwind + Mermaid. It must stay one file with no build step.
+- **Inline vanilla JS** for collapsibles, tabs, and before→after toggles. No frameworks, no extra CDN libraries beyond Tailwind + Mermaid — keep the output self-contained.
 
 If an interaction needs a library, it doesn't belong in this report.
 
@@ -130,7 +128,7 @@ If an interaction needs a library, it doesn't belong in this report.
 This is the house style — apply it, don't reinvent per report.
 
 - Lean editorial, not corporate-dashboard. Generous whitespace.
-- **Headings are a tight, heavy grotesque sans — never serif.** Apply `.display` to the top-level title (with `leading-[1.05]`) and `.subhead` to every section heading, so the whole document reads as one type system. Both classes use a system font stack only — no `font-serif`, no Google Fonts or other web fonts unless the user explicitly asks; the output must stay one portable file with no dependencies beyond the Tailwind and Mermaid CDNs it already carries. This governs titles and headings only — body text, small uppercase eyebrow labels, and monospace code labels are unaffected.
+- **Headings are a tight, heavy grotesque sans — never serif.** Apply `.display` to the top-level title (with `leading-[1.05]`) and `.subhead` to every section heading, so the whole document reads as one type system. Both classes use a system font stack only — no `font-serif`, no Google Fonts or other web fonts unless the user explicitly asks, which would break self-containment. This governs titles and headings only — body text, small uppercase eyebrow labels, and monospace code labels are unaffected.
 - Colour sparingly: one accent (indigo or emerald) plus red for problems/warnings and amber for callouts. Resist a rainbow.
 - Keep diagrams ~320px tall so before/after pairs sit side by side without scrolling.
 - Use `text-xs uppercase tracking-wider` for labels inside diagrams — they should read as schematic, not as UI chrome.

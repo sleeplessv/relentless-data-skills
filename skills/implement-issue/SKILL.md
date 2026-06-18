@@ -1,7 +1,7 @@
 ---
 name: implement-issue
 argument-hint: "[issue-number]"
-description: 'Implement a GitHub issue end-to-end on a feature branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement issue #N", "ship issue #N", "work issue #N", "implement the next issue", "grab the next ready issue", or otherwise asks to take an issue from open to PR.'
+description: 'Implement a GitHub issue end-to-end on a feature branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement issue #N", "implement the next ready issue", or otherwise asks to take an issue from open to PR.'
 ---
 
 # Implement Issue
@@ -10,16 +10,14 @@ Take a GitHub issue from open → feature branch → working code → green test
 
 ## Inputs
 
-- Issue number (optional, e.g. `#8` or `8`). If omitted, auto-select the lowest-numbered open implementation issue labelled `ready-for-agent` (step 0).
+- Issue number (optional, e.g. `#8` or `8`). If omitted, auto-select (see step 0).
 - Optional: target repo (defaults to the current `gh` remote).
-
-If no number is given AND no eligible `ready-for-agent` issue exists, ask the user which issue to work on. Do NOT fall back to an unlabelled issue — the label is the explicit signal that triage is done.
 
 ## Workflow
 
 **No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, issue comments. Use a comma, colon, or parentheses, or rewrite the sentence.
 
-**Run network commands outside the sandbox.** Every `gh` call and `git fetch`/`pull`/`push` needs network access to reach GitHub; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. Run these commands with sandboxing disabled, and if one fails with a connection error, suspect the sandbox first.
+**Run network commands outside the sandbox.** Run every `gh` and `git fetch`/`pull`/`push` with sandboxing disabled — a sandboxed shell blocks network and fails with a misleading DNS/connection error; on a connection error, suspect the sandbox first.
 
 ### 0. Resolve the issue number
 
@@ -64,6 +62,8 @@ The `issue-<N>` prefix is load-bearing for branch→issue tooling; keep it. Slug
 Grep/search for the modules the issue touches. Read `AGENTS.md`, `CONTEXT.md`, and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the issue asks for it.
 
 Identify the **test command** and the **run command** (`AGENTS.md`, `package.json` scripts, `Makefile`, `pyproject.toml`, CI workflows, `docker-compose.yml`). Run the test suite **once now, before editing**, to baseline — note any pre-existing failures so you don't mistake them for regressions later.
+
+Done when you have: (a) the test command, (b) the run command, and (c) a recorded list of any pre-existing test failures from the baseline run.
 
 ### 5. Implement in small commits
 

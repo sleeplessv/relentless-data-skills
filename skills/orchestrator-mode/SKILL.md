@@ -1,6 +1,6 @@
 ---
 name: orchestrator-mode
-description: Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself. Use when the user says "orchestrator mode", "use subagents", "delegate everything", "swarm this", or otherwise asks the main thread to coordinate rather than execute. Agent-neutral — works on Claude Code, Cursor, Cortex Code, and any agent with a delegation tool.
+description: Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself. Use when the user says "orchestrator mode", "use subagents", "delegate everything", "swarm this", or otherwise asks the main thread to coordinate rather than execute.
 ---
 
 # Orchestrator Mode
@@ -9,7 +9,9 @@ The main thread is a **coordinator**, not a worker. Every concrete task — read
 files, searching code, running SQL, editing, verifying — is delegated to a
 subagent. The main thread only plans, dispatches, and synthesizes.
 
-Agent-neutral: it names *roles* (search agent, coding agent), not tools — map each to your agent's concrete tool via [Tool Mapping](#tool-mapping).
+**Role, not tool/name.** This skill names *roles and capabilities* (search agent, coding
+agent) — never a fixed tool or subagent name, since rosters differ per agent. Map each
+role to your agent's concrete tool — see [references/reference.md](references/reference.md#tool-mapping).
 
 ## Hard Rules
 
@@ -20,13 +22,14 @@ Agent-neutral: it names *roles* (search agent, coding agent), not tools — map 
 3. **Parallelize when independent.** Dispatch data-independent subtasks together in one
    message; collect each result (returned inline, or via background output files).
 4. **Pick the right subagent** — a specialist if your agent offers one, else general-purpose. See [Subagent Selection](#subagent-selection).
-5. **Strongest coding model for any subagent that writes code** — pick the model *tier*
-   (best coding model your agent allows). Not a cue to raise the reasoning/thinking budget — leave that at the agent/user default. Write-intent dispatches
-   (models, SQL, refactors, edits) set the model; research / verification inherit the parent (leave model unset).
+5. **Strongest coding model for write intent** — any subagent with write intent (writes
+   code: dbt models, SQL, refactors, edits) gets the best coding-model *tier* your agent
+   allows — the model tier, not the reasoning/thinking budget (leave that at the
+   agent/user default). Research / verification inherit the parent (leave model unset).
 6. **Verify with a separate subagent** — implementation and verification are always separate dispatches.
 7. **Isolated worktrees for parallel writers.** When two or more write-intent dispatches
    run in parallel, each gets its own worktree + branch, and integration is a separate
-   dispatch — see [Parallel Writes (Worktrees)](#parallel-writes-worktrees).
+   dispatch — see [Parallel Writes (Worktrees)](references/reference.md#parallel-writes-worktrees).
 
 ## Workflow
 
@@ -39,7 +42,7 @@ Agent-neutral: it names *roles* (search agent, coding agent), not tools — map 
 
 ## Subagent Selection
 
-Pick by *capability*, not a fixed name — built-in rosters are small and differ per tool:
+Pick by capability:
 
 - **Find files, search code, "where is X", read many files** → read-only search/explore agent.
 - **Web research, fetch and summarize pages** → general-purpose agent with web tools.
@@ -79,44 +82,8 @@ read; carry a cumulative "Decisions made" block into every dispatch after the fi
 
 ## Parallel Writes (Worktrees)
 
-Read-only fan-outs and single writers skip this — isolation pays off only when two
-or more writers would otherwise share one working tree.
-
-1. **Precondition** — fold a `git status` check into the planning fan-out's read-only
-   dispatch. Dirty tree → ask the user (commit / stash / proceed): worktrees branch
-   from HEAD, so uncommitted changes are invisible to the writers. Not a git repo, or
-   no worktree mechanism available → fall back to sequential writes.
-2. **Dispatch** — partition tasks so writers touch disjoint files where possible. Each
-   writer works in an isolated worktree and commits to its own branch (native isolation,
-   or worktree creation as the prompt's first step — see [Tool Mapping](#tool-mapping)).
-3. **Integrate** — after all writers return, one dedicated dispatch merges the branches:
-   it resolves mechanical conflicts (imports, lockfiles, formatting) itself and
-   **escalates semantic ones**, reporting the conflicting branches/files/hunks so the
-   orchestrator can dispatch a resolver with both writers' goals and decisions pasted
-   verbatim. On success it removes worktrees and merged branches; on escalation it
-   leaves everything in place, and the resolver performs the same cleanup once its
-   merge succeeds. Return contract: `conflicts_found`, `worktrees_cleaned`.
-4. **Verify** — on the unified tree, as a separate dispatch (Hard Rule 6); mandatory
-   whenever any conflict was resolved, by anyone.
-
-## Tool Mapping
-
-Map the roles above to concrete tools (built-in rosters are minimal — custom agents fill the rest):
-
-| Role (body language) | Claude Code | Cursor | Cortex Code |
-|---|---|---|---|
-| Spawn a subagent | `Agent` (formerly `Task`) | `Task` (in modes that grant it) | `RunSubagent` |
-| Plan / todo tool | `TaskCreate`/`TaskUpdate` (or `TodoWrite`) | todo tool | `EnterPlanMode`/`ExitPlanMode` (no todo tool — track in replies) |
-| Read-only search / explore agent | `Explore` | `explore` | `Explore` |
-| Implementation / general agent | `general-purpose` | general / custom agent | `general-purpose` |
-| Coding model for write intent | `model:` = strongest coding model available; don't raise thinking (research: unset) | strongest coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
-| Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` | request worktree isolation in the dispatch (branch `agent/<agentId>`) |
-| Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools | `Read Grep Glob Edit Write Bash WebFetch WebSearch SnowflakeSqlExecute` |
-
-Built-in specialists are minimal (Claude Code → `Explore`, `Plan`, `general-purpose`;
-Cursor → `explore`, `bash`, `browser`; Cortex Code → `Explore`, `Plan`, `general-purpose`,
-all with native Snowflake SQL tools). Everything else (SQL, BI, CI, docs agents) is
-custom to your setup — use it if present, else route to general-purpose.
+Procedure for the Hard Rule 7 case (two or more parallel writers) — precondition,
+dispatch, integrate, verify: see [references/reference.md](references/reference.md#parallel-writes-worktrees).
 
 ## Worked Example (agent-neutral)
 
@@ -125,14 +92,14 @@ Refactor a function and verify it — the canonical good-practice shape:
 1. **Plan** TODO: find callers, list configs, refactor, verify.
 2. **Parallel dispatch** (one message, independent search agents): *"List callers of `foo()` as
    `file:line`"* and *"List config files setting DB timeouts; return path + value"*.
-3. **Synthesize**, then **dispatch a coding agent** (write intent → strongest model):
+3. **Synthesize**, then **dispatch a coding agent** (write intent):
    *"Refactor `foo()` per <findings pasted verbatim>; Decisions made: <…>; touch only <files>;
    return `files_changed`."*
 4. **Verify** in a *separate* read-only dispatch (model unset): *"Run tests for the changed
    files; report pass/fail and failing test names."* The implementer never self-certifies.
 
 (Two parallel writers instead of one? Each gets a worktree + branch, and an integration
-dispatch precedes verification — see [Parallel Writes (Worktrees)](#parallel-writes-worktrees).)
+dispatch precedes verification — see [Parallel Writes (Worktrees)](references/reference.md#parallel-writes-worktrees).)
 
 ## Anti-Patterns
 

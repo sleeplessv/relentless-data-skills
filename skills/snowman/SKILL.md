@@ -23,7 +23,8 @@ Check for **`.snowman/context.md`** in the project root.
   Snowflake architecture. Continue with the user's request.
 
 **Refuse to run queries when no context file exists.** The context is
-per-project and committed to the repo; it holds *names only*, never secrets.
+per-project and committed to the repo (names only, never secrets — see
+[references/install.md](references/install.md)).
 
 ## Running queries — always via the wrapper
 
@@ -137,4 +138,4 @@ scripts for manual execution.
 only staging), creating connections or storing credentials (the user does
 that with `snow connection add`), or non-Snowflake databases. The only
 credential handling snowman does is relaying the project root `.env` to the
-`snow` subprocess, opaquely — it never stores, prints, or asks for secrets.
+`snow` subprocess, opaquely.

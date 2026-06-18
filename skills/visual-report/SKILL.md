@@ -7,9 +7,9 @@ metadata:
 
 # Visual Report
 
-Turn a subject — a system, a process, research findings, a decision — into a single self-contained HTML document that **carries its meaning in visuals**, not paragraphs. Tailwind and Mermaid come from CDNs; hand-built CSS/SVG handles the editorial visuals Mermaid can't. The output is one file: portable, no build step — though Tailwind and Mermaid load from CDNs, so it renders fully only with network access.
+Turn a subject — a system, a process, research findings, a decision — into a single self-contained HTML document that **carries its meaning in visuals**, not paragraphs. Tailwind and Mermaid come from CDNs; hand-built CSS/SVG handles the editorial visuals Mermaid can't.
 
-The skill names its diagram patterns consistently — see [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md). The full scaffold, diagram recipes, interactivity rules, and house style live in [HTML-REPORT.md](references/HTML-REPORT.md).
+[VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) names the diagram patterns and is the single source for **which** pattern to pick for a given idea. The full scaffold, diagram **build recipes**, interactivity rules, and house style live in [HTML-REPORT.md](references/HTML-REPORT.md).
 
 ## Process
 
@@ -28,8 +28,8 @@ If you're in a repo, read `docs/adr/`. ADRs record decisions the report should r
 Write one self-contained HTML file and open it.
 
 - **Where:** default to the OS temp dir — resolve `$TMPDIR`, fall back to `/tmp` (or `%TEMP%` on Windows) — at `<tmpdir>/<slug>-<timestamp>.html`. If the user names a destination ("save to `docs/`") or says "keep/commit it," write there instead. Either way, **print the absolute path and open it** (`open` on macOS, `xdg-open` on Linux, `start` on Windows). If opening fails (headless/SSH session), just print the path and say so.
-- **Self-contained:** the only dependencies are the Tailwind CDN and the Mermaid ESM import. Light interactivity (collapsible sections, before→after toggles, CSS animations) is allowed via **inline vanilla JS only** — no extra libraries, no build step, one file.
-- **Visual-first:** every major idea earns a visual. Mix Mermaid (graph-shaped relationships) with hand-built divs/SVG (mass diagrams, cross-sections, collapses). If a section needs a paragraph to be understood, redraw the visual. See [HTML-REPORT.md](references/HTML-REPORT.md).
+- **Self-contained:** one file, no build step, portable — the only dependencies are the Tailwind CDN and the Mermaid ESM import, so it renders fully only with network access. Light interactivity (collapsible sections, before→after toggles, CSS animations) is allowed via **inline vanilla JS only** — no extra libraries. "Self-contained" throughout this skill means exactly this.
+- **Visual-first:** every major idea earns a visual. To pick the pattern that fits each idea, consult the "Picking between them" decision tree in [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) — don't default to a Mermaid flowchart for everything. Once you've chosen a pattern, get its build recipe in [HTML-REPORT.md](references/HTML-REPORT.md). If a section needs a paragraph to be understood, redraw the visual.
 - **House style:** the editorial aesthetic in [HTML-REPORT.md](references/HTML-REPORT.md) is the style — lean, not corporate-dashboard. Apply it; don't invent a new look per report.
 - **Verify:** a Mermaid syntax error doesn't fail loudly — it renders as an error blob in the page. Before handing over, re-read every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML) and confirm the page renders as intended; fix and reload until it does.
 

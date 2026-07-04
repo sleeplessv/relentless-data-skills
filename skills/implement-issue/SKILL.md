@@ -75,6 +75,7 @@ First **recognise what kind of work the issue is** — it decides how you build:
 Throughout:
 
 - Open a **draft PR within the first 1–2 commits**: `git push -u origin HEAD` then `gh pr create --draft --title "<title>" --body "Closes #<N>. <one-paragraph plan>"`. Use the repo's PR template (`.github/pull_request_template.md`) if one exists, keeping the `Closes #<N>` line. If `gh pr create` fails (permissions, branch protection), keep committing locally and surface the error at the end — don't abort.
+- Keep the loop **tight** while building: type-check and run the single test file you're touching as you go; save the full suite for step 6.
 - Keep commits scoped and conventional (`feat:`, `fix:`, `refactor:`, …).
 
 ### 6. Feedback loop: types + tests (REQUIRED before marking ready)
@@ -90,8 +91,9 @@ Run the **type-checker/linter, then the test suite** from step 4, and loop until
 
 If it fails, **fix and retry** — don't push the failure onto the reviewer. Loop until green.
 
-### 8. Finalise the PR
+### 8. Review, then finalise the PR
 
+- Review the diff before marking ready: run the `code-review` skill over the branch's changes if it's installed, otherwise read the full `git diff <base>...HEAD` yourself. Fix what the review surfaces.
 - Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed).
 - `gh pr ready`, then report the PR URL. Do **not** merge — leave that to the human.
 

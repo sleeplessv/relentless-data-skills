@@ -11,7 +11,7 @@ with explicit stop conditions instead of improvising when something is off.
 - **Safe branching** — refuses to branch over a dirty working tree, honours repo naming conventions, and handles blocked-by chains (branches off the blocker's branch, or stops if the blocker hasn't started).
 - **Task-aware implementation** — builds testable backend work in red-green-refactor tracer bullets (deferring to the `tdd` skill), and implements frontend, notebook, and exploratory data work directly where the test suite can't pin the behaviour.
 - **Verification before "done"** — baselines the test suite before editing, then runs a type-check + test feedback loop until both are green, then a runtime smoke check with separate paths for servers (start, hit endpoint, read logs) and CLIs/libraries/pipelines (representative invocation, exit code 0).
-- **PR hygiene** — draft PR within the first commits, repo PR template if present, Summary + Test plan in the body, marks ready for review but never merges.
+- **PR hygiene** — draft PR within the first commits, repo PR template if present, a `code-review` pass on the diff, Summary + Test plan in the body, marks ready for review but never merges.
 - **Stop conditions** — ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the issue, and hand back to the human.
 
 ## Conventions it expects

@@ -61,19 +61,26 @@ The `issue-<N>` prefix is load-bearing for branch→issue tooling; keep it. Slug
 
 Grep/search for the modules the issue touches. Read `AGENTS.md`, `CONTEXT.md`, and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the issue asks for it.
 
-Identify the **test command** and the **run command** (`AGENTS.md`, `package.json` scripts, `Makefile`, `pyproject.toml`, CI workflows, `docker-compose.yml`). Run the test suite **once now, before editing**, to baseline — note any pre-existing failures so you don't mistake them for regressions later.
+Identify the **feedback-loop commands** — the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`) — plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the test suite **once now, before editing**, to baseline — note any pre-existing failures so you don't mistake them for regressions later.
 
-Done when you have: (a) the test command, (b) the run command, and (c) a recorded list of any pre-existing test failures from the baseline run.
+Done when you have: (a) the type-check and test commands, (b) the run command, and (c) a recorded list of any pre-existing test failures from the baseline run.
 
-### 5. Implement in small commits
+### 5. Implement
+
+First **recognise what kind of work the issue is** — it decides how you build:
+
+- **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets** — **red → green → refactor**, one test at a time. One failing test (**red**), the minimal code to pass it (**green**), then **refactor**. Don't write all the tests up front; each test responds to what the last one taught you. Follow the `tdd` skill for the full loop.
+- **Everything else** — frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Say which path you took.
+
+Throughout:
 
 - Open a **draft PR within the first 1–2 commits**: `git push -u origin HEAD` then `gh pr create --draft --title "<title>" --body "Closes #<N>. <one-paragraph plan>"`. Use the repo's PR template (`.github/pull_request_template.md`) if one exists, keeping the `Closes #<N>` line. If `gh pr create` fails (permissions, branch protection), keep committing locally and surface the error at the end — don't abort.
+- Keep the loop **tight** while building: type-check and run the single test file you're touching as you go; save the full suite for step 6.
 - Keep commits scoped and conventional (`feat:`, `fix:`, `refactor:`, …).
-- After substantive edits, run the project's linter/type-checker if configured (do NOT add one if missing).
 
-### 6. Tests (REQUIRED before marking ready)
+### 6. Feedback loop: types + tests (REQUIRED before marking ready)
 
-Run the suite from step 4. Everything that passed at baseline must still pass; new failures are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it — matching existing style. Never add a test framework to a project that has none.
+Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it — matching existing style. Never add a type-checker or test framework to a project that has none; if either is absent, note it and rely on the step 7 smoke check.
 
 ### 7. Runtime smoke check (REQUIRED before marking ready)
 
@@ -84,8 +91,9 @@ Run the suite from step 4. Everything that passed at baseline must still pass; n
 
 If it fails, **fix and retry** — don't push the failure onto the reviewer. Loop until green.
 
-### 8. Finalise the PR
+### 8. Review, then finalise the PR
 
+- Review the diff before marking ready: run the `code-review` skill over the branch's changes if it's installed, otherwise read the full `git diff <base>...HEAD` yourself. Fix what the review surfaces.
 - Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed).
 - `gh pr ready`, then report the PR URL. Do **not** merge — leave that to the human.
 

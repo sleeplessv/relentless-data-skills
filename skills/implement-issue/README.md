@@ -13,6 +13,7 @@ with explicit stop conditions instead of improvising when something is off.
 - **Verification before "done"** — baselines the test suite before editing, then runs a type-check + test feedback loop until both are green, then a runtime smoke check with separate paths for servers (start, hit endpoint, read logs) and CLIs/libraries/pipelines (representative invocation, exit code 0).
 - **PR hygiene** — draft PR within the first commits, repo PR template if present, a `code-review` pass on the diff, Summary + Test plan in the body, marks ready for review but never merges.
 - **Stop conditions** — ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the issue, and hand back to the human.
+- **Orchestrated dispatch** — a sanctioned override contract (`base_branch`, `open_pr: false`, blockers pre-merged) so a feature orchestrator like `implement-feature` can run it per-issue against an integration branch without per-issue PRs.
 
 ## Conventions it expects
 

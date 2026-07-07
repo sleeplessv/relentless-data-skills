@@ -13,6 +13,18 @@ Take a GitHub issue from open → feature branch → working code → green test
 - Issue number (optional, e.g. `#8` or `8`). If omitted, auto-select (see step 0).
 - Optional: target repo (defaults to the current `gh` remote).
 
+## Orchestrated dispatch
+
+When a feature orchestrator (e.g. the `implement-feature` skill) dispatches this skill, its prompt may set these overrides — sanctioned branches of this workflow, not contradictions to argue with:
+
+- **Issue number is always given** — skip step 0's auto-pick.
+- **`base_branch: <integration branch>`** — replaces step 2 entirely; blockers are pre-merged into it, so skip all blocked-by detection. Cut the issue branch **without checking out the base** (it may be checked out in the main tree or a sibling worktree): `git switch -c feat/issue-<N>-<slug> <base_branch>` — the shared local ref is already at the tip the orchestrator pushed. `git fetch origin <base_branch>` only if that ref is missing, retrying once on a ref-lock error (parallel siblings fetch too). Never `git switch <base_branch>` itself.
+- **`resume_branch: <name>`** — a prior attempt's pushed WIP branch: fetch and switch to it instead of creating one, rebase onto `origin/<base_branch>`, read the findings comment on the issue, and continue from step 6. If the rebase conflicts, or the base alone already satisfies the issue (its previously failing tests pass on `origin/<base_branch>` before your changes), abandon the WIP and return `status: already_satisfied` — the orchestrator drops the issue.
+- **`open_pr: false`** — skip every PR step (the draft PR in step 5, the finalise/`gh pr ready` parts of step 8). Step 8's review becomes a direct read of `git diff <base_branch>...HEAD` (no `code-review` sub-agent fan-out — the orchestrator runs the authoritative review). Return `branch`, `worktree_path`, `files_changed`, `tests_run`, and `open_questions` instead of a PR URL; on a stop condition return `status: failed`, the pushed WIP `branch`, `worktree_path`, and `root_cause`.
+- **"Stop and ask" remaps** — you cannot reach the user: stop, put the question in `open_questions`, and return; the orchestrator asks.
+
+Everything else — claiming (step 1), environment setup before the baseline (a fresh worktree starts without installed dependencies — run the project's install command first), the types+tests loop, the smoke check, and the WIP push + findings comment on failure — is unchanged.
+
 ## Workflow
 
 **No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, issue comments. Use a comma, colon, or parentheses, or rewrite the sentence.
@@ -40,7 +52,7 @@ If it returns an issue, announce the pick (number + title) before proceeding. If
 ### 2. Pick a base branch
 
 - Default base: the repo's default branch (`gh repo view --json defaultBranchRef`).
-- **Detecting blocked-by:** GitHub has no native field — look for body/comment lines like `Blocked by #12` / `Depends on #12`, task-list references, or a `blocked` label.
+- **Detecting blocked-by:** check GitHub's native issue-dependency data first (`gh api` — sub-issues and blocked-by relationships), then fall back to body/comment lines like `Blocked by #12` / `Depends on #12`, task-list references, or a `blocked` label.
 - If blocked by an issue/PR whose branch exists but isn't merged, branch off that branch and note it in the PR description (reviewer rebases onto main once the blocker lands).
 - If the blocker has **no branch yet**, stop and surface to the user — don't branch off nothing or implement the blocker yourself.
 

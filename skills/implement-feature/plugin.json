@@ -1,0 +1,21 @@
+{
+  "name": "implement-feature",
+  "version": "0.1.0",
+  "description": "Implement a whole feature as one PR: orchestrate subagents over a PRD's issues on a shared integration branch — waves of issue branches, integrated review + tests, and a single feature PR to main.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/implement-feature",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "issues",
+    "prd",
+    "orchestration",
+    "subagents",
+    "feature-branch",
+    "pull-requests",
+    "workflow"
+  ]
+}

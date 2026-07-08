@@ -1,0 +1,20 @@
+{
+  "name": "implement-ticket",
+  "version": "0.2.0",
+  "description": "Implement a ticket (GitHub issue) end-to-end: claim it, branch, code in small commits, run tests + a runtime smoke check, and open a draft PR — with explicit stop conditions instead of improvising. Formerly implement-issue.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/implement-ticket",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "github",
+    "tickets",
+    "issues",
+    "pull-requests",
+    "workflow",
+    "automation",
+    "gh-cli"
+  ]
+}

@@ -1,25 +1,25 @@
 ---
-name: implement-issue
-argument-hint: "[issue-number]"
-description: 'Implement a GitHub issue end-to-end on a feature branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement issue #N", "implement the next ready issue", or otherwise asks to take an issue from open to PR.'
+name: implement-ticket
+argument-hint: "[ticket-number]"
+description: 'Implement a ticket (GitHub issue) end-to-end on a ticket branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement ticket #N", "implement issue #N", "implement the next ready ticket", or otherwise asks to take a ticket from open to PR.'
 ---
 
-# Implement Issue
+# Implement Ticket
 
-Take a GitHub issue from open → feature branch → working code → green tests + runtime smoke check → draft PR.
+Take a ticket (on GitHub: an issue) from open → ticket branch → working code → green tests + runtime smoke check → draft PR.
 
 ## Inputs
 
-- Issue number (optional, e.g. `#8` or `8`). If omitted, auto-select (see step 0).
+- Ticket number (optional, e.g. `#8` or `8`). If omitted, auto-select (see step 0).
 - Optional: target repo (defaults to the current `gh` remote).
 
 ## Orchestrated dispatch
 
 When a feature orchestrator (e.g. the `implement-feature` skill) dispatches this skill, its prompt may set these overrides — sanctioned branches of this workflow, not contradictions to argue with:
 
-- **Issue number is always given** — skip step 0's auto-pick.
-- **`base_branch: <integration branch>`** — replaces step 2 entirely; blockers are pre-merged into it, so skip all blocked-by detection. Cut the issue branch **without checking out the base** (it may be checked out in the main tree or a sibling worktree): `git switch -c feat/issue-<N>-<slug> <base_branch>` — the shared local ref is already at the tip the orchestrator pushed. `git fetch origin <base_branch>` only if that ref is missing, retrying once on a ref-lock error (parallel siblings fetch too). Never `git switch <base_branch>` itself.
-- **`resume_branch: <name>`** — a prior attempt's pushed WIP branch: fetch and switch to it instead of creating one, rebase onto `origin/<base_branch>`, read the findings comment on the issue, and continue from step 6. If the rebase conflicts, or the base alone already satisfies the issue (its previously failing tests pass on `origin/<base_branch>` before your changes), abandon the WIP and return `status: already_satisfied` — the orchestrator drops the issue.
+- **Ticket number is always given** — skip step 0's auto-pick.
+- **`base_branch: <integration branch>`** — replaces step 2 entirely; blockers are pre-merged into it, so skip all blocked-by detection. Cut the ticket branch **without checking out the base** (it may be checked out in the main tree or a sibling worktree): `git switch -c feat/ticket-<N>-<slug> <base_branch>` — the shared local ref is already at the tip the orchestrator pushed. `git fetch origin <base_branch>` only if that ref is missing, retrying once on a ref-lock error (parallel siblings fetch too). Never `git switch <base_branch>` itself.
+- **`resume_branch: <name>`** — a prior attempt's pushed WIP branch: fetch and switch to it instead of creating one, rebase onto `origin/<base_branch>`, read the findings comment on the ticket, and continue from step 6. If the rebase conflicts, or the base alone already satisfies the ticket (its previously failing tests pass on `origin/<base_branch>` before your changes), abandon the WIP and return `status: already_satisfied` — the orchestrator drops the ticket.
 - **`open_pr: false`** — skip every PR step (the draft PR in step 5, the finalise/`gh pr ready` parts of step 8). Step 8's review becomes a direct read of `git diff <base_branch>...HEAD` (no `code-review` sub-agent fan-out — the orchestrator runs the authoritative review). Return `branch`, `worktree_path`, `files_changed`, `tests_run`, and `open_questions` instead of a PR URL; on a stop condition return `status: failed`, the pushed WIP `branch`, `worktree_path`, and `root_cause`.
 - **"Stop and ask" remaps** — you cannot reach the user: stop, put the question in `open_questions`, and return; the orchestrator asks.
 
@@ -27,36 +27,36 @@ Everything else — claiming (step 1), environment setup before the baseline (a 
 
 ## Workflow
 
-**No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, issue comments. Use a comma, colon, or parentheses, or rewrite the sentence.
+**No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, ticket comments. Use a comma, colon, or parentheses, or rewrite the sentence.
 
 **Run network commands outside the sandbox.** Run every `gh` and `git fetch`/`pull`/`push` with sandboxing disabled — a sandboxed shell blocks network and fails with a misleading DNS/connection error; on a connection error, suspect the sandbox first.
 
-### 0. Resolve the issue number
+### 0. Resolve the ticket number
 
-If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` issue, **excluding PRDs** (spec documents, not tickets — filter primarily by the `prd` label, with the body-heading regex as fallback for older PRDs):
+If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs** (spec documents, not tickets — filter primarily by the `spec` label, plus the legacy `prd` label, with the body-heading regex as fallback for older specs):
 
 ```bash
 gh issue list --state open --label ready-for-agent --json number,title,body,labels \
   --jq 'sort_by(.number)
-        | map(select(.labels | map(.name) | index("prd") | not))
+        | map(select([.labels[].name] | any(. == "spec" or . == "prd") | not))
         | map(select(.body | test("(?m)^## (Problem Statement|User Stories|Implementation Decisions)") | not))
         | .[0]'
 ```
 
-If it returns an issue, announce the pick (number + title) before proceeding. If it returns `null` or nothing, stop and ask — do not guess, and do not implement a PRD directly (PRDs get broken into issues first, e.g. via a `to-issues` skill).
+If it returns a ticket, announce the pick (number + title) before proceeding. If it returns `null` or nothing, stop and ask — do not guess, and do not implement a spec directly (specs get broken into tickets first, e.g. via a `to-tickets` skill).
 
-### 1. Read the issue and claim it
+### 1. Read the ticket and claim it
 
-`gh issue view <N> --comments` — read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask). Then claim it so two agents don't work it simultaneously: `gh issue edit <N> --add-assignee @me` plus a brief "starting work, branch `feat/issue-<N>-<slug>`" comment. If already assigned to someone else, stop and ask.
+`gh issue view <N> --comments` — read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask). Then claim it so two agents don't work it simultaneously: `gh issue edit <N> --add-assignee @me` plus a brief "starting work, branch `feat/ticket-<N>-<slug>`" comment. If already assigned to someone else, stop and ask.
 
 ### 2. Pick a base branch
 
 - Default base: the repo's default branch (`gh repo view --json defaultBranchRef`).
 - **Detecting blocked-by:** check GitHub's native issue-dependency data first (`gh api` — sub-issues and blocked-by relationships), then fall back to body/comment lines like `Blocked by #12` / `Depends on #12`, task-list references, or a `blocked` label.
-- If blocked by an issue/PR whose branch exists but isn't merged, branch off that branch and note it in the PR description (reviewer rebases onto main once the blocker lands).
+- If blocked by a ticket/PR whose branch exists but isn't merged, branch off that branch and note it in the PR description (reviewer rebases onto main once the blocker lands).
 - If the blocker has **no branch yet**, stop and surface to the user — don't branch off nothing or implement the blocker yourself.
 
-### 3. Create the feature branch
+### 3. Create the ticket branch
 
 First run `git status --porcelain`. Any output → **stop and ask** (stash, commit, or abort) — never silently drag uncommitted changes onto the new branch.
 
@@ -64,14 +64,14 @@ Check `AGENTS.md` / `CONTRIBUTING.md` for a branch naming convention before gues
 
 ```bash
 git switch <base> && git pull --ff-only
-git switch -c feat/issue-<N>-<short-kebab-slug>
+git switch -c feat/ticket-<N>-<short-kebab-slug>
 ```
 
-The `issue-<N>` prefix is load-bearing for branch→issue tooling; keep it. Slug = kebab of the issue title, ≤5 words, drop filler.
+The `ticket-<N>` prefix is load-bearing for branch→ticket tooling; keep it, and treat the legacy `issue-<N>` prefix as equivalent when detecting existing branches. Slug = kebab of the ticket title, ≤5 words, drop filler.
 
 ### 4. Explore before editing
 
-Grep/search for the modules the issue touches. Read `AGENTS.md`, `CONTEXT.md`, and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the issue asks for it.
+Grep/search for the modules the ticket touches. Read `AGENTS.md`, `CONTEXT.md`, and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the ticket asks for it.
 
 Identify the **feedback-loop commands** — the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`) — plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the test suite **once now, before editing**, to baseline — note any pre-existing failures so you don't mistake them for regressions later.
 
@@ -79,7 +79,7 @@ Done when you have: (a) the type-check and test commands, (b) the run command, a
 
 ### 5. Implement
 
-First **recognise what kind of work the issue is** — it decides how you build:
+First **recognise what kind of work the ticket is** — it decides how you build:
 
 - **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets** — **red → green → refactor**, one test at a time. One failing test (**red**), the minimal code to pass it (**green**), then **refactor**. Don't write all the tests up front; each test responds to what the last one taught you. Follow the `tdd` skill for the full loop.
 - **Everything else** — frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Say which path you took.
@@ -113,10 +113,10 @@ If it fails, **fix and retry** — don't push the failure onto the reviewer. Loo
 
 Stop and surface to the user (do not improvise) if:
 
-- The issue is labelled `needs-info`, `wontfix`, or `needs-triage`, or is already assigned to someone else.
+- The ticket is labelled `needs-info`, `wontfix`, or `needs-triage`, or is already assigned to someone else.
 - Acceptance criteria are ambiguous or contradict the codebase's invariants.
-- The issue is blocked by an issue/PR that has no branch yet.
+- The ticket is blocked by a ticket/PR that has no branch yet.
 - The working tree is dirty when it's time to branch.
 - Tests or the smoke check still fail after **three fix attempts** at the same root cause.
 
-When stopping mid-implementation, don't discard the work: push the WIP branch and comment your findings (what failed, what you tried) on issue `<N>` so the next attempt starts from there.
+When stopping mid-implementation, don't discard the work: push the WIP branch and comment your findings (what failed, what you tried) on ticket `<N>` so the next attempt starts from there.

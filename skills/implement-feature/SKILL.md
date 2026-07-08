@@ -40,7 +40,7 @@ One read-only dispatch (general-purpose — it runs networked `gh`) gathers:
 - Closed tickets: silently skip. Spec body + acceptance criteria: capture verbatim for later handoffs.
 - Blocking edges between work-set tickets (native dependency API, `## Blocked by` body fallback) → the dependency graph.
 - The **feedback-loop commands** — install/setup, type-check, test, and run commands (same sources as `implement-ticket` step 4) — for the dispatch handoffs and the step 3 gates.
-- `git status --porcelain`; whether the integration branch exists (`feat/spec-<N>-*`, the legacy `feat/prd-<N>-*`, or the `feat/<slug>` a prior no-spec run named — probe origin with `git ls-remote origin 'feat/*'`, not a fetch). If it does, the **resume state** per work-set ticket: **merged** iff it carries a "merged into `<integration branch>`" comment, or a commit on `<default>..<integration branch>` matches `#<N>\b`, `ticket-<N>`, or the legacy `issue-<N>` (a human may have fixed it by hand); any pushed `feat/ticket-<N>-*` (or legacy `feat/issue-<N>-*`) WIP branch.
+- `git status --porcelain`; whether the integration branch exists (`feat/spec-<N>-*`, the legacy `feat/prd-<N>-*`, or the `feat/<slug>` a prior no-spec run named — probe origin with `git ls-remote origin 'feat/*'`, not a fetch). If it does, the **resume state** per work-set ticket: **merged** iff it carries a "merged into `<integration branch>`" comment, or a commit on `<default>..<integration branch>` matches `#<N>\b`, `ticket-<N>\b`, or the legacy `issue-<N>\b` (a human may have fixed it by hand); any pushed `feat/ticket-<N>-*` (or legacy `feat/issue-<N>-*`) WIP branch.
 
 Then, in the main thread:
 
@@ -112,8 +112,8 @@ One dispatch:
 - Repo PR template if present; body carries a **Summary**, a **Test plan** (what the
   verification dispatch ran and observed), and rebuilt `Closes #<n>` lines: scan every
   ticket from any run's work-set plus every open sub-issue of the spec, and include each
-  one covered by a "merged into" comment or a `#<N>\b` / `ticket-<N>` / legacy
-  `issue-<N>` commit — whichever run or human put it there. Add `Closes #<spec>` only
+  one covered by a "merged into" comment or a `#<N>\b` / `ticket-<N>\b` / legacy
+  `issue-<N>\b` commit — whichever run or human put it there. Add `Closes #<spec>` only
   when every open sub-issue is covered; otherwise comment progress on the spec.
 - Create it **ready-for-review** (not draft). Report the PR URL. Merging is the human's.
 

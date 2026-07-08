@@ -1,12 +1,12 @@
 ---
 name: implement-ticket
 argument-hint: "[ticket-number]"
-description: 'Implement a ticket (GitHub issue) end-to-end on a feature branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement ticket #N", "implement issue #N", "implement the next ready ticket", or otherwise asks to take a ticket from open to PR.'
+description: 'Implement a ticket (GitHub issue) end-to-end on a ticket branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement ticket #N", "implement issue #N", "implement the next ready ticket", or otherwise asks to take a ticket from open to PR.'
 ---
 
 # Implement Ticket
 
-Take a ticket (on GitHub: an issue) from open → feature branch → working code → green tests + runtime smoke check → draft PR.
+Take a ticket (on GitHub: an issue) from open → ticket branch → working code → green tests + runtime smoke check → draft PR.
 
 ## Inputs
 
@@ -56,7 +56,7 @@ If it returns a ticket, announce the pick (number + title) before proceeding. If
 - If blocked by a ticket/PR whose branch exists but isn't merged, branch off that branch and note it in the PR description (reviewer rebases onto main once the blocker lands).
 - If the blocker has **no branch yet**, stop and surface to the user — don't branch off nothing or implement the blocker yourself.
 
-### 3. Create the feature branch
+### 3. Create the ticket branch
 
 First run `git status --porcelain`. Any output → **stop and ask** (stash, commit, or abort) — never silently drag uncommitted changes onto the new branch.
 

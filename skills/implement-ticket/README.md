@@ -1,11 +1,14 @@
 # implement-ticket
 
 The **`implement-ticket`** agent skill: take a ticket (on GitHub: an issue) from
-open → feature branch → working code → green tests + runtime smoke check →
+open → ticket branch → working code → green tests + runtime smoke check →
 draft PR, with explicit stop conditions instead of improvising when something
 is off.
 
-> **Renamed from `implement-issue`.** The workflow is unchanged; the vocabulary
+> **Renamed from `implement-issue`.** The workflow steps are unchanged, but new
+> branches are named `feat/ticket-<N>-<slug>` instead of `feat/issue-<N>-<slug>`
+> (the legacy form is still recognised when detecting existing branches) — update
+> any CI filters or branch tooling keyed on the old prefix. The vocabulary
 > follows the spec/ticket terminology (a *spec* is broken into *tickets*; on
 > GitHub or GitLab a ticket is stored as an issue). If you installed
 > `implement-issue`, remove it and reinstall under the new name.

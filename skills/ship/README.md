@@ -57,3 +57,6 @@ npx skills add sleeplessv/relentless-data-skills/skills/ship
   outside any sandboxed shell, or they fail with misleading DNS/connection
   errors.
 - The `smart-git-commit` skill installed (a condensed fallback is built in).
+- For fully unattended `/ship clean` runs (background or auto modes), a
+  permission rule allowing `gh pr merge` — merging a just-created PR otherwise
+  stops at a permission prompt.

@@ -1,7 +1,7 @@
 {
   "name": "implement-feature",
-  "version": "0.1.0",
-  "description": "Implement a whole feature as one PR: orchestrate subagents over a PRD's issues on a shared integration branch — waves of issue branches, integrated review + tests, and a single feature PR to main.",
+  "version": "0.2.0",
+  "description": "Implement a whole feature as one PR: orchestrate subagents over a spec's tickets on a shared integration branch — waves of ticket branches, integrated review + tests, and a single feature PR to main.",
   "author": {
     "name": "sleeplessv"
   },
@@ -10,8 +10,8 @@
   "license": "Apache-2.0",
   "keywords": [
     "github",
-    "issues",
-    "prd",
+    "tickets",
+    "spec",
     "orchestration",
     "subagents",
     "feature-branch",

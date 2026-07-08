@@ -135,6 +135,29 @@
       ]
     },
     {
+      "name": "review-pbi-diff",
+      "source": "./skills/review-pbi-diff",
+      "description": "Turn a Power BI (PBIP) git diff into a manager-ready review artifact — a deterministic extractor builds a structured change model from hash-named visual.json and TMDL files, then the agent draws to-scale page wireframes, spec-checks every added/modified measure's DAX against the repo's metric definitions, and runs eleven evidence-backed red-flag checks (dangling measure references, ripple effects, hidden filters, visible scratch pages).",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/review-pbi-diff",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "power-bi",
+        "pbip",
+        "tmdl",
+        "dax",
+        "code-review",
+        "diff",
+        "wireframes",
+        "semantic-model",
+        "business-intelligence"
+      ]
+    },
+    {
       "name": "ship",
       "source": "./skills/ship",
       "description": "Take working-tree changes from branch to merged PR in one pass — branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches/PRs.",

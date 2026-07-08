@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation - or without asking when invoked with the clean argument. Use when the user runs /ship to take working-tree changes all the way to a merged PR.
+description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. The clean argument skips only that merge confirmation, never the unrelated-changes prompt. Use when the user runs /ship to take working-tree changes all the way to a merged PR.
 disable-model-invocation: true
 ---
 
@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Take the current working-tree changes from branch to merged PR in one pass: branch off `main`, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
 
-**Argument:** `clean` — skip the merge confirmation and go straight through (`/ship clean`).
+**Argument:** `clean` — skip the Step 5 merge confirmation and go straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt still fires.
 
 ## Step 0: Preflight
 
@@ -29,12 +29,13 @@ Form the commit groups **before** any branching (the `smart-git-commit` grouping
 
 ## Step 2: Pick the branch
 
-Decide where the changes should live from git/gh state — only ask when it is genuinely ambiguous. Detect "merged" two ways, because squash merges are not git ancestors:
+Decide where the changes should live from git/gh state — only ask when it is genuinely ambiguous. On `main`, skip the detection below and go straight to a fresh branch. On a feature branch, detect "merged" two ways — either signal counts, because squash merges are not git ancestors — and check for an open PR (an open PR means live work):
 
 ```bash
 git fetch origin main
 git merge-base --is-ancestor HEAD origin/main && echo ancestor-merged
 gh pr list --head "$(git branch --show-current)" --state merged --json number
+gh pr list --head "$(git branch --show-current)" --state open --json number
 ```
 
 | Current state | Action |
@@ -66,7 +67,8 @@ EOF
 ```
 
 - **Title** — the conventional-commit subject of the dominant change (e.g. `feat: add ship skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
-- **Body** — `## Summary` with 2–4 bullets, one per commit group. No test-plan boilerplate.
+- **Body** — `## Summary`, one bullet per commit group (a single group gets one or two bullets — don't pad to fill). No test-plan boilerplate.
+- **Live branch** — when the PR includes commits that predate this run, the title and bullets describe the whole PR (everything the squash lands on `main`), not just this session's groups.
 - **No em dashes (—)** in the title or body — use a comma, colon, or parentheses, or rewrite the sentence. Same rule as the commit messages.
 
 ## Step 5: Merge and clean up

@@ -49,7 +49,10 @@ window-checked, commits come from `gh search commits` windowed on
 committer date and are attributed to their PR or marked direct pushes,
 and `discussions` holds items the actor commented on but did not author.
 Surface any stderr warnings (result caps) to the user; a capped search
-means missing items. Done when `week.json` exists.
+means missing items. Rate limits: one run makes ~14 search calls against
+GitHub's 30/min search quota; the script waits 60 s and retries once on
+a 403, but if it still fails, wait a minute and re-run. Done when
+`week.json` exists.
 
 ## Step 3: Bucket, then narrate
 
@@ -67,17 +70,20 @@ included, to one bucket:
 Each item carries a `signal` (conventional-commit prefix) and `labels`,
 strong hints but not verdicts; read the title and overrule a misleading
 prefix. List the item keys first (e.g. `python3 -c "..."` over
-`week.json`) and write `buckets.json` mapping every key to a bucket. An
-item missing from the mapping silently lands in `other`, so absence is a
-bug, not a choice.
+`week.json`) and write `buckets.json` mapping every key to a bucket. The
+same key can appear in several component lists (a PR in both
+`prs_created` and `prs_merged`); the mapping is by unique key, one
+bucket per key. An item missing from the mapping silently lands in
+`other`, so absence is a bug, not a choice.
 
 Then write `narratives.json` beside it: an object mapping each repo full
 name with current-period activity to a narrative string. Per repo, 2 to
 4 sentences that tell the story of the week's work there, weaving in
-Markdown links to the items mentioned. For the repo that dominates the
-week, extend the narrative with a structured per-work-type breakdown
-(one line per bucket present in that repo, with its items). Render keeps
-the text verbatim and warns on keys matching no current-period repo.
+Markdown links to the items mentioned. For the dominant repo (the one
+with the most item occurrences across current-period lists), extend the
+narrative with a structured per-work-type breakdown (one line per
+bucket present in that repo, with its items). Render keeps the text
+verbatim and warns on keys matching no current-period repo.
 
 Done when every current-period key appears in `buckets.json` and every
 active repo has a narrative.
@@ -90,13 +96,15 @@ python3 <skill-dir>/scripts/render.py --data <...>/week.json \
   --out <tmpdir>/gh-week-<iso_week>-<actor>.html
 ```
 
-Write to the OS temp dir (`$TMPDIR`, fall back to `/tmp`) unless the
-user named a destination, and copy `week.json` beside the report; it is
-the re-render receipt, so on tweak requests re-run render from it
-instead of re-collecting. The report embeds all data but pulls Tailwind
-and Chart.js from CDNs: offline, charts are skipped with a visible note
-and the page stays readable. Print the absolute paths of both files and
-open the report (`open` / `xdg-open` / `start`; on failure just say so).
+- Write to the OS temp dir (`$TMPDIR`, fall back to `/tmp`) unless the
+  user named a destination.
+- Copy `week.json` beside the report; it is the re-render receipt, so
+  on tweak requests re-run render from it instead of re-collecting.
+- The report embeds all data but pulls Tailwind and Chart.js from CDNs:
+  offline, charts are skipped with a visible note and the page stays
+  readable.
+- Print the absolute paths of both files and open the report (`open` /
+  `xdg-open` / `start`; on failure just say so).
 
 ## Step 5: Summarise
 

@@ -50,6 +50,28 @@
       ]
     },
     {
+      "name": "gh-weekly-report",
+      "source": "./skills/gh-weekly-report",
+      "description": "Generate a weekly GitHub activity report — the authenticated user's issues, PRs, reviews, and commits across one account's repos, bucketed into canonical work types (feature, fix, refactor, docs, chore/infra, triage/review), rendered as a fully self-contained interactive HTML file with week-over-week deltas, per-repo breakdown, and drill-down to every item.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/gh-weekly-report",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "github",
+        "gh",
+        "weekly-report",
+        "activity",
+        "issues",
+        "pull-requests",
+        "reporting",
+        "html"
+      ]
+    },
+    {
       "name": "implement-feature",
       "source": "./skills/implement-feature",
       "description": "Implement a whole feature as one PR: orchestrate subagents over a spec's tickets on a shared integration branch — waves of ticket branches, integrated review + tests, and a single feature PR to main.",

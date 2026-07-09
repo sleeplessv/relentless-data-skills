@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GitHub week</title>
+<style>
+  :root {
+    --ink: #1a1a2e; --muted: #6b7280; --line: #e5e7eb; --bg: #fafafa;
+    --card: #ffffff; --accent: #4f46e5; --up: #059669; --down: #dc2626;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+    color: var(--ink); background: var(--bg); padding: 2rem 1rem 4rem;
+  }
+  main { max-width: 960px; margin: 0 auto; }
+  header h1 { font-size: 1.6rem; letter-spacing: -0.02em; }
+  header p { color: var(--muted); margin-top: 0.25rem; }
+  h2 {
+    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 2.25rem 0 0.75rem;
+  }
+  .counters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
+    padding: 0.9rem 1rem; cursor: pointer; text-align: left; width: 100%;
+    font: inherit; transition: border-color 0.15s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .card .n { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.03em; }
+  .card .label { color: var(--muted); font-size: 0.8rem; }
+  .delta { font-size: 0.8rem; font-weight: 600; margin-left: 0.4rem; }
+  .delta.up { color: var(--up); } .delta.down { color: var(--down); }
+  .delta.flat { color: var(--muted); }
+  .minor { color: var(--muted); font-size: 0.85rem; margin-top: 0.6rem; }
+  .minor button {
+    font: inherit; color: inherit; background: none; border: none;
+    cursor: pointer; text-decoration: underline dotted; padding: 0;
+  }
+  .bars .row, .repos .row {
+    display: grid; grid-template-columns: 10rem 1fr 3rem; align-items: center;
+    gap: 0.75rem; padding: 0.3rem 0; cursor: pointer; border: none;
+    background: none; font: inherit; width: 100%; text-align: left;
+    border-radius: 6px;
+  }
+  .bars .row:hover, .repos .row:hover { background: #f0f0f5; }
+  .bars .name, .repos .name {
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .bar { height: 0.9rem; border-radius: 4px; background: var(--accent); min-width: 2px; }
+  .count { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  .b-feature { background: #4f46e5; } .b-fix { background: #dc2626; }
+  .b-refactor { background: #d97706; } .b-docs { background: #2563eb; }
+  .b-chore-infra { background: #6b7280; } .b-triage-review { background: #0d9488; }
+  .b-other { background: #a8a29e; }
+  #detail { margin-top: 2.25rem; }
+  #detail .placeholder { color: var(--muted); font-style: italic; }
+  .item {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 0.6rem 0.9rem; margin-bottom: 0.5rem;
+    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline;
+  }
+  .item a { color: var(--ink); font-weight: 600; text-decoration: none; }
+  .item a:hover { color: var(--accent); text-decoration: underline; }
+  .chip {
+    font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 999px;
+    background: #eef2ff; color: #3730a3; white-space: nowrap;
+  }
+  .chip.bucket { color: #fff; }
+  .meta { color: var(--muted); font-size: 0.8rem; }
+  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1 id="title"></h1>
+    <p id="subtitle"></p>
+  </header>
+
+  <h2>Headlines</h2>
+  <div class="counters" id="counters"></div>
+  <p class="minor" id="minor"></p>
+
+  <h2>Buckets</h2>
+  <div class="bars" id="buckets"></div>
+
+  <h2>Repos</h2>
+  <div class="repos" id="repos"></div>
+
+  <h2 id="detail-heading">Detail</h2>
+  <div id="detail"><p class="placeholder">Click any counter, bucket, or repo to drill down.</p></div>
+
+  <footer id="footer"></footer>
+</main>
+
+<script id="report-data" type="application/json">__REPORT_DATA__</script>
+<script>
+"use strict";
+const DATA = JSON.parse(document.getElementById("report-data").textContent);
+
+const METRICS = [
+  ["issues_created", "Issues created"],
+  ["issues_resolved", "Issues resolved"],
+  ["prs_created", "PRs created"],
+  ["prs_merged", "PRs merged"],
+  ["reviews_given", "Reviews given"],
+  ["commits", "Commits"],
+];
+const MINOR = [
+  ["issues_not_planned", "closed as not-planned"],
+  ["prs_abandoned", "PRs abandoned"],
+];
+
+document.getElementById("title").textContent =
+  `GitHub week ${DATA.window.iso_week} — ${DATA.actor}`;
+document.getElementById("subtitle").textContent =
+  `${DATA.window.from} → ${DATA.window.to} · repos owned by ${DATA.owner}`;
+document.getElementById("footer").textContent =
+  `Deltas vs ${DATA.previous_window.from} → ${DATA.previous_window.to}. ` +
+  `Times are UTC.`;
+
+// One entry per distinct piece of work, remembering every list it sits in.
+const byKey = new Map();
+for (const [metric] of [...METRICS, ...MINOR]) {
+  for (const item of DATA.current[metric] || []) {
+    if (!byKey.has(item.key)) byKey.set(item.key, { ...item, metrics: [] });
+    byKey.get(item.key).metrics.push(metric);
+  }
+}
+const ITEMS = [...byKey.values()];
+
+function deltaBadge(cur, prev) {
+  const d = cur - prev;
+  const el = document.createElement("span");
+  el.className = "delta " + (d > 0 ? "up" : d < 0 ? "down" : "flat");
+  el.textContent = d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : "–";
+  el.title = `previous week: ${prev}`;
+  return el;
+}
+
+let activeCard = null;
+function select(card, title, items) {
+  if (activeCard) activeCard.classList.remove("active");
+  activeCard = card;
+  if (card) card.classList.add("active");
+  renderDetail(title, items);
+}
+
+// Headline counters
+const counters = document.getElementById("counters");
+for (const [metric, label] of METRICS) {
+  const cur = DATA.current[metric] || [];
+  const prev = DATA.previous[metric] || [];
+  const card = document.createElement("button");
+  card.className = "card";
+  const n = document.createElement("div");
+  n.className = "n";
+  n.textContent = cur.length;
+  n.appendChild(deltaBadge(cur.length, prev.length));
+  const l = document.createElement("div");
+  l.className = "label";
+  l.textContent = label;
+  card.append(n, l);
+  card.onclick = () => select(card, label, cur);
+  counters.appendChild(card);
+}
+
+// Minor lines: discarded work is still work, but not a headline.
+const minor = document.getElementById("minor");
+MINOR.forEach(([metric, label], i) => {
+  const cur = DATA.current[metric] || [];
+  const btn = document.createElement("button");
+  btn.textContent = `${cur.length} ${label}`;
+  btn.onclick = () => select(null, label, cur);
+  if (i) minor.append(" · ");
+  minor.appendChild(btn);
+});
+
+function cssBucket(bucket) { return "b-" + bucket.replace(/[^a-z]+/g, "-"); }
+
+function barRows(container, groups, colorFor) {
+  const max = Math.max(1, ...groups.map(([, items]) => items.length));
+  for (const [name, items] of groups) {
+    const row = document.createElement("button");
+    row.className = "row";
+    const label = document.createElement("span");
+    label.className = "name";
+    label.textContent = name;
+    const bar = document.createElement("div");
+    bar.className = "bar " + (colorFor ? colorFor(name) : "");
+    bar.style.width = (items.length / max) * 100 + "%";
+    const count = document.createElement("span");
+    count.className = "count";
+    count.textContent = items.length;
+    row.append(label, bar, count);
+    row.onclick = () => select(null, name, items);
+    container.appendChild(row);
+  }
+}
+
+const BUCKET_ORDER = ["feature", "fix", "refactor", "docs", "chore/infra",
+                      "triage/review", "other"];
+barRows(
+  document.getElementById("buckets"),
+  BUCKET_ORDER.map(b => [b, ITEMS.filter(i => i.bucket === b)])
+              .filter(([, items]) => items.length),
+  cssBucket,
+);
+
+barRows(
+  document.getElementById("repos"),
+  [...new Set(ITEMS.map(i => i.repo))].sort()
+    .map(r => [r, ITEMS.filter(i => i.repo === r)]),
+);
+
+const METRIC_LABEL = Object.fromEntries([...METRICS, ...MINOR]);
+function renderDetail(title, items) {
+  document.getElementById("detail-heading").textContent = `Detail — ${title}`;
+  const detail = document.getElementById("detail");
+  detail.textContent = "";
+  if (!items.length) {
+    const p = document.createElement("p");
+    p.className = "placeholder";
+    p.textContent = "Nothing here this week.";
+    detail.appendChild(p);
+    return;
+  }
+  for (const raw of items) {
+    const item = byKey.get(raw.key) || raw;
+    const row = document.createElement("div");
+    row.className = "item";
+    const a = document.createElement("a");
+    a.href = item.url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = item.title;
+    row.appendChild(a);
+    if (item.bucket) {
+      const b = document.createElement("span");
+      b.className = "chip bucket " + cssBucket(item.bucket);
+      b.textContent = item.bucket;
+      row.appendChild(b);
+    }
+    const meta = document.createElement("span");
+    meta.className = "meta";
+    const bits = [item.key];
+    if (item.direct_push) bits.push("direct push");
+    else if (item.pr) bits.push(`via ${item.pr}`);
+    if (item.review_states) bits.push(item.review_states.join(", ").toLowerCase());
+    if (item.metrics) {
+      bits.push(item.metrics.map(m => METRIC_LABEL[m].toLowerCase()).join(" · "));
+    }
+    meta.textContent = bits.join(" · ");
+    row.appendChild(meta);
+    detail.appendChild(row);
+  }
+  document.getElementById("detail-heading").scrollIntoView({ behavior: "smooth" });
+}
+</script>
+</body>
+</html>

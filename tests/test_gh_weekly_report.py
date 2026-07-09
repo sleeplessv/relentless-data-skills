@@ -348,11 +348,14 @@ class TestWeekJsonContract(unittest.TestCase):
 def tiny_week():
     return {
         "current": {
-            "prs_merged": [{"key": "acme/data#7", "title": "feat: x"}],
-            "commits": [{"key": "abc123", "title": "tweak"}],
+            "prs_merged": [{"key": "acme/data#7", "repo": "acme/data",
+                            "title": "feat: x"}],
+            "commits": [{"key": "abc123", "repo": "acme/data",
+                         "title": "tweak"}],
         },
         "previous": {
-            "prs_merged": [{"key": "acme/data#2", "title": "old"}],
+            "prs_merged": [{"key": "acme/data#2", "repo": "acme/data",
+                            "title": "old"}],
         },
     }
 
@@ -372,6 +375,68 @@ class TestMergeBuckets(unittest.TestCase):
             render.merge_buckets(tiny_week(), {"acme/data#7": "misc"})
 
 
+class TestMergeNarratives(unittest.TestCase):
+    """narratives.json ({repo full name: text}) is merged into the payload
+    verbatim under `narratives`; a key naming a repo with no activity in the
+    data is an authoring slip, so it warns on stderr but never fails."""
+
+    def test_narratives_land_in_payload(self):
+        week = render.merge_narratives(
+            tiny_week(), {"acme/data": "Shipped the drill-down."}
+        )
+        self.assertEqual(week["narratives"],
+                         {"acme/data": "Shipped the drill-down."})
+
+    def test_absent_narratives_yield_empty_object(self):
+        week = render.merge_narratives(tiny_week(), {})
+        self.assertEqual(week["narratives"], {})
+
+    def test_known_repo_key_does_not_warn(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            render.merge_narratives(tiny_week(), {"acme/data": "text"})
+        self.assertEqual(stderr.getvalue(), "")
+
+    def test_unknown_repo_key_warns_on_stderr(self):
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            week = render.merge_narratives(tiny_week(), {"acme/ghost": "?"})
+        self.assertIn("acme/ghost", stderr.getvalue())
+        # Warned, not dropped: the payload stays a verbatim copy.
+        self.assertIn("acme/ghost", week["narratives"])
+
+
+class TestRenderMainNarratives(unittest.TestCase):
+    """--narratives is optional end to end: with it the text reaches the
+    report; without it the payload still carries an empty `narratives`."""
+
+    def render_main(self, narratives=None):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "week.json").write_text(json.dumps(tiny_week()))
+            (root / "buckets.json").write_text(
+                json.dumps({"acme/data#7": "feature"})
+            )
+            out = root / "report.html"
+            argv = ["--data", str(root / "week.json"),
+                    "--buckets", str(root / "buckets.json"),
+                    "--out", str(out)]
+            if narratives is not None:
+                (root / "narratives.json").write_text(json.dumps(narratives))
+                argv += ["--narratives", str(root / "narratives.json")]
+            with contextlib.redirect_stdout(io.StringIO()):
+                render.main(argv)
+            return out.read_text()
+
+    def test_narrative_text_reaches_the_report(self):
+        html = self.render_main({"acme/data": "Landed the drill-down."})
+        self.assertIn("Landed the drill-down.", html)
+
+    def test_flag_is_optional_and_defaults_to_empty(self):
+        html = self.render_main()
+        self.assertIn('"narratives": {}', html)
+
+
 class TestInject(unittest.TestCase):
     def test_data_lands_at_the_marker(self):
         html = render.inject("<script id=\"report-data\" "
@@ -386,6 +451,9 @@ class TestInject(unittest.TestCase):
 
 
 class TestTemplate(unittest.TestCase):
+    """String-level assertions on the template source: no browser, so the
+    contract is pinned where it lives, in the markup and inline script."""
+
     def setUp(self):
         self.text = TEMPLATE.read_text()
 
@@ -393,11 +461,37 @@ class TestTemplate(unittest.TestCase):
         self.assertEqual(self.text.count("__REPORT_DATA__"), 1)
         self.assertIn('id="report-data"', self.text)
 
-    def test_is_fully_self_contained(self):
-        # No CDN, no external fetches: the report must open offline forever.
-        for needle in ("src=\"http", "src='http", "href=\"http",
-                       "href='http", "@import", "url(http"):
-            self.assertNotIn(needle, self.text, needle)
+    def test_loads_tailwind_and_chartjs_from_cdn(self):
+        self.assertIn("cdn.tailwindcss.com", self.text)
+        self.assertIn("cdn.jsdelivr.net/npm/chart.js", self.text)
+
+    def test_degrades_without_the_chartjs_cdn(self):
+        # All data is embedded; chart code must be guarded so the page
+        # still renders its content when the CDN is unreachable.
+        self.assertIn('typeof Chart === "undefined"', self.text)
+
+    def test_discussions_counter_is_a_headline_metric(self):
+        self.assertIn('["discussions", "Discussions"]', self.text)
+
+    def test_narratives_are_read_from_the_payload(self):
+        self.assertIn("DATA.narratives", self.text)
+
+    def test_owner_wording_only_when_payload_has_an_owner(self):
+        # The header keys on the actor; owner is an optional filter note.
+        owner_lines = [line for line in self.text.splitlines()
+                       if "repos owned by" in line]
+        self.assertEqual(len(owner_lines), 1, owner_lines)
+        self.assertIn("DATA.owner ?", owner_lines[0])
+
+    def test_title_keys_on_actor(self):
+        title_lines = [line for line in self.text.splitlines()
+                       if "DATA.actor" in line]
+        self.assertTrue(title_lines)
+        for line in title_lines:
+            self.assertNotIn("DATA.owner", line)
+
+    def test_no_em_dash_anywhere(self):
+        self.assertNotIn("\u2014", self.text)
 
 
 if __name__ == "__main__":

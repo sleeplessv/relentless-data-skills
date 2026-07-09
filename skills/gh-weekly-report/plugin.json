@@ -1,7 +1,7 @@
 {
   "name": "gh-weekly-report",
   "version": "0.1.0",
-  "description": "Generate a weekly GitHub activity report — the authenticated user's issues, PRs, reviews, and commits across one account's repos, bucketed into canonical work types (feature, fix, refactor, docs, chore/infra, triage/review), rendered as a fully self-contained interactive HTML file with week-over-week deltas, per-repo breakdown, and drill-down to every item.",
+  "description": "Generate a weekly GitHub activity report covering everything the authenticated user did on GitHub (issues, PRs, reviews, commits, discussions), optionally narrowed to one owner's repos, bucketed into canonical work types (feature, fix, refactor, docs, chore/infra, triage/review) with per-repo narratives, and rendered as an interactive HTML file with week-over-week deltas, per-repo breakdown, and drill-down to every item (data embedded; Tailwind and Chart.js load from CDNs).",
   "author": {
     "name": "sleeplessv"
   },

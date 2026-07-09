@@ -23,7 +23,7 @@ MARKER = "__REPORT_DATA__"
 
 def merge_buckets(week: dict, buckets: dict[str, str]) -> dict:
     """Stamp a bucket on every current-period item; previous is deltas-only
-    so it stays untouched. A bucket outside the taxonomy is an agent typo —
+    so it stays untouched. A bucket outside the taxonomy is an agent typo;
     fail loudly rather than render a category that doesn't exist."""
     for value in buckets.values():
         if value not in BUCKETS:

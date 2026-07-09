@@ -174,7 +174,8 @@ def fetch_closed_issue_detail(item: dict) -> dict:
     return item
 
 
-def fetch_reviews_given(owner: str, actor: str, start: date, end: date) -> list[dict]:
+def fetch_reviews_given(owner: str | None, actor: str, start: date,
+                        end: date) -> list[dict]:
     candidates = search("prs", ["--reviewed-by", actor,
                                 "--updated", f">={start}"], owner)
     given = []

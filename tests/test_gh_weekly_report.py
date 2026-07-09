@@ -793,6 +793,22 @@ class TestTemplate(unittest.TestCase):
     def test_no_em_dash_anywhere(self):
         self.assertNotIn("\u2014", self.text)
 
+    def test_narrative_markdown_links_are_rendered_as_anchors(self):
+        # SKILL.md tells the agent to weave Markdown links into the
+        # narratives; a bare textContent assignment would show literal
+        # [title](url) brackets.
+        self.assertIn("renderNarrative", self.text)
+        self.assertIn("MD_LINK", self.text)
+        self.assertNotIn("p.textContent = narrative", self.text)
+
+    def test_narrative_renderer_never_uses_innerhtml(self):
+        # The narrative is agent-authored data: DOM nodes only.
+        self.assertNotIn("innerHTML", self.text)
+
+    def test_narrative_preserves_line_structure(self):
+        # The dominant-repo narrative carries a per-bucket breakdown,
+        # one line per bucket; pre-line whitespace keeps those lines.
+        self.assertIn("white-space: pre-line", self.text)
 
 
 if __name__ == "__main__":

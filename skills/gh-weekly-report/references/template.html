@@ -38,6 +38,10 @@
       --b-triage-review: #e66767; --b-other: #898781;
     }
   }
+  /* Narratives are authored one line per thought (the dominant repo
+     gets a per-bucket breakdown); pre-line keeps those lines without
+     depending on the Tailwind CDN. */
+  .narrative { white-space: pre-line; }
   .card.active { outline: 2px solid var(--pos); outline-offset: -1px; }
   .delta.up { color: var(--delta-up); }
   .delta.down { color: var(--delta-down); }
@@ -214,6 +218,27 @@ barRows(
   cssBucket,
 );
 
+// Narratives arrive as agent-authored Markdown-ish text: plain prose
+// with [title](url) links. Render with DOM nodes only (the text is
+// data, never markup to inject); anchors get the same styling and
+// new-tab behaviour as the drill-down item links.
+const MD_LINK = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g;
+function renderNarrative(el, text) {
+  let last = 0;
+  for (const m of text.matchAll(MD_LINK)) {
+    el.append(text.slice(last, m.index));
+    const a = document.createElement("a");
+    a.href = m[2];
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.className = "font-semibold hover:underline";
+    a.textContent = m[1];
+    el.appendChild(a);
+    last = m.index + m[0].length;
+  }
+  el.append(text.slice(last));
+}
+
 // Repos: the agent's narrative (when authored) sits above each repo's
 // drill-down row; a repo without one just shows the row.
 {
@@ -230,7 +255,7 @@ barRows(
       const p = document.createElement("p");
       p.className = "narrative mb-1 border-l-2 border-black/10 pl-3 text-sm "
         + "text-[#52514e] dark:border-white/10 dark:text-[#c3c2b7]";
-      p.textContent = narrative;
+      renderNarrative(p, narrative);
       block.appendChild(p);
     }
     const { row, bar } = barRow(repo, items);

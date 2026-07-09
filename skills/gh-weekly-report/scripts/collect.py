@@ -15,19 +15,31 @@ import json
 import re
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 SEARCH_LIMIT = 1000
 
 
+def rate_limited(stderr: str) -> bool:
+    """GitHub search allows 30 req/min and one collect run makes ~14
+    search calls, so a 403 mid-run usually means the quota, not gh."""
+    low = stderr.lower()
+    return "403" in low or "rate limit" in low
+
+
 def run_gh(args: list[str]) -> str:
     """Single seam to the gh CLI; tests replace this function.
 
-    Retries once on a nonzero exit (search endpoints flake) before raising.
+    Retries once on a nonzero exit (search endpoints flake) before
+    raising; a rate-limited failure waits out the 60-second search
+    quota window first.
     """
     res = subprocess.run(["gh", *args], capture_output=True, text=True)
     if res.returncode != 0:
+        if rate_limited(res.stderr):
+            time.sleep(60)
         res = subprocess.run(["gh", *args], capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed: {res.stderr.strip()}")
@@ -42,6 +54,19 @@ def owner_flag(owner: str | None) -> list[str]:
 def gh_json(args: list[str]):
     out = run_gh(args)
     return json.loads(out) if out.strip() else []
+
+
+def parse_concatenated_json(out: str) -> list:
+    """Flatten `gh api --paginate` output: one JSON array per page,
+    emitted back to back, which json.loads alone cannot parse."""
+    decoder = json.JSONDecoder()
+    items: list = []
+    idx, end = 0, len(out)
+    while idx < end and (chunk := out[idx:].lstrip()):
+        page, consumed = decoder.raw_decode(chunk)
+        items.extend(page)
+        idx = end - len(chunk) + consumed
+    return items
 
 
 def previous_window(start: date, end: date) -> tuple[date, date]:
@@ -136,6 +161,7 @@ def compute_window(today: date) -> tuple[date, date]:
 # --- fetch layer: every function below talks to gh through run_gh ---------
 
 SEARCH_FIELDS = "number,title,url,repository,labels,createdAt,closedAt,state,author"
+COMMIT_SEARCH_FIELDS = "sha,commit,repository,url"
 
 
 def norm_item(raw: dict) -> dict:
@@ -191,9 +217,6 @@ def fetch_reviews_given(owner: str | None, actor: str, start: date,
     return given
 
 
-COMMIT_SEARCH_FIELDS = "sha,commit,repository,url"
-
-
 def fetch_commits(owner: str | None, actor: str, start: date, end: date,
                   attribute: bool) -> list[dict]:
     """Commits the actor authored, windowed on committer date: a squash
@@ -231,14 +254,15 @@ def fetch_commits(owner: str | None, actor: str, start: date, end: date,
     return commits
 
 
-def fetch_discussions(actor: str, start: date, end: date,
-                      owner: str | None) -> list[dict]:
+def fetch_discussions(owner: str | None, actor: str, start: date,
+                      end: date) -> list[dict]:
     """Items the actor commented on but did not author, with the actor's
     in-window comment activity.
 
     Candidates come from gh search --commenter (issues and PRs are
     separate search kinds, so no overlap); search cannot window on
-    comment time, so each candidate is checked against the comments API.
+    comment time, so each candidate is checked against the comments API,
+    paginated so busy threads do not undercount.
     """
     discussions = []
     for kind in ("issues", "prs"):
@@ -247,8 +271,9 @@ def fetch_discussions(actor: str, start: date, end: date,
         for item in candidates:
             if item["author"] == actor:
                 continue
-            comments = gh_json(
-                ["api", f"repos/{item['repo']}/issues/{item['number']}/comments"])
+            comments = parse_concatenated_json(run_gh(
+                ["api", f"repos/{item['repo']}/issues/{item['number']}"
+                 "/comments?per_page=100", "--paginate"]))
             mine = [c["created_at"] for c in comments
                     if (c.get("user") or {}).get("login") == actor
                     and start <= date.fromisoformat(c["created_at"][:10]) <= end]
@@ -288,7 +313,7 @@ def collect_period(owner: str | None, actor: str, start: date, end: date,
         "prs_abandoned": abandoned_prs(prs_closed, {p["key"] for p in prs_merged}),
         "reviews_given": fetch_reviews_given(owner, actor, start, end),
         "commits": fetch_commits(owner, actor, start, end, attribute),
-        "discussions": fetch_discussions(actor, start, end, owner),
+        "discussions": fetch_discussions(owner, actor, start, end),
     }
 
 

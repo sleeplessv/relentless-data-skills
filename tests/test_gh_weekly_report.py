@@ -6,7 +6,7 @@ Standard library only. Run from the repo root:
 
 Nothing here ever talks to GitHub: every gh CLI call goes through
 collect.run_gh, which the tests replace with a canned dispatcher. The
-week.json shape is asserted deliberately — the agent and render.py parse
+week.json shape is asserted deliberately: the agent and render.py parse
 it, so it is an interface, not an implementation detail.
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ TEMPLATE = (REPO_ROOT / "skills" / "gh-weekly-report" / "references"
 
 
 class TestComputeWindow(unittest.TestCase):
-    """Last complete Mon-Sun week, UTC — never the week in progress."""
+    """Last complete Mon-Sun week, UTC, never the week in progress."""
 
     def test_midweek_returns_previous_monday_to_sunday(self):
         # Wed 2026-07-08 → last complete week is Mon Jun 29 .. Sun Jul 5.
@@ -204,35 +204,83 @@ class TestClassifySignal(unittest.TestCase):
 
 
 class TestRunGhRetry(unittest.TestCase):
-    """run_gh retries a failed gh invocation once before raising."""
+    """run_gh retries a failed gh invocation once before raising; a
+    rate-limited failure waits 60 s first (GitHub search allows 30
+    req/min and one collect run makes ~14 search calls)."""
 
     @staticmethod
     def _completed(code, stdout="", stderr=""):
         return subprocess.CompletedProcess(
             args=["gh"], returncode=code, stdout=stdout, stderr=stderr)
 
+    def _run(self, outcomes):
+        """Run run_gh against canned outcomes; return (result, run, sleep)
+        where result is the output or the raised RuntimeError."""
+        with mock.patch.object(collect.time, "sleep") as sleep, \
+                mock.patch.object(collect.subprocess, "run",
+                                  side_effect=outcomes) as run:
+            try:
+                result = collect.run_gh(["api", "user"])
+            except RuntimeError as exc:
+                result = exc
+        return result, run, sleep
+
     def test_success_does_not_retry(self):
-        with mock.patch.object(collect.subprocess, "run",
-                               side_effect=[self._completed(0, stdout="ok")]) as run:
-            self.assertEqual(collect.run_gh(["api", "user"]), "ok")
+        result, run, sleep = self._run([self._completed(0, stdout="ok")])
+        self.assertEqual(result, "ok")
         self.assertEqual(run.call_count, 1)
+        sleep.assert_not_called()
 
     def test_failure_then_success_returns_output(self):
-        with mock.patch.object(
-                collect.subprocess, "run",
-                side_effect=[self._completed(1, stderr="flake"),
-                             self._completed(0, stdout="ok")]) as run:
-            self.assertEqual(collect.run_gh(["api", "user"]), "ok")
+        result, run, sleep = self._run([self._completed(1, stderr="flake"),
+                                        self._completed(0, stdout="ok")])
+        self.assertEqual(result, "ok")
         self.assertEqual(run.call_count, 2)
+        sleep.assert_not_called()
 
     def test_two_failures_raise(self):
-        with mock.patch.object(
-                collect.subprocess, "run",
-                side_effect=[self._completed(1, stderr="down"),
-                             self._completed(1, stderr="down")]) as run:
-            with self.assertRaises(RuntimeError):
-                collect.run_gh(["api", "user"])
+        result, run, _ = self._run([self._completed(1, stderr="down"),
+                                    self._completed(1, stderr="down")])
+        self.assertIsInstance(result, RuntimeError)
         self.assertEqual(run.call_count, 2)
+
+    def test_rate_limited_failure_sleeps_60s_before_retry(self):
+        result, run, sleep = self._run(
+            [self._completed(1, stderr="HTTP 403: API rate limit exceeded"),
+             self._completed(0, stdout="ok")])
+        self.assertEqual(result, "ok")
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(60)
+
+    def test_rate_limit_wording_without_403_also_sleeps(self):
+        result, _, sleep = self._run(
+            [self._completed(1, stderr="You have exceeded a secondary Rate Limit"),
+             self._completed(0, stdout="ok")])
+        self.assertEqual(result, "ok")
+        sleep.assert_called_once_with(60)
+
+    def test_rate_limited_retry_still_raises_after_second_failure(self):
+        result, run, sleep = self._run(
+            [self._completed(1, stderr="HTTP 403: rate limit"),
+             self._completed(1, stderr="HTTP 403: rate limit")])
+        self.assertIsInstance(result, RuntimeError)
+        self.assertEqual(run.call_count, 2)
+        sleep.assert_called_once_with(60)
+
+
+@contextlib.contextmanager
+def recorded_gh(response="[]"):
+    """Patch collect.run_gh with a recorder; yields the list of gh arg
+    lists. `response` is a canned string or a callable dispatching on
+    the gh args (e.g. fake_run_gh)."""
+    calls = []
+
+    def recorder(gh_args):
+        calls.append(gh_args)
+        return response(gh_args) if callable(response) else response
+
+    with mock.patch.object(collect, "run_gh", side_effect=recorder):
+        yield calls
 
 
 class TestSearchArgs(unittest.TestCase):
@@ -240,13 +288,7 @@ class TestSearchArgs(unittest.TestCase):
     flag on the search, absent means no owner scoping at all."""
 
     def _search_args(self, owner):
-        calls = []
-
-        def recorder(gh_args):
-            calls.append(gh_args)
-            return "[]"
-
-        with mock.patch.object(collect, "run_gh", side_effect=recorder):
+        with recorded_gh() as calls:
             collect.search("issues", ["--author", "alice"], owner)
         (args,) = calls
         return args
@@ -304,9 +346,12 @@ def fake_run_gh(args):
     if args[:2] == ["search", "prs"] and "--commenter" in joined:
         return "[]"
     if joined.startswith("api repos/acme/tools/issues/10/comments"):
+        # gh api --paginate emits each page's JSON array back to back
+        # (not one valid document); the fake reproduces that shape.
         return json.dumps([
             {"user": {"login": "alice"}, "created_at": "2026-07-01T09:00:00Z"},
             {"user": {"login": "alice"}, "created_at": "2026-06-10T08:00:00Z"},
+        ]) + "\n" + json.dumps([
             {"user": {"login": "bob"}, "created_at": "2026-07-01T11:00:00Z"},
         ])
     if args[:2] == ["search", "issues"] and "--author" in joined:
@@ -385,13 +430,7 @@ class TestFetchCommitsSearch(unittest.TestCase):
     WINDOW = (date(2026, 6, 29), date(2026, 7, 5))
 
     def _search_args(self, owner):
-        calls = []
-
-        def recorder(gh_args):
-            calls.append(gh_args)
-            return "[]"
-
-        with mock.patch.object(collect, "run_gh", side_effect=recorder):
+        with recorded_gh() as calls:
             collect.fetch_commits(owner, "alice", *self.WINDOW, attribute=False)
         (args,) = calls
         return args
@@ -423,13 +462,7 @@ class TestFetchCommitsSearch(unittest.TestCase):
         self.assertFalse(commit["direct_push"])
 
     def test_no_attribution_calls_when_not_requested(self):
-        calls = []
-
-        def recorder(gh_args):
-            calls.append(gh_args)
-            return fake_run_gh(gh_args)
-
-        with mock.patch.object(collect, "run_gh", side_effect=recorder):
+        with recorded_gh(fake_run_gh) as calls:
             commits = collect.fetch_commits("acme", "alice", *self.WINDOW,
                                             attribute=False)
         self.assertEqual([a for a in calls if a[0] == "api"], [])
@@ -517,7 +550,7 @@ class TestFetchDiscussions(unittest.TestCase):
 
     def _fetch(self, start, end):
         with mock.patch.object(collect, "run_gh", side_effect=fake_run_gh):
-            return collect.fetch_discussions("alice", start, end, "acme")
+            return collect.fetch_discussions("acme", "alice", start, end)
 
     def test_keeps_commented_item_authored_by_someone_else(self):
         items = self._fetch(date(2026, 6, 29), date(2026, 7, 5))
@@ -539,6 +572,45 @@ class TestFetchDiscussions(unittest.TestCase):
 
     def test_item_with_no_in_window_comments_is_dropped(self):
         self.assertEqual(self._fetch(date(2026, 6, 22), date(2026, 6, 28)), [])
+
+    def test_comments_check_paginates_at_100_per_page(self):
+        # REST default is 30/page; without --paginate a busy thread
+        # silently undercounts the actor's in-window comments.
+        with recorded_gh(fake_run_gh) as calls:
+            collect.fetch_discussions("acme", "alice",
+                                      date(2026, 6, 29), date(2026, 7, 5))
+        comment_calls = [c for c in calls
+                         if c[0] == "api" and "/comments" in c[1]]
+        self.assertTrue(comment_calls)
+        for args in comment_calls:
+            self.assertIn("--paginate", args)
+            self.assertIn("per_page=100", args[1])
+
+    def test_multi_page_comment_payload_counts_all_pages(self):
+        # fake_run_gh returns the comments as two concatenated JSON
+        # arrays, the shape gh api --paginate actually emits; alice's
+        # in-window comment sits on page one, bob's on page two, and
+        # both pages must be read for the counts to be right.
+        (item,) = self._fetch(date(2026, 6, 29), date(2026, 7, 5))
+        self.assertEqual(item["comments"], 1)
+
+
+class TestParseConcatenatedJson(unittest.TestCase):
+    """gh api --paginate emits one JSON array per page, back to back;
+    the parser must flatten them into a single list."""
+
+    def test_single_page_is_a_plain_array(self):
+        self.assertEqual(collect.parse_concatenated_json('[{"a": 1}]'),
+                         [{"a": 1}])
+
+    def test_multiple_pages_are_flattened(self):
+        out = '[{"a": 1}, {"a": 2}]\n[{"a": 3}]'
+        self.assertEqual(collect.parse_concatenated_json(out),
+                         [{"a": 1}, {"a": 2}, {"a": 3}])
+
+    def test_empty_output_is_an_empty_list(self):
+        self.assertEqual(collect.parse_concatenated_json(""), [])
+        self.assertEqual(collect.parse_concatenated_json("  \n"), [])
 
 
 class TestOwnerlessEmptyWeek(unittest.TestCase):
@@ -720,6 +792,7 @@ class TestTemplate(unittest.TestCase):
 
     def test_no_em_dash_anywhere(self):
         self.assertNotIn("\u2014", self.text)
+
 
 
 if __name__ == "__main__":

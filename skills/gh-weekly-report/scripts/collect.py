@@ -188,35 +188,35 @@ def fetch_reviews_given(owner: str, actor: str, start: date, end: date) -> list[
     return given
 
 
-def fetch_commits(owner: str, actor: str, start: date, end: date,
+COMMIT_SEARCH_FIELDS = "sha,commit,repository,url"
+
+
+def fetch_commits(owner: str | None, actor: str, start: date, end: date,
                   attribute: bool) -> list[dict]:
-    repos = gh_json(["repo", "list", owner,
-                     "--json", "name,defaultBranchRef,pushedAt",
-                     "--limit", str(SEARCH_LIMIT)])
-    if len(repos) >= SEARCH_LIMIT:
-        print(f"warning: gh repo list hit the {SEARCH_LIMIT}-result cap; "
-              "commit activity in repos beyond it is missing", file=sys.stderr)
+    """Commits the actor authored, windowed on committer date: a squash
+    merge carries the merge moment as committer date, so merged work lands
+    in the week it merged. Accepted limits of the search index: default
+    branch only, GitHub-linked commit email matching, eventual consistency.
+    """
+    raw = gh_json(["search", "commits", *owner_flag(owner),
+                   "--author", actor,
+                   "--committer-date", f"{start}..{end}",
+                   "--json", COMMIT_SEARCH_FIELDS,
+                   "--limit", str(SEARCH_LIMIT)])
+    if len(raw) >= SEARCH_LIMIT:
+        print(f"warning: gh search commits hit the {SEARCH_LIMIT}-result cap; "
+              "the report may be missing commits", file=sys.stderr)
     commits = []
-    for repo in repos:
-        pushed = repo.get("pushedAt")
-        branch = (repo.get("defaultBranchRef") or {}).get("name")
-        if not branch or not pushed or date.fromisoformat(pushed[:10]) < start:
-            continue
-        full = f"{owner}/{repo['name']}"
-        raw = gh_json(["api",
-                       f"repos/{full}/commits?sha={branch}&author={actor}"
-                       f"&since={start}T00:00:00Z&until={end}T23:59:59Z"
-                       "&per_page=100", "--paginate"])
-        for c in raw:
-            headline = c["commit"]["message"].splitlines()[0]
-            commits.append({
-                "key": c["sha"],
-                "repo": full,
-                "title": headline,
-                "url": c["html_url"],
-                "committed_at": c["commit"]["author"]["date"],
-                "signal": classify_signal(headline),
-            })
+    for c in raw:
+        headline = c["commit"]["message"].splitlines()[0]
+        commits.append({
+            "key": c["sha"],
+            "repo": c["repository"]["fullName"],
+            "title": headline,
+            "url": c["url"],
+            "committed_at": c["commit"]["committer"]["date"],
+            "signal": classify_signal(headline),
+        })
     if attribute:
         pr_by_sha = {}
         for c in commits:

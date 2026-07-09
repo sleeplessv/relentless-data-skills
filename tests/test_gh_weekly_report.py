@@ -327,25 +327,21 @@ def fake_run_gh(args):
         return json.dumps([{"user": {"login": "alice"},
                             "submitted_at": "2026-07-01T10:00:00Z",
                             "state": "APPROVED"}])
-    if args[:2] == ["repo", "list"]:
-        return json.dumps([
-            {"name": "data", "defaultBranchRef": {"name": "main"},
-             "pushedAt": "2026-07-01T00:00:00Z"},
-            {"name": "dormant", "defaultBranchRef": {"name": "main"},
-             "pushedAt": "2026-05-01T00:00:00Z"},
-        ])
+    if args[:2] == ["search", "commits"]:
+        # Author date deliberately differs from committer date: the window
+        # and committed_at must follow the committer date (a squash merge
+        # carries the merge moment there).
+        return only_current([{
+            "sha": "abc123",
+            "url": "https://github.com/acme/data/commit/abc123",
+            "repository": {"fullName": "acme/data"},
+            "commit": {"message": "feat: new thing\n\nlong body",
+                       "author": {"date": "2026-06-30T23:00:00Z"},
+                       "committer": {"date": "2026-07-01T10:00:00Z"}},
+        }])
     if joined.startswith("api repos/acme/data/commits/abc123/pulls"):
         return json.dumps([{"number": 7,
                             "base": {"repo": {"full_name": "acme/data"}}}])
-    if joined.startswith("api repos/acme/data/commits"):
-        if "since=2026-06-29" in joined:
-            return json.dumps([{
-                "sha": "abc123",
-                "html_url": "https://github.com/acme/data/commit/abc123",
-                "commit": {"message": "feat: new thing\n\nlong body",
-                           "author": {"date": "2026-07-01T10:00:00Z"}},
-            }])
-        return "[]"
     raise AssertionError(f"unexpected gh call: {joined}")
 
 
@@ -354,6 +350,65 @@ def _pr(number, title):
             "url": f"https://github.com/acme/data/pull/{number}",
             "repository": {"nameWithOwner": "acme/data"},
             "labels": [], "author": {"login": "alice"}, "state": "closed"}
+
+
+class TestFetchCommitsSearch(unittest.TestCase):
+    """Commits come from gh search commits windowed on committer date,
+    not from enumerating an owner's repos."""
+
+    WINDOW = (date(2026, 6, 29), date(2026, 7, 5))
+
+    def _search_args(self, owner):
+        calls = []
+
+        def recorder(gh_args):
+            calls.append(gh_args)
+            return "[]"
+
+        with mock.patch.object(collect, "run_gh", side_effect=recorder):
+            collect.fetch_commits(owner, "alice", *self.WINDOW, attribute=False)
+        (args,) = calls
+        return args
+
+    def test_windows_on_committer_date(self):
+        args = self._search_args(owner=None)
+        self.assertEqual(args[:2], ["search", "commits"])
+        self.assertEqual(args[args.index("--author") + 1], "alice")
+        self.assertEqual(args[args.index("--committer-date") + 1],
+                         "2026-06-29..2026-07-05")
+
+    def test_owner_flag_only_when_filtering(self):
+        self.assertNotIn("--owner", self._search_args(owner=None))
+        args = self._search_args(owner="acme")
+        self.assertEqual(args[args.index("--owner") + 1], "acme")
+
+    def test_normalises_and_attributes_from_search_payload(self):
+        with mock.patch.object(collect, "run_gh", side_effect=fake_run_gh):
+            (commit,) = collect.fetch_commits("acme", "alice", *self.WINDOW,
+                                              attribute=True)
+        self.assertEqual(commit["key"], "abc123")
+        self.assertEqual(commit["repo"], "acme/data")
+        self.assertEqual(commit["title"], "feat: new thing")
+        # Committer date, not author date: squash merges carry the merge
+        # moment as committer date.
+        self.assertEqual(commit["committed_at"], "2026-07-01T10:00:00Z")
+        self.assertEqual(commit["signal"], "feature")
+        self.assertEqual(commit["pr"], "acme/data#7")
+        self.assertFalse(commit["direct_push"])
+
+    def test_no_attribution_calls_when_not_requested(self):
+        calls = []
+
+        def recorder(gh_args):
+            calls.append(gh_args)
+            return fake_run_gh(gh_args)
+
+        with mock.patch.object(collect, "run_gh", side_effect=recorder):
+            commits = collect.fetch_commits("acme", "alice", *self.WINDOW,
+                                            attribute=False)
+        self.assertEqual([a for a in calls if a[0] == "api"], [])
+        self.assertTrue(commits)
+        self.assertNotIn("pr", commits[0])
 
 
 class TestWeekJsonContract(unittest.TestCase):

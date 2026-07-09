@@ -285,6 +285,30 @@ def fake_run_gh(args):
     def only_current(payload):
         return json.dumps(payload if CUR in joined else [])
 
+    if args[:2] == ["search", "issues"] and "--commenter" in joined:
+        # Discussion candidates: #10 is someone else's thread alice
+        # commented on; #11 is alice's own (must be excluded before any
+        # comments API call, or the dispatcher raises on it).
+        return json.dumps([
+            {"number": 10, "title": "design debate",
+             "url": "https://github.com/acme/tools/issues/10",
+             "repository": {"nameWithOwner": "acme/tools"},
+             "labels": [], "author": {"login": "bob"}, "state": "open",
+             "createdAt": "2026-06-01T00:00:00Z"},
+            {"number": 11, "title": "alice's own thread",
+             "url": "https://github.com/acme/tools/issues/11",
+             "repository": {"nameWithOwner": "acme/tools"},
+             "labels": [], "author": {"login": "alice"}, "state": "open",
+             "createdAt": "2026-06-01T00:00:00Z"},
+        ])
+    if args[:2] == ["search", "prs"] and "--commenter" in joined:
+        return "[]"
+    if joined.startswith("api repos/acme/tools/issues/10/comments"):
+        return json.dumps([
+            {"user": {"login": "alice"}, "created_at": "2026-07-01T09:00:00Z"},
+            {"user": {"login": "alice"}, "created_at": "2026-06-10T08:00:00Z"},
+            {"user": {"login": "bob"}, "created_at": "2026-07-01T11:00:00Z"},
+        ])
     if args[:2] == ["search", "issues"] and "--author" in joined:
         return only_current([{
             "number": 1, "title": "feat: new thing",
@@ -293,7 +317,9 @@ def fake_run_gh(args):
             "labels": [{"name": "enhancement"}],
             "createdAt": "2026-06-30T09:00:00Z", "state": "open",
         }])
-    if args[:2] == ["search", "issues"]:  # closed candidates, any author
+    if args[:2] == ["search", "issues"] and "--involves" in joined:
+        # Closed candidates: search has no closed-by qualifier, so
+        # collect must cast the --involves net and filter by closer.
         return only_current([
             {"number": 3, "title": "fix: broken join",
              "url": "https://github.com/acme/data/issues/3",
@@ -442,7 +468,7 @@ class TestWeekJsonContract(unittest.TestCase):
                 set(self.week[period]),
                 {"issues_created", "issues_resolved", "issues_not_planned",
                  "prs_created", "prs_merged", "prs_abandoned",
-                 "reviews_given", "commits"},
+                 "reviews_given", "commits", "discussions"},
             )
 
     def test_current_period_applies_the_metric_rules(self):
@@ -453,6 +479,7 @@ class TestWeekJsonContract(unittest.TestCase):
         self.assertEqual([p["key"] for p in cur["prs_merged"]], ["acme/data#7"])
         self.assertEqual([p["key"] for p in cur["prs_abandoned"]], ["acme/data#8"])
         self.assertEqual([r["key"] for r in cur["reviews_given"]], ["acme/tools#5"])
+        self.assertEqual([d["key"] for d in cur["discussions"]], ["acme/tools#10"])
 
     def test_items_carry_drilldown_fields_and_signal(self):
         item = self.week["current"]["issues_created"][0]
@@ -468,8 +495,82 @@ class TestWeekJsonContract(unittest.TestCase):
         self.assertEqual(commit["pr"], "acme/data#7")
         self.assertFalse(commit["direct_push"])
 
+    def test_discussion_items_carry_the_pinned_shape(self):
+        # The render ticket depends on this exact contract: every
+        # norm_item field plus commented_at and comments.
+        (item,) = self.week["current"]["discussions"]
+        self.assertEqual(
+            set(item),
+            {"key", "repo", "number", "title", "url", "labels", "author",
+             "created_at", "closed_at", "signal", "commented_at", "comments"},
+        )
+        self.assertEqual(item["commented_at"], "2026-07-01T09:00:00Z")
+        self.assertEqual(item["comments"], 1)
+
     def test_previous_period_is_empty(self):
         self.assertTrue(all(v == [] for v in self.week["previous"].values()))
+
+
+class TestFetchDiscussions(unittest.TestCase):
+    """Discussions = items the actor commented on but did not author,
+    window-checked against the actor's own comment timestamps."""
+
+    def _fetch(self, start, end):
+        with mock.patch.object(collect, "run_gh", side_effect=fake_run_gh):
+            return collect.fetch_discussions("alice", start, end, "acme")
+
+    def test_keeps_commented_item_authored_by_someone_else(self):
+        items = self._fetch(date(2026, 6, 29), date(2026, 7, 5))
+        self.assertEqual([i["key"] for i in items], ["acme/tools#10"])
+
+    def test_first_in_window_comment_time_and_count(self):
+        (item,) = self._fetch(date(2026, 6, 29), date(2026, 7, 5))
+        # Only the 2026-07-01 alice comment is in window; bob's comment
+        # and alice's 2026-06-10 comment must not count.
+        self.assertEqual(item["commented_at"], "2026-07-01T09:00:00Z")
+        self.assertEqual(item["comments"], 1)
+
+    def test_authored_items_are_excluded_before_the_comments_api(self):
+        # fake_run_gh has no comments branch for #11 (alice's own thread)
+        # and raises on unexpected calls, so reaching the API for it
+        # would fail loudly. The result must not contain it either.
+        items = self._fetch(date(2026, 6, 29), date(2026, 7, 5))
+        self.assertNotIn("acme/tools#11", [i["key"] for i in items])
+
+    def test_item_with_no_in_window_comments_is_dropped(self):
+        self.assertEqual(self._fetch(date(2026, 6, 22), date(2026, 6, 28)), [])
+
+
+class TestOwnerlessEmptyWeek(unittest.TestCase):
+    """No --owner: nothing is derived from the invoking repo (a gh repo
+    view call would trip the dispatcher's unexpected-call assertion),
+    week.json carries owner null, and an empty week is still a valid
+    all-empty payload."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.TemporaryDirectory()
+        with mock.patch.object(collect, "run_gh", side_effect=fake_run_gh), \
+                contextlib.redirect_stdout(io.StringIO()):
+            collect.main([
+                "--actor", "alice",
+                "--from", "2026-06-22", "--to", "2026-06-28",
+                "--out", cls.tmp.name,
+            ])
+        cls.week = json.loads((Path(cls.tmp.name) / "week.json").read_text())
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.tmp.cleanup()
+
+    def test_owner_is_null_when_no_filter_given(self):
+        self.assertIsNone(self.week["owner"])
+
+    def test_all_components_empty_in_both_periods(self):
+        for period in ("current", "previous"):
+            self.assertEqual(
+                [k for k, v in self.week[period].items() if v != []], [],
+                period)
 
 
 def tiny_week():

@@ -16,15 +16,25 @@ import sys
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-SEARCH_LIMIT = 200
+SEARCH_LIMIT = 1000
 
 
 def run_gh(args: list[str]) -> str:
-    """Single seam to the gh CLI; tests replace this function."""
+    """Single seam to the gh CLI; tests replace this function.
+
+    Retries once on a nonzero exit (search endpoints flake) before raising.
+    """
     res = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if res.returncode != 0:
+        res = subprocess.run(["gh", *args], capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed: {res.stderr.strip()}")
     return res.stdout
+
+
+def owner_flag(owner: str | None) -> list[str]:
+    """Owner is an optional narrowing filter; absent means no scoping."""
+    return ["--owner", owner] if owner else []
 
 
 def gh_json(args: list[str]):
@@ -142,8 +152,8 @@ def norm_item(raw: dict) -> dict:
     }
 
 
-def search(kind: str, extra: list[str], owner: str) -> list[dict]:
-    args = ["search", kind, "--owner", owner, "--json", SEARCH_FIELDS,
+def search(kind: str, extra: list[str], owner: str | None) -> list[dict]:
+    args = ["search", kind, *owner_flag(owner), "--json", SEARCH_FIELDS,
             "--limit", str(SEARCH_LIMIT), *extra]
     results = gh_json(args)
     if len(results) >= SEARCH_LIMIT:

@@ -14,6 +14,7 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -200,6 +201,77 @@ class TestClassifySignal(unittest.TestCase):
     def test_unrecognised_title_yields_none(self):
         self.assertIsNone(collect.classify_signal("Update README"))
         self.assertIsNone(collect.classify_signal("feature without colon"))
+
+
+class TestRunGhRetry(unittest.TestCase):
+    """run_gh retries a failed gh invocation once before raising."""
+
+    @staticmethod
+    def _completed(code, stdout="", stderr=""):
+        return subprocess.CompletedProcess(
+            args=["gh"], returncode=code, stdout=stdout, stderr=stderr)
+
+    def test_success_does_not_retry(self):
+        with mock.patch.object(collect.subprocess, "run",
+                               side_effect=[self._completed(0, stdout="ok")]) as run:
+            self.assertEqual(collect.run_gh(["api", "user"]), "ok")
+        self.assertEqual(run.call_count, 1)
+
+    def test_failure_then_success_returns_output(self):
+        with mock.patch.object(
+                collect.subprocess, "run",
+                side_effect=[self._completed(1, stderr="flake"),
+                             self._completed(0, stdout="ok")]) as run:
+            self.assertEqual(collect.run_gh(["api", "user"]), "ok")
+        self.assertEqual(run.call_count, 2)
+
+    def test_two_failures_raise(self):
+        with mock.patch.object(
+                collect.subprocess, "run",
+                side_effect=[self._completed(1, stderr="down"),
+                             self._completed(1, stderr="down")]) as run:
+            with self.assertRaises(RuntimeError):
+                collect.run_gh(["api", "user"])
+        self.assertEqual(run.call_count, 2)
+
+
+class TestSearchArgs(unittest.TestCase):
+    """Owner is an optional narrowing filter: present means an --owner
+    flag on the search, absent means no owner scoping at all."""
+
+    def _search_args(self, owner):
+        calls = []
+
+        def recorder(gh_args):
+            calls.append(gh_args)
+            return "[]"
+
+        with mock.patch.object(collect, "run_gh", side_effect=recorder):
+            collect.search("issues", ["--author", "alice"], owner)
+        (args,) = calls
+        return args
+
+    def test_owner_present_adds_owner_flag(self):
+        args = self._search_args("acme")
+        self.assertEqual(args[args.index("--owner") + 1], "acme")
+
+    def test_owner_absent_omits_owner_flag(self):
+        self.assertNotIn("--owner", self._search_args(None))
+
+    def test_search_limit_is_1000(self):
+        self.assertEqual(collect.SEARCH_LIMIT, 1000)
+        args = self._search_args(None)
+        self.assertEqual(args[args.index("--limit") + 1], "1000")
+
+    def test_cap_warning_when_results_hit_limit(self):
+        raw = json.dumps([{"number": i, "title": "t", "url": "u",
+                           "repository": {"nameWithOwner": "acme/data"},
+                           "labels": []} for i in range(collect.SEARCH_LIMIT)])
+        stderr = io.StringIO()
+        with mock.patch.object(collect, "run_gh", return_value=raw), \
+                contextlib.redirect_stderr(stderr):
+            collect.search("issues", [], "acme")
+        self.assertIn("cap", stderr.getvalue())
 
 
 CUR = "2026-06-29..2026-07-05"

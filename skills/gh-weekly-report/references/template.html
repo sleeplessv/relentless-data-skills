@@ -4,97 +4,86 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>GitHub week</title>
+<!-- Styling and charts come from CDNs; every byte of data is embedded below.
+     Offline the page stays readable: content and lists render unstyled,
+     charts are skipped with a note. -->
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
 <style>
+  /* Chart palette (validated with the dataviz six-checks script).
+     Light/dark swap in one place; the script reads these by role. */
   :root {
-    --ink: #1a1a2e; --muted: #6b7280; --line: #e5e7eb; --bg: #fafafa;
-    --card: #ffffff; --accent: #4f46e5; --up: #059669; --down: #dc2626;
+    --surface-1: #fcfcfb;
+    --text-secondary: #52514e;
+    --muted: #898781;
+    --grid: #e1e0d9;
+    --delta-up: #006300;
+    --delta-down: #d03b3b;
+    --pos: #2a78d6;   /* diverging cool pole */
+    --neg: #e34948;   /* diverging warm pole */
+    --b-feature: #2a78d6; --b-fix: #1baf7a; --b-refactor: #eda100;
+    --b-docs: #008300; --b-chore-infra: #4a3aa7;
+    --b-triage-review: #e34948; --b-other: #898781;
   }
-  * { box-sizing: border-box; margin: 0; }
-  body {
-    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
-          Helvetica, Arial, sans-serif;
-    color: var(--ink); background: var(--bg); padding: 2rem 1rem 4rem;
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --surface-1: #1a1a19;
+      --text-secondary: #c3c2b7;
+      --grid: #2c2c2a;
+      --delta-up: #0ca30c;
+      --pos: #3987e5;
+      --neg: #e66767;
+      --b-feature: #3987e5; --b-fix: #199e70; --b-refactor: #c98500;
+      --b-docs: #008300; --b-chore-infra: #9085e9;
+      --b-triage-review: #e66767; --b-other: #898781;
+    }
   }
-  main { max-width: 960px; margin: 0 auto; }
-  header h1 { font-size: 1.6rem; letter-spacing: -0.02em; }
-  header p { color: var(--muted); margin-top: 0.25rem; }
-  h2 {
-    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.08em;
-    color: var(--muted); margin: 2.25rem 0 0.75rem;
-  }
-  .counters { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; }
-  .card {
-    background: var(--card); border: 1px solid var(--line); border-radius: 10px;
-    padding: 0.9rem 1rem; cursor: pointer; text-align: left; width: 100%;
-    font: inherit; transition: border-color 0.15s;
-  }
-  .card:hover { border-color: var(--accent); }
-  .card.active { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .card .n { font-size: 1.8rem; font-weight: 700; letter-spacing: -0.03em; }
-  .card .label { color: var(--muted); font-size: 0.8rem; }
-  .delta { font-size: 0.8rem; font-weight: 600; margin-left: 0.4rem; }
-  .delta.up { color: var(--up); } .delta.down { color: var(--down); }
+  .card.active { outline: 2px solid var(--pos); outline-offset: -1px; }
+  .delta.up { color: var(--delta-up); }
+  .delta.down { color: var(--delta-down); }
   .delta.flat { color: var(--muted); }
-  .minor { color: var(--muted); font-size: 0.85rem; margin-top: 0.6rem; }
-  .minor button {
-    font: inherit; color: inherit; background: none; border: none;
-    cursor: pointer; text-decoration: underline dotted; padding: 0;
-  }
-  .bars .row, .repos .row {
-    display: grid; grid-template-columns: 10rem 1fr 3rem; align-items: center;
-    gap: 0.75rem; padding: 0.3rem 0; cursor: pointer; border: none;
-    background: none; font: inherit; width: 100%; text-align: left;
-    border-radius: 6px;
-  }
-  .bars .row:hover, .repos .row:hover { background: #f0f0f5; }
-  .bars .name, .repos .name {
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .bar { height: 0.9rem; border-radius: 4px; background: var(--accent); min-width: 2px; }
-  .count { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
-  .b-feature { background: #4f46e5; } .b-fix { background: #dc2626; }
-  .b-refactor { background: #d97706; } .b-docs { background: #2563eb; }
-  .b-chore-infra { background: #6b7280; } .b-triage-review { background: #0d9488; }
-  .b-other { background: #a8a29e; }
-  #detail { margin-top: 2.25rem; }
-  #detail .placeholder { color: var(--muted); font-style: italic; }
-  .item {
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: 0.6rem 0.9rem; margin-bottom: 0.5rem;
-    display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline;
-  }
-  .item a { color: var(--ink); font-weight: 600; text-decoration: none; }
-  .item a:hover { color: var(--accent); text-decoration: underline; }
-  .chip {
-    font-size: 0.72rem; padding: 0.1rem 0.5rem; border-radius: 999px;
-    background: #eef2ff; color: #3730a3; white-space: nowrap;
-  }
-  .chip.bucket { color: #fff; }
-  .meta { color: var(--muted); font-size: 0.8rem; }
-  footer { margin-top: 3rem; color: var(--muted); font-size: 0.8rem; }
+  .bar { height: 0.9rem; border-radius: 4px; min-width: 2px; background: var(--pos); }
+  .b-feature { background: var(--b-feature); } .b-fix { background: var(--b-fix); }
+  .b-refactor { background: var(--b-refactor); } .b-docs { background: var(--b-docs); }
+  .b-chore-infra { background: var(--b-chore-infra); }
+  .b-triage-review { background: var(--b-triage-review); }
+  .b-other { background: var(--b-other); }
 </style>
 </head>
-<body>
-<main>
+<body class="bg-[#f9f9f7] text-[#0b0b0b] dark:bg-[#0d0d0d] dark:text-white antialiased">
+<main class="mx-auto max-w-4xl px-4 py-10 font-sans text-[15px] leading-normal">
   <header>
-    <h1 id="title"></h1>
-    <p id="subtitle"></p>
+    <h1 id="title" class="text-2xl font-bold tracking-tight"></h1>
+    <p id="subtitle" class="mt-1 text-sm text-[#52514e] dark:text-[#c3c2b7]"></p>
   </header>
 
-  <h2>Headlines</h2>
-  <div class="counters" id="counters"></div>
-  <p class="minor" id="minor"></p>
+  <h2 class="mt-9 mb-3 text-xs font-semibold uppercase tracking-widest text-[#898781]">Headlines</h2>
+  <div id="counters" class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"></div>
+  <p id="minor" class="mt-2.5 text-sm text-[#898781]"></p>
 
-  <h2>Buckets</h2>
-  <div class="bars" id="buckets"></div>
+  <h2 class="mt-9 mb-3 text-xs font-semibold uppercase tracking-widest text-[#898781]">Charts</h2>
+  <div class="grid gap-4 md:grid-cols-2">
+    <figure class="rounded-xl border border-black/10 bg-[#fcfcfb] p-4 dark:border-white/10 dark:bg-[#1a1a19]">
+      <figcaption class="mb-2 text-sm font-semibold">Bucket mix, current week</figcaption>
+      <div class="relative h-60"><canvas id="chart-buckets"></canvas></div>
+    </figure>
+    <figure class="rounded-xl border border-black/10 bg-[#fcfcfb] p-4 dark:border-white/10 dark:bg-[#1a1a19]">
+      <figcaption class="mb-2 text-sm font-semibold">Week-over-week deltas</figcaption>
+      <div class="relative h-60"><canvas id="chart-deltas"></canvas></div>
+    </figure>
+  </div>
+  <p id="charts-fallback" style="display: none" class="mt-2 text-sm italic text-[#898781]">Charts skipped (no network for the Chart.js CDN); the bucket rows and counters below carry the same data.</p>
 
-  <h2>Repos</h2>
-  <div class="repos" id="repos"></div>
+  <h2 class="mt-9 mb-3 text-xs font-semibold uppercase tracking-widest text-[#898781]">Buckets</h2>
+  <div id="buckets"></div>
 
-  <h2 id="detail-heading">Detail</h2>
-  <div id="detail"><p class="placeholder">Click any counter, bucket, or repo to drill down.</p></div>
+  <h2 class="mt-9 mb-3 text-xs font-semibold uppercase tracking-widest text-[#898781]">Repos</h2>
+  <div id="repos"></div>
 
-  <footer id="footer"></footer>
+  <h2 id="detail-heading" class="mt-9 mb-3 text-xs font-semibold uppercase tracking-widest text-[#898781]">Detail</h2>
+  <div id="detail"><p class="italic text-[#898781]">Click any counter, bucket, or repo to drill down.</p></div>
+
+  <footer id="footer" class="mt-12 text-xs text-[#898781]"></footer>
 </main>
 
 <script id="report-data" type="application/json">__REPORT_DATA__</script>
@@ -108,6 +97,7 @@ const METRICS = [
   ["prs_created", "PRs created"],
   ["prs_merged", "PRs merged"],
   ["reviews_given", "Reviews given"],
+  ["discussions", "Discussions"],
   ["commits", "Commits"],
 ];
 const MINOR = [
@@ -115,12 +105,14 @@ const MINOR = [
   ["prs_abandoned", "PRs abandoned"],
 ];
 
+// The report keys on the actor; owner is only an optional repo filter.
 document.getElementById("title").textContent =
-  `GitHub week ${DATA.window.iso_week} — ${DATA.actor}`;
+  `GitHub week ${DATA.window.iso_week} - ${DATA.actor}`;
 document.getElementById("subtitle").textContent =
-  `${DATA.window.from} → ${DATA.window.to} · repos owned by ${DATA.owner}`;
+  `${DATA.window.from} to ${DATA.window.to}` +
+  (DATA.owner ? `, filtered to repos owned by ${DATA.owner}` : "");
 document.getElementById("footer").textContent =
-  `Deltas vs ${DATA.previous_window.from} → ${DATA.previous_window.to}. ` +
+  `Deltas vs ${DATA.previous_window.from} to ${DATA.previous_window.to}. ` +
   `Times are UTC.`;
 
 // One entry per distinct piece of work, remembering every list it sits in.
@@ -136,8 +128,9 @@ const ITEMS = [...byKey.values()];
 function deltaBadge(cur, prev) {
   const d = cur - prev;
   const el = document.createElement("span");
-  el.className = "delta " + (d > 0 ? "up" : d < 0 ? "down" : "flat");
-  el.textContent = d > 0 ? `▲${d}` : d < 0 ? `▼${-d}` : "–";
+  el.className = "delta ml-1.5 text-xs font-semibold "
+    + (d > 0 ? "up" : d < 0 ? "down" : "flat");
+  el.textContent = d > 0 ? `+${d}` : d < 0 ? `${d}` : "0";
   el.title = `previous week: ${prev}`;
   return el;
 }
@@ -150,19 +143,20 @@ function select(card, title, items) {
   renderDetail(title, items);
 }
 
-// Headline counters
+// Headline counters: fixed set and order, so week N looks like week N-1.
 const counters = document.getElementById("counters");
 for (const [metric, label] of METRICS) {
   const cur = DATA.current[metric] || [];
   const prev = DATA.previous[metric] || [];
   const card = document.createElement("button");
-  card.className = "card";
+  card.className = "card w-full rounded-xl border border-black/10 "
+    + "bg-[#fcfcfb] px-4 py-3 text-left dark:border-white/10 dark:bg-[#1a1a19]";
   const n = document.createElement("div");
-  n.className = "n";
+  n.className = "text-2xl font-bold tracking-tight";
   n.textContent = cur.length;
   n.appendChild(deltaBadge(cur.length, prev.length));
   const l = document.createElement("div");
-  l.className = "label";
+  l.className = "text-xs text-[#898781]";
   l.textContent = label;
   card.append(n, l);
   card.onclick = () => select(card, label, cur);
@@ -174,57 +168,86 @@ const minor = document.getElementById("minor");
 MINOR.forEach(([metric, label], i) => {
   const cur = DATA.current[metric] || [];
   const btn = document.createElement("button");
+  btn.className = "underline decoration-dotted";
   btn.textContent = `${cur.length} ${label}`;
   btn.onclick = () => select(null, label, cur);
-  if (i) minor.append(" · ");
+  if (i) minor.append(" | ");
   minor.appendChild(btn);
 });
 
 function cssBucket(bucket) { return "b-" + bucket.replace(/[^a-z]+/g, "-"); }
 
+function barRow(name, items, colorClass) {
+  const row = document.createElement("button");
+  row.className = "row grid w-full grid-cols-[10rem_1fr_3rem] items-center "
+    + "gap-3 rounded-md px-1 py-1 text-left hover:bg-black/5 "
+    + "dark:hover:bg-white/10";
+  const label = document.createElement("span");
+  label.className = "overflow-hidden text-ellipsis whitespace-nowrap";
+  label.textContent = name;
+  const bar = document.createElement("div");
+  bar.className = "bar " + (colorClass || "");
+  const count = document.createElement("span");
+  count.className = "text-right tabular-nums text-[#898781]";
+  count.textContent = items.length;
+  row.append(label, bar, count);
+  row.onclick = () => select(null, name, items);
+  return { row, bar };
+}
+
 function barRows(container, groups, colorFor) {
   const max = Math.max(1, ...groups.map(([, items]) => items.length));
   for (const [name, items] of groups) {
-    const row = document.createElement("button");
-    row.className = "row";
-    const label = document.createElement("span");
-    label.className = "name";
-    label.textContent = name;
-    const bar = document.createElement("div");
-    bar.className = "bar " + (colorFor ? colorFor(name) : "");
+    const { row, bar } = barRow(name, items, colorFor && colorFor(name));
     bar.style.width = (items.length / max) * 100 + "%";
-    const count = document.createElement("span");
-    count.className = "count";
-    count.textContent = items.length;
-    row.append(label, bar, count);
-    row.onclick = () => select(null, name, items);
     container.appendChild(row);
   }
 }
 
 const BUCKET_ORDER = ["feature", "fix", "refactor", "docs", "chore/infra",
                       "triage/review", "other"];
+const bucketCounts = BUCKET_ORDER.map(
+  b => [b, ITEMS.filter(i => i.bucket === b)]);
 barRows(
   document.getElementById("buckets"),
-  BUCKET_ORDER.map(b => [b, ITEMS.filter(i => i.bucket === b)])
-              .filter(([, items]) => items.length),
+  bucketCounts.filter(([, items]) => items.length),
   cssBucket,
 );
 
-barRows(
-  document.getElementById("repos"),
-  [...new Set(ITEMS.map(i => i.repo))].sort()
-    .map(r => [r, ITEMS.filter(i => i.repo === r)]),
-);
+// Repos: the agent's narrative (when authored) sits above each repo's
+// drill-down row; a repo without one just shows the row.
+{
+  const reposEl = document.getElementById("repos");
+  const repos = [...new Set(ITEMS.map(i => i.repo))].filter(Boolean).sort();
+  const maxRepo = Math.max(1, ...repos.map(
+    r => ITEMS.filter(i => i.repo === r).length));
+  for (const repo of repos) {
+    const items = ITEMS.filter(i => i.repo === repo);
+    const block = document.createElement("div");
+    block.className = "mb-2";
+    const narrative = (DATA.narratives || {})[repo];
+    if (narrative) {
+      const p = document.createElement("p");
+      p.className = "narrative mb-1 border-l-2 border-black/10 pl-3 text-sm "
+        + "text-[#52514e] dark:border-white/10 dark:text-[#c3c2b7]";
+      p.textContent = narrative;
+      block.appendChild(p);
+    }
+    const { row, bar } = barRow(repo, items);
+    bar.style.width = (items.length / maxRepo) * 100 + "%";
+    block.appendChild(row);
+    reposEl.appendChild(block);
+  }
+}
 
 const METRIC_LABEL = Object.fromEntries([...METRICS, ...MINOR]);
 function renderDetail(title, items) {
-  document.getElementById("detail-heading").textContent = `Detail — ${title}`;
+  document.getElementById("detail-heading").textContent = `Detail: ${title}`;
   const detail = document.getElementById("detail");
   detail.textContent = "";
   if (!items.length) {
     const p = document.createElement("p");
-    p.className = "placeholder";
+    p.className = "italic text-[#898781]";
     p.textContent = "Nothing here this week.";
     detail.appendChild(p);
     return;
@@ -232,33 +255,103 @@ function renderDetail(title, items) {
   for (const raw of items) {
     const item = byKey.get(raw.key) || raw;
     const row = document.createElement("div");
-    row.className = "item";
+    row.className = "mb-2 flex flex-wrap items-baseline gap-2 rounded-lg "
+      + "border border-black/10 bg-[#fcfcfb] px-3.5 py-2 "
+      + "dark:border-white/10 dark:bg-[#1a1a19]";
     const a = document.createElement("a");
     a.href = item.url;
     a.target = "_blank";
     a.rel = "noopener";
+    a.className = "font-semibold hover:underline";
     a.textContent = item.title;
     row.appendChild(a);
     if (item.bucket) {
       const b = document.createElement("span");
-      b.className = "chip bucket " + cssBucket(item.bucket);
+      b.className = "whitespace-nowrap rounded-full px-2 py-0.5 text-xs "
+        + "text-white " + cssBucket(item.bucket);
       b.textContent = item.bucket;
       row.appendChild(b);
     }
     const meta = document.createElement("span");
-    meta.className = "meta";
+    meta.className = "text-xs text-[#898781]";
     const bits = [item.key];
     if (item.direct_push) bits.push("direct push");
     else if (item.pr) bits.push(`via ${item.pr}`);
     if (item.review_states) bits.push(item.review_states.join(", ").toLowerCase());
+    if (typeof item.comments === "number") bits.push(`${item.comments} comments`);
     if (item.metrics) {
-      bits.push(item.metrics.map(m => METRIC_LABEL[m].toLowerCase()).join(" · "));
+      bits.push(item.metrics.map(m => METRIC_LABEL[m].toLowerCase()).join(", "));
     }
-    meta.textContent = bits.join(" · ");
+    meta.textContent = bits.join(" | ");
     row.appendChild(meta);
     detail.appendChild(row);
   }
   document.getElementById("detail-heading").scrollIntoView({ behavior: "smooth" });
+}
+
+// Charts (Chart.js). All data above already rendered from the embedded
+// payload, so a missing CDN only costs the pictures, never the content.
+if (typeof Chart === "undefined") {
+  document.getElementById("charts-fallback").style.display = "";
+} else {
+  const cssVar = name => getComputedStyle(document.documentElement)
+    .getPropertyValue(name).trim();
+  Chart.defaults.color = cssVar("--muted");
+  Chart.defaults.font.family =
+    'system-ui, -apple-system, "Segoe UI", sans-serif';
+  const gridColor = cssVar("--grid");
+  const barOpts = {
+    indexAxis: "y",
+    maintainAspectRatio: false,
+    plugins: { legend: { display: false } },  // single series: title names it
+    scales: {
+      x: { grid: { color: gridColor }, ticks: { precision: 0 } },
+      y: { grid: { display: false } },
+    },
+  };
+
+  // Bucket mix: identity job, one fixed categorical hue per bucket
+  // ("other" wears the de-emphasis gray). All buckets always plotted,
+  // in taxonomy order, so the layout is stable week to week.
+  new Chart(document.getElementById("chart-buckets"), {
+    type: "bar",
+    data: {
+      labels: BUCKET_ORDER,
+      datasets: [{
+        data: bucketCounts.map(([, items]) => items.length),
+        backgroundColor: BUCKET_ORDER.map(b => cssVar("--" + cssBucket(b))),
+        borderRadius: 4,          // rounded data end,
+        borderSkipped: "start",   // square at the baseline
+        maxBarThickness: 24,
+        categoryPercentage: 0.72,
+      }],
+    },
+    options: { ...barOpts,
+      scales: { ...barOpts.scales,
+                x: { ...barOpts.scales.x, beginAtZero: true } } },
+  });
+
+  // Week-over-week deltas: polarity job, diverging pair around a zero
+  // baseline (cool = more than last week, warm = less). Every headline
+  // metric always plotted, in headline order.
+  const deltas = METRICS.map(([metric]) =>
+    (DATA.current[metric] || []).length - (DATA.previous[metric] || []).length);
+  new Chart(document.getElementById("chart-deltas"), {
+    type: "bar",
+    data: {
+      labels: METRICS.map(([, label]) => label),
+      datasets: [{
+        data: deltas,
+        backgroundColor: deltas.map(
+          d => d < 0 ? cssVar("--neg") : cssVar("--pos")),
+        borderRadius: 4,
+        borderSkipped: "start",
+        maxBarThickness: 24,
+        categoryPercentage: 0.72,
+      }],
+    },
+    options: barOpts,
+  });
 }
 </script>
 </body>

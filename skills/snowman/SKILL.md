@@ -1,6 +1,6 @@
 ---
 name: snowman
-description: Use when exploring Snowflake data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or preparing a data/schema change via the snow CLI. Never executes writes - DML/DDL the user asks for is staged as a script under .snowman/staged/ for manual execution by the user.
+description: Use for any Snowflake work — running a query, exploring data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or staging a data/schema change. Every snow CLI call goes through this skill.
 ---
 
 # snowman
@@ -18,7 +18,8 @@ Check for **`.snowman/context.md`** in the project root.
 
 - **Absent** → this is a first run. Read [references/install.md](references/install.md),
   run the bootstrap (discovers connection, databases, warehouses, roles →
-  writes `.snowman/context.md`), then continue.
+  writes `.snowman/context.md` and offers a Snowflake routing rule for the
+  project's `AGENTS.md`/`CLAUDE.md`), then continue.
 - **Present** → load it; it is the source of truth for this project's
   Snowflake architecture. Continue with the user's request.
 

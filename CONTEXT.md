@@ -12,5 +12,5 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Work-set** — the resolved list of tickets a feature run will implement; announced before any branch is created.
 - **Wave** — the set of currently-unblocked tickets dispatched in parallel; a wave's ticket branches are cut from the integration-branch tip, so blockers are always merged before their dependants start.
 - **Orchestrated dispatch** — an invocation of `implement-ticket` by an orchestrator with sanctioned overrides (base branch, no per-ticket PR, blockers pre-merged) rather than its solo defaults.
-- **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation.
-- **Owner** — the GitHub account whose repos bound a report's scope; discovered from the repo the skill is invoked in, overridable per invocation. The owner selects the scope — the report covers all of the owner's repos, not just the current one.
+- **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
+- **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.

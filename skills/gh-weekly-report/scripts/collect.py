@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Collect one actor's week of GitHub activity across one owner's repos.
+"""Collect one actor's week of GitHub activity, wherever it happened.
 
+The report is bounded by the actor, not by a repo owner: --owner is an
+optional narrowing filter, and nothing is derived from the invoking repo.
 Shells out to the gh CLI (inheriting its auth) and emits a single
-week.json — the complete drill-down-ready dataset for the report week and
+week.json, the complete drill-down-ready dataset for the report week and
 the week before it. Deterministic: all judgment (bucketing, narrative)
 belongs to the agent, not this script.
 """
@@ -13,23 +15,58 @@ import json
 import re
 import subprocess
 import sys
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-SEARCH_LIMIT = 200
+SEARCH_LIMIT = 1000
+
+
+def rate_limited(stderr: str) -> bool:
+    """GitHub search allows 30 req/min and one collect run makes ~14
+    search calls, so a 403 mid-run usually means the quota, not gh."""
+    low = stderr.lower()
+    return "403" in low or "rate limit" in low
 
 
 def run_gh(args: list[str]) -> str:
-    """Single seam to the gh CLI; tests replace this function."""
+    """Single seam to the gh CLI; tests replace this function.
+
+    Retries once on a nonzero exit (search endpoints flake) before
+    raising; a rate-limited failure waits out the 60-second search
+    quota window first.
+    """
     res = subprocess.run(["gh", *args], capture_output=True, text=True)
+    if res.returncode != 0:
+        if rate_limited(res.stderr):
+            time.sleep(60)
+        res = subprocess.run(["gh", *args], capture_output=True, text=True)
     if res.returncode != 0:
         raise RuntimeError(f"gh {' '.join(args)} failed: {res.stderr.strip()}")
     return res.stdout
 
 
+def owner_flag(owner: str | None) -> list[str]:
+    """Owner is an optional narrowing filter; absent means no scoping."""
+    return ["--owner", owner] if owner else []
+
+
 def gh_json(args: list[str]):
     out = run_gh(args)
     return json.loads(out) if out.strip() else []
+
+
+def parse_concatenated_json(out: str) -> list:
+    """Flatten `gh api --paginate` output: one JSON array per page,
+    emitted back to back, which json.loads alone cannot parse."""
+    decoder = json.JSONDecoder()
+    items: list = []
+    idx, end = 0, len(out)
+    while idx < end and (chunk := out[idx:].lstrip()):
+        page, consumed = decoder.raw_decode(chunk)
+        items.extend(page)
+        idx = end - len(chunk) + consumed
+    return items
 
 
 def previous_window(start: date, end: date) -> tuple[date, date]:
@@ -124,6 +161,7 @@ def compute_window(today: date) -> tuple[date, date]:
 # --- fetch layer: every function below talks to gh through run_gh ---------
 
 SEARCH_FIELDS = "number,title,url,repository,labels,createdAt,closedAt,state,author"
+COMMIT_SEARCH_FIELDS = "sha,commit,repository,url"
 
 
 def norm_item(raw: dict) -> dict:
@@ -142,8 +180,8 @@ def norm_item(raw: dict) -> dict:
     }
 
 
-def search(kind: str, extra: list[str], owner: str) -> list[dict]:
-    args = ["search", kind, "--owner", owner, "--json", SEARCH_FIELDS,
+def search(kind: str, extra: list[str], owner: str | None) -> list[dict]:
+    args = ["search", kind, *owner_flag(owner), "--json", SEARCH_FIELDS,
             "--limit", str(SEARCH_LIMIT), *extra]
     results = gh_json(args)
     if len(results) >= SEARCH_LIMIT:
@@ -162,7 +200,8 @@ def fetch_closed_issue_detail(item: dict) -> dict:
     return item
 
 
-def fetch_reviews_given(owner: str, actor: str, start: date, end: date) -> list[dict]:
+def fetch_reviews_given(owner: str | None, actor: str, start: date,
+                        end: date) -> list[dict]:
     candidates = search("prs", ["--reviewed-by", actor,
                                 "--updated", f">={start}"], owner)
     given = []
@@ -178,35 +217,32 @@ def fetch_reviews_given(owner: str, actor: str, start: date, end: date) -> list[
     return given
 
 
-def fetch_commits(owner: str, actor: str, start: date, end: date,
+def fetch_commits(owner: str | None, actor: str, start: date, end: date,
                   attribute: bool) -> list[dict]:
-    repos = gh_json(["repo", "list", owner,
-                     "--json", "name,defaultBranchRef,pushedAt",
-                     "--limit", str(SEARCH_LIMIT)])
-    if len(repos) >= SEARCH_LIMIT:
-        print(f"warning: gh repo list hit the {SEARCH_LIMIT}-result cap; "
-              "commit activity in repos beyond it is missing", file=sys.stderr)
+    """Commits the actor authored, windowed on committer date: a squash
+    merge carries the merge moment as committer date, so merged work lands
+    in the week it merged. Accepted limits of the search index: default
+    branch only, GitHub-linked commit email matching, eventual consistency.
+    """
+    raw = gh_json(["search", "commits", *owner_flag(owner),
+                   "--author", actor,
+                   "--committer-date", f"{start}..{end}",
+                   "--json", COMMIT_SEARCH_FIELDS,
+                   "--limit", str(SEARCH_LIMIT)])
+    if len(raw) >= SEARCH_LIMIT:
+        print(f"warning: gh search commits hit the {SEARCH_LIMIT}-result cap; "
+              "the report may be missing commits", file=sys.stderr)
     commits = []
-    for repo in repos:
-        pushed = repo.get("pushedAt")
-        branch = (repo.get("defaultBranchRef") or {}).get("name")
-        if not branch or not pushed or date.fromisoformat(pushed[:10]) < start:
-            continue
-        full = f"{owner}/{repo['name']}"
-        raw = gh_json(["api",
-                       f"repos/{full}/commits?sha={branch}&author={actor}"
-                       f"&since={start}T00:00:00Z&until={end}T23:59:59Z"
-                       "&per_page=100", "--paginate"])
-        for c in raw:
-            headline = c["commit"]["message"].splitlines()[0]
-            commits.append({
-                "key": c["sha"],
-                "repo": full,
-                "title": headline,
-                "url": c["html_url"],
-                "committed_at": c["commit"]["author"]["date"],
-                "signal": classify_signal(headline),
-            })
+    for c in raw:
+        headline = c["commit"]["message"].splitlines()[0]
+        commits.append({
+            "key": c["sha"],
+            "repo": c["repository"]["fullName"],
+            "title": headline,
+            "url": c["url"],
+            "committed_at": c["commit"]["committer"]["date"],
+            "signal": classify_signal(headline),
+        })
     if attribute:
         pr_by_sha = {}
         for c in commits:
@@ -218,11 +254,47 @@ def fetch_commits(owner: str, actor: str, start: date, end: date,
     return commits
 
 
-def collect_period(owner: str, actor: str, start: date, end: date,
+def fetch_discussions(owner: str | None, actor: str, start: date,
+                      end: date) -> list[dict]:
+    """Items the actor commented on but did not author, with the actor's
+    in-window comment activity.
+
+    Candidates come from gh search --commenter (issues and PRs are
+    separate search kinds, so no overlap); search cannot window on
+    comment time, so each candidate is checked against the comments API,
+    paginated so busy threads do not undercount.
+    """
+    discussions = []
+    for kind in ("issues", "prs"):
+        candidates = search(kind, ["--commenter", actor,
+                                   "--updated", f">={start}"], owner)
+        for item in candidates:
+            if item["author"] == actor:
+                continue
+            comments = parse_concatenated_json(run_gh(
+                ["api", f"repos/{item['repo']}/issues/{item['number']}"
+                 "/comments?per_page=100", "--paginate"]))
+            mine = [c["created_at"] for c in comments
+                    if (c.get("user") or {}).get("login") == actor
+                    and start <= date.fromisoformat(c["created_at"][:10]) <= end]
+            if mine:
+                item["commented_at"] = min(mine)
+                item["comments"] = len(mine)
+                discussions.append(item)
+    return discussions
+
+
+def collect_period(owner: str | None, actor: str, start: date, end: date,
                    attribute: bool) -> dict:
     rng = f"{start}..{end}"
     created = search("issues", ["--author", actor, "--created", rng], owner)
-    closed_candidates = search("issues", ["--state", "closed", "--closed", rng], owner)
+    # Search has no closed-by qualifier and there is no owner to
+    # enumerate, so --involves casts the widest available net (authored,
+    # assigned, mentioned, commented) and split_closed_issues filters by
+    # actual closer. Documented edge: an issue the actor closed without
+    # any such involvement is not found.
+    closed_candidates = search("issues", ["--involves", actor, "--state",
+                                          "closed", "--closed", rng], owner)
     resolved, not_planned = split_closed_issues(
         [fetch_closed_issue_detail(i) for i in closed_candidates], actor)
 
@@ -241,13 +313,14 @@ def collect_period(owner: str, actor: str, start: date, end: date,
         "prs_abandoned": abandoned_prs(prs_closed, {p["key"] for p in prs_merged}),
         "reviews_given": fetch_reviews_given(owner, actor, start, end),
         "commits": fetch_commits(owner, actor, start, end, attribute),
+        "discussions": fetch_discussions(owner, actor, start, end),
     }
 
 
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--owner", help="account whose repos bound the report"
-                        " (default: owner of the current repo)")
+    parser.add_argument("--owner", help="optionally narrow the report to"
+                        " repos owned by this account (default: no filter)")
     parser.add_argument("--actor", help="user whose activity is reported"
                         " (default: the authenticated gh user)")
     parser.add_argument("--from", dest="from_", metavar="YYYY-MM-DD")
@@ -256,8 +329,7 @@ def main(argv: list[str] | None = None) -> None:
     opts = parser.parse_args(argv)
 
     actor = opts.actor or run_gh(["api", "user", "--jq", ".login"]).strip()
-    owner = opts.owner or run_gh(
-        ["repo", "view", "--json", "owner", "--jq", ".owner.login"]).strip()
+    owner = opts.owner  # None means actor-wide, no owner filter
 
     if opts.from_ or opts.to:
         start, end = parse_range(opts.from_, opts.to)

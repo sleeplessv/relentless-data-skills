@@ -1,6 +1,6 @@
 ---
 name: snowman
-description: Use when exploring Snowflake data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or preparing a data/schema change via the snow CLI. Never executes writes - DML/DDL the user asks for is staged as a script under .snowman/staged/ for manual execution by the user.
+description: Use for any Snowflake work — running a query, exploring data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or staging a data/schema change. Every snow CLI call goes through this skill.
 ---
 
 # snowman
@@ -18,7 +18,8 @@ Check for **`.snowman/context.md`** in the project root.
 
 - **Absent** → this is a first run. Read [references/install.md](references/install.md),
   run the bootstrap (discovers connection, databases, warehouses, roles →
-  writes `.snowman/context.md`), then continue.
+  writes `.snowman/context.md` and offers a Snowflake routing rule for the
+  project's `AGENTS.md`/`CLAUDE.md`), then continue.
 - **Present** → load it; it is the source of truth for this project's
   Snowflake architecture. Continue with the user's request.
 
@@ -117,7 +118,14 @@ These are **taught, not hard-blocked** (apply them yourself):
 - **Cost hygiene** — bound exploratory `SELECT *` with `LIMIT`/`SAMPLE`;
   avoid full scans on large tables; surface the target warehouse first.
 - **Start broad, then narrow** — databases → schemas → tables → DESCRIBE →
-  SAMPLE; prefer several focused queries over one large one.
+  SAMPLE; prefer several focused queries over one large one. Narrow toward
+  the question asked: an anomaly you pass on the way gets a sentence in the
+  answer, not an investigation of its own.
+- **Run the queries yourself** — no subagent per query or per table, and none
+  to re-check a result you have; one only for a wide, independent investigation.
+- **Report, don't narrate** — one sentence on what you're looking for before
+  the first query, then updates only when a result changes direction. Lead
+  with the finding, rows after, large result sets truncated to what matters.
 - **Database scope** is an advisory focus hint in the context file, not a
   hard wall — Snowflake roles already gate real read access.
 

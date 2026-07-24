@@ -13,11 +13,13 @@ Turn a subject — a system, a process, research findings, a decision — into a
 
 ## Process
 
+Report on the subject you were given, at the scope asked. If exploring surfaces a bug, a stale doc, or a design problem, note it in the report — don't go fix it.
+
 ### 1. Explore
 
 Find the subject and where its substance lives, then gather from there:
 
-- **About the codebase?** Use the Agent tool with `subagent_type=Explore` to walk it. Don't dump files into the report — extract the structure worth drawing.
+- **About the codebase?** Use the Agent tool with `subagent_type=Explore` to walk it — one dispatch for the whole walk, not one per module, and none for the writing. Don't dump files into the report — extract the structure worth drawing.
 - **Already in the conversation?** The analysis is done (a finished design discussion, a debugging session, a research summary). Organize what's there; don't re-investigate.
 - **Pointed at sources?** Read the named docs/URLs.
 
@@ -29,14 +31,14 @@ Write one self-contained HTML file and open it.
 
 - **Where:** default to the OS temp dir — resolve `$TMPDIR`, fall back to `/tmp` (or `%TEMP%` on Windows) — at `<tmpdir>/<slug>-<timestamp>.html`. If the user names a destination ("save to `docs/`") or says "keep/commit it," write there instead. Either way, **print the absolute path and open it** (`open` on macOS, `xdg-open` on Linux, `start` on Windows). If opening fails (headless/SSH session), just print the path and say so.
 - **Self-contained:** one file, no build step, portable — the only dependencies are the Tailwind CDN and the Mermaid ESM import, so it renders fully only with network access. Light interactivity (collapsible sections, before→after toggles, CSS animations) is allowed via **inline vanilla JS only** — no extra libraries. "Self-contained" throughout this skill means exactly this.
-- **Visual-first:** every major idea earns a visual. To pick the pattern that fits each idea, consult the "Picking between them" decision tree in [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) — don't default to a Mermaid flowchart for everything. Once you've chosen a pattern, get its build recipe in [HTML-REPORT.md](references/HTML-REPORT.md). If a section needs a paragraph to be understood, redraw the visual.
+- **Visual-first:** every major idea earns a visual, and the report runs as long as the subject has ideas — a five-idea subject gets five visuals, not twelve sections propped up by an intro, a recap and a conclusion. To pick the pattern that fits each idea, consult the "Picking between them" decision tree in [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) — don't default to a Mermaid flowchart for everything. Once you've chosen a pattern, get its build recipe in [HTML-REPORT.md](references/HTML-REPORT.md). If a section needs a paragraph to be understood, redraw the visual.
 - **House style:** the editorial aesthetic in [HTML-REPORT.md](references/HTML-REPORT.md) is the style — lean, not corporate-dashboard. Apply it; don't invent a new look per report.
-- **Verify:** a Mermaid syntax error doesn't fail loudly — it renders as an error blob in the page. Before handing over, re-read every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML) and confirm the page renders as intended; fix and reload until it does.
+- **Verify:** a Mermaid syntax error never fails loudly — it renders as an error blob in the page. Before handing over, re-read every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML), then check the rendered page — no error blobs, every diagram legible; fix and reload until it's clean.
 
 **Cite ADRs (if applicable).** When the report depicts something governed by an existing ADR, cite it in an amber callout (_"this flow follows ADR-0012"_) so a reader can trace *why it's built this way* to the decision record. Only when an ADR genuinely governs what's drawn — never staple an ADR callout onto every diagram.
 
 ### 3. Grill loop
 
-After the file is written, interview the user relentlessly about what the report gets wrong or underweights — a section, a diagram pattern choice, the emphasis — until it says what they mean. Ask the questions one at a time, as plain prose, and give your recommended answer with each. If a question can be answered by re-reading the sources or codebase, do that instead of asking. Iterate on the same file after each answer; stop when the user has nothing left to change.
+After the file is written, hand it over in one sentence: what the report covers and where it is. Then interview the user relentlessly about what the report gets wrong or underweights — a section, a diagram pattern choice, the emphasis — until it says what they mean. Ask the questions one at a time, as plain prose, and give your recommended answer with each. If a question can be answered by re-reading the sources or codebase, do that instead of asking. Iterate on the same file after each answer; stop when the user has nothing left to change.
 
 **Propose an ADR (if applicable).** If the grilling surfaces a load-bearing decision nobody had recorded — the visualization made a design choice explicit and a future reader would wonder "why this way?" — offer to draft one: _"Want me to record this as an ADR?"_ Only when it clears all three tests: it's hard to reverse, it's surprising without context, and it's the result of a real trade-off. Skip ephemeral or self-evident reasons.

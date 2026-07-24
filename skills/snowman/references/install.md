@@ -177,6 +177,26 @@ re-run the bootstrap to refresh._
 - <schema> — <note>
 ```
 
+## Step 4 — route Snowflake work to snowman (one gate)
+
+Skills compete with the agent's habit of calling `snow sql` directly; a
+routing rule in the project's agent instructions makes the skill fire
+reliably. Check `AGENTS.md` and `CLAUDE.md` in the project root — if either
+already mentions `snowman`, skip this step. Otherwise propose appending this
+block and gate once:
+
+```markdown
+## Snowflake
+
+All Snowflake access goes through the `snowman` skill — queries run via its
+read-only wrapper, and requested changes are staged under `.snowman/staged/`,
+never executed.
+```
+
+Append to `AGENTS.md` if it exists, else `CLAUDE.md` if it exists, else
+create `AGENTS.md` with just this block. If the user declines, move on —
+never re-propose within the session.
+
 ## Done
 
 Confirm the file is written, then switch to the wrapper for all further

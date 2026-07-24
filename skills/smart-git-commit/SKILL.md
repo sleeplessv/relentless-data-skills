@@ -7,6 +7,8 @@ description: Groups changed files by affected area, creates one conventional com
 
 ## Workflow
 
+Commit what has already changed: grouping and staging are the only edits this skill makes. Don't fix lint, reformat, or touch file contents on the way past — mention anything the diff surfaces when you report back instead.
+
 ### Step 1: Inspect changes
 
 Run these in parallel:
@@ -95,6 +97,8 @@ git push -u origin HEAD
 ```
 
 **Run the push outside the sandbox.** `git push` needs network access to reach the remote; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. If the push fails with a connection error, suspect the sandbox first.
+
+**Close out** with the outcome first — the commit subjects and whether the push landed, in a line or two. No per-commit writeup.
 
 ## Safety Rules
 

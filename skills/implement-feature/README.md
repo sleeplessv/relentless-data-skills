@@ -15,7 +15,9 @@ a feature run yourself, so it pays zero always-on context load.
   alone → discovers its open sub-issues; tickets alone → resolves the parent spec for
   context; both → the explicit list wins. The spec is always context, never a work
   item. The resolved work-set is announced before any branch is created; closed
-  tickets are silently skipped; a cycle in the blocking graph stops the run.
+  tickets are silently skipped; a cycle in the blocking graph stops the run. A
+  fresh work-set of exactly one ticket skips the orchestration entirely and hands
+  off to `implement-ticket` directly.
 - **One integration branch** — `feat/spec-<N>-<slug>` off the default branch; all
   ticket work merges here, and it is the only branch that ever points at `main`.
 - **Topological waves** — every currently-unblocked ticket is dispatched in parallel

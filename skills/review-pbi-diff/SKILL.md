@@ -16,6 +16,9 @@ DAX and exact bindings.
 single base ref meaning "vs working tree"). Default: `main...HEAD`. The user
 may also name pages to treat as scratch, beyond the automatic rule below.
 
+**Scope:** review and report — findings go in the artifact, not into edits to
+the PBIP files, the DAX, or an issue tracker.
+
 ## Step 1 — Extract the change model (deterministic)
 
 Run the bundled extractor, outputting to the scratchpad:
@@ -78,9 +81,10 @@ concept). Verdicts, each rendered as a badge in the artifact:
   catch up. If the repo has no metric-definition docs at all, say so once and
   mark every measure ❓ without repeating it per measure.
 
-Done when every added/modified measure carries a verdict. If there are more
-than ~15 measures to spec-check, fan out parallel subagents (each gets a
-batch of measures + the definitions docs) and merge results.
+Done when every added/modified measure carries a verdict. Spec-check inline:
+~15 measures is a ceiling, not a trigger. Past it, use as few parallel
+subagents as cover the measures in batches (each gets its batch + the
+definitions docs) and merge. Never spawn an agent to review the review.
 
 If the repo documents requirements (e.g. `docs/requirements/`), also map the
 overall work against them: which requirements does this branch address, and
@@ -88,10 +92,18 @@ what claimed scope is missing.
 
 ### Red-flag checks
 
-Run every check below — each either yields findings or comes back confirmed
-clean. A finding is reportable only with evidence you verified in the change
-model or `objects/` files. Severity: 🔴 wrong results / broken, 🟡 should fix
-before merge, 🔵 minor/hygiene.
+**Detection pass — surface everything.** Run every check below and record
+every candidate it raises; don't drop one for being minor, uncertain, or
+probably fine. Each check either yields candidates or comes back confirmed
+clean.
+
+**Filter pass — evidence, then rank.** Before building the artifact, revisit
+the candidates: pull each one's evidence from the change model, reading the
+`objects/…before|.after` files whenever the model doesn't carry enough;
+discard only what the evidence disproves; and rank — 🔴 wrong results /
+broken, 🟡 should fix before merge, 🔵 minor/hygiene. Every finding in the
+artifact cites what you checked; one you can neither confirm nor disprove
+ships as 🔵 stating what you checked and what is still unknown.
 
 1. **Bare `/` division** in new/changed DAX where the denominator can be
    zero/blank (`DIVIDE` is the safe idiom).
@@ -122,14 +134,14 @@ before merge, 🔵 minor/hygiene.
     `visibility: HiddenInViewMode` ships to end users: 🟡 hide (or delete)
     before publishing. Hidden scratch pages are tolerated.
 
-When a finding needs more context than the change model carries, read the
-`objects/…before|.after` files for that visual/table before reporting it.
-
 ## Step 3 — Build the artifact
 
 Follow [references/artifact.md](references/artifact.md) for the artifact
-structure and wireframe rules. Load the `artifact-design` skill if available,
-write a single self-contained HTML file to the scratchpad, and publish it
-with the Artifact tool (favicon 📊, stable title `PBI Review: <branch or
-range>`). If the Artifact tool is unavailable, save the HTML and give the
-user its path.
+structure and wireframe rules. Length follows substance — within that
+structure, wireframes and tables over prose, no filler padding, no restating
+a table in prose beneath it. Load the `artifact-design` skill if available,
+write a single self-contained HTML file to the scratchpad, and publish it with
+the Artifact tool (favicon 📊, stable title `PBI Review: <branch or range>`).
+If the Artifact tool is unavailable, save the HTML and give the user its path.
+Close out with the outcome first — artifact URL (or path) and 🔴/🟡/🔵 counts
+— then any detail.

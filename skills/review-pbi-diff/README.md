@@ -27,12 +27,13 @@ red-flags list. Built for a Power BI expert reviewing a developer's branch.
   ✅ matches the documented definition, ⚠️ deviates (with exactly how), or
   ❓ no definition found — checked against logic (grain, filter context,
   exclusions), not just names.
-- **Eleven red-flag checks**, each requiring verified evidence: bare `/`
-  division, missing format strings, deleted/renamed measures still
+- **Eleven red-flag checks**, run as a surface-everything detection pass, then
+  filtered and ranked against evidence before they reach the artifact: bare
+  `/` division, missing format strings, deleted/renamed measures still
   referenced, modified-measure ripple, `USERELATIONSHIP` targets, unrelated
   fact tables on one visual, untitled visuals, hidden filters that change
-  data, overlapping data visuals, hardcoded literals / convention
-  violations, and visible scratch pages.
+  data, overlapping data visuals, hardcoded literals / convention violations,
+  and visible scratch pages.
 - **Hosted HTML artifact.** One self-contained file — wireframes are
   color-coded to-scale layouts (added/modified/deleted/unchanged), DAX in
   collapsible before/after blocks, findings ranked 🔴/🟡/🔵. Published via

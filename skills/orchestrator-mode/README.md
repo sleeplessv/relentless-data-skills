@@ -15,8 +15,9 @@ CLI). Custom specialists in your own setup slot in wherever you have them.
 - **Hard delegation rule.** The main thread may only call the delegation tool,
   the plan/todo tool, and user-facing question/report tools. Every file /
   search / shell / web / edit tool is forbidden — it gets delegated.
-- **Parallel fan-out.** Independent subtasks are dispatched together in one
-  message and collected, instead of run sequentially.
+- **Parallel fan-out, with a floor.** Independent subtasks are dispatched together
+  in one message and collected, instead of run sequentially — but small related
+  tasks are batched into one dispatch rather than one agent per file.
 - **Capability-based subagent selection.** Pick the agent by what the task
   needs (search, web research, SQL, build, coding, review), preferring a custom
   specialist if you have one and falling back to general-purpose.
@@ -31,8 +32,10 @@ CLI). Custom specialists in your own setup slot in wherever you have them.
   `git worktree add` elsewhere). A dedicated
   integration dispatch merges the branches back — resolving mechanical conflicts,
   escalating semantic ones — and verification then runs on the unified tree.
-- **Separate verification.** Implementation and verification are always
-  different subagent calls — no "the implementer said it worked".
+- **Separate verification where the blast radius is real.** Work that merges to a
+  shared branch, changes a schema or data, or spans multiple files gets its own
+  verification dispatch — no "the implementer said it worked". Read-only lookups,
+  single-file edits, and search results are not re-checked by a second agent.
 - **Handoff-grade prompts.** Subagents are stateless, so dispatch prompts are
   treated as mini handoff documents (two tiers: lightweight vs. rich), with a
   quote-don't-summarize continuity discipline.

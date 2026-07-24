@@ -38,5 +38,5 @@ or more writers would otherwise share one working tree.
    verbatim. On success it removes worktrees and merged branches; on escalation it
    leaves everything in place, and the resolver performs the same cleanup once its
    merge succeeds. Return contract: `conflicts_found`, `worktrees_cleaned`.
-4. **Verify** — on the unified tree, as a separate dispatch (Hard Rule 6); mandatory
-   whenever any conflict was resolved, by anyone.
+4. **Verify** — on the unified tree, as a separate dispatch: merged parallel writers always
+   clear the Hard Rule 6 threshold. Mandatory whenever any conflict was resolved, by anyone.

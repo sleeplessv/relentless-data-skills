@@ -27,6 +27,8 @@ file / test action below is a subagent dispatch. Per-ticket work composes the
 - **No em dashes (—) in anything published to git or GitHub** — use commas, colons, or parentheses.
 - **Network `gh` / `git fetch|pull|push` run outside the sandbox** — every dispatch prompt says so.
 - The spec is context, never a work item.
+- **Implement the work-set at the scope its tickets ask for** — adjacent bugs, refactors, and cleanups get reported in the feature PR body, not fixed.
+- **One dispatch per ticket per wave** — no helper or double-check agents alongside it, none to re-read what a dispatch already returned. Only the dispatches steps 0-4 already prescribe (integration, resolver, targeted verification, gates, fixes, PR) run beside it.
 - Dispatch prompts tell the subagent to invoke `implement-ticket`; if subagents cannot load skills, paste its body verbatim into the prompt.
 - **Every ticket dispatch gets worktree isolation, even a one-ticket wave** — deliberately stricter than orchestrator-mode's two-writer rule, so the main tree never leaves the integration branch.
 
@@ -45,6 +47,7 @@ One read-only dispatch (general-purpose — it runs networked `gh`) gathers:
 Then, in the main thread:
 
 - **Announce the work-set** (numbers + titles) and the wave plan before any branch is created.
+- **Work-set of one, no existing integration branch → do not orchestrate.** Say so, hand the ticket to `implement-ticket` in a single dispatch on its solo defaults (own branch, own PR, no overrides), and stop: the machinery below only pays off across several tickets. On resume, stay here — that ticket belongs to the feature PR.
 - **Cycle in the graph → stop** and surface it.
 - **Dirty tree → stop and ask** (stash / commit / abort).
 - Existing integration branch → **resume**: merged tickets leave the work-set; WIP branches go to their wave's dispatch as `resume_branch`.
@@ -63,7 +66,7 @@ Done when: the integration branch tips match on origin and in the main tree, and
 
 ### 2. Implement in waves
 
-Repeat until the work-set drains:
+Repeat until the work-set drains, reporting once per wave (what merged, what is next), not per dispatch:
 
 1. **Wave** = every remaining ticket whose blockers are all merged into the integration branch.
 2. Dispatch the wave in parallel — one worktree-isolated coding subagent per ticket
@@ -94,7 +97,8 @@ Done when: every work-set ticket is merged, or recorded as failed / skipped-as-d
 ### 3. Integration gates
 
 After the last wave, two separate dispatches by fresh subagents (no self-certification,
-per orchestrator-mode):
+per orchestrator-mode: the first look at the *merged* result of many agents' work, not the
+orchestrator re-checking itself):
 
 1. **Verify** — the step-0 feedback-loop commands: full type-check + test suite + runtime smoke check on the integration branch.
 2. **Review** — the `code-review` skill over `git diff <default>...<integration branch>`, with the spec pasted in as the intent to review against.
@@ -115,7 +119,10 @@ One dispatch:
   one covered by a "merged into" comment or a `#<N>\b` / `ticket-<N>\b` / legacy
   `issue-<N>\b` commit — whichever run or human put it there. Add `Closes #<spec>` only
   when every open sub-issue is covered; otherwise comment progress on the spec.
-- Create it **ready-for-review** (not draft). Report the PR URL. Merging is the human's.
+- **Size the body to the change**: a line per ticket in the Summary, what actually ran in
+  the Test plan, no filler sections and no restated ticket bodies.
+- Create it **ready-for-review** (not draft). Merging is the human's. Close out leading
+  with the outcome (PR URL + what landed), detail after.
 
 Done when: the PR URL is reported.
 
@@ -126,5 +133,6 @@ Verify, then stop before Review and the PR. Stop the same way when a semantic me
 conflict survives its one resolver dispatch.
 
 When stopping, leave the integration branch pushed and report — superseding
-orchestrator-mode's 1–3-sentence rule — what merged, what failed (root cause + WIP
-branch names), what was skipped as downstream, and that re-invoking resumes from step 0.
+orchestrator-mode's 1–3-sentence rule — leading with the outcome (what merged and what
+did not), then the detail: what failed (root cause + WIP branch names), what was skipped
+as downstream, and that re-invoking resumes from step 0.

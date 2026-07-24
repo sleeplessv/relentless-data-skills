@@ -16,12 +16,12 @@ scope — recommend migrating up.
 claim, you MUST either cite a fetched `.md` doc page or label the claim
 "baseline knowledge". No exceptions.
 
-Two obligations on every Prefect answer:
+Also on every Prefect answer:
 
-1. **State assumptions when they fork the answer** — Cloud vs self-hosted,
-   work-pool type (process / docker / kubernetes / managed). Never silently assume.
-2. **Pass the verify gate above** — cite the fetched doc page, or say "baseline
-   knowledge" explicitly.
+- **State assumptions when they fork the answer** — Cloud vs self-hosted,
+  work-pool type (process / docker / kubernetes / managed). Never silently assume.
+- **Answer at the depth asked** — a config question gets the config, not a tour
+  of the concept. Link the doc page rather than restating it.
 
 ## Doc-Lookup Protocol
 
@@ -64,7 +64,9 @@ blocks, profiles — query it via the CLI instead of reasoning from memory or co
   commands — only when they're the explicit task; surface anything destructive
   or hard to reverse (pause, cancel, delete) before running it.
 
-Two moves that aren't obvious:
+Two moves that aren't obvious. Both end in a report, not a fix — name the drift
+or the root cause and stop there; changing deployments, pools, or flow code is in
+scope only when that change is the task (Boundary, above).
 
 - **Auditing a project:** diff deployed reality (deployments, pools, schedules
   — via the CLI) against the repo's manifests; drift is the finding.

@@ -74,7 +74,7 @@ Edit freely; re-run the bootstrap to refresh the frontmatter._
 
 ## Project lore
 _Append entries as you learn them the hard way — seed/test couplings,
-known-slow models, schema quirks. Newest last._
+known-slow models, schema quirks. One or two lines each. Newest last._
 
 - <e.g. fct_call is ~5M rows; full build needs a background run.>
 - <e.g. adding a region means a seed row in region_config AND an

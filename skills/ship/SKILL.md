@@ -10,6 +10,8 @@ Take the current working-tree changes from branch to merged PR in one pass: bran
 
 **Argument:** `clean` — skip the Step 5 merge confirmation and go straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt still fires.
 
+**Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through — a problem you notice in passing goes in the close-out, not into a commit.
+
 ## Step 0: Preflight
 
 Run in parallel:
@@ -92,6 +94,8 @@ gh pr merge --squash --delete-branch --auto
 ```
 
 Report "checks pending — auto-merge armed; it will land when green" and stop. The local branch stays for now; the next `/ship` run's stale-branch detection cleans it up.
+
+**Close-out:** lead with the outcome in one sentence — merged, PR left open, or auto-merge armed — with the PR URL. Anything worth flagging goes after it.
 
 ## Safety rules
 

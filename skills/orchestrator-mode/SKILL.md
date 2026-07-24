@@ -18,27 +18,34 @@ role to your agent's concrete tool — see [references/reference.md](references/
 1. **The main thread may only call** the delegation tool, the plan/todo tool, and
    user-facing question/report tools. Every file / search / shell / web / edit tool is
    forbidden in the main thread — delegate it.
-2. **Every** user request is decomposed into one or more subagent dispatches.
+2. **Every** user request is decomposed into one or more subagent dispatches — but batch,
+   don't atomize: one dispatch carries several atomic tasks in the same area. Never an
+   agent per file.
 3. **Parallelize when independent.** Dispatch data-independent subtasks together in one
    message; collect each result (returned inline, or via background output files).
 4. **Pick the right subagent** — a specialist if your agent offers one, else general-purpose. See [Subagent Selection](#subagent-selection).
 5. **Strongest coding model for write intent** — any subagent with write intent (writes
    code: dbt models, SQL, refactors, edits) gets the best coding-model *tier* your agent
-   allows — the model tier, not the reasoning/thinking budget (leave that at the
-   agent/user default). Research / verification inherit the parent (leave model unset).
-6. **Verify with a separate subagent** — implementation and verification are always separate dispatches.
+   allows. Reasoning effort is a separate dial from model tier — leave it at the
+   agent/user default. Research / verification inherit the parent (leave model unset).
+6. **Verify separately when blast radius is real** — write-intent work that merges to a
+   shared branch, changes a schema or data, or spans multiple files gets its own
+   verification dispatch. Read-only lookups, single-file edits, and search results do
+   not: the returning agent's own output is the evidence.
 7. **Isolated worktrees for parallel writers.** When two or more write-intent dispatches
    run in parallel, each gets its own worktree + branch, and integration is a separate
    dispatch — see [Parallel Writes (Worktrees)](references/reference.md#parallel-writes-worktrees).
 
 ## Workflow
 
-1. **Plan** — write a TODO list enumerating the subagent dispatches.
+1. **Plan** — write a TODO list enumerating the subagent dispatches, scoped to what was
+   asked; problems surfaced outside that scope get reported, not queued as extra dispatches.
 2. **Dispatch** — call the delegation tool with a fully self-contained prompt (subagents are stateless).
 3. **Fan out** — independent subtasks go in one message as parallel dispatches; collect each result before the dependent step.
 4. **Synthesize** — read reports, update TODOs, dispatch follow-ups.
-5. **Verify** — before marking done, dispatch a verification subagent (reviewer, or a build / SQL check).
-6. **Report** — summarize to the user in 1–3 sentences, including any artifact paths/IDs returned.
+5. **Verify** — dispatch a verification subagent (reviewer, or a build / SQL check) when the
+   work clears the Hard Rule 6 threshold; below it, the returned reports are the evidence.
+6. **Report** — lead with the outcome, then artifact paths/IDs returned; 1–3 sentences total.
 
 ## Subagent Selection
 
@@ -49,7 +56,7 @@ Pick by capability:
 - **Run SQL, explore a warehouse, check row counts** → SQL/data specialist if you have one, else general-purpose.
 - **Build / verify code, run tests** → shell/build agent, else general-purpose.
 - **Multi-step coding, refactors, anything else** → general-purpose agent.
-- **Review / verify another agent's output** → a *separate* general-purpose reviewer.
+- **Review / verify another agent's output** (Rule 6 cases only) → a *separate* general-purpose reviewer.
 
 **Prefer custom specialists** (SQL runner, BI agent, CI investigator, docs agent) if your
 environment defines them. **Never invent a subagent type** — it must be one your agent
@@ -96,7 +103,8 @@ Refactor a function and verify it — the canonical good-practice shape:
    *"Refactor `foo()` per <findings pasted verbatim>; Decisions made: <…>; touch only <files>;
    return `files_changed`."*
 4. **Verify** in a *separate* read-only dispatch (model unset): *"Run tests for the changed
-   files; report pass/fail and failing test names."* The implementer never self-certifies.
+   files; report pass/fail and failing test names."* A multi-file refactor clears the Rule 6
+   threshold; a lookup would not.
 
 (Two parallel writers instead of one? Each gets a worktree + branch, and an integration
 dispatch precedes verification — see [Parallel Writes (Worktrees)](references/reference.md#parallel-writes-worktrees).)
@@ -106,6 +114,9 @@ dispatch precedes verification — see [Parallel Writes (Worktrees)](references/
 - Reading a file in the main thread "just to check something" — delegate.
 - A single megaprompt asking one subagent to do everything — split it.
 - Sequential dispatch of independent tasks — parallelize.
+- A verification dispatch for work whose correctness is already visible in the previous
+  agent's returned output — read the report instead.
+- One agent per trivial task where one agent could have carried five — batch them.
 - Two write-intent subagents sharing one working tree in parallel — isolate in worktrees.
 - Summarizing prior findings instead of quoting verbatim — loss compounds.
 - Tier 1 prompts for verification/implementation subagents — they need intent + rationale.

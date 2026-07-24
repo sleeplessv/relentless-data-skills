@@ -118,7 +118,14 @@ These are **taught, not hard-blocked** (apply them yourself):
 - **Cost hygiene** — bound exploratory `SELECT *` with `LIMIT`/`SAMPLE`;
   avoid full scans on large tables; surface the target warehouse first.
 - **Start broad, then narrow** — databases → schemas → tables → DESCRIBE →
-  SAMPLE; prefer several focused queries over one large one.
+  SAMPLE; prefer several focused queries over one large one. Narrow toward
+  the question asked: an anomaly you pass on the way gets a sentence in the
+  answer, not an investigation of its own.
+- **Run the queries yourself** — no subagent per query or per table, and none
+  to re-check a result you have; one only for a wide, independent investigation.
+- **Report, don't narrate** — one sentence on what you're looking for before
+  the first query, then updates only when a result changes direction. Lead
+  with the finding, rows after, large result sets truncated to what matters.
 - **Database scope** is an advisory focus hint in the context file, not a
   hard wall — Snowflake roles already gate real read access.
 

@@ -17,7 +17,11 @@ to what changed.
 
 Everything deterministic lives in two bundled stdlib-only scripts; the
 agent's job is judgment: bucketing the work, writing the narratives, and
-summarising the week.
+summarising the week. Report the week, nothing more: problems the report
+surfaces go in the summary, never into follow-up work — do not open
+issues or change any repo. The whole run is two script calls around one
+pass over one JSON file, so run it inline; no subagents, and no fan-out
+per repo or bucket.
 
 ## Step 1: Resolve parameters
 
@@ -81,8 +85,9 @@ name with current-period activity to a narrative string. Per repo, 2 to
 4 sentences that tell the story of the week's work there, weaving in
 Markdown links to the items mentioned. For the dominant repo (the one
 with the most item occurrences across current-period lists), extend the
-narrative with a structured per-work-type breakdown (one line per
-bucket present in that repo, with its items). Render keeps the text
+narrative with a structured per-work-type breakdown: one line per
+bucket present in that repo listing its items, and nothing else — no
+per-item commentary, no restating the narrative. Render keeps the text
 verbatim and warns on keys matching no current-period repo.
 
 Done when every current-period key appears in `buckets.json` and every
@@ -108,7 +113,8 @@ python3 <skill-dir>/scripts/render.py --data <...>/week.json \
 
 ## Step 5: Summarise
 
-Close with a few sentences in chat: the headline numbers with their
-deltas, the dominant bucket, and anything the counters hide (a capped
-search, a week dominated by one repo, all-direct-push weeks). The report
-carries the detail; the summary carries the story.
+Close with a few sentences in chat, leading with the outcome: the
+headline numbers and their deltas first, then the dominant bucket and
+anything the counters hide (a capped search, a week dominated by one
+repo, all-direct-push weeks). The report carries the detail; the summary
+carries the story.

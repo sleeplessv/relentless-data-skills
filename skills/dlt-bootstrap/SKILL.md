@@ -49,6 +49,10 @@ Establish by inspection, creating what's missing in the install step:
 
 ## Install (verified fast path)
 
+Say in one sentence what you're about to install, then run the sequence
+straight through — speak again only for a failure, a decision the user must
+make, or the hand-off; not per command.
+
 ```bash
 uv init                          # only if no pyproject.toml
 uv add "dlt[hub]"
@@ -91,6 +95,8 @@ matching the interview answer:
    project and fill every `<placeholder>` from the interview + detection.
    Then re-read the frontmatter: every key from the template present, one per
    line, no `<` left (easy to mangle `destination` / `dev_destination`).
+   Fill the template, don't grow it: no extra sections, no restating what the
+   workbench's own rules already cover.
 2. Name it `dlt-house-conventions.md` and place it **in the same location
    where `dlthub ai init` installed its own rules** (find its
    `dlthub-workspace.md`) so it is always-on for the same agent. If that agent
@@ -121,7 +127,11 @@ matching the interview answer:
 - This skill **sets up**; it does not build pipelines, and it does not fork or
   re-teach workbench skill content — upstream owns that. If asked to build a
   pipeline before bootstrap, bootstrap first, then route to the workbench's
-  skills.
+  skills. When the bootstrap surfaces adjacent problems — missing tests, an
+  untidy `pyproject.toml`, a stale dependency — report them and finish the
+  bootstrap; don't fix them on the way through.
+- Bootstrap is a linear install sequence — run every step inline, never fanned
+  out to subagents.
 - Credential safety is enforced at runtime by the house rule's Secrets section;
   see [references/rule-template.md](references/rule-template.md).
 - Incremental re-runs must be idempotent: re-installing an existing toolkit or

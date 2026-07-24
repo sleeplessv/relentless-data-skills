@@ -27,6 +27,8 @@ Everything else — claiming (step 1), environment setup before the baseline (a 
 
 ## Workflow
 
+**Implement what the ticket asks, at the scope it asks for.** Adjacent bugs, drive-by refactors, and missing tests outside the acceptance criteria get reported in the PR body (or `open_questions` under an orchestrated dispatch), not fixed here.
+
 **No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, ticket comments. Use a comma, colon, or parentheses, or rewrite the sentence.
 
 **Run network commands outside the sandbox.** Run every `gh` and `git fetch`/`pull`/`push` with sandboxing disabled — a sandboxed shell blocks network and fails with a misleading DNS/connection error; on a connection error, suspect the sandbox first.
@@ -105,9 +107,9 @@ If it fails, **fix and retry** — don't push the failure onto the reviewer. Loo
 
 ### 8. Review, then finalise the PR
 
-- Review the diff before marking ready: run the `code-review` skill over the branch's changes if it's installed, otherwise read the full `git diff <base>...HEAD` yourself. Fix what the review surfaces.
-- Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed).
-- `gh pr ready`, then report the PR URL. Do **not** merge — leave that to the human.
+- Read the full `git diff <base>...HEAD` yourself before marking ready, and fix what it surfaces. Reach for the `code-review` skill only when the diff is large or touches subsystems you didn't explore in step 4 — one pass, and no review agents beyond it.
+- Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed). Size both to the change: no filler sections, no restating the diff.
+- `gh pr ready`, then close out leading with the outcome — PR URL and what landed in the first sentence, detail after. Do **not** merge — leave that to the human.
 
 ## Stop conditions
 

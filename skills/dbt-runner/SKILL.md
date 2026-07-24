@@ -73,6 +73,11 @@ failures.md points here):
 
 ## When something fails
 
+Fix the failure in front of you, at the scope it demands. Model refactors,
+test additions, and cleanup the failure did not require get reported, not
+performed. Work the escalation ladder below inline — it is greps and file
+lookups, not subagent work.
+
 Escalation ladder — in order, no skipping:
 
 1. Grep the logfile for the error signature and look it up in
@@ -89,4 +94,8 @@ Escalation ladder — in order, no skipping:
 
 Project-specific lore (seed/test couplings, known-slow models, schema
 quirks) accumulates in the context file's **Project lore** section — append
-to it when you learn something the hard way.
+a line or two when you learn something the hard way, not a writeup.
+
+While a build runs, speak up only on a finding or a change of direction.
+Report back leading with the outcome — what the run did, or what the root
+cause was — then the supporting detail.

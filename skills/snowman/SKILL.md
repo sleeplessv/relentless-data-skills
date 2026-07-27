@@ -1,6 +1,6 @@
 ---
 name: snowman
-description: Use for any Snowflake work — running a query, exploring data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or staging a data/schema change. Every snow CLI call goes through this skill.
+description: Use when doing any Snowflake work — running a query, exploring data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or staging a data/schema change. Every snow CLI call goes through this skill.
 ---
 
 # snowman

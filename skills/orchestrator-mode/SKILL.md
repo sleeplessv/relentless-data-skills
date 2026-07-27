@@ -38,6 +38,14 @@ role to your agent's concrete tool — see [references/reference.md](references/
 7. **Isolated worktrees for parallel writers.** When two or more write-intent dispatches
    run in parallel, each gets its own worktree + branch, and integration is a separate
    dispatch — see [Parallel Writes (Worktrees)](references/reference.md#parallel-writes-worktrees).
+8. **Delegate coordination when the subtask has its own decomposition** — a subtask
+   needing its own plan → dispatch → synthesize cycle (internal reports the parent never
+   needs to see) is dispatched as a *sub-orchestrator*: its prompt says to invoke this
+   skill and coordinate its scope, and the skill applies to it recursively. Coordinators,
+   like verifiers, always inherit the session model. Each layer verifies its own scope
+   per Rule 6 and returns its verification evidence; the parent verifies only what it
+   integrates across children. Harness limits and caveats: see
+   [Nesting (Sub-orchestrators)](references/reference.md#nesting-sub-orchestrators).
 
 ## Workflow
 
@@ -84,7 +92,7 @@ verbatim — no lossy summary); **constraints** (conventions, files to leave unt
 - **Decisions made & rationale** — choices already locked in, so this subagent does not relitigate them.
 - **Artifacts so far** — files/IDs/branches/query results, with paths; **known unknowns** — what is *not* decided, so it flags rather than assumes (it cannot ask).
 - **Suggested skills** to invoke; **sensitive-data note** — redact secrets/PII before pasting.
-- **Return contract** — structured fields like `files_changed`, `tests_run`, `decisions_made`, `open_questions`, `next_steps`.
+- **Return contract** — structured fields like `files_changed`, `tests_run`, `verification_evidence`, `decisions_made`, `open_questions`, `next_steps`.
 
 **Continuity discipline:** quote prior findings verbatim (lossy summaries are the #1
 cause of rework); reference long artifacts by path/URL but name the specific lines to
@@ -123,6 +131,10 @@ dispatch precedes verification — see [Parallel Writes (Worktrees)](references/
 - Two write-intent subagents sharing one working tree in parallel — isolate in worktrees.
 - Upgrading every write dispatch to the strongest tier regardless of complexity — match
   the tier instead.
+- A worker that starts coordinating mid-flight — designation happens in the parent's
+  plan, at dispatch time.
+- Re-verifying a child's already-verified internals — each layer verifies its own scope;
+  the parent checks only the seams.
 - Summarizing prior findings instead of quoting verbatim — loss compounds.
 - Tier 1 prompts for verification/implementation subagents — they need intent + rationale.
 

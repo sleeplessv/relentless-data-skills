@@ -19,6 +19,24 @@ Cursor → `explore`, `bash`, `browser`; Cortex Code → `Explore`, `Plan`, `gen
 all with native Snowflake SQL tools). Everything else (SQL, BI, CI, docs agents) is
 custom to your setup — use it if present, else route to general-purpose.
 
+## Nesting (Sub-orchestrators)
+
+Mechanics for Hard Rule 8. The designation is a Tier 2 dispatch prompt that opens with:
+*"Invoke the orchestrator-mode skill; you are the coordinator for this scope"* — followed
+by the usual rich handoff (goal, prior findings verbatim, decisions made, return
+contract including `verification_evidence`).
+
+Claude Code harness facts (verified 2026-07; other harnesses: confirm nested spawn is
+supported before designating — if it isn't, decompose flat at the top instead):
+
+- Subagents can spawn subagents up to **3 layers** below the main thread by default
+  (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`).
+- Session budgets: **200 subagents per session** (`CLAUDE_CODE_MAX_SUBAGENTS_PER_SESSION`),
+  **20 concurrent** (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`); excess dispatches queue.
+- At the depth limit the delegation tool is withheld, so a dispatch there is a plain
+  worker — don't designate it as a coordinator.
+- Forks inherit context but cannot spawn further forks; they can spawn named subagents.
+
 ## Parallel Writes (Worktrees)
 
 Read-only fan-outs and single writers skip this — isolation pays off only when two

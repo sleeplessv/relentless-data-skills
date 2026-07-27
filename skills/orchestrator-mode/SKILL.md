@@ -28,9 +28,10 @@ role to your agent's concrete tool — see [references/reference.md](references/
    dispatch inherits the session model). Reach for the strongest coding tier when
    write-intent work spans multiple files, changes schema or data, or carries
    architectural impact; drop to a cheaper tier for simple or mechanical dispatches
-   (single-file edits, read-only fan-outs). Verification dispatches always inherit.
-   Reasoning effort is a separate dial from model tier — leave it at the agent/user
-   default.
+   (single-file edits, read-only fan-outs). Mechanical trumps file count: a sweep of
+   identical edits stays cheap however many files it touches. Verification dispatches
+   always inherit. Reasoning effort is a separate dial from model tier — leave it at
+   the agent/user default.
 6. **Verify separately when blast radius is real** — write-intent work that merges to a
    shared branch, changes a schema or data, or spans multiple files gets its own
    verification dispatch. Read-only lookups, single-file edits, and search results do

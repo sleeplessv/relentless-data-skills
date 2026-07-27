@@ -24,10 +24,13 @@ role to your agent's concrete tool — see [references/reference.md](references/
 3. **Parallelize when independent.** Dispatch data-independent subtasks together in one
    message; collect each result (returned inline, or via background output files).
 4. **Pick the right subagent** — a specialist if your agent offers one, else general-purpose. See [Subagent Selection](#subagent-selection).
-5. **Strongest coding model for write intent** — any subagent with write intent (writes
-   code: dbt models, SQL, refactors, edits) gets the best coding-model *tier* your agent
-   allows. Reasoning effort is a separate dial from model tier — leave it at the
-   agent/user default. Research / verification inherit the parent (leave model unset).
+5. **Match model tier to task complexity** — leave the model unset by default (the
+   dispatch inherits the session model). Reach for the strongest coding tier when
+   write-intent work spans multiple files, changes schema or data, or carries
+   architectural impact; drop to a cheaper tier for simple or mechanical dispatches
+   (single-file edits, read-only fan-outs). Verification dispatches always inherit.
+   Reasoning effort is a separate dial from model tier — leave it at the agent/user
+   default.
 6. **Verify separately when blast radius is real** — write-intent work that merges to a
    shared branch, changes a schema or data, or spans multiple files gets its own
    verification dispatch. Read-only lookups, single-file edits, and search results do
@@ -99,7 +102,7 @@ Refactor a function and verify it — the canonical good-practice shape:
 1. **Plan** TODO: find callers, list configs, refactor, verify.
 2. **Parallel dispatch** (one message, independent search agents): *"List callers of `foo()` as
    `file:line`"* and *"List config files setting DB timeouts; return path + value"*.
-3. **Synthesize**, then **dispatch a coding agent** (write intent):
+3. **Synthesize**, then **dispatch a coding agent** (strongest tier — multi-file refactor):
    *"Refactor `foo()` per <findings pasted verbatim>; Decisions made: <…>; touch only <files>;
    return `files_changed`."*
 4. **Verify** in a *separate* read-only dispatch (model unset): *"Run tests for the changed
@@ -118,6 +121,8 @@ dispatch precedes verification — see [Parallel Writes (Worktrees)](references/
   agent's returned output — read the report instead.
 - One agent per trivial task where one agent could have carried five — batch them.
 - Two write-intent subagents sharing one working tree in parallel — isolate in worktrees.
+- Upgrading every write dispatch to the strongest tier regardless of complexity — match
+  the tier instead.
 - Summarizing prior findings instead of quoting verbatim — loss compounds.
 - Tier 1 prompts for verification/implementation subagents — they need intent + rationale.
 

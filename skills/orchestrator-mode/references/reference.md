@@ -10,7 +10,7 @@ Map the roles in SKILL.md to concrete tools (built-in rosters are minimal — cu
 | Plan / todo tool | `TaskCreate`/`TaskUpdate` (or `TodoWrite`) | todo tool | `EnterPlanMode`/`ExitPlanMode` (no todo tool — track in replies) |
 | Read-only search / explore agent | `Explore` | `explore` | `Explore` |
 | Implementation / general agent | `general-purpose` | general / custom agent | `general-purpose` |
-| Coding model for write intent | `model:` = strongest coding model available; don't raise thinking (research: unset) | strongest coding model | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
+| Model tier per dispatch | `model:` unset by default; strongest tier when complexity clears Rule 5; cheaper tier for simple/mechanical; verification unset; don't raise thinking | same principle | `model:` in a custom subagent's frontmatter (no per-dispatch override) |
 | Isolated worktree per parallel writer | `isolation: "worktree"` on `Agent` | prompt's first step: `git worktree add ../wt-<task> -b <branch>` | request worktree isolation in the dispatch (branch `agent/<agentId>`) |
 | Forbidden in main thread (examples) | `Read Grep Glob Edit Write Bash WebFetch WebSearch` | `Read Grep Shell` + edit/search tools | `Read Grep Glob Edit Write Bash WebFetch WebSearch SnowflakeSqlExecute` |
 

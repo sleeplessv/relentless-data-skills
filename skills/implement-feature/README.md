@@ -25,27 +25,28 @@ a feature run yourself, so it pays zero always-on context load.
   integration dispatch merges each wave, so blockers are always merged before their
   dependants start.
 - **Gates at both levels** — each ticket subagent keeps `implement-ticket`'s
-  types+tests loop and runtime smoke check; after the last wave, a separate
-  verification dispatch (full suite + smoke) and a separate `code-review` dispatch
-  (whole feature diff, spec as intent) run on the unified integration branch, with
-  fix dispatches looping until green.
+  types+tests loop and runtime smoke check, and each wave gets a targeted
+  verification after its merge; after the last wave, a separate verification
+  dispatch (full suite + smoke) and a separate `code-review` dispatch (whole
+  feature diff, spec as intent) run on the unified integration branch, with fix
+  dispatches looping until green or stopping after three strikes.
 - **One feature PR** — created ready-for-review only when everything is green, with
   Summary, Test plan, and `Closes #n` lines for every implemented ticket — plus the
   spec, but only once every open ticket of the spec is covered. Never merged by the agent.
 - **Drain-around-failure + resume** — a three-strikes ticket pushes its WIP branch
   and comments findings; its dependants are skipped, independent tickets continue,
-  and the run stops before the PR with a full report. Re-invoking resumes from the
-  pushed integration branch (legacy `feat/prd-<N>-*` / `feat/issue-<N>-*` branch
-  names are recognised too).
+  and the run verifies the integration branch, then stops before Review and the PR
+  with a full report. Re-invoking resumes from the pushed integration branch
+  (legacy `feat/prd-<N>-*` / `feat/issue-<N>-*` branch names are recognised too).
 
 ## Conventions it expects
 
 Tickets produced by `to-tickets`: parent spec referenced in a `## Parent` body
 section (native sub-issue linkage is used too where present, but current
-`to-tickets` doesn't dependably create it) and blockers as native blocking
-edges unioned with `## Blocked by` body sections (either source alone may
-carry an edge). Current `to-spec` applies no `spec` label;
-the legacy `spec`/`prd` labels are recognised where a repo carries them.
+`to-tickets` doesn't dependably create it; wayfinder's `Part of #<n>` fallback
+is also recognised) and blockers as native blocking edges unioned with body
+declarations (`## Blocked by` sections, inline `Blocked by #n`, `Depends on #n`
+— either source alone may carry an edge).
 
 ## Install
 

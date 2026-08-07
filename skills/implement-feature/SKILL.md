@@ -8,7 +8,7 @@ description: "Implement a whole feature as one PR: orchestrate subagent waves ov
 # Implement Feature
 
 Take a spec and its tickets from open → integration branch → parallel ticket branches →
-integrated review + tests → **one feature PR** into the default branch.
+integrated review + tests → verification plan → **one feature PR** into the default branch.
 
 Operate under the `orchestrator-mode` skill for the whole run — every git / gh / file /
 test action below is a subagent dispatch (its 1–3-sentence report rule yields to this
@@ -22,6 +22,7 @@ skill via its **Orchestrated dispatch** contract.
 - **Ticket branch** — `feat/ticket-<N>-<slug>`, cut from the integration-branch tip. (Legacy: `feat/issue-<N>-<slug>`.)
 - **Wave** — the currently-unblocked tickets, dispatched in parallel.
 - **Feature PR** — the single PR from integration branch to default branch.
+- **Verification plan** — the human-facing walkthrough of the delivered feature (see `CONTEXT.md`): using the application and inspecting the data, not re-running tests. Authored after the gates, embedded in the feature PR body.
 
 ## Rules
 
@@ -29,7 +30,7 @@ skill via its **Orchestrated dispatch** contract.
 - **Network `gh` / `git fetch|pull|push` run outside the sandbox** — every dispatch prompt says so.
 - The spec is context, never a work item.
 - **Implement the work-set at the scope its tickets ask for** — adjacent bugs, refactors, and cleanups get reported in the feature PR body, not fixed.
-- **One dispatch per ticket per wave** — no helper or double-check agents alongside it, none to re-read what a dispatch already returned. Only the dispatches steps 0-4 already prescribe (integration, resolver, targeted verification, gates, fixes, PR) run beside it.
+- **One dispatch per ticket per wave** — no helper or double-check agents alongside it, none to re-read what a dispatch already returned. Only the dispatches steps 0-5 already prescribe (integration, resolver, targeted tests, gates, fixes, verification plan, PR) run beside it.
 - Dispatch prompts tell the subagent to invoke `implement-ticket`; if subagents cannot load skills, paste its body verbatim into the prompt.
 - **Every ticket dispatch gets worktree isolation, even a one-ticket wave** — deliberately stricter than orchestrator-mode's two-writer rule, so the main tree never leaves the integration branch. Use the delegation tool's native worktree isolation (orchestrator-mode reference, Tool Mapping); none available → stop and say so rather than sharing the main tree.
 
@@ -53,10 +54,10 @@ Then, in the main thread:
 
 - **Announce the work-set** (numbers + titles) and the wave plan before any branch is created.
 - **Work-set of one, no existing integration branch → do not orchestrate.** Say so, hand the ticket to `implement-ticket` in a single dispatch on its solo defaults (own branch, own PR, no overrides), and stop: the machinery below only pays off across several tickets. On resume, stay here — that ticket belongs to the feature PR.
-- **Work-set of zero → no waves.** With an existing integration branch, the branch is merged-but-ungated: go straight to step 3's gates, then step 4. With none, report there is nothing to implement and stop.
+- **Work-set of zero → no waves.** With an existing integration branch, the branch is merged-but-ungated: go straight to step 3's gates, then steps 4-5. With none, report there is nothing to implement and stop.
 - **Cycle in the graph → stop** and surface it.
 - **Dirty tree → stop and ask** (stash / commit / abort).
-- Existing integration branch → **resume**: keep its discovered name verbatim everywhere (never rename or re-create it); merged tickets move to a resolved set — they satisfy blocker edges and step 4's `Closes` scan but are not re-dispatched; WIP branches go to their wave's dispatch as `resume_branch`. A `needs-info` label beside a WIP branch is a ticket a prior run parked, not human triage: name it in the announcement and dispatch it (the contract swaps the label back). `needs-info` with no WIP branch, `wontfix`, or `needs-triage` still stops.
+- Existing integration branch → **resume**: keep its discovered name verbatim everywhere (never rename or re-create it); merged tickets move to a resolved set — they satisfy blocker edges and step 5's `Closes` scan but are not re-dispatched; WIP branches go to their wave's dispatch as `resume_branch`. A `needs-info` label beside a WIP branch is a ticket a prior run parked, not human triage: name it in the announcement and dispatch it (the contract swaps the label back). `needs-info` with no WIP branch, `wontfix`, or `needs-triage` still stops. `awaiting-verification` on the spec or on a work-set ticket (a prior run's PR awaits human verification) is not a stop: name it in the announcement and proceed — this run's Verification plan supersedes the old one.
 
 Done when: work-set announced, graph acyclic, tree clean, resume state known.
 
@@ -94,7 +95,7 @@ Repeat until the work-set drains, reporting once per wave (what merged, what is 
    `git worktree list --porcelain`; delete nothing not found that way), and the merged branches. Return contract: `merged_tickets`,
    `conflicts_found`, `worktrees_cleaned`, `integration_tip`. **On escalation the
    resolver inherits those duties** for what it merges; the orchestrator opens the
-   next wave only on a returned `integration_tip`, after a targeted verification
+   next wave only on a returned `integration_tip`, after a targeted test
    dispatch — the affected tests when a conflict was resolved, otherwise the merged
    tickets' tests (merged parallel writers always clear orchestrator-mode's Rule 6 bar).
 4. A failed ticket (three strikes) keeps `implement-ticket`'s orchestrated stop
@@ -117,16 +118,48 @@ per orchestrator-mode: the first look at the *merged* result of many agents' wor
 
 Findings → sequential write-intent fix dispatches on the integration branch, then
 re-verify; three strikes stops the run. On a partial work-set (anything failed or
-skipped) run Verify so the pushed branch is known-green, skip Review and the PR, and stop.
+skipped) run Verify so the pushed branch is known-green, skip Review, the Verification
+plan, and the PR, and stop.
 
 Done when: Verify and Review are clean on the pushed integration branch (partial work-set: Verify clean, then stop).
 
-### 4. Feature PR
+### 4. Verification plan
+
+One dispatch (it runs the delivered software — inherit the session model) authors the
+**Verification plan**: the walkthrough a human follows to use the delivered feature and
+inspect its data. Its prompt carries the step-0 spec body and acceptance criteria
+verbatim, the work-set tickets' criteria, and the step-0 feedback-loop and run commands.
+
+- **Structure**: an **Environment** block up top (where to run it — the same environment
+  the gates used — and estimated time), then per-scenario: **Goal** (which acceptance
+  criterion), **Preconditions/setup**, **Steps** (copy-paste-ready commands/queries, one
+  action each), **What you should see**, **Cleanup** when steps mutate anything.
+- **Traceability**: scenarios cover the spec's acceptance criteria first, plus any ticket
+  criterion not subsumed by them; a criterion with no human-facing surface is listed as
+  "verified by automated tests only, because <reason>" instead of getting a scenario.
+- **Not a test run**: expected results orient the human's judgement ("you should see
+  ~1,200 rows, `order_total` populated from 2024 on"), never assert pass/fail —
+  acceptance is the human's call.
+- **Execute before publishing**: the dispatch runs every command/query in the plan
+  against that environment; the observed output becomes the what-you-should-see text. A
+  step the run's environment cannot reach is still authored, flagged
+  "not executed, requires <env>", and named in the Environment block.
+- **Evidently broken** (a step errors, or the data plainly contradicts a criterion) →
+  back into step 3's fix machinery (sequential fix dispatches, re-run step 3's Verify,
+  re-author the plan; the same three strikes). The plan never walks the human into a
+  known defect.
+- **Nothing to walk through** (docs-only, config tweak): return a one-line waiver —
+  "No human verification beyond code review: <reason>" — never omit the section.
+
+Done when: the dispatch returns the plan (or its waiver) as a markdown section, every runnable step executed.
+
+### 5. Feature PR
 
 One dispatch:
 
 - Repo PR template if present; body carries a **Summary**, a **Test plan** (what the
-  verification dispatch ran and observed), and rebuilt `Closes #<n>` lines: scan every
+  step-3 Verify gate ran and observed), the step-4 **Verification plan** verbatim,
+  and rebuilt `Closes #<n>` lines: scan every
   ticket from any run's work-set plus every open ticket of the spec (re-run the step-0
   ticket scan) and include each one covered by step 0's evidence rule (a "merged into"
   comment, or a closing/subject-position commit ref) — whichever run or human put it
@@ -134,15 +167,23 @@ One dispatch:
   otherwise comment progress on the spec.
 - **Size the body to the change**: a line per ticket in the Summary, what actually ran in
   the Test plan, no filler sections and no restated ticket bodies.
-- Create it **ready-for-review** (not draft). Merging is the human's. Close out leading
-  with the outcome (PR URL + what landed), detail after.
+- Create it **ready-for-review** (not draft); if a prior run already opened the feature
+  PR, update its body instead — replacing the old Verification plan section, not
+  appending a second one. Merging is the human's.
+- Apply `awaiting-verification` to the spec, or to each work-set ticket when the run has
+  no spec (`gh label create` it first if the repo lacks it) — unless the plan is a
+  waiver, when there is nothing to verify. Removing the
+  label is the human's, after working the plan; never remove it yourself.
+- Close out leading with the outcome (PR URL + what landed), detail after.
 
 Done when: the PR URL is reported.
 
 ## Stop conditions
 
 A strike-out never halts mid-wave: drain the independent tickets (step 2.4), run step 3's
-Verify, then stop before Review and the PR. A semantic merge conflict surviving its one
+Verify, then stop before Review, the Verification plan, and the PR. A three-strikes
+stop in step 3's or step 4's fix loop halts the same way: no PR, the plan's findings
+reported. A semantic merge conflict surviving its one
 resolver dispatch stops immediately instead — no further waves, no Verify; unmerged
 tickets are reported and their dependants leave the work-set as in step 2.4. When
 stopping, push the integration branch if it is ahead of origin, and report leading with

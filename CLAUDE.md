@@ -8,7 +8,7 @@ Issues (and specs) are tracked as GitHub Issues on `sleeplessv/relentless-data-s
 
 ### Triage labels
 
-The five canonical triage labels are used verbatim: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+The six canonical triage labels are used verbatim: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`, `awaiting-verification`. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

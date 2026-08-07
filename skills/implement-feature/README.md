@@ -30,8 +30,8 @@ a feature run yourself, so it pays zero always-on context load.
   (whole feature diff, spec as intent) run on the unified integration branch, with
   fix dispatches looping until green.
 - **One feature PR** — created ready-for-review only when everything is green, with
-  Summary, Test plan, and `Closes #n` lines for every implemented ticket **and the
-  spec**. Never merged by the agent.
+  Summary, Test plan, and `Closes #n` lines for every implemented ticket — plus the
+  spec, but only once every open ticket of the spec is covered. Never merged by the agent.
 - **Drain-around-failure + resume** — a three-strikes ticket pushes its WIP branch
   and comments findings; its dependants are skipped, independent tickets continue,
   and the run stops before the PR with a full report. Re-invoking resumes from the
@@ -43,7 +43,8 @@ a feature run yourself, so it pays zero always-on context load.
 Tickets produced by `to-tickets`: parent spec referenced in a `## Parent` body
 section (native sub-issue linkage is used too where present, but current
 `to-tickets` doesn't dependably create it) and blockers as native blocking
-edges (`## Blocked by` fallback). Current `to-spec` applies no `spec` label;
+edges unioned with `## Blocked by` body sections (either source alone may
+carry an edge). Current `to-spec` applies no `spec` label;
 the legacy `spec`/`prd` labels are recognised where a repo carries them.
 
 ## Install

@@ -38,9 +38,11 @@ file / test action below is a subagent dispatch. Per-ticket work composes the
 
 One read-only dispatch (general-purpose — it runs networked `gh`) gathers:
 
-- **Args** — spec number, ticket list/range, or both. Spec-only → list its open tickets: search open issues whose `## Parent` body section references the spec (the reliable link — current `to-tickets` doesn't dependably create native sub-issues), and union in the native sub-issue API via `gh api` where populated. List-only → resolve the shared parent spec for context. Both → the explicit list is the authoritative work-set.
+- **Args** — spec number, ticket list/range, or both. Spec-only → list its open tickets by scanning bodies for a `## Parent` section referencing `#<spec>` (the reliable link — current `to-tickets` doesn't dependably create native sub-issues). The match must be anchored to the heading — a prose mention of `#<spec>` elsewhere in a body is not a link, and `gh search issues` cannot express this:
+  `gh issue list --state open --limit 500 --json number,title,body --jq '[.[] | select((.body // "") | test("(?m)^## Parent[^\n]*\n+[^\n]*#<spec>\\b"))]'`
+  Union in the native sub-issue results (`gh api repos/<owner>/<repo>/issues/<spec>/sub_issues --jq '.[].number'` — empty or 404 is normal), dedupe by number, keep open issues only. List-only → resolve the shared parent spec for context. Both → the explicit list is the authoritative work-set.
 - Closed tickets: silently skip. Spec body + acceptance criteria: capture verbatim for later handoffs.
-- Blocking edges between work-set tickets (native dependency API, `## Blocked by` body fallback) → the dependency graph.
+- Blocking edges → the dependency graph: for **every** work-set ticket, union the native dependency API (`gh api repos/<owner>/<repo>/issues/<n>/dependencies/blocked_by --jq '.[].number'`) with any `## Blocked by` body section or inline `Blocked by #n` line — either source alone may carry an edge, so the body scan is per-ticket, never skipped because the API returned edges elsewhere. An edge to an open issue outside the work-set → stop and ask; to a closed one → ignore.
 - The **feedback-loop commands** — install/setup, type-check, test, and run commands (same sources as `implement-ticket` step 4) — for the dispatch handoffs and the step 3 gates.
 - `git status --porcelain`; whether the integration branch exists (`feat/spec-<N>-*`, the legacy `feat/prd-<N>-*`, or the `feat/<slug>` a prior no-spec run named — probe origin with `git ls-remote origin 'feat/*'`, not a fetch). If it does, the **resume state** per work-set ticket: **merged** iff it carries a "merged into `<integration branch>`" comment, or a commit on `<default>..<integration branch>` matches `#<N>\b`, `ticket-<N>\b`, or the legacy `issue-<N>\b` (a human may have fixed it by hand); any pushed `feat/ticket-<N>-*` (or legacy `feat/issue-<N>-*`) WIP branch.
 
@@ -101,7 +103,7 @@ per orchestrator-mode: the first look at the *merged* result of many agents' wor
 orchestrator re-checking itself):
 
 1. **Verify** — the step-0 feedback-loop commands: full type-check + test suite + runtime smoke check on the integration branch.
-2. **Review** — the `code-review` skill over `git diff <default>...<integration branch>`, with the spec pasted in as the intent to review against.
+2. **Review** — the `code-review` skill with `<default>` as its fixed point (the main tree has the integration branch checked out, so HEAD is its tip). Write the step-0 spec body to a scratch file and pass that path as the spec source — this overrides code-review's own spec search, which would otherwise follow commit refs to the *tickets* instead of the spec; it must not ask the user.
 
 Findings → sequential write-intent fix dispatches on the integration branch, then
 re-verify; three strikes stops the run. On a partial work-set (anything failed or
@@ -115,8 +117,8 @@ One dispatch:
 
 - Repo PR template if present; body carries a **Summary**, a **Test plan** (what the
   verification dispatch ran and observed), and rebuilt `Closes #<n>` lines: scan every
-  ticket from any run's work-set plus every open ticket of the spec (`## Parent` scan
-  plus native sub-issues), and include each
+  ticket from any run's work-set plus every open ticket of the spec (re-run the
+  step-0 ticket scan), and include each
   one covered by a "merged into" comment or a `#<N>\b` / `ticket-<N>\b` / legacy
   `issue-<N>\b` commit — whichever run or human put it there. Add `Closes #<spec>` only
   when every open ticket of the spec is covered; otherwise comment progress on the spec.

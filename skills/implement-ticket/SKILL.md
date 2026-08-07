@@ -35,7 +35,7 @@ Everything else — claiming (step 1), environment setup before the baseline (a 
 
 ### 0. Resolve the ticket number
 
-If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs** (spec documents, not tickets — filter primarily by the `spec` label, plus the legacy `prd` label, with the body-heading regex as fallback for older specs):
+If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs** (spec documents, not tickets — the body-heading regex is the primary spec detector, because current `to-spec` puts `ready-for-agent` on the spec itself and applies no `spec` label; the `spec` and legacy `prd` labels are extra hints some repos carry):
 
 ```bash
 gh issue list --state open --label ready-for-agent --json number,title,body,labels \
@@ -83,7 +83,7 @@ Done when you have: (a) the type-check and test commands, (b) the run command, a
 
 First **recognise what kind of work the ticket is** — it decides how you build:
 
-- **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets** — **red → green → refactor**, one test at a time. One failing test (**red**), the minimal code to pass it (**green**), then **refactor**. Don't write all the tests up front; each test responds to what the last one taught you. Follow the `tdd` skill for the full loop.
+- **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets** — the **red → green** loop, one test at a time. One failing test (**red**), then the minimal code to pass it (**green**). Don't write all the tests up front; each test responds to what the last one taught you. Refactoring is not part of the loop — it belongs to the step 8 review pass. Follow the `tdd` skill for the full loop. The `tdd` skill expects tests at **pre-agreed seams**: with no user in the loop, the ticket is that agreement — place tests at the seams its acceptance criteria and the existing test layout imply. If no sensible seam exists for a criterion, treat it as ambiguous acceptance criteria (a stop condition), not a licence to test implementation details.
 - **Everything else** — frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Say which path you took.
 
 Throughout:

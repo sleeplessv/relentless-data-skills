@@ -15,10 +15,10 @@ is off.
 
 ## What it does
 
-- **Ticket selection** — works a given `#N`, or auto-picks the lowest-numbered open ticket labelled `ready-for-agent` (excluding specs, which carry a `spec` label — `prd` on older repos).
+- **Ticket selection** — works a given `#N`, or auto-picks the lowest-numbered open ticket labelled `ready-for-agent` (excluding specs, detected by their body headings — plus the `spec`/`prd` labels where a repo carries them).
 - **Claiming** — assigns itself and comments on the ticket so two agents never grab the same ticket.
 - **Safe branching** — refuses to branch over a dirty working tree, honours repo naming conventions, and handles blocked-by chains (branches off the blocker's branch, or stops if the blocker hasn't started).
-- **Task-aware implementation** — builds testable backend work in red-green-refactor tracer bullets (deferring to the `tdd` skill), and implements frontend, notebook, and exploratory data work directly where the test suite can't pin the behaviour.
+- **Task-aware implementation** — builds testable backend work in red-green tracer bullets (deferring to the `tdd` skill; refactoring belongs to the review pass, not the loop), and implements frontend, notebook, and exploratory data work directly where the test suite can't pin the behaviour.
 - **Verification before "done"** — baselines the test suite before editing, then runs a type-check + test feedback loop until both are green, then a runtime smoke check with separate paths for servers (start, hit endpoint, read logs) and CLIs/libraries/pipelines (representative invocation, exit code 0).
 - **PR hygiene** — draft PR within the first commits, repo PR template if present, a full-diff read before marking ready, Summary + Test plan sized to the change, marks ready for review but never merges.
 - **Stop conditions** — ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the ticket, and hand back to the human.
@@ -27,9 +27,11 @@ is off.
 ## Conventions it expects
 
 The auto-pick path assumes a light triage vocabulary: `ready-for-agent` marks
-tickets an agent may take, and `spec` (`prd` on older repos) marks spec
-documents that should be broken into tickets first. Without those labels you
-can still invoke it with an explicit ticket number.
+tickets an agent may take. Specs (which should be broken into tickets first)
+are excluded by their body headings; current `to-spec` labels the spec itself
+`ready-for-agent` and applies no `spec` label, though the `spec`/`prd` labels
+are still honoured where present. Without any of this you can still invoke it
+with an explicit ticket number.
 
 ## Install
 

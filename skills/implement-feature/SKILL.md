@@ -38,7 +38,7 @@ file / test action below is a subagent dispatch. Per-ticket work composes the
 
 One read-only dispatch (general-purpose — it runs networked `gh`) gathers:
 
-- **Args** — spec number, ticket list/range, or both. Spec-only → list its open sub-issues (native sub-issue API via `gh api`, `## Parent` body fallback). List-only → resolve the shared parent spec for context. Both → the explicit list is the authoritative work-set.
+- **Args** — spec number, ticket list/range, or both. Spec-only → list its open tickets: search open issues whose `## Parent` body section references the spec (the reliable link — current `to-tickets` doesn't dependably create native sub-issues), and union in the native sub-issue API via `gh api` where populated. List-only → resolve the shared parent spec for context. Both → the explicit list is the authoritative work-set.
 - Closed tickets: silently skip. Spec body + acceptance criteria: capture verbatim for later handoffs.
 - Blocking edges between work-set tickets (native dependency API, `## Blocked by` body fallback) → the dependency graph.
 - The **feedback-loop commands** — install/setup, type-check, test, and run commands (same sources as `implement-ticket` step 4) — for the dispatch handoffs and the step 3 gates.
@@ -115,10 +115,11 @@ One dispatch:
 
 - Repo PR template if present; body carries a **Summary**, a **Test plan** (what the
   verification dispatch ran and observed), and rebuilt `Closes #<n>` lines: scan every
-  ticket from any run's work-set plus every open sub-issue of the spec, and include each
+  ticket from any run's work-set plus every open ticket of the spec (`## Parent` scan
+  plus native sub-issues), and include each
   one covered by a "merged into" comment or a `#<N>\b` / `ticket-<N>\b` / legacy
   `issue-<N>\b` commit — whichever run or human put it there. Add `Closes #<spec>` only
-  when every open sub-issue is covered; otherwise comment progress on the spec.
+  when every open ticket of the spec is covered; otherwise comment progress on the spec.
 - **Size the body to the change**: a line per ticket in the Summary, what actually ran in
   the Test plan, no filler sections and no restated ticket bodies.
 - Create it **ready-for-review** (not draft). Merging is the human's. Close out leading

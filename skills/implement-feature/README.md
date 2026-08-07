@@ -12,7 +12,7 @@ a feature run yourself, so it pays zero always-on context load.
 ## What it does
 
 - **Work-set resolution** — accepts a spec number, a ticket list/range, or both. Spec
-  alone → discovers its open sub-issues; tickets alone → resolves the parent spec for
+  alone → discovers its open tickets (`## Parent` scan plus native sub-issues); tickets alone → resolves the parent spec for
   context; both → the explicit list wins. The spec is always context, never a work
   item. The resolved work-set is announced before any branch is created; closed
   tickets are silently skipped; a cycle in the blocking graph stops the run. A
@@ -40,9 +40,11 @@ a feature run yourself, so it pays zero always-on context load.
 
 ## Conventions it expects
 
-Tickets produced by `to-tickets`: parent spec linked as a native sub-issue (`## Parent`
-body fallback) and blockers as native blocking edges (`## Blocked by` fallback).
-The spec carries a `spec` label (`prd` on older repos).
+Tickets produced by `to-tickets`: parent spec referenced in a `## Parent` body
+section (native sub-issue linkage is used too where present, but current
+`to-tickets` doesn't dependably create it) and blockers as native blocking
+edges (`## Blocked by` fallback). Current `to-spec` applies no `spec` label;
+the legacy `spec`/`prd` labels are recognised where a repo carries them.
 
 ## Install
 

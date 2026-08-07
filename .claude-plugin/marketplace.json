@@ -115,6 +115,27 @@
       ]
     },
     {
+      "name": "metabase",
+      "source": "./skills/metabase",
+      "description": "Operate a Metabase instance through its REST API via a wrapper that treats cards as live objects — read-only ad-hoc SQL, MBQL-to-SQL compilation, source-chain and blast-radius tracing, and dashboard filter-wiring audits that catch field ids pointing at the wrong database. Every mutation captures a restore point first; there is no execute path for DML/DDL.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/metabase",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "metabase",
+        "bi",
+        "dashboards",
+        "sql",
+        "rest-api",
+        "read-only",
+        "analytics-engineering"
+      ]
+    },
+    {
       "name": "orchestrator-mode",
       "source": "./skills/orchestrator-mode",
       "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, and Cortex Code.",

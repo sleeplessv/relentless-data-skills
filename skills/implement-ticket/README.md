@@ -15,13 +15,13 @@ is off.
 
 ## What it does
 
-- **Ticket selection** — works a given `#N`, or auto-picks the lowest-numbered open ticket labelled `ready-for-agent` (excluding specs, detected by their body headings — plus the `spec`/`prd` labels where a repo carries them).
+- **Ticket selection** — works a given `#N`, or auto-picks the lowest-numbered open ticket labelled `ready-for-agent` (excluding specs, detected by their body headings — plus the `spec`/`prd` labels where a repo carries them — and skipping tickets that are already assigned or carry a stop-condition label).
 - **Claiming** — assigns itself and comments on the ticket so two agents never grab the same ticket.
 - **Safe branching** — refuses to branch over a dirty working tree, honours repo naming conventions, and handles blocked-by chains (branches off the blocker's branch, or stops if the blocker hasn't started).
 - **Task-aware implementation** — builds testable backend work in red-green tracer bullets (deferring to the `tdd` skill; refactoring belongs to the review pass, not the loop), and implements frontend, notebook, and exploratory data work directly where the test suite can't pin the behaviour.
 - **Verification before "done"** — baselines the test suite before editing, then runs a type-check + test feedback loop until both are green, then a runtime smoke check with separate paths for servers (start, hit endpoint, read logs) and CLIs/libraries/pipelines (representative invocation, exit code 0).
 - **PR hygiene** — draft PR within the first commits, repo PR template if present, a full-diff read before marking ready, Summary + Test plan sized to the change, marks ready for review but never merges.
-- **Stop conditions** — ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the ticket, and hand back to the human.
+- **Stop conditions** — ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the ticket, park it as `needs-info` (solo runs), and hand back to the human; explicitly re-requesting the parked ticket resumes it.
 - **Orchestrated dispatch** — a sanctioned override contract (`base_branch`, `open_pr: false`, blockers pre-merged) so a feature orchestrator like `implement-feature` can run it per-ticket against an integration branch without per-ticket PRs.
 
 ## Conventions it expects

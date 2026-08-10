@@ -39,23 +39,37 @@ environment change (new shell, edited `.env`, switched target).
 
 ## Invocation rules — every dbt command
 
-1. **Run outside the sandbox.** dbt needs network access to the warehouse.
+1. **Invoke via the context file's `runner`, never bare `dbt`.** dbt-fusion
+   ships as `dbt`, so PATH often resolves to a different engine than the one
+   the project pins — a fusion binary on a core project hard-errors on
+   deprecations and never reaches SQL compilation, which reads as "the project
+   is broken". If the context file has no `runner`, derive it (`uv.lock` →
+   `uv run dbt`, `poetry.lock` → `poetry run dbt`, `.venv/` →
+   `.venv/bin/dbt`) and record it. Before trusting a parse-stage failure,
+   confirm the engine with `<runner> --version`.
+2. **Run outside the sandbox.** dbt needs network access to the warehouse.
    In a sandboxed shell it fails with DNS/connection errors that masquerade
    as auth problems. If you see a connection error, suspect the sandbox
    *first* — do not start debugging credentials.
-2. **Never pipe dbt output — redirect to a logfile.** Piped output
+3. **Never pipe dbt output — redirect to a logfile.** Piped output
    (`dbt build | tail`) can buffer and return blank. Always:
    ```bash
-   dbt build --select <sel> > /tmp/dbt_run.log 2>&1
+   <runner> build --select <sel> > /tmp/dbt_run.log 2>&1
    ```
    then grep/tail the logfile. Exit code first, log second.
-3. **Long runs go to the background.** Full builds or large facts can
+4. **Long runs go to the background.** Full builds or large facts can
    exceed default tool timeouts. Run in the background (or raise the
    timeout) and poll the logfile. The context file's lore section lists
    known-slow models.
-4. **Verify the selection matched.** After every run, confirm the log shows
+5. **Verify the selection matched.** After every run, confirm the log shows
    a non-zero model count. `No models available` / "Nothing to do" from a
    typo'd `--select` exits 0 and looks like success while doing nothing.
+6. **Check the run was not vacuous.** A model whose spine is empty in the
+   local environment builds 0 rows, and every data test on it passes
+   trivially. `PASS=n ERROR=0` on an empty model proves it compiles, nothing
+   more. When a model's source is populated outside dbt's DAG (ML scores,
+   externally-loaded tables), count the rows before reporting success, and
+   exercise the logic on synthetic rows via `<runner> show --inline`.
 
 ## Reading the result
 

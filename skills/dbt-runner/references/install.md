@@ -26,9 +26,18 @@ env var, the private key, or a passphrase during discovery.
      without them;
    - if an output sets `private_key_path` from an env var → that var name
      is `private_key_path_var` (key-pair auth).
-3. **Engine** — run `dbt --version` (sandbox-safe, no network). dbt-fusion
-   identifies itself as `dbt-fusion <x.y.z>`; otherwise it's dbt-core.
-   Record engine and version.
+3. **Runner, then engine** — resolve *how* to invoke dbt before asking *what*
+   dbt is. Bare `dbt` on PATH is often a different install from the one the
+   project pins, and dbt-fusion ships as `dbt`, so PATH commonly yields fusion
+   for a core project. Check for a project-managed environment — `uv.lock` /
+   `[tool.uv]` in `pyproject.toml` → `uv run dbt`; `poetry.lock` →
+   `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt` — and record it as
+   `runner`. Fall back to `dbt` only when none exists. Then run
+   `<runner> --version` (sandbox-safe, no network): dbt-fusion identifies
+   itself as `dbt-fusion <x.y.z>`, otherwise it's dbt-core. Record engine and
+   version. If bare `dbt --version` disagrees with `<runner> --version`, note
+   the mismatch in Project lore — it will otherwise be rediscovered as a fake
+   "the project is broken" failure.
 4. **Packages** — note whether `packages.yml` / `package-lock.yml` exist
    and whether `dbt_packages/` is populated (preflight checks this every
    session; just note the state).
@@ -53,6 +62,7 @@ commit — suggest the user commit it.
 ---
 profile: <profile-name>
 target: <working-target>
+runner: <uv run dbt | poetry run dbt | .venv/bin/dbt | dbt>
 engine: fusion              # fusion | core
 engine_version: <x.y.z>
 required_env_vars:

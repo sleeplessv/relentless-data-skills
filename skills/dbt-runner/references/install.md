@@ -94,5 +94,6 @@ known-slow models, schema quirks. One or two lines each. Newest last._
 ## Done
 
 Confirm the file is written, run the preflight
-(`python3 <skill-dir>/scripts/preflight.py`), then proceed with the user's
+(`python3 <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>`),
+then proceed with the user's
 original request.

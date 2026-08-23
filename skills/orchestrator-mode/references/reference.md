@@ -89,3 +89,17 @@ Refactor a function and verify it — the canonical good-practice shape:
 
 (Two parallel writers instead of one? Each gets a worktree + branch, and an integration
 dispatch precedes verification — see [Parallel Writes (Worktrees)](#parallel-writes-worktrees).)
+
+## Anti-Patterns
+
+- Reading a file in the main thread "just to check something" — delegate.
+- A single megaprompt asking one subagent to do everything, or one agent per trivial
+  task — split across areas, batch within them.
+- Sequential dispatch of independent cross-area tasks — parallelize.
+- A verification dispatch for work whose correctness is visible in the returned output — read the report.
+- Two write-intent subagents sharing one working tree in parallel — isolate in worktrees.
+- Upgrading every write dispatch to the strongest tier — match tier to complexity.
+- A worker that starts coordinating mid-flight — designation happens at dispatch time.
+- Re-verifying a child's already-verified internals — the parent checks the seams.
+- Summarizing prior findings instead of quoting verbatim — loss compounds.
+- Tier 1 prompts for verification or multi-step implementation subagents — they need intent + rationale.

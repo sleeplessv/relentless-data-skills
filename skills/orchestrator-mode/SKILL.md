@@ -9,6 +9,9 @@ The main thread is a **coordinator**, not a worker. Every concrete task (reading
 searching code, running SQL, editing, verifying) is delegated to a subagent; the main
 thread only plans, dispatches, and synthesizes.
 
+Delegation guards the context window: bulk payloads stay in subagent contexts; only
+summaries and decisions enter the main thread, where spent context cannot be reclaimed.
+
 **Role, not tool/name.** This skill names *roles and capabilities* (search agent, coding
 agent) — never a fixed tool or subagent name, since rosters differ per agent. Map each
 role to your agent's concrete tool — see [references/reference.md](references/reference.md#tool-mapping).
@@ -17,7 +20,8 @@ role to your agent's concrete tool — see [references/reference.md](references/
 
 1. **The main thread may only call** the delegation tool (including its management
    companions: continue, wait on, or stop a dispatch), the plan/todo tool, the
-   skill-loading tool, and user-facing question/report tools. Every file / search /
+   skill-loading tool (reading this skill's own `references/` file counts as skill
+   loading), and user-facing question/report tools. Every file / search /
    shell / web / edit tool is forbidden in the main thread — delegate it.
 2. **Every** user request is decomposed into one or more subagent dispatches — but batch,
    don't atomize: one dispatch carries several atomic tasks in the same area. Never an
@@ -28,16 +32,18 @@ role to your agent's concrete tool — see [references/reference.md](references/
    Batching wins inside an area: same-area independent edits are one dispatch, not N
    parallel writers; parallelize across areas.
 4. **Pick the right subagent** — a specialist if your agent offers one, else general-purpose. See [Subagent Selection](#subagent-selection).
-5. **Match model tier to task complexity** — leave the model unset by default (the
-   dispatch inherits the session model). Reach for the strongest coding tier when
-   write-intent work spans multiple files, changes schema or data, or carries
-   architectural impact; drop to a cheaper tier for simple or mechanical dispatches
-   (single-file edits, read-only fan-outs). Mechanical trumps file count — but never
-   the schema/data or architectural triggers, and an edit needing per-site judgement is
-   not mechanical. Tiers are relative to the session model: escalation is a floor, so
-   if the session model already is the strongest tier, leave the model unset — never
-   pass a tier below it. Verification dispatches always inherit; a fix dispatch after a
-   failed verification is sized to the fix. Reasoning effort is a separate dial — leave it at the default.
+5. **Match model tier to task complexity.** Leave the model unset by default; the
+   dispatch then inherits the session model. Escalate to the strongest coding tier
+   when write-intent work spans multiple files, changes schema or data, or carries
+   architectural impact. Drop to a cheaper tier for simple or mechanical dispatches,
+   such as single-file edits and read-only fan-outs. A mechanical sweep stays cheap
+   whatever its file count, but the schema/data and architectural triggers still
+   escalate it, and an edit that needs per-site judgement is not mechanical.
+   Escalation is a floor: never pass a tier below the session model, and if the
+   session model is already the strongest tier, leave the model unset. Verification
+   dispatches always inherit. A fix dispatch after a failed verification is sized
+   to the fix, not to the failed work. Reasoning effort is a separate dial; leave
+   it at the default.
 6. **Verify separately when blast radius is real** — write-intent work that merges to a
    shared branch, changes a schema or data, spans multiple files, or carries
    architectural impact gets its own verification dispatch. Read-only lookups,
@@ -48,17 +54,17 @@ role to your agent's concrete tool — see [references/reference.md](references/
    dispatch — see [Parallel Writes (Worktrees)](references/reference.md#parallel-writes-worktrees).
    No worktree analogue for the shared resource (a warehouse schema, a live service), or
    a sweep too short to repay the isolation overhead → serialize those writers instead; that is the sanctioned sequential dispatch.
-8. **Delegate coordination when the subtask has its own decomposition** — a subtask
-   needing its own plan → dispatch → synthesize cycle (internal reports the parent never
-   needs to see) is dispatched as a *sub-orchestrator*: its prompt says to invoke this
-   skill and coordinate its scope, and the skill applies to it recursively ("main
-   thread" then means the sub-orchestrator itself). Coordinators, like verifiers,
-   always inherit the session model. Each layer verifies its own scope per Rule 6 and
-   returns its verification evidence — below-threshold work returns
-   `verification_evidence: none required` so the parent can tell it apart; the parent
-   verifies what it integrates across children, plus any child work that arrived
-   unverified once the merged whole clears Rule 6. Harness limits and caveats: see
-   [Nesting (Sub-orchestrators)](references/reference.md#nesting-sub-orchestrators).
+8. **Delegate coordination when the subtask has its own decomposition.** A subtask
+   that needs its own plan → dispatch → synthesize cycle, with internal reports the
+   parent never needs to see, is dispatched as a *sub-orchestrator*. Its prompt says
+   to invoke this skill and coordinate its scope. The skill then applies to it
+   recursively, and "main thread" means the sub-orchestrator itself. Coordinators,
+   like verifiers, always inherit the session model. Each layer verifies its own
+   scope per Rule 6 and returns its verification evidence. Below-threshold work
+   returns `verification_evidence: none required` so the parent can tell it apart.
+   The parent verifies what it integrates across children, plus any child work that
+   arrived unverified once the merged whole clears Rule 6. Harness limits and
+   caveats: see [Nesting (Sub-orchestrators)](references/reference.md#nesting-sub-orchestrators).
 
 ## Workflow
 
@@ -114,10 +120,6 @@ specific lines to read (the *producing* dispatch writes such an artifact and ret
 its path plus a one-line-per-entry index); carry a cumulative "Decisions made" block
 into every dispatch after the first.
 
-## Parallel Writes (Worktrees)
-
-Procedure for the Hard Rule 7 case (two or more parallel writers): see [references/reference.md](references/reference.md#parallel-writes-worktrees).
-
 ## Worked Example (agent-neutral)
 
 Refactor-and-verify, the canonical shape (plan → parallel search fan-out → one
@@ -126,17 +128,7 @@ strongest-tier coding dispatch → separate model-unset verification): see
 
 ## Anti-Patterns
 
-- Reading a file in the main thread "just to check something" — delegate.
-- A single megaprompt asking one subagent to do everything, or one agent per trivial
-  task — split across areas, batch within them.
-- Sequential dispatch of independent cross-area tasks — parallelize.
-- A verification dispatch for work whose correctness is visible in the returned output — read the report.
-- Two write-intent subagents sharing one working tree in parallel — isolate in worktrees.
-- Upgrading every write dispatch to the strongest tier — match tier to complexity.
-- A worker that starts coordinating mid-flight — designation happens at dispatch time.
-- Re-verifying a child's already-verified internals — the parent checks the seams.
-- Summarizing prior findings instead of quoting verbatim — loss compounds.
-- Tier 1 prompts for verification or multi-step implementation subagents — they need intent + rationale.
+Ten failure shapes and their fixes: see [references/reference.md](references/reference.md#anti-patterns).
 
 ## Activation & Exit
 

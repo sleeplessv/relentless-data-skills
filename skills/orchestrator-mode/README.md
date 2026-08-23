@@ -21,11 +21,13 @@ CLI). Custom specialists in your own setup slot in wherever you have them.
 - **Capability-based subagent selection.** Pick the agent by what the task
   needs (search, web research, SQL, build, coding, review), preferring a custom
   specialist if you have one and falling back to general-purpose.
-- **Model discipline.** Subagents with write/implementation intent get the
-  strongest (most capable) coding model available — that's the model *tier*, not
-  a cue to raise the reasoning/thinking budget (leave that at the agent/user default);
-  research and verification dispatches inherit the parent model. Skipped automatically if your agent has no
-  per-subagent model control.
+- **Model discipline.** Dispatches inherit the session model by default. The
+  strongest coding tier is reserved for write-intent work with real complexity
+  (multi-file, schema or data changes, architectural impact); simple or
+  mechanical dispatches drop to a cheaper tier; verification and coordination
+  dispatches always inherit. Model tier, not reasoning budget — leave thinking
+  at the default. Skipped automatically if your agent has no per-subagent
+  model control.
 - **Worktree-isolated parallel writes.** When two or more write-intent subagents
   run in parallel, each works in its own git worktree + branch (native isolation
   on Claude Code, requested worktree isolation on Cortex Code, prompt-driven
@@ -65,12 +67,12 @@ npx skills add sleeplessv/relentless-data-skills/skills/orchestrator-mode
 ## Files
 
 - `SKILL.md` — the orchestration policy: hard rules, workflow, capability-based
-  subagent selection, model selection, prompt tiers, and the Claude Code /
-  Cursor / Cortex Code tool-mapping table.
-
-  `SKILL.md` is **intentionally self-contained** (no `REFERENCE.md`): orchestrator
-  mode forbids `Read` in the main thread, so a reference file would be unreadable
-  the moment the mode activates. Don't "fix" the length by splitting it.
+  subagent selection, model discipline, and the two-tier prompt requirements.
+- `references/reference.md` — the Claude Code / Cursor / Cortex Code tool-mapping
+  table, sub-orchestrator nesting mechanics, the parallel-writes worktree
+  procedure, a worked example, and the anti-pattern list. Rule 1 counts reading
+  this file as skill loading, so the main thread may consult it while the mode
+  is active.
 
 ## Maintenance / CI
 

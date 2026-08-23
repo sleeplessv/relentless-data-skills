@@ -63,12 +63,19 @@ npx skills add sleeplessv/relentless-data-skills/skills/implement-feature
 ```
 
 Install `orchestrator-mode`, `implement-ticket`, and (ideally) `code-review`
-alongside it — this skill composes them rather than restating them.
+alongside it — this skill composes them rather than restating them. It also
+references `principle-laziness-protocol`, `unslop`, and `technical-writing` for
+its code-frugality and prose standards; without them it falls back to the
+one-line minimums baked into the skill.
 
 ## Files
 
 - `SKILL.md` — the full workflow: work-set resolution, integration branch, waves,
   integration gates, feature PR, stop conditions.
+- `references/reference.md` — per-dispatch contracts disclosed from the workflow:
+  resolver commands and evidence rules, the wave-integration contract, the review
+  spec-source override, the Verification plan authoring contract, the feature PR
+  body contract. Dispatch prompts pass its absolute path and section anchor.
 
 ## Maintenance / CI
 

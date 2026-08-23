@@ -29,7 +29,9 @@ Everything else — claiming (step 1), environment setup before the baseline (th
 
 **Implement what the ticket asks, at the scope it asks for.** Adjacent bugs, drive-by refactors, and missing tests outside the acceptance criteria get reported in the PR body (or `open_questions` under an orchestrated dispatch), not fixed here.
 
-**No em dashes (—) in anything published to git or GitHub** — commit messages, PR titles and bodies, ticket comments. Use a comma, colon, or parentheses, or rewrite the sentence.
+**Make the smallest change that solves the ticket.** Prefer deletion over addition, keep the call hierarchy flat, and put each decision in one place; a diff a maintainer would find exhausting is the wrong solution. The `principle-laziness-protocol` skill, when installed, is the full protocol — follow it.
+
+**Prose published to git or GitHub (commit messages, PR titles and bodies, ticket comments, the Summary, Test plan, and Verification plan) follows the `technical-writing` and `unslop` skills when installed.** Baked-in minimum either way: plain words, active voice, one thought per sentence, and no em dashes (—) — use a comma, colon, or parentheses, or rewrite the sentence.
 
 **Run network commands outside the sandbox.** Run every `gh` and `git fetch`/`pull`/`push` with sandboxing disabled — a sandboxed shell blocks network and fails with a misleading DNS/connection error; on a connection error, suspect the sandbox first.
 

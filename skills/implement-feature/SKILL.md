@@ -26,10 +26,10 @@ skill via its **Orchestrated dispatch** contract.
 
 ## Rules
 
-- **No em dashes (—) in anything published to git or GitHub** — use commas, colons, or parentheses.
+- **Prose published to git or GitHub (PR body, ticket and spec comments, commit messages) follows the `technical-writing` and `unslop` skills when installed; baked-in minimum either way: plain words, active voice, and no em dashes (—)** — use commas, colons, or parentheses. Dispatch prompts that write such prose carry this rule (subagents may not have the skills).
 - **Network `gh` / `git fetch|pull|push` run outside the sandbox** — every dispatch prompt says so.
 - The spec is context, never a work item.
-- **Implement the work-set at the scope its tickets ask for** — adjacent bugs, refactors, and cleanups get reported in the feature PR body, not fixed.
+- **Implement the work-set at the scope its tickets ask for, as the smallest change that solves it** — adjacent bugs, refactors, and cleanups get reported in the feature PR body, not fixed. Ticket dispatches inherit the frugality bar via `implement-ticket`; steps 3–4 fix dispatch prompts carry it explicitly (the `principle-laziness-protocol` skill when installed): prefer deletion over addition and the smallest diff that fixes it.
 - **One dispatch per ticket per wave** — no helper or double-check agents alongside it, none to re-read what a dispatch already returned. Only the dispatches steps 0-5 already prescribe (integration, resolver, targeted tests, gates, fixes, verification plan, PR) run beside it.
 - Dispatch prompts tell the subagent to invoke `implement-ticket`; if subagents cannot load skills, paste its body verbatim into the prompt.
 - **Every ticket dispatch gets worktree isolation, even a one-ticket wave** — deliberately stricter than orchestrator-mode's two-writer rule, so the main tree never leaves the integration branch. Use the delegation tool's native worktree isolation (orchestrator-mode reference, Tool Mapping); none available → stop and say so rather than sharing the main tree.

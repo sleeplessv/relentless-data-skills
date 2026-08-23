@@ -47,6 +47,11 @@ npx skills add sleeplessv/relentless-data-skills/skills/implement-ticket
 /plugin install implement-ticket@relentless-data-skills
 ```
 
+The skill also references `tdd` and `code-review`, plus
+`principle-laziness-protocol`, `unslop`, and `technical-writing` for its
+code-frugality and prose standards; without those three it falls back to the
+one-line minimums baked into the skill.
+
 It activates when you say "implement ticket #N", "implement issue #N", or
 "grab the next ready ticket".
 

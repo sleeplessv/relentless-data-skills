@@ -30,13 +30,57 @@ run `python scripts/sync_registry.py --write`.
 
 ## External skills (references)
 
-Skills we use alongside this collection but don't maintain here — install them
-from their upstream repos:
+Skills we run alongside this collection but don't maintain here. Install them
+from their upstream repos.
+
+### Matt Pocock's engineering skills
+
+[mattpocock/skills](https://github.com/mattpocock/skills) is the flow the
+`implement-*` skills here plug into: `grill-with-docs` sharpens an idea,
+`to-spec` turns the thread into a spec, `to-tickets` splits it into tickets, and
+`implement` builds each one by driving `tdd`, closing with `code-review`. Run
+`setup-matt-pocock-skills` once per repo first. It writes the issue-tracker,
+triage-label, and domain-doc conventions the rest assume, which is where this
+repo's `docs/agents/` files and the `## Agent skills` block in `CLAUDE.md` come
+from. `ask-matt` is the router if you forget which one to reach for.
+
+Ones we use most, beyond the flow above: `triage`, `diagnosing-bugs`,
+`domain-modeling`, `codebase-design`, `research`, `prototype`, `handoff`,
+`wizard`, `resolving-merge-conflicts`, `writing-for-agents`.
+
+```bash
+npx skills add mattpocock/skills/skills/engineering/<skill>
+# a few live under skills/productivity/ instead: grilling, grill-me, handoff,
+# teach, to-questionnaire, wait-what, writing-for-agents, writing-great-skills
+```
+
+### Cursor's pstack
+
+[cursor/plugins](https://github.com/cursor/plugins) is Cursor's plugin
+repo. The `pstack` plugin is the one worth having in every agent, mostly for
+`unslop`, which strips AI tells from anything you write. It is an always-on rule
+rather than something you invoke. `bro` and `principle-laziness-protocol` ship
+with it. From the same repo, `thermos` and `thermo-nuclear-review` are a
+harsher code-quality pass than `code-review`, for when you want the diff torn
+apart rather than reviewed.
+
+```bash
+npx skills add cursor/plugins/pstack/skills/unslop
+npx skills add cursor/plugins/thermos/skills/thermos
+```
+
+Inside Cursor these install as plugins from the built-in registry instead, and
+Cursor's own bundled skills (`review`, `split-to-prs`, `autopilot`, and the
+rest) are already there.
+
+### Others
 
 | Skill | Upstream | Install |
 | --- | --- | --- |
+| `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) | `npx skills add vercel-labs/skills/skills/find-skills` |
+| `frontend-design` | [anthropics/claude-code](https://github.com/anthropics/claude-code) | `npx skills add anthropics/claude-code/plugins/frontend-design/skills/frontend-design` |
 | `terraform-skill` | [antonbabenko/terraform-skill](https://github.com/antonbabenko/terraform-skill) | `npx skills add antonbabenko/terraform-skill` |
-| `llm-council` | based on [karpathy/llm-council](https://github.com/karpathy/llm-council) (methodology) | local SKILL.md adaptation; no upstream package |
+| `llm-council` | based on [karpathy/llm-council](https://github.com/karpathy/llm-council) (methodology) | local SKILL.md adaptation, no upstream package |
 
 ## Install
 

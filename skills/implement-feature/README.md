@@ -72,6 +72,10 @@ one-line minimums baked into the skill.
 
 - `SKILL.md` — the full workflow: work-set resolution, integration branch, waves,
   integration gates, feature PR, stop conditions.
+- `references/reference.md` — per-dispatch contracts disclosed from the workflow:
+  resolver commands and evidence rules, the wave-integration contract, the review
+  spec-source override, the Verification plan authoring contract, the feature PR
+  body contract. Dispatch prompts pass its absolute path and section anchor.
 
 ## Maintenance / CI
 

@@ -1,0 +1,57 @@
+{
+  "_comment": "Every key is optional; values here override DEFAULT_CONFIG in lineage_common.py. Fill from the repo map before dispatching extractors.",
+  "countries": ["UK", "DE", "FR", "ES"],
+  "countryPrefixes": {"FGUK": "UK", "FGDE": "DE", "FGFR": "FR", "FGES": "ES"},
+  "lakehouseNameLayers": {"bronze": "bronze", "bronze_new": "bronze", "silver": "silver", "gold": "gold", "metadata": "metadata", "meta": "metadata", "awsstaging": "awsstaging"},
+  "forkNamePattern": "(^Test|Test$|Stage|Copy|bkp|backup|\\bold\\b|\\d{8}|DevName1|DevName2)",
+  "forkDirPattern": "^(DevName1|DevName2|Test|Sandbox)[/ ]",
+  "_comment_perCountryBronzeDatabases": "Bronze databases whose tables are stored as <db>/<country>_<table> rather than <db>/<table>. Default is []; read the repo's generic view-creation notebook to fill it.",
+  "perCountryBronzeDatabases": ["Aloha", "Menulink"],
+  "silver": {
+    "configGlobs": ["files/config/Silver/**/*.json", "files/config/OtherArea/*.json"],
+    "wrapperNotebook": "wrapperMain.py",
+    "genericConf": "files/config/Generic/Config.conf",
+    "partnerPattern": "^(PartnerA|PartnerB|PartnerC)",
+    "processAreaPartners": ["Aloha", "Menulink", "Slang", "Rewards"],
+    "pyStepConfigs": {
+      "LoadSilverTableSomething.py": ["files/config/Silver/Area/SilverTableSomething.json", "SilverDeltaTableSomething.py"]
+    }
+  },
+  "gold": {
+    "configGlobs": ["files/config/Gold/**/*.json"],
+    "wrapperNotebook": "GoldWrapperMain.py",
+    "notebookGlobs": ["Main/Gold/**/.platform", "Main/DQ/**/.platform"],
+    "factScriptsDir": "Main/Gold/FactScripts",
+    "orchestrationForkPattern": "(Test|Stage|SingleJob|SinglePartner|DevName1)",
+    "orchestrationPipelines": {
+      "GoldDimMainLoad.json": "Gold (Dimension activity)",
+      "GoldFactMainLoad.json": "Gold (Fact activity, dependsOn Dimension)",
+      "GoldFactPartnersLoad.json": "PartnersGoldLoad"
+    },
+    "storeMappingSchema": "Slang",
+    "storeMappingTables": ["FgIntegrationPartnerStore", "FgStore"],
+    "partnerPattern": "^FgFact(PartnerA|PartnerB|PartnerC)",
+    "handWritten": [
+      {
+        "notebook": "FgEtlGoldFactTableExample.py",
+        "targetSchema": "Fact",
+        "targetTable": "FgFactExample",
+        "configPath": "files/config/Gold/Fact/GoldTableFactExample.json",
+        "sources": [["silver", "Aloha", "FgSomeSilverTable"], ["gold", "Dimension", "FgDimStore"]],
+        "note": "optional: why the automatic SQL parse needed an override"
+      }
+    ]
+  },
+  "semantic": {
+    "modelsGlob": "Models/*.SemanticModel",
+    "workspaceId": "00000000-0000-0000-0000-000000000000",
+    "sandboxReportDirs": ["Old Reports", "Sandbox"]
+  },
+  "notebooks": {
+    "knownSchemas": ["aloha", "slang", "reference", "partners", "menulink", "rewards", "dimension", "fact", "dim", "dbo", "meta", "dq", "staging"],
+    "schemaLayerHints": {"dimension": "gold", "fact": "gold", "dim": "gold", "meta": "metadata"},
+    "unqualifiedTablePrefixes": "(?i)^(fg|ref|dpv|hst|dim|fact|etl)",
+    "forkDirs": ["DevName1/", "DevName2/", "Sandbox/"],
+    "forkNamePrefixes": ["devname1", "devname2"]
+  }
+}

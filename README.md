@@ -91,11 +91,11 @@ without installing anything.
   result plainly.
 - `blast-radius` looks for what a change breaks outside its own diff, then runs
   code to prove the one fact that makes it safe.
-- Six `principle-*` rules load per situation rather than on request:
+- Seven `principle-*` rules load per situation rather than on request:
   `fix-root-causes`, `prove-it-works`, `laziness-protocol`,
   `guard-the-context-window`, `make-operations-idempotent`,
-  `sequence-verifiable-units`. Together they are most of what stops an agent
-  declaring done on a proxy.
+  `sequence-verifiable-units`, `encode-lessons-in-structure`. Together they
+  are most of what stops an agent declaring done on a proxy.
 - `bro` is the tone knob.
 
 From the same repo, `thermos`, `thermo-nuclear-review` and the `cursor-team-kit`
@@ -108,6 +108,7 @@ npx skills add cursor/plugins -g -y \
   -s principle-fix-root-causes -s principle-prove-it-works \
   -s principle-laziness-protocol -s principle-guard-the-context-window \
   -s principle-make-operations-idempotent -s principle-sequence-verifiable-units \
+  -s principle-encode-lessons-in-structure \
   -s thermos -s thermo-nuclear-review -s thermo-nuclear-code-quality-review
 ```
 

@@ -44,42 +44,88 @@ triage-label, and domain-doc conventions the rest assume, which is where this
 repo's `docs/agents/` files and the `## Agent skills` block in `CLAUDE.md` come
 from. `ask-matt` is the router if you forget which one to reach for.
 
-Ones we use most, beyond the flow above: `triage`, `diagnosing-bugs`,
-`domain-modeling`, `codebase-design`, `research`, `prototype`, `handoff`,
-`wizard`, `resolving-merge-conflicts`, `writing-for-agents`.
+The rest we keep installed, by job:
+
+- Planning and shaping: `grilling`, `grill-me`, `batch-grill-me`,
+  `to-questionnaire`, `wayfinder` (for work too big for one session),
+  `prototype`, `handoff` and `claude-handoff` for moving a thread between
+  sessions.
+- Code: `triage`, `diagnosing-bugs`, `codebase-design`,
+  `improve-codebase-architecture`, `domain-modeling`,
+  `resolving-merge-conflicts`.
+- Everything else: `research`, `wizard`, `wait-what`, `writing-for-agents`,
+  `writing-great-skills`.
 
 ```bash
-npx skills add mattpocock/skills/skills/engineering/<skill>
-# a few live under skills/productivity/ instead: grilling, grill-me, handoff,
-# teach, to-questionnaire, wait-what, writing-for-agents, writing-great-skills
+npx skills add mattpocock/skills -g -y \
+  -s setup-matt-pocock-skills -s ask-matt \
+  -s grill-with-docs -s to-spec -s to-tickets -s implement -s tdd -s code-review \
+  -s grilling -s grill-me -s batch-grill-me -s to-questionnaire -s wayfinder \
+  -s prototype -s handoff -s claude-handoff \
+  -s triage -s diagnosing-bugs -s codebase-design \
+  -s improve-codebase-architecture -s domain-modeling -s resolving-merge-conflicts \
+  -s research -s wizard -s wait-what -s writing-for-agents -s writing-great-skills
 ```
+
+Skill names are flat, so the folder a skill sits in upstream (`engineering/`,
+`productivity/`, `in-progress/`) does not appear in the command. Drop `-g` to
+install into the current project instead of `~/.claude/skills`, add
+`-a '*'` to link into every detected agent, and `-l` lists what a repo offers
+without installing anything.
+
 
 ### Cursor's pstack
 
-[cursor/plugins](https://github.com/cursor/plugins) is Cursor's plugin
-repo. The `pstack` plugin is the one worth having in every agent, mostly for
-`unslop`, which strips AI tells from anything you write. It is an always-on rule
-rather than something you invoke. `bro` and `principle-laziness-protocol` ship
-with it. From the same repo, `thermos` and `thermo-nuclear-review` are a
-harsher code-quality pass than `code-review`, for when you want the diff torn
-apart rather than reviewed.
+[cursor/plugins](https://github.com/cursor/plugins) is Cursor's plugin repo.
+`pstack` is the one worth having in every agent, and it has grown well past
+`unslop`:
+
+- `unslop` strips AI tells from anything you write. It is an always-on rule, not
+  something you invoke.
+- `technical-writing` is the standard behind docs, RFCs, PR bodies and commit
+  messages (Diataxis structure, Google developer style, STE instruction rules,
+  Global English syntax).
+- `why` answers "why does this work this way" by querying whatever MCPs are
+  connected, across git history, the issue tracker, docs, chat and
+  observability, and citing what it found. `teach` runs it and explains the
+  result plainly.
+- `blast-radius` looks for what a change breaks outside its own diff, then runs
+  code to prove the one fact that makes it safe.
+- Six `principle-*` rules load per situation rather than on request:
+  `fix-root-causes`, `prove-it-works`, `laziness-protocol`,
+  `guard-the-context-window`, `make-operations-idempotent`,
+  `sequence-verifiable-units`. Together they are most of what stops an agent
+  declaring done on a proxy.
+- `bro` is the tone knob.
+
+From the same repo, `thermos`, `thermo-nuclear-review` and the `cursor-team-kit`
+version, `thermo-nuclear-code-quality-review`, are a harsher code-quality pass
+than `code-review`, for when you want the diff torn apart rather than reviewed.
 
 ```bash
-npx skills add cursor/plugins/pstack/skills/unslop
-npx skills add cursor/plugins/thermos/skills/thermos
+npx skills add cursor/plugins -g -y \
+  -s unslop -s technical-writing -s why -s teach -s blast-radius -s bro \
+  -s principle-fix-root-causes -s principle-prove-it-works \
+  -s principle-laziness-protocol -s principle-guard-the-context-window \
+  -s principle-make-operations-idempotent -s principle-sequence-verifiable-units \
+  -s thermos -s thermo-nuclear-review -s thermo-nuclear-code-quality-review
 ```
 
+One repo, 80-odd skills across its plugins, so `-s` is doing the picking here.
+`npx skills add cursor/plugins -l` prints the full list if you want more of it.
+
+
 Inside Cursor these install as plugins from the built-in registry instead, and
-Cursor's own bundled skills (`review`, `split-to-prs`, `autopilot`, and the
-rest) are already there.
+Cursor's own bundled skills are already there. `split-to-prs` is the one we
+reach for outside Cursor too, so it is worth symlinking into `~/.claude/skills`.
 
 ### Others
 
 | Skill | Upstream | Install |
 | --- | --- | --- |
-| `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) | `npx skills add vercel-labs/skills/skills/find-skills` |
-| `frontend-design` | [anthropics/claude-code](https://github.com/anthropics/claude-code) | `npx skills add anthropics/claude-code/plugins/frontend-design/skills/frontend-design` |
-| `terraform-skill` | [antonbabenko/terraform-skill](https://github.com/antonbabenko/terraform-skill) | `npx skills add antonbabenko/terraform-skill` |
+| `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) | `npx skills add vercel-labs/skills -g -y -s find-skills` |
+| `frontend-design` | [anthropics/claude-code](https://github.com/anthropics/claude-code) | `npx skills add anthropics/claude-code -g -y -s frontend-design` |
+| `terraform-skill` | [antonbabenko/terraform-skill](https://github.com/antonbabenko/terraform-skill) | `npx skills add antonbabenko/terraform-skill -g -y` |
 | `llm-council` | based on [karpathy/llm-council](https://github.com/karpathy/llm-council) (methodology) | local SKILL.md adaptation, no upstream package |
 
 ## Install

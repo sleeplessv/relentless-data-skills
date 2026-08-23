@@ -203,6 +203,29 @@
       ]
     },
     {
+      "name": "review-dbt-diff",
+      "source": "./skills/review-dbt-diff",
+      "description": "Read-only, diff-scoped reviewer for dbt model changes — twelve defect checks derived from the target repo's own fix history (grain, join cardinality, incremental coherence, NULL semantics, CDC ordering, contract drift), row-count deltas against production, evidence-rung grading, an Act-On cap of five with a visible Dismissed section, and a committed dismissal log that learns which patterns the owner keeps overriding.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/review-dbt-diff",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "dbt",
+        "snowflake",
+        "code-review",
+        "diff",
+        "data-quality",
+        "incremental-models",
+        "scd2",
+        "cdc",
+        "analytics-engineering"
+      ]
+    },
+    {
       "name": "review-pbi-diff",
       "source": "./skills/review-pbi-diff",
       "description": "Turn a Power BI (PBIP) git diff into a manager-ready review artifact — a deterministic extractor builds a structured change model from hash-named visual.json and TMDL files, then the agent draws to-scale page wireframes, spec-checks every added/modified measure's DAX against the repo's metric definitions, and runs eleven evidence-backed red-flag checks (dangling measure references, ripple effects, hidden filters, visible scratch pages).",

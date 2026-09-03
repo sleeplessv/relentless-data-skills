@@ -32,11 +32,11 @@ The step 3 Review dispatch prompt carries the step-0 spec body verbatim. The sub
 
 Authoring contract for the step 4 dispatch.
 
-- **Structure**: an **Environment** block up top (where to run it — the same environment the gates used — and estimated time), then per-scenario: **Goal** (which acceptance criterion), **Preconditions/setup**, **Steps** (copy-paste-ready commands/queries, one action each), **What you should see**, **Cleanup** when steps mutate anything.
-- **Traceability**: scenarios cover the spec's acceptance criteria first, plus any ticket criterion not subsumed by them; a criterion with no human-facing surface is listed as "verified by automated tests only, because <reason>" instead of getting a scenario.
-- **Not a test run**: expected results orient the human's judgement ("you should see ~1,200 rows, `order_total` populated from 2024 on"), never assert pass/fail — acceptance is the human's call.
-- **Execute before publishing**: run every command/query in the plan against that environment; the observed output becomes the what-you-should-see text. A step the run's environment cannot reach is still authored, flagged "not executed, requires <env>", and named in the Environment block.
-- **Waiver**: nothing to walk through (docs-only, config tweak) → the one-line form "No human verification beyond code review: <reason>" — never a silently missing section.
+- **Few and critical**: at most **three scenarios**. A scenario earns its place only because automated tests could not have covered it (UI, data shape, an integration). If more qualify, keep the three with the highest cost of being wrong. No traceability list — uncovered criteria are simply absent; the Test plan records what ran.
+- **Shape**: optionally one line up top, "Run against <env>, ~N min", omitted when obvious. Each scenario is numbered copy-paste-ready **Steps** (preconditions and cleanup fold in as steps) plus one **What you should see** line.
+- **Not a test run**: the what-you-should-see line orients the human's judgement ("~1,200 rows, `order_total` populated from 2024 on"), never asserts pass/fail — acceptance is the human's call.
+- **Execute before publishing**: run every step against that environment; the observed output becomes the what-you-should-see text. A step the run's environment cannot reach is still authored, flagged "not executed, requires <env>".
+- **Waiver**: nothing qualifies (docs-only, config tweak, fully covered by tests) → the one-line form "No human verification beyond code review: <reason>" — never a silently missing section.
 
 ## Feature PR
 

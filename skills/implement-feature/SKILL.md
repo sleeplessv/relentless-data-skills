@@ -113,7 +113,7 @@ Done when: Verify and Review are clean on the pushed integration branch (partial
 
 ### 4. Verification plan
 
-One dispatch (it runs the delivered software — inherit the session model) authors the **Verification plan** per its full contract in [references/reference.md#verification-plan](references/reference.md#verification-plan) (structure, traceability, execute-before-publishing, the waiver form). Its prompt carries the step-0 spec body and acceptance criteria verbatim, the work-set tickets' criteria, the step-0 feedback-loop and run commands, and that reference. **Evidently broken** (a step errors, or the data plainly contradicts a criterion) → back into step 3's fix machinery (sequential fix dispatches, re-run Verify, re-author the plan; the same three strikes) — the plan never walks the human into a known defect.
+One dispatch (it runs the delivered software — inherit the session model) authors the **Verification plan** per its full contract in [references/reference.md#verification-plan](references/reference.md#verification-plan) (the three-scenario cap and selection rule, shape, execute-before-publishing, the waiver form). Its prompt carries the step-0 spec body and acceptance criteria verbatim, the work-set tickets' criteria, the step-0 feedback-loop and run commands, and that reference. **Evidently broken** (a step errors, or the data plainly contradicts a criterion) → back into step 3's fix machinery (sequential fix dispatches, re-run Verify, re-author the plan; the same three strikes) — the plan never walks the human into a known defect.
 
 Done when: the dispatch returns the plan (or its waiver) as a markdown section, every runnable step executed.
 

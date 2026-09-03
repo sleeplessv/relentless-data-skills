@@ -1,7 +1,7 @@
 {
   "name": "snowman",
   "version": "0.1.0",
-  "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only execution and stages user-requested DML/DDL as scripts for manual execution.",
+  "description": "Read-only Snowflake exploration through the snow CLI: schema discovery, profiling, hypothesis testing, and data-quality investigation. A guardrail wrapper rejects anything but a single read-only statement, returns CSV capped at 50 rows and 200 chars per cell, and saves an overflowing result in full. When the user asks for a change, the wrapper stages the DML or DDL as a script for the user to run. It never executes writes. Bootstraps a committed per-project context.",
   "author": {
     "name": "sleeplessv"
   },

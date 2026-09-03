@@ -366,6 +366,23 @@ def auth_hint(kind: str, connection: str, env_file: Path | None) -> str:
     )
 
 
+def auth_hint_for(
+    stderr: str, connection: str, env_file: Path | None, env: dict[str, str]
+) -> str | None:
+    """The one-line auth hint for a failed snow call, or None if it does
+    not look like an auth failure.
+
+    Wraps the trigger regex, the ``snow connection list`` lookup, the
+    authenticator classification, and the wording. A lookup that fails for
+    any reason (including a missing ``snow`` binary) yields the combined
+    hint rather than no hint.
+    """
+    if not AUTH_ERROR_RE.search(stderr):
+        return None
+    kind = classify_auth(connection_params(connection, env))
+    return auth_hint(kind, connection, env_file)
+
+
 def strip_for_analysis(sql: str) -> str:
     """Remove block comments, line comments, and string literals.
 
@@ -647,9 +664,10 @@ def execute(
 
     if stderr:
         sys.stderr.write(clean_snow_stderr(stderr))
-    if returncode != 0 and AUTH_ERROR_RE.search(stderr):
-        kind = classify_auth(connection_params(connection, sub_env))
-        print(auth_hint(kind, connection, env_file), file=sys.stderr)
+    if returncode != 0:
+        hint = auth_hint_for(stderr, connection, env_file, sub_env)
+        if hint:
+            print(hint, file=sys.stderr)
 
     if stdout.strip():
         try:

@@ -883,37 +883,6 @@ class TestExecute(SnowmanTestCase):
         with mock.patch.object(snowman, "run_snow", side_effect=snowman.Blocked("`snow` CLI not found on PATH.")):
             self.assert_blocked(snowman.execute, "SELECT 1", match="`snow` CLI not found")
 
-    def run_failing_auth(self, sql_stderr: str, lookup: Outcome) -> str:
-        """Execute with a failing snow call and the given connection lookup outcome."""
-        code, _, err = self.run_execute(
-            {"sql": (1, "", sql_stderr), "connection": lookup}, "SELECT 1"
-        )
-        self.assertEqual(code, 1)
-        return err
-
-    def test_auth_failure_keypair_hint(self):
-        self.make_project()
-        output = self.run_failing_auth(
-            "could not decrypt private key\n",
-            connection_listing(
-                "analytics",
-                {"authenticator": "SNOWFLAKE_JWT", "private_key_file": "/k.pem"},
-            ),
-        )
-        self.assertIn("key-pair auth failure", output)
-        self.assertIn("no .env file was found", output)
-        self.assertNotIn("snow connection test", output)
-
-    def test_auth_failure_browser_hint(self):
-        self.make_project()
-        output = self.run_failing_auth(
-            "OAuth access token expired\n",
-            connection_listing("analytics", {"authenticator": "OAUTH_AUTHORIZATION_CODE"}),
-        )
-        self.assertIn("authenticates in a browser", output)
-        self.assertIn("snow connection test -c analytics", output)
-        self.assertNotIn("PRIVATE_KEY_PASSPHRASE", output)
-
     def test_auth_failure_inside_rich_panel_still_hints(self):
         self.make_project()
         panel = (
@@ -922,33 +891,18 @@ class TestExecute(SnowmanTestCase):
             "│ decrypt private key                                      │\n"
             "╰──────────────────────────────────────────────────────────╯\n"
         )
-        output = self.run_failing_auth(
-            panel, connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"})
+        code, _, err = self.run_execute(
+            {"sql": (1, "", panel),
+             "connection": connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"})},
+            "SELECT 1",
         )
-        self.assertIn(
-            "ERROR: 250001 (08001): Failed to connect to DB: could not decrypt private key\n",
-            output,
+        self.assertEqual(code, 1)
+        self.assertEqual(
+            err.splitlines()[0],
+            "ERROR: 250001 (08001): Failed to connect to DB: could not decrypt private key",
         )
-        self.assertNotIn("│", output)
-        self.assertIn("key-pair auth failure", output)
-
-    def test_auth_failure_unknown_gets_combined_hint(self):
-        self.make_project()
-        output = self.run_failing_auth(
-            "JWT token is invalid\n",
-            (0, "not json", ""),  # lookup fails -> generic hint
-        )
-        self.assertIn("PRIVATE_KEY_PASSPHRASE", output)
-        self.assertIn("snow connection test -c analytics", output)
-
-    def test_auth_hint_mentions_loaded_dotenv(self):
-        root = self.make_project()
-        (root / ".env").write_text("PRIVATE_KEY_PASSPHRASE=x\n", encoding="utf-8")
-        output = self.run_failing_auth(
-            "bad passphrase\n",
-            connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"}),
-        )
-        self.assertIn("a .env was loaded from", output)
+        self.assertNotIn("│", err)
+        self.assertIn("hint: this looks like a key-pair auth failure", err)
 
     def test_non_auth_failure_gets_no_hint(self):
         self.make_project()
@@ -958,52 +912,20 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual([args[0] for args, _ in self.snow.calls], ["sql"])
 
 
-class TestAuthClassification(SnowmanTestCase):
-    def test_browser_authenticators(self):
-        for value in ("OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER", "externalbrowser"):
-            with self.subTest(authenticator=value):
-                self.assertEqual(
-                    snowman.classify_auth({"authenticator": value}), "browser"
-                )
+class TestAuthHintFor(SnowmanTestCase):
+    """auth_hint_for: the trigger regex, the lookup, the classification, the wording."""
 
-    def test_keypair_via_authenticator(self):
-        self.assertEqual(
-            snowman.classify_auth({"authenticator": "SNOWFLAKE_JWT"}), "keypair"
-        )
+    def hint(self, stderr: str, lookup: Outcome | None = None, env_file=None) -> str | None:
+        outcomes = {} if lookup is None else {"connection": lookup}
+        with mock.patch.object(snowman, "run_snow", fake_snow(outcomes)):
+            return snowman.auth_hint_for(stderr, "analytics", env_file, {})
 
-    def test_keypair_via_private_key_file_without_authenticator(self):
-        self.assertEqual(
-            snowman.classify_auth({"private_key_file": "/k.pem"}), "keypair"
-        )
+    def test_none_for_non_auth_errors(self):
+        for message in ("syntax error: unexpected token 'FROM'", "some snow error"):
+            with self.subTest(message=message):
+                self.assertIsNone(self.hint(message))
 
-    def test_unknown_for_missing_or_other(self):
-        for params in (None, {}, {"authenticator": "OAUTH_CLIENT_CREDENTIALS"}):
-            with self.subTest(params=params):
-                self.assertEqual(snowman.classify_auth(params), "unknown")
-
-
-class TestConnectionParams(SnowmanTestCase):
-    def lookup(self, outcome: Outcome) -> dict | None:
-        with mock.patch.object(snowman, "run_snow", fake_snow({"connection": outcome})):
-            return snowman.connection_params("analytics", dict(os.environ))
-
-    def test_returns_parameters_for_listed_connection(self):
-        params = self.lookup(connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"}))
-        self.assertEqual(params, {"authenticator": "SNOWFLAKE_JWT"})
-
-    def test_none_when_connection_not_listed(self):
-        self.assertIsNone(self.lookup(connection_listing("other", {"authenticator": "X"})))
-
-    def test_none_on_garbage_output(self):
-        self.assertIsNone(self.lookup((0, "not json", "")))
-
-    def test_none_when_snow_missing(self):
-        with mock.patch.object(snowman, "run_snow", side_effect=snowman.Blocked("missing")):
-            self.assertIsNone(snowman.connection_params("analytics", {}))
-
-
-class TestAuthErrorRe(SnowmanTestCase):
-    def test_matches_auth_failures(self):
+    def test_auth_looking_errors_get_a_hint(self):
         for message in (
             "could not decrypt private key",
             "JWT token is invalid",
@@ -1011,12 +933,54 @@ class TestAuthErrorRe(SnowmanTestCase):
             "Failed to authenticate: 250001",
         ):
             with self.subTest(message=message):
-                self.assertTrue(snowman.AUTH_ERROR_RE.search(message))
+                hint = self.hint(message, connection_listing("analytics", {}))
+                self.assertTrue(hint.startswith("hint: "), hint)
 
-    def test_ignores_parser_token_errors(self):
-        self.assertFalse(
-            snowman.AUTH_ERROR_RE.search("syntax error: unexpected token 'FROM'")
+    def test_browser_connection(self):
+        for value in ("OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER", "externalbrowser"):
+            with self.subTest(authenticator=value):
+                hint = self.hint(
+                    "OAuth access token expired",
+                    connection_listing("analytics", {"authenticator": value}),
+                )
+                self.assertIn("authenticates in a browser", hint)
+                self.assertIn("snow connection test -c analytics", hint)
+                self.assertNotIn("PRIVATE_KEY_PASSPHRASE", hint)
+
+    def test_keypair_connection(self):
+        for params in ({"authenticator": "SNOWFLAKE_JWT"}, {"private_key_file": "/k.pem"}):
+            with self.subTest(params=params):
+                hint = self.hint(
+                    "could not decrypt private key", connection_listing("analytics", params)
+                )
+                self.assertIn("key-pair auth failure", hint)
+                self.assertIn("no .env file was found", hint)
+                self.assertNotIn("snow connection test", hint)
+
+    def test_unknown_connection_gets_combined_hint(self):
+        for label, lookup in (
+            ("not listed", connection_listing("other", {"authenticator": "SNOWFLAKE_JWT"})),
+            ("other authenticator", connection_listing("analytics", {"authenticator": "OAUTH_CLIENT_CREDENTIALS"})),
+            ("empty parameters", connection_listing("analytics", {})),
+            ("garbage output", (0, "not json", "")),
+        ):
+            with self.subTest(lookup=label):
+                hint = self.hint("JWT token is invalid", lookup)
+                self.assertIn("PRIVATE_KEY_PASSPHRASE", hint)
+                self.assertIn("snow connection test -c analytics", hint)
+
+    def test_missing_snow_during_lookup_still_hints(self):
+        with mock.patch.object(snowman, "run_snow", side_effect=snowman.Blocked("missing")):
+            hint = snowman.auth_hint_for("JWT token is invalid", "analytics", None, {})
+        self.assertIn("PRIVATE_KEY_PASSPHRASE", hint)
+
+    def test_mentions_loaded_dotenv(self):
+        hint = self.hint(
+            "bad passphrase",
+            connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"}),
+            env_file=Path("/p/.env"),
         )
+        self.assertIn("a .env was loaded from /p/.env", hint)
 
 
 class TestMainCli(SnowmanTestCase):

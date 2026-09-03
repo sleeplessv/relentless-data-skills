@@ -78,7 +78,7 @@ class TestRuleTemplate(unittest.TestCase):
 
     def test_steers_away_from_dlthub_platform_deployment(self) -> None:
         self.assertIn("Prefect flow", self.text)
-        self.assertIn("do **not** use dltHub-platform deployment", self.text)
+        self.assertIn("**not** use dltHub-platform deployment", self.text)
 
 
 class TestDocsMap(unittest.TestCase):

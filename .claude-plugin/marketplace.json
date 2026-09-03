@@ -9,7 +9,7 @@
     {
       "name": "dbt-runner",
       "source": "./skills/dbt-runner",
-      "description": "Invocation discipline and failure triage for running dbt — a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file.",
+      "description": "Invocation discipline and failure triage for running dbt: a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -52,7 +52,7 @@
     {
       "name": "fabric-lineage-dag",
       "source": "./skills/fabric-lineage-dag",
-      "description": "Build an interactive data-lineage DAG for a Microsoft Fabric Git-exported medallion workspace — five parallel stdlib extractors (pipelines and schedules, JSON-config Silver, JSON-config Gold and wrapper notebooks, notebook code, TMDL semantic models and PBIR reports) write one agreed graph schema, a merge step aliases ids, derives live/fork flags and writes a validation report, and a dagre+d3 single-file page renders overview and focus lineage with a Coverage & gaps panel.",
+      "description": "Build an interactive data-lineage DAG for a Microsoft Fabric Git-exported medallion workspace. Five parallel stdlib extractors (pipelines and schedules, JSON-config Silver, JSON-config Gold and wrapper notebooks, notebook code, TMDL semantic models and PBIR reports) write one agreed graph schema, a merge step aliases ids, derives live and fork flags and writes a validation report, and a dagre+d3 single-file page renders overview and focus lineage with a Coverage & gaps panel.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -98,7 +98,7 @@
     {
       "name": "implement-feature",
       "source": "./skills/implement-feature",
-      "description": "Implement a whole feature as one PR: orchestrate subagents over a spec's tickets on a shared integration branch — waves of ticket branches, integrated review + tests, and a single feature PR to main.",
+      "description": "Implement a whole feature as one PR: orchestrate subagents over a spec's tickets on a shared integration branch. Ticket branches land in waves, with integrated review + tests, then a single feature PR to main.",
       "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
@@ -120,7 +120,7 @@
     {
       "name": "implement-ticket",
       "source": "./skills/implement-ticket",
-      "description": "Implement a ticket (GitHub issue) end-to-end: claim it, branch, code in small commits, run tests + a runtime smoke check, and open a draft PR — with explicit stop conditions instead of improvising. Formerly implement-issue.",
+      "description": "Implement a ticket (GitHub issue) end-to-end: claim it, branch, code in small commits, run tests + a runtime smoke check, and open a draft PR, with explicit stop conditions instead of improvising. Formerly implement-issue.",
       "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
@@ -141,7 +141,7 @@
     {
       "name": "metabase",
       "source": "./skills/metabase",
-      "description": "Operate a Metabase instance through its REST API via a wrapper that treats cards as live objects — read-only ad-hoc SQL, MBQL-to-SQL compilation, source-chain and blast-radius tracing, and dashboard filter-wiring audits that catch field ids pointing at the wrong database. Every mutation captures a restore point first; there is no execute path for DML/DDL.",
+      "description": "Operate a Metabase instance through its REST API via a wrapper that treats cards as live objects: read-only ad-hoc SQL, MBQL-to-SQL compilation, source-chain and blast-radius tracing, and dashboard filter-wiring audits that catch field ids pointing at the wrong database. Every mutation captures a restore point first; there is no execute path for DML or DDL.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -162,7 +162,7 @@
     {
       "name": "orchestrator-mode",
       "source": "./skills/orchestrator-mode",
-      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself — plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, and Cortex Code.",
+      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself: plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, and Cortex Code.",
       "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
@@ -205,7 +205,7 @@
     {
       "name": "review-pbi-diff",
       "source": "./skills/review-pbi-diff",
-      "description": "Turn a Power BI (PBIP) git diff into a manager-ready review artifact — a deterministic extractor builds a structured change model from hash-named visual.json and TMDL files, then the agent draws to-scale page wireframes, spec-checks every added/modified measure's DAX against the repo's metric definitions, and runs eleven evidence-backed red-flag checks (dangling measure references, ripple effects, hidden filters, visible scratch pages).",
+      "description": "Turn a Power BI (PBIP) git diff into a manager-ready review artifact. A deterministic extractor builds a structured change model from hash-named visual.json and TMDL files, then the agent draws to-scale page wireframes, spec-checks every added or modified measure's DAX against the repo's metric definitions, and runs eleven evidence-backed red-flag checks (dangling measure references, ripple effects, hidden filters, visible scratch pages).",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -228,7 +228,7 @@
     {
       "name": "ship",
       "source": "./skills/ship",
-      "description": "Take working-tree changes from branch to merged PR in one pass — branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches/PRs.",
+      "description": "Take working-tree changes from branch to merged PR in one pass: branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches and PRs.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -249,7 +249,7 @@
     {
       "name": "smart-git-commit",
       "source": "./skills/smart-git-commit",
-      "description": "Groups changed files by affected area, creates one conventional commit per group, then pushes to remote — with safety rules against force-pushes, skipped hooks, and committed secrets.",
+      "description": "Groups changed files by affected area, creates one conventional commit per group, then pushes to remote, with safety rules against force-pushes, skipped hooks, and committed secrets.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -268,7 +268,7 @@
     {
       "name": "snowman",
       "source": "./skills/snowman",
-      "description": "Read-only Snowflake exploration via the snow CLI — schema discovery, profiling, hypothesis testing, and data-quality investigation. Bootstraps a committed per-project context; a guardrail wrapper hard-enforces read-only execution and stages user-requested DML/DDL as scripts for manual execution.",
+      "description": "Read-only Snowflake exploration through the snow CLI: schema discovery, profiling, hypothesis testing, and data-quality investigation. A guardrail wrapper rejects anything but a single read-only statement, returns CSV capped at 50 rows and 200 chars per cell, and saves an overflowing result in full. When the user asks for a change, the wrapper stages the DML or DDL as a script for the user to run. It never executes writes. Bootstraps a committed per-project context.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -289,7 +289,7 @@
     {
       "name": "visual-report",
       "source": "./skills/visual-report",
-      "description": "Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG.",
+      "description": "Produce a single self-contained HTML visual report, an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS and SVG.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"

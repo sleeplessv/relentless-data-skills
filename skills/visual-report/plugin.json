@@ -1,7 +1,7 @@
 {
   "name": "visual-report",
   "version": "0.1.0",
-  "description": "Produce a single self-contained HTML visual report — an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG.",
+  "description": "Produce a single self-contained HTML visual report, an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS and SVG.",
   "author": {
     "name": "sleeplessv"
   },

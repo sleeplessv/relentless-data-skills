@@ -1,7 +1,7 @@
 {
   "name": "review-pbi-diff",
   "version": "0.1.0",
-  "description": "Turn a Power BI (PBIP) git diff into a manager-ready review artifact — a deterministic extractor builds a structured change model from hash-named visual.json and TMDL files, then the agent draws to-scale page wireframes, spec-checks every added/modified measure's DAX against the repo's metric definitions, and runs eleven evidence-backed red-flag checks (dangling measure references, ripple effects, hidden filters, visible scratch pages).",
+  "description": "Turn a Power BI (PBIP) git diff into a manager-ready review artifact. A deterministic extractor builds a structured change model from hash-named visual.json and TMDL files, then the agent draws to-scale page wireframes, spec-checks every added or modified measure's DAX against the repo's metric definitions, and runs eleven evidence-backed red-flag checks (dangling measure references, ripple effects, hidden filters, visible scratch pages).",
   "author": {
     "name": "sleeplessv"
   },

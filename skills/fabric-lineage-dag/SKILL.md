@@ -32,13 +32,13 @@ Schema: `{nodes:[{id,name,layer,type,path,partner,country,loadType,details{}}], 
 
 Edge kinds: `copy transform reads writes calls runs invokes triggers refreshes directlake relationship partof binds dax`. Layers: `source bronze silver gold semantic report notebook pipeline dataflow metadata awsstaging export unresolved`.
 
-## Step 1 — Contract and config
+## Step 1: Contract and config
 
 Read the repo map (README / REPO-MAP / CONTEXT) for: lakehouse names, per-country Bronze databases, partner names, developer fork folders, the Silver and Gold wrapper notebooks, config globs, the key fact table. Write `<scratch>/lineage.config.json` from `scripts/lineage.config.example.json` (every key optional; defaults in `scripts/lineage_common.py`).
 
 Done when: the config file exists, the key fact table id is written down in the contract form (e.g. `gold.fact_fgfactitemsale`), and a search term for the test is chosen.
 
-## Step 2 — Five parallel extractors
+## Step 2: Five parallel extractors
 
 Dispatch five read-only agents at once, each with [`references/extractors.md`](references/extractors.md), the config, and one script:
 
@@ -56,7 +56,7 @@ Each agent runs its script, reads the printed stats, spot-checks ten nodes again
 
 Done when: all five `extract-*.json` files exist, every coverage line names its partial cases, and the main thread has appended the five lines to `<scratch>/coverage.txt`.
 
-## Step 3 — Merge and validate
+## Step 3: Merge and validate
 
 One dispatch with [`references/validation.md`](references/validation.md):
 
@@ -70,19 +70,19 @@ The agent reads `validation-report.md`, classifies every non-zero gap as a real 
 
 Done when: stubs = 0, every alias is logged, the report contains all thirteen checklist items, and `graph-compact.json` is under 2 MB.
 
-## Step 4 — Render
+## Step 4: Render
 
 One dispatch with [`references/render.md`](references/render.md) and `scripts/render/README.md`. The agent bundles d3, builds `data.json` and `lineage.html` (title from the workspace, optional explainer SVG written from the report numbers), and runs `test.js` against the key fact table and the search term.
 
 Done when: `test.js` prints `PASS` (no console errors, no external hosts beyond Google Fonts, no horizontal body scroll, focus and search work, dark theme computed), overview layout is under 100 ms for ~300 nodes, and the four screenshots have been looked at.
 
-## Step 5 — Copy pass
+## Step 5: Copy pass
 
 Run `unslop` over the page's user-facing strings (title, subtitle, explainer caption, gap bullets, notices, empty states) and rebuild.
 
 Done when: the rebuilt page still passes `test.js`.
 
-## Step 6 — Publish
+## Step 6: Publish
 
 Load `artifact-design`, then publish `lineage.html` with the Artifact tool: noun-phrase title, one-sentence description, a favicon that stays stable across redeploys, a version label. Relay the artifact URL, the validation totals, and the top gaps to the user.
 

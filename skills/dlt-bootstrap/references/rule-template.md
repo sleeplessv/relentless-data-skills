@@ -14,7 +14,7 @@ orchestration: prefect
 Always-on rules for dlt pipeline work in this project. They apply to every
 session, including work driven by the dltHub AI Workbench's own skills and
 commands (`/find-source`, `/create-rest-api-pipeline`, ...). The frontmatter
-above is bookkeeping owned by the `dlt-bootstrap` skill — update it when
+above is bookkeeping owned by the `dlt-bootstrap` skill; update it when
 toolkits or source types change; do not delete it.
 
 ## Development loop
@@ -23,20 +23,20 @@ toolkits or source types change; do not delete it.
   on resources until the schema and data look right; only then remove limits
   and promote to the production destination (`destination` in the frontmatter).
 - Validate after every change: row counts, primary keys, nested-object
-  handling — use the workbench's validation skills and the local dashboard.
+  handling. Use the workbench's validation skills and the local dashboard.
 
 ## Secrets
 
 - CRITICAL: never ask for credentials in chat. Always let the user edit
   secrets directly and do not attempt to read them.
-- Local credentials live in `.dlt/secrets.toml` (must be gitignored — verify
+- Local credentials live in `.dlt/secrets.toml` (must be gitignored; verify
   before any commit). Deployed pipelines read credentials from environment
   variables, never from committed files or code.
 
 ## Hardening and shipping
 
 - Production pipelines are wrapped in a **Prefect flow** and deployed per the
-  `prefect` conventions — do **not** use dltHub-platform deployment
+  `prefect` conventions. Do **not** use dltHub-platform deployment
   (`setup-runtime`) in this project.
 - Add incremental loading before calling a pipeline production-ready.
 - Ship via the `/ship` flow (branch → conventional commits → PR →

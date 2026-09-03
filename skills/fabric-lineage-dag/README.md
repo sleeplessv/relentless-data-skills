@@ -3,9 +3,9 @@
 The **`fabric-lineage-dag`** agent skill: turn a Microsoft Fabric workspace
 exported to Git (pipelines, notebooks, lakehouses, JSON-config Silver/Gold,
 TMDL semantic models, PBIR reports) into an interactive "what feeds what"
-lineage DAG — one self-contained HTML page with an overview, dbt-style focus
-mode, a details panel with inherited schedules, and a Coverage & gaps panel
-that states what the graph had to guess or skip.
+lineage DAG. It produces one self-contained HTML page with an overview,
+dbt-style focus mode, a details panel with inherited schedules, and a
+Coverage & gaps panel that states what the graph had to guess or skip.
 
 ## What it does
 
@@ -17,18 +17,18 @@ that states what the graph had to guess or skip.
 - **Five parallel extractors**, stdlib-only Python, one per evidence source:
   pipelines + schedules + dataflows, Silver configs, Gold configs + wrapper
   notebooks, notebook code, semantic model + reports. Each returns a
-  found / parsed / partial coverage line. They know the gotchas: the
+  found / parsed / partial coverage line. They handle known edge cases: the
   segment-reversed GUID form pipelines and TMDL use to reference items,
   `additionalProcedure` being a function name resolved via `globals()`,
   per-country Bronze paths, runtime `INFORMATION_SCHEMA` table lists.
 - **Merge + validate.** Union by id, alias schema-less ids, stub dangling
   refs, derive `isFork` and `isLive` (reachable from an enabled schedule),
   inherit partner/country downstream, and write a validation report with
-  thirteen gap lists (Gold with no upstream, notebooks nothing runs,
-  pipelines with no schedule and no invoker, …).
-- **Render.** dagre + a 50 KB d3 bundle inlined under a strict CSP (Google
+  thirteen gap lists: Gold with no upstream, notebooks nothing runs,
+  pipelines with no schedule and no invoker, and more.
+- **Render.** dagre plus a 50 KB d3 bundle inlined under a strict CSP (Google
   Fonts only). Overview groups sources per database and Bronze per
-  schema + country (~300 nodes, under 100 ms); focus mode walks the directional
+  schema + country (~300 nodes, under 100 ms). Focus mode walks the directional
   closure with a depth selector and a 400-node cap. Light/dark tokens, layer
   text tags so identity is never colour-alone, Playwright verification.
 
@@ -40,7 +40,7 @@ that states what the graph had to guess or skip.
 - Node for the render step: `npm install` in `scripts/render/` pulls dagre,
   d3-selection/zoom/transition, esbuild and Playwright.
 - A repo map or README naming lakehouses, wrapper notebooks, partner names,
-  and developer fork folders — copied into `lineage.config.json`.
+  and developer fork folders, copied into `lineage.config.json`.
 
 ## Install
 
@@ -58,21 +58,21 @@ npx skills add sleeplessv/relentless-data-skills/skills/fabric-lineage-dag
 
 ## Files
 
-- `SKILL.md` — the id contract and the six-step procedure (config → five
-  extractors → merge/validate → render → copy pass → publish).
-- `references/extractors.md` — per-source parsing rules and gotchas.
-- `references/validation.md` — merge rules and the report checklist.
-- `references/render.md` — UX spec, performance rules, design tokens,
+- `SKILL.md`: the id contract and the six-step procedure (config, five
+  extractors, merge/validate, render, copy pass, publish).
+- `references/extractors.md`: per-source parsing rules and edge cases.
+- `references/validation.md`: merge rules and the report checklist.
+- `references/render.md`: UX spec, performance rules, design tokens,
   verification checklist.
-- `scripts/lineage_common.py` — shared CLI, config defaults, GUID map,
+- `scripts/lineage_common.py`: shared CLI, config defaults, GUID map,
   graph builders.
-- `scripts/extract_*.py`, `scripts/merge_graph.py` — the pipeline.
-- `scripts/lineage.config.example.json` — every repo-specific knob.
-- `scripts/render/` — `template.html`, `style.css`, `app.js`,
+- `scripts/extract_*.py`, `scripts/merge_graph.py`: the pipeline.
+- `scripts/lineage.config.example.json`: every repo-specific knob.
+- `scripts/render/`: `template.html`, `style.css`, `app.js`,
   `build-data.js`, `build.js`, `test.js`, `package.json` (see its README).
 
 ## Maintenance / CI
 
 Repo CI runs `scripts/lint_skill.py` against this skill's `SKILL.md`
-(frontmatter, "Use when" trigger, line budget) — see the
+(frontmatter, "Use when" trigger, line budget). See the
 [root README](../../README.md#maintenance--ci).

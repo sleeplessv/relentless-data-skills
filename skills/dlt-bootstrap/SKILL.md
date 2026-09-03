@@ -19,12 +19,12 @@ house rule applying automatically because it is a rule, not skill-mediated.
 Search the project for a committed `dlt-house-conventions.md`.
 
 - **Present** → incremental mode: read its frontmatter (`source_types`,
-  `toolkits_installed`), then do only what's missing — typically installing an
+  `toolkits_installed`), then do only what's missing. This typically means installing an
   additional toolkit for a new source type and updating the frontmatter.
 - **Absent** → full bootstrap (below).
 
 If invoked proactively (the user was working on something else and the rule is
-merely missing), don't start the bootstrap — note that the project lacks
+merely missing), don't start the bootstrap. Note that the project lacks
 `dlt-house-conventions.md`, offer to run the setup, and return to the user's
 actual task unless they accept.
 
@@ -32,31 +32,31 @@ actual task unless they accept.
 
 Establish by inspection, creating what's missing in the install step:
 
-- `pyproject.toml` / venv — greenfield vs existing project (same path either way).
+- `pyproject.toml` / venv: greenfield vs existing project (same path either way).
 - `dlt[hub]` already a dependency? `uv run dlthub --version` succeeds?
-- Which agent is in use (Claude Code / Cursor / Codex) — usually obvious from
-  the session; pass it explicitly to `--agent` rather than relying on detection.
+- Which agent is in use (Claude Code / Cursor / Codex), usually obvious from
+  the session. Pass it explicitly to `--agent` rather than relying on detection.
 - Existing `.dlt/` directory, existing pipelines, git repo state.
 - Where `dlthub ai init` placed its rules (see "Write the house rule").
 
 ## Interview (three questions max, as plain prose)
 
-1. **Source type(s)** this project ingests — REST API, SQL database, or files?
+1. **Source type(s)** this project ingests: REST API, SQL database, or files?
    Drives toolkit selection. Multiple is fine.
-2. **Pipeline / dataset name** — only ask if not derivable from the repo name.
-3. **Destination** — Snowflake is the house default; confirm, allowing a
+2. **Pipeline / dataset name.** Only ask if not derivable from the repo name.
+3. **Destination.** Snowflake is the house default; confirm, allowing a
    per-client override (e.g. BigQuery) without editing this skill.
 
 ## Install (verified fast path)
 
 Say in one sentence what you're about to install, then run the sequence
-straight through — speak again only for a failure, a decision the user must
-make, or the hand-off; not per command.
+straight through. Speak again only for a failure, a decision the user must
+make, or the hand-off, not per command.
 
 ```bash
 uv init                          # only if no pyproject.toml
 uv add "dlt[hub]"
-uv add "dlthub[mcp]"             # MCP server deps — without this the workspace MCP never starts
+uv add "dlthub[mcp]"             # MCP server deps; without this the workspace MCP never starts
 uv run dlthub init               # workspace init; follow its instructions (uv sync)
 uv run dlthub ai init --agent claude
 uv run dlthub ai toolkit install <toolkit> --agent claude   # per source type
@@ -65,10 +65,10 @@ uv run dlthub ai status          # verify: agent detected, toolkits + entry skil
 
 If any command fails or a flag is rejected, suspect upstream drift before
 debugging: consult [references/docs-map.md](references/docs-map.md) (start at
-the workbench README) and re-derive the command — never invent flags.
+the workbench README) and re-derive the command. Never invent flags.
 
 Known upstream trap (verified 2026-06): if `dlthub ai status` warns to
-`pip install "dlt[workspace]"`, ignore it — that extra does not exist; the
+`pip install "dlt[workspace]"`, ignore it. That extra does not exist; the
 correct fix is `uv add "dlthub[mcp]"` (already in the fast path above).
 
 ## Toolkit policy
@@ -85,7 +85,7 @@ matching the interview answer:
 - **Never install** `quick-start` (this skill is the entry point) or
   `dlthub-platform` (we deploy via Prefect, not the dltHub platform).
 - `data-exploration`, `data-quality`, `transformations` only on explicit
-  request — note that the last two require a dltHub sign-up; flag that before
+  request. The last two require a dltHub sign-up; flag that before
   installing and skip gracefully if the user has no account.
 - Record every installed toolkit in the house rule's frontmatter.
 
@@ -103,19 +103,19 @@ matching the interview answer:
    merges rules into a memory file (`CLAUDE.md` / `AGENTS.md`), append the
    filled template as a clearly delimited managed section instead.
 3. Ensure the agent memory file carries dltHub's credential-safety line (it is
-   in the template) — their installer does not add it for Claude Code.
+   in the template); their installer does not add it for Claude Code.
 4. Commit the rule and the workbench-installed files. Never commit
-   `.dlt/secrets.toml` — neither `uv init` nor `dlthub ai init` gitignores it
+   `.dlt/secrets.toml`. Neither `uv init` nor `dlthub ai init` gitignores it
    (the latter only writes `.claudeignore`). Add `secrets.toml` to
    `.gitignore` if absent, then verify: `git check-ignore .dlt/secrets.toml`.
 
 ## Verify, then hand off
 
-- `uv run dlthub ai status` shows the agent and pipeline toolkits — it omits
+- `uv run dlthub ai status` shows the agent and pipeline toolkits, but it omits
   `init`; use `uv run dlthub ai toolkit list` to confirm the full set.
 - MCP: confirm `dlt-workspace-mcp` is registered for the agent (for Claude
   Code, check the project `.mcp.json`).
-- Tell the user to **restart their agent session now** — the workbench skills
+- Tell the user to **restart their agent session now**. The workbench skills
   (`/find-source`, ...) and the MCP server are not active until they do.
 - Tell the user the working loop: `/find-source` → scaffold → secrets via the
   MCP secrets tools → debug → validate on DuckDB → harden (incremental
@@ -125,12 +125,12 @@ matching the interview answer:
 ## Guardrails
 
 - This skill **sets up**; it does not build pipelines, and it does not fork or
-  re-teach workbench skill content — upstream owns that. If asked to build a
+  re-teach workbench skill content, since upstream owns that. If asked to build a
   pipeline before bootstrap, bootstrap first, then route to the workbench's
-  skills. When the bootstrap surfaces adjacent problems — missing tests, an
-  untidy `pyproject.toml`, a stale dependency — report them and finish the
+  skills. When the bootstrap surfaces adjacent problems, such as missing tests, an
+  untidy `pyproject.toml`, or a stale dependency, report them and finish the
   bootstrap; don't fix them on the way through.
-- Bootstrap is a linear install sequence — run every step inline, never fanned
+- Bootstrap is a linear install sequence. Run every step inline, never fanned
   out to subagents.
 - Credential safety is enforced at runtime by the house rule's Secrets section;
   see [references/rule-template.md](references/rule-template.md).

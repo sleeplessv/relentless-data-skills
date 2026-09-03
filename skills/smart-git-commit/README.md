@@ -6,17 +6,17 @@ remote.
 
 ## What it does
 
-- **Grouping** — splits changes into independently-reviewable commits by
-  subsystem or directory, keeping a change together with its own tests and
-  docs, and borrowing area names from the repo's own conventions (recent
+- **Grouping.** Splits changes into independently-reviewable commits by
+  subsystem or directory, keeps a change together with its own tests and
+  docs, and borrows area names from the repo's own conventions (recent
   commit subjects, `CLAUDE.md`, `README`).
-- **Conventional commits** — lowercase type prefixes (`feat`, `fix`, `docs`,
+- **Conventional commits.** Lowercase type prefixes (`feat`, `fix`, `docs`,
   `refactor`, `test`, `chore`, `style`), imperative mood, ~72-char subjects.
-  History wins on flavor (adopts `feat(scope):` if the repo uses scopes), the
-  skill wins on format (always conventional, even in repos that aren't).
-- **Push on completion** — pushes after all commits are created, setting the
+  History wins on flavor (adopts `feat(scope):` if the repo uses scopes); the
+  skill wins on format, always conventional, even in repos that aren't.
+- **Push on completion.** Pushes after all commits are created, setting the
   upstream if the branch doesn't have one yet.
-- **Safety rules** — never amends pushed commits, never force-pushes
+- **Safety rules.** Never amends pushed commits, never force-pushes
   `main`/`master`, never skips hooks, never commits likely secrets, and stops
   (rather than force-pushing) on a rejected push.
 
@@ -39,11 +39,11 @@ or commit and push.
 
 ## Files
 
-- `SKILL.md` — the full workflow: inspect, group, type, commit, push, safety rules.
-- `plugin.json` — Claude Code plugin manifest.
+- `SKILL.md`: the full workflow (inspect, group, type, commit, push, safety rules).
+- `plugin.json`: Claude Code plugin manifest.
 
 ## Requirements
 
 - `git`, with a remote configured if you want the final push to succeed.
-- Network access to the remote — the final `git push` must run outside any
+- Network access to the remote. The final `git push` must run outside any
   sandboxed shell, or it fails with a misleading DNS/connection error.

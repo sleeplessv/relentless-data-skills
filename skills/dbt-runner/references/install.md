@@ -1,4 +1,4 @@
-# dbt-runner — bootstrap (first run in a project)
+# dbt-runner bootstrap (first run in a project)
 
 You are here because the project has **no `.dbt-runner/context.md`**. Your
 job is to discover this project's dbt setup and write that file, so every
@@ -6,7 +6,7 @@ later invocation (and the preflight script) has a per-project source of
 truth.
 
 **Style: discovery-first.** Everything below is readable from files and
-`dbt --version` — don't interrogate the user for things the repo can tell
+`dbt --version`. Don't interrogate the user for things the repo can tell
 you. Ask only the genuine decisions, one at a time, with a recommended
 answer.
 
@@ -14,10 +14,10 @@ answer.
 file *paths*, never values. Never read or print the value of a credential
 env var, the private key, or a passphrase during discovery.
 
-## Step 1 — discover (no questions yet)
+## Step 1: discover (no questions yet)
 
-1. **Profile name** — `profile:` in `dbt_project.yml` at the project root.
-2. **Profile config** — find that profile in `profiles.yml`
+1. **Profile name.** `profile:` in `dbt_project.yml` at the project root.
+2. **Profile config.** Find that profile in `profiles.yml`
    (`$DBT_PROFILES_DIR/profiles.yml`, default `~/.dbt/profiles.yml`).
    Record:
    - the default `target:` and the list of `outputs:`;
@@ -26,37 +26,37 @@ env var, the private key, or a passphrase during discovery.
      without them;
    - if an output sets `private_key_path` from an env var → that var name
      is `private_key_path_var` (key-pair auth).
-3. **Runner, then engine** — resolve *how* to invoke dbt before asking *what*
+3. **Runner, then engine.** Resolve *how* to invoke dbt before asking *what*
    dbt is. Bare `dbt` on PATH is often a different install from the one the
    project pins, and dbt-fusion ships as `dbt`, so PATH commonly yields fusion
-   for a core project. Check for a project-managed environment — `uv.lock` /
+   for a core project. Check for a project-managed environment: `uv.lock` /
    `[tool.uv]` in `pyproject.toml` → `uv run dbt`; `poetry.lock` →
-   `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt` — and record it as
+   `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt`. Record it as
    `runner`. Fall back to `dbt` only when none exists. Then run
    `<runner> --version` (sandbox-safe, no network): dbt-fusion identifies
    itself as `dbt-fusion <x.y.z>`, otherwise it's dbt-core. Record engine and
    version. If bare `dbt --version` disagrees with `<runner> --version`, note
-   the mismatch in Project lore — it will otherwise be rediscovered as a fake
+   the mismatch in Project lore. Otherwise it will be rediscovered as a fake
    "the project is broken" failure.
-4. **Packages** — note whether `packages.yml` / `package-lock.yml` exist
+4. **Packages.** Note whether `packages.yml` / `package-lock.yml` exist
    and whether `dbt_packages/` is populated (preflight checks this every
    session; just note the state).
 
-## Step 2 — decisions (ask; recommend an answer each)
+## Step 2: decisions (ask; recommend an answer each)
 
 1. **Which target is the working target?** Recommend the profile's default
    `target:`. If several outputs exist (e.g. `local` dev vs `prd`), confirm
-   the agent should always use the dev one — building against prod without
+   the agent should always use the dev one. Building against prod without
    grants fails late and noisily.
 2. **Known-slow models?** Ask if any models are big enough that a build
    exceeds normal timeouts (row counts help). Goes into Project lore; fine
    to leave empty and let it accumulate.
 
-## Step 3 — render, confirm, write
+## Step 3: render, confirm, write
 
 Compose `.dbt-runner/context.md` from the template, **show it to the
 user**, get approval, then write it to the dbt project root. Safe to
-commit — suggest the user commit it.
+commit; suggest the user commit it.
 
 ```markdown
 ---
@@ -74,16 +74,16 @@ private_key_path_var: <VAR_NAME>   # omit if not key-pair auth
 
 # dbt context for <project>
 
-_Discovered by the dbt-runner bootstrap. Names only — no credentials.
+_Discovered by the dbt-runner bootstrap. Names only, no credentials.
 Edit freely; re-run the bootstrap to refresh the frontmatter._
 
 ## Setup
 - Profile `<profile>`, target `<target>` → <database>.<schema> on
-  <warehouse> (names as found in profiles.yml — for orientation only).
+  <warehouse> (names as found in profiles.yml, for orientation only).
 - Auth: <key-pair via `<VAR>` | password | SSO>.
 
 ## Project lore
-_Append entries as you learn them the hard way — seed/test couplings,
+_Append entries as you learn them the hard way: seed/test couplings,
 known-slow models, schema quirks. One or two lines each. Newest last._
 
 - <e.g. fct_call is ~5M rows; full build needs a background run.>

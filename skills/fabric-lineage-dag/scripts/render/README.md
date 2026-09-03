@@ -12,8 +12,8 @@ node build.js --data <scratch>/data.json --out <scratch>/lineage.html --title "A
 node test.js <scratch>/lineage.html <focus-node-id> <search-term> <scratch>   # PASS/FAIL + screenshots
 ```
 
-- `template.html` — page skeleton with `/*__TOKEN__*/` slots; `<!--__EXPLAINER__-->` takes an optional `<details class="panel">` block you write (macro-flow SVG).
-- `app.js` — overview grouping, focus closure, dagre layout, details panel, search, filters, Coverage & gaps panel (rendered from `meta.gaps`).
-- `style.css` — light/dark tokens on `:root`, layer colours `--c-<layer>`.
-- `build-data.js` — picks per-layer detail keys from `graph.json` into the compact graph; edit the `pick(...)` lists to surface more fields.
-- `test.js` — Playwright headless checks: console errors, external requests beyond Google Fonts, body horizontal scroll, focus on a key node, search, dark theme.
+- `template.html`: page skeleton with `/*__TOKEN__*/` slots; `<!--__EXPLAINER__-->` takes an optional `<details class="panel">` block you write (macro-flow SVG).
+- `app.js`: overview grouping, focus closure, dagre layout, details panel, search, filters, Coverage & gaps panel (rendered from `meta.gaps`).
+- `style.css`: light/dark tokens on `:root`, layer colours `--c-<layer>`.
+- `build-data.js`: picks per-layer detail keys from `graph.json` into the compact graph; edit the `pick(...)` lists to surface more fields.
+- `test.js`: Playwright headless checks for console errors, external requests beyond Google Fonts, body horizontal scroll, focus on a key node, search, dark theme.

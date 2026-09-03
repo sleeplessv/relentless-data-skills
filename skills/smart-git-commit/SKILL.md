@@ -3,30 +3,30 @@ name: smart-git-commit
 description: Groups changed files by affected area, creates one conventional commit per group, then pushes to remote. Use when the user asks to commit changes or commit and push.
 ---
 
-# Smart Git Commit
+# Smart git commit
 
 ## Workflow
 
-Commit what has already changed: grouping and staging are the only edits this skill makes. Don't fix lint, reformat, or touch file contents on the way past — mention anything the diff surfaces when you report back instead.
+Commit what has already changed: grouping and staging are the only edits this skill makes. Don't fix lint, reformat, or touch file contents on the way past. Mention anything the diff surfaces when you report back instead.
 
 ### Step 1: Inspect changes
 
 Run these in parallel:
 
-- `git status` — see all modified/untracked files
-- `git diff` — see unstaged changes
-- `git diff --cached` — see staged changes
-- `git log --oneline -10` — learn the repo's commit conventions (scopes, area names)
+- `git status`: see all modified/untracked files
+- `git diff`: see unstaged changes
+- `git diff --cached`: see staged changes
+- `git log --oneline -10`: learn the repo's commit conventions (scopes, area names)
 
 If there is nothing to commit, say so and stop.
 
 ### Step 2: Group files by area
 
-Split the changes into atomic commits — one logical change per commit:
+Split the changes into atomic commits, one logical change per commit:
 
 - Group by subsystem or top-level directory (e.g. `api/`, `docs/`, `.github/workflows/`, a service, a model layer).
 - Keep a change together with its own tests and docs when they belong to the same logical change.
-- Take area names from the repo's own conventions — recent commit subjects, `CLAUDE.md`, `README` — rather than inventing new ones.
+- Take area names from the repo's own conventions (recent commit subjects, `CLAUDE.md`, `README`) rather than inventing new ones.
 - Bundle files that don't fit neatly with the closest related group.
 - Treat already-staged files like any other change: they join their group and are re-staged with it.
 
@@ -63,11 +63,11 @@ EOF
 **Message rules:**
 
 - Lowercase type prefix
-- Imperative mood: "add", "fix", "update" — not "added", "fixes"
+- Imperative mood: "add", "fix", "update"; not "added", "fixes"
 - Max ~72 chars on the subject line
 - No period at the end of the subject line
 - Body only when the why isn't obvious from the subject
-- No em dashes (—) anywhere in the message — use a comma, colon, or parentheses, or rewrite the sentence
+- No em dashes anywhere in the message. Use a comma, colon, or parentheses, or rewrite the sentence
 
 **Examples:**
 
@@ -98,12 +98,12 @@ git push -u origin HEAD
 
 **Run the push outside the sandbox.** `git push` needs network access to reach the remote; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. If the push fails with a connection error, suspect the sandbox first.
 
-**Close out** with the outcome first — the commit subjects and whether the push landed, in a line or two. No per-commit writeup.
+**Close out** with the outcome first: the commit subjects and whether the push landed, in a line or two. No per-commit writeup.
 
-## Safety Rules
+## Safety rules
 
 - NEVER amend commits that have already been pushed
 - NEVER force push to `main` or `master`
 - NEVER skip hooks (`--no-verify`)
 - NEVER commit files that likely contain secrets (`.env`, credentials, tokens)
-- If `git push` is rejected (non-fast-forward), stop and tell the user — do not force push
+- If `git push` is rejected (non-fast-forward), stop and tell the user. Do not force push

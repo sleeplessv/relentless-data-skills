@@ -7,20 +7,20 @@ tracks the latest docs instead of training data.
 
 ## What it does
 
-- **Doc-lookup protocol** — resolves a topic via `docs.prefect.io/llms.txt`,
+- **Doc-lookup protocol.** Resolves a topic via `docs.prefect.io/llms.txt`,
   then fetches the page as markdown (`<page>.md`); never invents URLs; web
-  search is fallback only. Works under network sandboxing (uses the agent's
-  web-fetch, not shell `curl`). Every answer names the doc page consulted — or
-  says "baseline knowledge" explicitly.
-- **CLI-first protocol** — queries the live instance (`uv run prefect
-  deployment ls`, `flow-run inspect`, …) instead of guessing state; checks auth
-  via `prefect config view` first. Read-only commands run eagerly;
-  destructive/hard-to-reverse ones are surfaced before running.
-- **Standards** — ~10 house opinions (lockfile-pinned 3.x, dev/prod split by
-  pools and manifests, CI deploys, schedules on the deployment, secrets in
+  search is a fallback only. Works under network sandboxing, using the agent's
+  web-fetch instead of shell `curl`. Every answer names the doc page consulted,
+  or says "baseline knowledge" explicitly.
+- **CLI-first protocol.** Queries the live instance (`uv run prefect
+  deployment ls`, `flow-run inspect`, …) instead of guessing state, and checks
+  auth via `prefect config view` first. Read-only commands run eagerly;
+  destructive or hard-to-reverse ones are surfaced before running.
+- **Standards.** About 10 house opinions (lockfile-pinned 3.x, dev/prod split
+  by pools and manifests, CI deploys, schedules on the deployment, secrets in
   blocks) plus three battle-tested patterns, each with its applicability
   condition.
-- **Guardrails** — the classic stale-knowledge traps: workers not agents, no
+- **Guardrails.** The classic stale-knowledge traps: workers not agents, no
   `Deployment` object, changed 3.x caching/results/transactions semantics.
 
 Targets the **Prefect 3.x** generation (no patch pin). Prefect 2.x is out of scope.
@@ -50,7 +50,7 @@ It activates automatically when you do Prefect 3 work or ask about Prefect.
 
 ## Files
 
-- `SKILL.md` — everything: doc-lookup + CLI-first protocols, standards, guardrails.
+- `SKILL.md`: everything, including doc-lookup + CLI-first protocols, standards, and guardrails.
 
 ## Maintenance / CI
 

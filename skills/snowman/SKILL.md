@@ -42,8 +42,11 @@ python3 <skill-dir>/scripts/snowman.py "<SQL>"
 from `.snowman/context.md`. Never pass `--connection` yourself, except during
 the bootstrap, before the context file exists ([references/install.md](references/install.md)).
 
-Output is CSV (header row, empty cell for NULL, nested values as compact JSON)
-plus `#` footer lines, which are notes, never data. The wrapper shows 50 rows
+Output is CSV (header row, empty cell for NULL, `""` for an empty string, nested
+values as compact JSON) plus `#` footer lines, which are notes, never data. A
+`# types:` footer names the columns whose type the text cannot show (scaled
+NUMBER, DATE and TIMESTAMP, VARIANT), so no DESCRIBE round trip is needed to
+read `1.50` as a number or `2026-09-03` as a date. The wrapper shows 50 rows
 (`--max-rows N`, `0` for all). When a context file exists, it saves an overflowing
 result in full to `.snowman/results/*.csv`. Before bootstrap nothing is saved, so
 narrow the query or pass `--max-rows 0`. String and nested-JSON cells are cut at 200 chars

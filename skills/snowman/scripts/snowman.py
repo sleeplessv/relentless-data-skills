@@ -31,19 +31,22 @@ Execute mode (default):
     never printed. This is what makes key-pair connections with an encrypted
     private key work: the passphrase lives in ``.env``, not in any config
     snowman touches;
-  * on success runs ``snow sql -q <SQL> --connection <conn> --format
-    JSON_EXT --enhanced-exit-codes``, parses the JSON result and prints it
-    as CSV (header row first, a NULL is an empty cell, and VARIANT, OBJECT,
-    and ARRAY cells are compact JSON). CSV costs a third to a fifth of the
-    tokens of snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
+  * on success runs ``snow sql -q "<SQL>\n;DESCRIBE RESULT LAST_QUERY_ID()"
+    --connection <conn> --format JSON_EXT --enhanced-exit-codes`` (the
+    second statement fetches the result's column types in the same
+    session), parses the JSON result and prints it as CSV (header row
+    first, a NULL is an empty cell, an empty string is ``""``, and VARIANT,
+    OBJECT, and ARRAY cells are compact JSON). CSV costs a third to a fifth
+    of the tokens of snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
     rows are shown and, when a context file exists, the full result is
     written to ``.snowman/results/<timestamp>__<sha1-8 of SQL>.csv``
     (gitignored); a same-second clash gets a ``-1``, ``-2`` suffix.
     ``--max-cell N`` (default 200) cuts longer string cells
     to ``<prefix>…(+K chars)``. ``0`` lifts either cap. ``--json`` prints a
-    compact JSON array instead of CSV. Notes about NULLs, truncated cells
-    and the row cap are appended as ``# ...`` footer lines, the only
-    non-data lines on stdout;
+    compact JSON array instead of CSV. Notes about column types that CSV
+    cannot carry (scaled NUMBER, dates and timestamps, VARIANT), NULLs,
+    truncated cells and the row cap are appended as ``# ...`` footer lines,
+    the only non-data lines on stdout;
   * relays snow's stderr with the Rich error panel flattened to one
     ``ERROR: ...`` line, and forwards snow's exit code (5 = SQL error, 2 =
     argument error, other snow errors keep snow's own code). If snow fails
@@ -71,7 +74,6 @@ Standard library only.
 from __future__ import annotations
 
 import argparse
-import csv
 import hashlib
 import io
 import json
@@ -482,10 +484,10 @@ DEFAULT_MAX_ROWS = 50
 DEFAULT_MAX_CELL = 200
 
 
-def render_cell(value) -> str:
-    """CSV cell text: None -> empty, bool -> true/false, nested -> compact JSON."""
+def render_cell(value) -> str | None:
+    """CSV cell text: None stays None, bool -> true/false, nested -> compact JSON."""
     if value is None:
-        return ""
+        return None
     if isinstance(value, bool):
         return "true" if value else "false"
     if isinstance(value, (dict, list)):
@@ -500,17 +502,56 @@ def truncate_cell(text: str, max_cell: int) -> tuple[str, bool]:
     return text, False
 
 
-def write_csv_row(out: io.StringIO, cells: list[str]) -> None:
+def csv_field(text: str | None, *, force_quote: bool = False) -> str:
+    """One RFC 4180 field. ``None`` (NULL) is an empty field, ``""`` (empty
+    string) is a quoted empty field so a reader can tell the two apart, and
+    anything else is quoted only when it holds a comma, quote or newline."""
+    if text is None:
+        return ""
+    if force_quote or text == "" or any(c in text for c in ',"\r\n'):
+        return '"' + text.replace('"', '""') + '"'
+    return text
+
+
+def write_csv_row(out: io.StringIO, cells: list[str | None]) -> None:
     """Write one CSV line. A first cell starting with ``#`` is force-quoted so
     no data line can be mistaken for a ``# ...`` footer."""
-    if cells and cells[0].startswith("#"):
-        first = '"' + cells[0].replace('"', '""') + '"'
-        if len(cells) == 1:
-            out.write(first + "\n")
-            return
-        out.write(first + ",")
-        cells = cells[1:]
-    csv.writer(out, lineterminator="\n").writerow(cells)
+    fields = [csv_field(cell) for cell in cells]
+    if cells and cells[0] is not None and cells[0].startswith("#"):
+        fields[0] = csv_field(cells[0], force_quote=True)
+    out.write(",".join(fields) + "\n")
+
+
+PLAIN_TYPES = {"VARCHAR", "TEXT", "STRING", "CHAR", "CHARACTER", "BOOLEAN"}
+INTEGER_TYPES = {"NUMBER", "DECIMAL", "NUMERIC", "INT", "INTEGER", "BIGINT",
+                 "SMALLINT", "TINYINT", "BYTEINT"}
+
+
+def type_is_plain(sql_type: str) -> bool:
+    """True for types CSV text already conveys: strings, booleans, and
+    integers (NUMBER with scale 0). Everything else deserves a footer note."""
+    base, _, rest = sql_type.partition("(")
+    base = base.strip().upper()
+    if base in PLAIN_TYPES:
+        return True
+    if base in INTEGER_TYPES:
+        scale = rest.rstrip(")").partition(",")[2].strip()
+        return scale in ("", "0")
+    return False
+
+
+def types_footer(describe_rows: list[dict] | None) -> str | None:
+    """``# types: COL TYPE, ...`` for the columns whose Snowflake type the CSV
+    text cannot show (scaled NUMBER, FLOAT, DATE/TIME/TIMESTAMP, VARIANT,
+    OBJECT, ARRAY, ...). ``describe_rows`` is the ``DESCRIBE RESULT`` output
+    that the wrapper fetches with the query. None when nothing is notable."""
+    notable = [
+        f"{row['name']} {row['type']}"
+        for row in describe_rows or []
+        if isinstance(row, dict) and row.get("name") and row.get("type")
+        and not type_is_plain(str(row["type"]))
+    ]
+    return f"# types: {', '.join(notable)}" if notable else None
 
 
 def render_rows(
@@ -520,14 +561,17 @@ def render_rows(
     max_rows: int = DEFAULT_MAX_ROWS,
     max_cell: int = DEFAULT_MAX_CELL,
     full_note: str | None = None,
+    types: list[dict] | None = None,
 ) -> tuple[str, list[str]]:
     """Shape a JSON_EXT result for the agent: ``(text, footer_lines)``.
 
-    ``fmt`` is ``csv`` (header row, NULL as empty cell, nested values as
-    compact JSON) or ``json`` (compact array, NULL stays ``null``). Rows past
-    ``max_rows`` and characters past ``max_cell`` are cut (0 = unlimited).
-    ``full_note`` is spliced into the row-cap footer to say where (or
-    whether) the full result was saved. Footers all start with ``# ``.
+    ``fmt`` is ``csv`` (header row, NULL as empty cell, empty string as
+    ``""``, nested values as compact JSON) or ``json`` (compact array, NULL
+    stays ``null``). Rows past ``max_rows`` and characters past ``max_cell``
+    are cut (0 = unlimited). ``full_note`` is spliced into the row-cap footer
+    to say where (or whether) the full result was saved. ``types`` is the
+    ``DESCRIBE RESULT`` row list for the same query, if fetched; it feeds a
+    ``# types:`` footer. Footers all start with ``# ``.
     """
     total = len(rows)
     if total == 0:
@@ -536,6 +580,7 @@ def render_rows(
     columns = list(shown[0].keys())
 
     had_null = False
+    had_empty = False
     truncated_any = False
     out = io.StringIO()
     if fmt == "json":
@@ -558,14 +603,23 @@ def render_rows(
             for col in columns:
                 value = row.get(col)
                 had_null |= value is None
-                text, cut = truncate_cell(render_cell(value), max_cell)
-                truncated_any |= cut
+                had_empty |= value == ""
+                text = render_cell(value)
+                if text is not None:
+                    text, cut = truncate_cell(text, max_cell)
+                    truncated_any |= cut
                 cells.append(text)
             write_csv_row(out, cells)
 
     footers = []
-    if had_null:
+    if (note := types_footer(types)):
+        footers.append(note)
+    if had_null and had_empty:
+        footers.append('# empty cells are NULL; "" is an empty string')
+    elif had_null:
         footers.append("# empty cells are NULL")
+    elif had_empty:
+        footers.append('# "" is an empty string')
     if truncated_any:
         footers.append(
             f"# some cells truncated to {max_cell} chars; pass --max-cell 0 for full values"
@@ -689,6 +743,36 @@ def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) 
     return 0
 
 
+DESCRIBE_RESULT = "DESCRIBE RESULT LAST_QUERY_ID()"
+
+
+def with_describe(sql: str) -> str:
+    """Append ``DESCRIBE RESULT LAST_QUERY_ID()`` as a second statement so one
+    ``snow`` session returns the rows and their column types. The ``;`` goes
+    on its own line so a trailing ``--`` comment cannot swallow it. Any
+    trailing ``;`` on the query (even one followed by a comment) is cut so no
+    empty statement sits between, which Snowflake would reject."""
+    masked = ANALYSIS_TOKEN_RE.sub(lambda m: " " * len(m.group(0)), sql)
+    body = masked.rstrip()
+    while body.endswith(";"):
+        body = body[:-1].rstrip()
+    return f"{sql[:len(body)]}\n;{DESCRIBE_RESULT}"
+
+
+def split_result(parsed) -> tuple[list | None, list[dict] | None]:
+    """``(rows, describe_rows)`` from snow's JSON_EXT stdout. Two statements
+    come back as ``[[rows...], [describe rows...]]``; a lone ``[rows...]``
+    (or the ``[]`` snow prints on failure) has no types. Anything else is
+    ``(None, None)`` so the caller relays it raw."""
+    if not isinstance(parsed, list):
+        return None, None
+    if len(parsed) == 2 and all(isinstance(part, list) for part in parsed):
+        return parsed[0], parsed[1]
+    if all(isinstance(row, dict) for row in parsed):
+        return parsed, None
+    return None, None
+
+
 def execute(
     sql: str,
     connection_override: str | None = None,
@@ -707,7 +791,7 @@ def execute(
 
     sub_env = snow_env(env_file)
     result = run_snow(
-        ["sql", "-q", sql, "--connection", connection,
+        ["sql", "-q", with_describe(sql), "--connection", connection,
          "--format", "JSON_EXT", "--enhanced-exit-codes"],
         sub_env,
     )
@@ -721,10 +805,12 @@ def execute(
 
     if result.stdout.strip():
         try:
-            rows = json.loads(result.stdout)
+            rows, types = split_result(json.loads(result.stdout))
         except ValueError:
-            rows = None
-        if not isinstance(rows, list):
+            rows = types = None
+        if result.returncode != 0 and result.stdout.strip() in ("[", "[]"):
+            pass  # what a failed query leaves on stdout; stderr has the error
+        elif not isinstance(rows, list):
             sys.stdout.write(result.stdout)  # unexpected shape: relay raw
         else:
             full_note = None
@@ -736,7 +822,8 @@ def execute(
                     rel = os.path.relpath(spilled, Path.cwd())
                     full_note = f"full result: {rel}"
             text, footers = render_rows(
-                rows, fmt=fmt, max_rows=max_rows, max_cell=max_cell, full_note=full_note
+                rows, fmt=fmt, max_rows=max_rows, max_cell=max_cell,
+                full_note=full_note, types=types,
             )
             sys.stdout.write(text)
             for line in footers:

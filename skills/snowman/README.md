@@ -48,7 +48,8 @@ never executes writes.
   warehouse. The wrapper does not block on cost, because reliable cost
   detection needs real parsing.
 - **Output shaping.** Results come back as CSV (header row, empty cell for
-  NULL, nested values as compact JSON), a fraction of the tokens of the CLI's
+  NULL, `""` for an empty string, nested values as compact JSON, a `# types:`
+  footer for scaled NUMBER, date/time, and VARIANT columns), a fraction of the tokens of the CLI's
   indented JSON. The wrapper shows 50 rows and writes an overflowing result in
   full to `.snowman/results/` (gitignored), cuts cells at 200 chars, flags
   each of those with a `#` footer line, and flattens the CLI's error panel to

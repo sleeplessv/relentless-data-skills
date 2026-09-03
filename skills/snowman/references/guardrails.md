@@ -22,8 +22,10 @@ wrapper:
    REVOKE, CALL, EXECUTE, COPY, PUT, REMOVE, UNDROP, USE, SET` and more. This
    scan catches `WITH ... INSERT` and similar. If any of them appears, the
    wrapper refuses the query.
-5. **Injects** `--connection <from context>` and `--format JSON_EXT`, then
-   renders the result itself (see "Output shaping" below). It reads the
+5. **Injects** `--connection <from context>` and `--format JSON_EXT`, appends
+   `DESCRIBE RESULT LAST_QUERY_ID()` as a second statement so the same
+   session also returns the result's column types, then renders the result
+   itself (see "Output shaping" below). It reads the
    connection from `.snowman/context.md` and refuses to run with no context
    file. In a multi-environment context (`environments:` map, separate dev
    and prod accounts) it resolves `--env <name>`, falling back to
@@ -39,11 +41,21 @@ code 2. Nothing has reached Snowflake at that point.
 ### Output shaping
 
 The wrapper parses snow's JSON and prints it as CSV. The header row comes
-first. An empty cell is NULL. VARIANT, OBJECT, and ARRAY cells are compact
-JSON. Numbers are untouched. Lines starting with `# ` are wrapper footers,
-never data, in this order:
+first. An empty cell is NULL. An empty string is `""` (a quoted empty
+field), so the two are distinguishable in the output and in the spill file.
+pandas and DuckDB read both as NULL by default; pass `keep_default_na=False`
+or `allow_quoted_nulls=false` to keep the difference. VARIANT, OBJECT, and
+ARRAY cells are compact JSON. Numbers are untouched. Lines starting with `# `
+are wrapper footers, never data, in this order:
 
-- `# empty cells are NULL` when any shown cell was NULL.
+- `# types: AMOUNT NUMBER(10,2), ORDER_TS TIMESTAMP_NTZ(9), PAYLOAD VARIANT`
+  for the columns whose Snowflake type the CSV text cannot carry: NUMBER with
+  a non-zero scale (which arrives as a quoted string like `1.50`), FLOAT,
+  DATE, TIME, TIMESTAMP, VARIANT, OBJECT, ARRAY, BINARY, GEOGRAPHY. Strings,
+  booleans, and integer NUMBER columns are omitted. The types come from the
+  `DESCRIBE RESULT` statement the wrapper runs with the query.
+- `# empty cells are NULL` when any shown cell was NULL, `# "" is an empty
+  string` when any shown cell was an empty string, or one line saying both.
 - `# some cells truncated to 200 chars; pass --max-cell 0 for full values`
   when a string or nested-JSON cell exceeded `--max-cell N` (default 200)
   and was cut to `<prefix>…(+K chars)`.

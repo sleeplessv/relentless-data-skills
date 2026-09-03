@@ -588,10 +588,62 @@ class TestRenderRows(SnowmanTestCase):
         self.assertEqual(text, "A,B\n,x\n")
         self.assertEqual(footers, ["# empty cells are NULL"])
 
-    def test_empty_string_is_not_null(self):
-        _, footers = snowman.render_rows(
+    def test_empty_string_is_quoted_and_noted(self):
+        text, footers = snowman.render_rows(
             [{"A": "", "B": "x"}], fmt="csv", max_rows=50, max_cell=200
         )
+        self.assertEqual(text, 'A,B\n"",x\n')
+        self.assertEqual(footers, ['# "" is an empty string'])
+
+    def test_null_and_empty_string_share_one_footer(self):
+        text, footers = snowman.render_rows(
+            [{"A": "", "B": None}, {"A": None, "B": ""}], fmt="csv", max_rows=50, max_cell=200
+        )
+        self.assertEqual(text, 'A,B\n"",\n,""\n')
+        self.assertEqual(footers, ['# empty cells are NULL; "" is an empty string'])
+
+    def test_json_mode_keeps_null_and_empty_string_distinct_without_footer(self):
+        text, footers = snowman.render_rows(
+            [{"A": "", "B": None}], fmt="json", max_rows=50, max_cell=200
+        )
+        self.assertEqual(text, '[{"A":"","B":null}]\n')
+        self.assertEqual(footers, [])
+
+    def test_cells_with_comma_quote_or_newline_are_quoted(self):
+        text, _ = snowman.render_rows(
+            [{"A": "a,b", "B": 'say "hi"', "C": "l1\nl2", "D": "plain"}],
+            fmt="csv", max_rows=50, max_cell=200,
+        )
+        self.assertEqual(text, 'A,B,C,D\n"a,b","say ""hi""","l1\nl2",plain\n')
+
+    def test_types_footer_lists_only_types_csv_cannot_show(self):
+        describe = [
+            {"name": "ID", "type": "NUMBER(38,0)"},
+            {"name": "AMOUNT", "type": "NUMBER(10,2)"},
+            {"name": "NAME", "type": "VARCHAR(16777216)"},
+            {"name": "OK", "type": "BOOLEAN"},
+            {"name": "TS", "type": "TIMESTAMP_NTZ(9)"},
+            {"name": "D", "type": "DATE"},
+            {"name": "F", "type": "FLOAT"},
+            {"name": "O", "type": "OBJECT"},
+            {"name": "V", "type": "VARIANT"},
+        ]
+        _, footers = snowman.render_rows(
+            [{"ID": 1}], fmt="csv", max_rows=50, max_cell=200, types=describe
+        )
+        self.assertEqual(
+            footers,
+            ["# types: AMOUNT NUMBER(10,2), TS TIMESTAMP_NTZ(9), D DATE, F FLOAT, "
+             "O OBJECT, V VARIANT"],
+        )
+
+    def test_types_footer_absent_when_all_plain_or_no_describe(self):
+        describe = [{"name": "ID", "type": "NUMBER"}, {"name": "S", "type": "VARCHAR(10)"}]
+        _, footers = snowman.render_rows(
+            [{"ID": 1}], fmt="csv", max_rows=50, max_cell=200, types=describe
+        )
+        self.assertEqual(footers, [])
+        _, footers = snowman.render_rows([{"ID": 1}], fmt="csv", max_rows=50, max_cell=200)
         self.assertEqual(footers, [])
 
     def test_nested_values_render_as_compact_json(self):
@@ -657,14 +709,16 @@ class TestRenderRows(SnowmanTestCase):
         self.assertEqual(text.count("\n"), 1204)
         self.assertEqual(footers, [])
 
-    def test_footer_order_null_then_truncation_then_cap(self):
+    def test_footer_order_types_null_truncation_cap(self):
         rows = [{"S": "abcdefghij", "N": None}] * 3
         _, footers = snowman.render_rows(
-            rows, fmt="csv", max_rows=2, max_cell=4, full_note="full result: x.csv"
+            rows, fmt="csv", max_rows=2, max_cell=4, full_note="full result: x.csv",
+            types=[{"name": "N", "type": "DATE"}],
         )
         self.assertEqual(
             [f.split(";")[0] for f in footers],
-            ["# empty cells are NULL",
+            ["# types: N DATE",
+             "# empty cells are NULL",
              "# some cells truncated to 4 chars",
              "# showing 2 of 3 rows"],
         )
@@ -824,9 +878,64 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(
             self.sql_args(),
-            ["sql", "-q", "SELECT 1", "--connection", "analytics",
+            ["sql", "-q", "SELECT 1\n;DESCRIBE RESULT LAST_QUERY_ID()",
+             "--connection", "analytics",
              "--format", "JSON_EXT", "--enhanced-exit-codes"],
         )
+
+    def test_describe_appended_after_trailing_semicolon_and_comment(self):
+        self.assertEqual(
+            snowman.with_describe("SELECT 1;  "),
+            "SELECT 1\n;DESCRIBE RESULT LAST_QUERY_ID()",
+        )
+        self.assertEqual(
+            snowman.with_describe("SELECT 1 -- note;"),
+            "SELECT 1\n;DESCRIBE RESULT LAST_QUERY_ID()",
+        )
+        self.assertEqual(
+            snowman.with_describe("SELECT 1; -- done\n/* end */"),
+            "SELECT 1\n;DESCRIBE RESULT LAST_QUERY_ID()",
+        )
+        self.assertEqual(
+            snowman.with_describe("SELECT ';' AS S;;"),
+            "SELECT ';' AS S\n;DESCRIBE RESULT LAST_QUERY_ID()",
+        )
+
+    def test_failed_query_stdout_fragment_is_not_relayed(self):
+        self.enter(self.make_project())
+        for fragment in ("[\n", "[]\n"):
+            code, out, err = self.run_execute(
+                {"sql": Outcome(5, fragment, PANEL_STDERR)}, "SELECT 1"
+            )
+            self.assertEqual(code, 5)
+            self.assertEqual(out, "")
+            self.assertEqual(err, PANEL_CLEANED)
+
+    def test_two_statement_result_yields_rows_and_types_footer(self):
+        self.enter(self.make_project())
+        payload = json.dumps([
+            [{"A": 1, "B": "1.50"}],
+            [{"name": "A", "type": "NUMBER(1,0)", "kind": "COLUMN"},
+             {"name": "B", "type": "NUMBER(10,2)", "kind": "COLUMN"}],
+        ])
+        code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "A,B\n1,1.50\n# types: B NUMBER(10,2)\n")
+        self.assertEqual(err, "")
+
+    def test_two_statement_empty_result_reports_zero_rows(self):
+        self.enter(self.make_project())
+        payload = json.dumps([[], [{"name": "A", "type": "DATE"}]])
+        _, out, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+        self.assertEqual(out, "# 0 rows\n")
+
+    def test_split_result_shapes(self):
+        self.assertEqual(snowman.split_result([[{"A": 1}], [{"name": "A"}]]),
+                         ([{"A": 1}], [{"name": "A"}]))
+        self.assertEqual(snowman.split_result([{"A": 1}]), ([{"A": 1}], None))
+        self.assertEqual(snowman.split_result([]), ([], None))
+        self.assertEqual(snowman.split_result({"error": 1}), (None, None))
+        self.assertEqual(snowman.split_result([1, 2]), (None, None))
 
     def test_json_ext_result_rendered_as_csv_with_footers(self):
         self.enter(self.make_project())

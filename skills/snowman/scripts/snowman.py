@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""snowman — read-only guardrail wrapper around the Snowflake ``snow`` CLI.
+"""snowman: read-only guardrail wrapper around the Snowflake ``snow`` CLI.
 
 Every snowman query goes through here. The wrapper makes one ironclad
 guarantee: **only read-only, single-statement SQL ever reaches Snowflake.**
-Cost discipline (LIMIT/SAMPLE, full-scan avoidance) is taught in
-``references/guardrails.md`` and is NOT enforced here — see that file.
+Cost discipline (LIMIT or SAMPLE, full-scan avoidance) is taught in
+``references/guardrails.md`` and is NOT enforced here. See that file.
 
 Usage:
     python3 snowman.py "<SQL>"
@@ -17,52 +17,52 @@ Execute mode (default):
   * resolves the project's ``.snowman/context.md`` (walks up from CWD) and
     reads the connection from its YAML frontmatter. Two frontmatter forms:
     a single ``connection:`` (one account), or an ``environments:`` map plus
-    ``default_env:`` (dev/prod in separate accounts). With environments,
-    ``--env <name>`` picks one per query and ``default_env`` is the fallback —
-    selection is stateless, never sticky;
-  * refuses to run if no context file exists (bootstrap not done) — unless
+    ``default_env:`` (dev and prod in separate accounts). With environments,
+    ``--env <name>`` picks one per query and ``default_env`` is the fallback.
+    Selection is stateless, never sticky;
+  * refuses to run if no context file exists (bootstrap not done), unless
     ``--connection <name>`` overrides it, which is how the bootstrap routes
     its discovery queries through the guardrail before the context exists;
   * strips comments + string literals, then rejects anything that is not a
     single read-only statement;
   * loads the project's ``.env`` (if any) into the ``snow`` subprocess
-    environment — existing process env always wins; values and var names are
+    environment. Existing process env always wins. Values and var names are
     never printed. This is what makes key-pair connections with an encrypted
     private key work: the passphrase lives in ``.env``, not in any config
     snowman touches;
   * on success runs ``snow sql -q <SQL> --connection <conn> --format
     JSON_EXT --enhanced-exit-codes``, parses the JSON result and prints it
-    as CSV (header row first; a NULL is an empty cell; VARIANT/OBJECT/ARRAY
-    cells are compact JSON). CSV costs a third to a fifth of the tokens of
-    snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
+    as CSV (header row first, a NULL is an empty cell, and VARIANT, OBJECT,
+    and ARRAY cells are compact JSON). CSV costs a third to a fifth of the
+    tokens of snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
     rows are shown and, when a context file exists, the full result is
     written to ``.snowman/results/<timestamp>__<sha1-8 of SQL>.csv``
-    (gitignored); ``--max-cell N`` (default 200) cuts longer string cells
-    to ``<prefix>…(+K chars)``; ``0`` lifts either cap. ``--json`` prints a
+    (gitignored). ``--max-cell N`` (default 200) cuts longer string cells
+    to ``<prefix>…(+K chars)``. ``0`` lifts either cap. ``--json`` prints a
     compact JSON array instead of CSV. Notes about NULLs, truncated cells
     and the row cap are appended as ``# ...`` footer lines, the only
     non-data lines on stdout;
   * relays snow's stderr with the Rich error panel flattened to one
     ``ERROR: ...`` line, and forwards snow's exit code (5 = SQL error, 2 =
-    argument error). If snow fails with an auth-looking error, looks up the
-    connection's authenticator via ``snow connection list`` (local config
-    read, no secrets) and appends a one-line hint matched to the auth
-    method: complete the browser login (OAuth/SSO) vs put the key-pair
-    passphrase in ``.env``;
+    argument error, other snow errors keep snow's own code). If snow fails
+    with an auth-looking error, looks up the connection's authenticator
+    through ``snow connection list`` (local config read, no secrets) and
+    appends a one-line hint matched to the auth method: complete the browser
+    login (OAuth or SSO), or put the key-pair passphrase in ``.env``;
   * on refusal prints ``BLOCKED: <reason>`` to stderr and exits non-zero.
 
 Stage mode (``--stage``):
-  * never executes anything — writes the SQL to
+  * never executes anything. Writes the SQL to
     ``.snowman/staged/<timestamp>__<slug>.sql`` for the user to review and
     run manually;
-  * accepts any SQL, including DML/DDL and multi-statement scripts; the only
-    check is non-emptiness. Destructive keywords add a warning line to the
-    file header, they never block;
+  * accepts any SQL, including DML or DDL and multi-statement scripts. The
+    only check is non-emptiness. Destructive keywords add a warning line to
+    the file header. They never block;
   * still requires ``.snowman/context.md`` (the header's run command needs
     the connection name). In a multi-environment project ``--env`` is
-    REQUIRED — the run command targets a real account, so the environment
-    must be explicit; it also lands in the filename and a header line;
-  * keeps ``.snowman/staged/`` gitignored via a ``.gitignore`` it maintains.
+    REQUIRED. The run command targets a real account, so the environment
+    must be explicit. It also lands in the filename and a header line;
+  * keeps ``.snowman/staged/`` gitignored through a ``.gitignore`` it maintains.
 
 Standard library only.
 """
@@ -84,7 +84,8 @@ from pathlib import Path
 ALLOWED_LEADING = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
 
 # Belt-and-braces: if any of these appears as a bare word anywhere in the
-# comment/string-stripped SQL, refuse — catches `WITH ... INSERT`, etc.
+# comment-stripped and string-stripped SQL, refuse. Catches `WITH ... INSERT`
+# and similar.
 WRITE_KEYWORDS = {
     "INSERT", "UPDATE", "DELETE", "MERGE", "UPSERT", "TRUNCATE", "DROP",
     "CREATE", "ALTER", "REPLACE", "RENAME", "GRANT", "REVOKE", "CALL",
@@ -92,7 +93,7 @@ WRITE_KEYWORDS = {
     "UNSET", "BEGIN", "COMMIT", "ROLLBACK",
 }
 
-# Stage mode only warns (never blocks) when one of these appears — the human
+# Stage mode only warns (never blocks) when one of these appears. The human
 # reviewing the staged file should have the destructive bits flagged.
 DESTRUCTIVE_KEYWORDS = {
     "DROP", "TRUNCATE", "DELETE", "REPLACE", "GRANT", "REVOKE", "REMOVE",
@@ -100,7 +101,7 @@ DESTRUCTIVE_KEYWORDS = {
 
 BLOCK = 2  # exit code for a guardrail refusal
 
-# A snow failure matching this is likely an auth problem — worth a hint, not
+# A snow failure matching this is likely an auth problem, worth a hint but not
 # worth debugging the connection config. Deliberately broad (it only ever
 # adds a line to an already-failed query) but avoids bare "token", which
 # parser errors use. The hint itself is matched to the connection's real
@@ -109,7 +110,7 @@ AUTH_ERROR_RE = re.compile(
     r"private[ _]?key|passphrase|decrypt|jwt|oauth|access token|authenticat", re.I
 )
 
-# Authenticators whose remedy is a human completing a browser login once —
+# Authenticators whose remedy is a human completing a browser login once.
 # snow caches the token afterwards. Error text alone can't discriminate
 # (key-pair auth is itself JWT-based and OAuth failures also mention tokens),
 # hence the authenticator lookup.
@@ -129,7 +130,7 @@ def find_context() -> Path:
         if candidate.is_file():
             return candidate
     die(
-        "no .snowman/context.md found in this project — run the snowman "
+        "no .snowman/context.md found in this project. Run the snowman "
         "bootstrap first (see references/install.md)."
     )
 
@@ -139,12 +140,12 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
 
     Returns ``(top, environments)``: top-level scalar keys, and the
     ``environments:`` map of env name -> {key: value}. Only the shapes the
-    snowman templates produce are understood; anything nested deeper is
+    snowman templates produce are understood. Anything nested deeper is
     ignored.
     """
     text = context.read_text(encoding="utf-8")
     if not text.startswith("---"):
-        die(f"{context} has no YAML frontmatter — cannot find the connection.")
+        die(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
     _, _, rest = text.partition("---")
     front, _, _ = rest.partition("---")
 
@@ -187,7 +188,7 @@ def resolve_connection(
     """Resolve ``(connection, environment-or-None)`` from the frontmatter.
 
     Legacy form (single ``connection:``): ``--env`` is rejected. Multi-env
-    form (``environments:``): queries fall back to ``default_env``; staging
+    form (``environments:``): queries fall back to ``default_env``. Staging
     always needs an explicit ``--env`` because the staged file's run command
     targets a real account.
     """
@@ -196,24 +197,24 @@ def resolve_connection(
     if environments:
         if top.get("connection"):
             die(
-                f"{context} defines both `connection:` and `environments:` — "
-                "keep exactly one form."
+                f"{context} defines both `connection:` and `environments:`. "
+                "Keep exactly one form."
             )
         if for_stage and not env:
             die(
-                "staging in a multi-environment project requires --env <name> "
-                "— the staged file's run command targets a real account, so "
+                "staging in a multi-environment project requires --env <name>. "
+                "The staged file's run command targets a real account, so "
                 f"the environment must be explicit. Defined: {', '.join(environments)}."
             )
         chosen = env or top.get("default_env")
         if not chosen:
             die(
-                f"{context} has `environments:` but no `default_env:` — add "
+                f"{context} has `environments:` but no `default_env:`. Add "
                 "one to the frontmatter, or pass --env <name>."
             )
         if chosen not in environments:
             die(
-                f"unknown environment {chosen!r} — {context} defines: "
+                f"unknown environment {chosen!r}. {context} defines: "
                 f"{', '.join(environments)}."
             )
         connection = environments[chosen].get("connection")
@@ -224,7 +225,7 @@ def resolve_connection(
     if env:
         die(
             f"--env was given but {context} defines a single `connection:` "
-            "with no `environments:` map — drop --env, or convert the "
+            "with no `environments:` map. Drop --env, or convert the "
             "frontmatter to the multi-environment form."
         )
     connection = top.get("connection")
@@ -246,7 +247,7 @@ def find_env_file(start: Path) -> Path | None:
 def load_dotenv(path: Path) -> dict[str, str]:
     """Tolerant stdlib .env parser: comments, blanks, `export `, quotes.
 
-    Malformed lines are skipped silently — this is a relay, not a linter.
+    Malformed lines are skipped silently. This is a relay, not a linter.
     """
     out: dict[str, str] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -267,9 +268,9 @@ def load_dotenv(path: Path) -> dict[str, str]:
 
 
 def snow_env(env_file: Path | None) -> dict[str, str]:
-    """Process env merged over .env — existing env always wins.
+    """Process env merged over .env. Existing env always wins.
 
-    The .env vars exist only in the snow subprocess; their names and values
+    The .env vars exist only in the snow subprocess. Their names and values
     are never printed.
     """
     merged = dict(os.environ)
@@ -280,11 +281,11 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
 
 
 def connection_params(connection: str, env: dict[str, str]) -> dict | None:
-    """Look up a connection's parameters via ``snow connection list``.
+    """Look up a connection's parameters through ``snow connection list``.
 
-    Reads local snow config only — never reaches Snowflake, and the listing
-    shows names/paths, not key material. Returns None when the lookup fails
-    or the connection isn't listed; callers fall back to generic guidance.
+    Reads local snow config only. Never reaches Snowflake, and the listing
+    shows names and paths, not key material. Returns None when the lookup
+    fails or the connection isn't listed. Callers fall back to generic guidance.
     """
     try:
         result = subprocess.run(
@@ -323,30 +324,30 @@ def auth_hint(kind: str, connection: str, env_file: Path | None) -> str:
     )
     keypair = (
         "if its private key is encrypted, the passphrase belongs in the "
-        "project root .env (e.g. PRIVATE_KEY_PASSPHRASE=...) — snowman passes "
-        f".env to snow automatically; this run: {env_note}. If a .env was "
+        "project root .env (e.g. PRIVATE_KEY_PASSPHRASE=...). snowman passes "
+        f".env to snow automatically. This run: {env_note}. If a .env was "
         "loaded and it still fails, the variable name is probably wrong for "
         "this connection"
     )
     if kind == "browser":
         return (
             f"hint: connection {connection!r} authenticates in a browser "
-            f"(OAuth/SSO) — {browser}."
+            f"(OAuth or SSO). {browser}."
         )
     if kind == "keypair":
-        return f"hint: this looks like a key-pair auth failure — {keypair}."
+        return f"hint: this looks like a key-pair auth failure. {keypair}."
     return (
         "hint: this looks like an auth failure. If the connection uses "
         f"key-pair auth: {keypair}. If it authenticates in a browser "
-        f"(OAuth/SSO): {browser}."
+        f"(OAuth or SSO): {browser}."
     )
 
 
 def strip_for_analysis(sql: str) -> str:
     """Remove block comments, line comments, and string literals.
 
-    The result is used ONLY for the read-only checks; the original SQL is
-    what actually runs. Blanking string literals stops semicolons/keywords
+    The result is used ONLY for the read-only checks. The original SQL is
+    what actually runs. Blanking string literals stops semicolons and keywords
     inside quotes from triggering false rejects.
     """
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)        # /* block */
@@ -361,7 +362,7 @@ def enforce_read_only(sql: str) -> None:
 
     statements = [s for s in cleaned.split(";") if s.strip()]
     if len(statements) > 1:
-        die("multiple statements detected — submit one statement at a time.")
+        die("multiple statements detected. Submit one statement at a time.")
     if not statements:
         die("empty query.")
 
@@ -378,7 +379,7 @@ def enforce_read_only(sql: str) -> None:
         if re.search(rf"\b{kw}\b", cleaned, flags=re.I)
     }
     if found:
-        die(f"write/DDL keyword(s) present: {', '.join(sorted(found))}.")
+        die(f"write or DDL keyword present: {', '.join(sorted(found))}.")
 
 
 DEFAULT_MAX_ROWS = 50
@@ -397,14 +398,14 @@ def render_cell(value) -> str:
 
 
 def truncate_cell(text: str, max_cell: int) -> tuple[str, bool]:
-    """Cut `text` to `max_cell` chars plus an `…(+K chars)` tail; 0 = unlimited."""
+    """Cut `text` to `max_cell` chars plus an `…(+K chars)` tail. 0 = unlimited."""
     if max_cell and len(text) > max_cell:
         return f"{text[:max_cell]}…(+{len(text) - max_cell} chars)", True
     return text, False
 
 
 def write_csv_row(out: io.StringIO, cells: list[str]) -> None:
-    """Write one CSV line; a first cell starting with ``#`` is force-quoted so
+    """Write one CSV line. A first cell starting with ``#`` is force-quoted so
     no data line can be mistaken for a ``# ...`` footer."""
     if cells and cells[0].startswith("#"):
         first = '"' + cells[0].replace('"', '""') + '"'
@@ -428,7 +429,7 @@ def render_rows(
 
     ``fmt`` is ``csv`` (header row, NULL as empty cell, nested values as
     compact JSON) or ``json`` (compact array, NULL stays ``null``). Rows past
-    ``max_rows`` and characters past ``max_cell`` are cut (0 = unlimited);
+    ``max_rows`` and characters past ``max_cell`` are cut (0 = unlimited).
     ``full_note`` is spliced into the row-cap footer to say where (or
     whether) the full result was saved. Footers all start with ``# ``.
     """
@@ -486,7 +487,7 @@ def clean_snow_stderr(text: str) -> str:
 
     Border-only lines are dropped, the ``│`` gutters removed, and the
     wrapped lines of one panel re-joined with single spaces (blank panel
-    lines are skipped). Each panel becomes its own line; lines outside a
+    lines are skipped). Each panel becomes its own line. Lines outside a
     panel pass through untouched.
     """
     out: list[str] = []
@@ -537,11 +538,11 @@ def spill_full_result(rows: list[dict], sql: str, context: Path) -> Path:
 def stage(sql: str, name: str, env: str | None) -> int:
     """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
     if not sql.strip():
-        die("empty script — nothing to stage.")
+        die("empty script. Nothing to stage.")
 
     slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")
     if not slug:
-        die(f"--name {name!r} reduces to an empty slug — use letters, digits, hyphens.")
+        die(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
 
     context = find_context()
     connection, env_name = resolve_connection(context, env, for_stage=True)
@@ -565,7 +566,7 @@ def stage(sql: str, name: str, env: str | None) -> int:
         if re.search(rf"\b{kw}\b", strip_for_analysis(sql), flags=re.I)
     )
     header = [
-        "-- staged by snowman — NOT executed",
+        "-- staged by snowman, NOT executed",
         f"-- purpose: {slug}",
     ]
     if env_name:
@@ -576,7 +577,7 @@ def stage(sql: str, name: str, env: str | None) -> int:
     ]
     if destructive:
         header.append(
-            f"-- WARNING: contains {', '.join(destructive)} — review carefully before running"
+            f"-- WARNING: contains {', '.join(destructive)}. Review carefully before running"
         )
     path.write_text("\n".join(header) + "\n\n" + sql.strip() + "\n", encoding="utf-8")
 
@@ -656,7 +657,7 @@ def execute(
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         prog="snowman.py",
-        description="Read-only Snowflake query wrapper; --stage writes DML/DDL "
+        description="Read-only Snowflake query wrapper. --stage writes DML or DDL "
         "to .snowman/staged/ for manual execution instead of running anything.",
     )
     parser.add_argument("sql", help="the SQL to run (read-only) or stage")
@@ -676,22 +677,22 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--env", metavar="NAME",
         help="environment to target in a multi-environment project (falls "
-        "back to default_env for queries; required with --stage there)",
+        "back to default_env for queries). Required with --stage there",
     )
     parser.add_argument(
         "--max-rows", type=int, default=DEFAULT_MAX_ROWS, metavar="N",
         help="rows to print before spilling the full result to "
-        f".snowman/results/ (default {DEFAULT_MAX_ROWS}; 0 = unlimited)",
+        f".snowman/results/ (default {DEFAULT_MAX_ROWS}, 0 = unlimited)",
     )
     parser.add_argument(
         "--max-cell", type=int, default=DEFAULT_MAX_CELL, metavar="N",
         help="characters to keep per cell before cutting with an "
-        f"…(+K chars) tail (default {DEFAULT_MAX_CELL}; 0 = unlimited)",
+        f"…(+K chars) tail (default {DEFAULT_MAX_CELL}, 0 = unlimited)",
     )
     parser.add_argument(
         "--json", action="store_true",
         help="print rows as a compact JSON array instead of CSV (nested "
-        "VARIANT/OBJECT/ARRAY values stay real JSON)",
+        "VARIANT, OBJECT, and ARRAY values stay real JSON)",
     )
     args = parser.parse_args(argv[1:])
 
@@ -706,7 +707,7 @@ def main(argv: list[str]) -> int:
     if args.name:
         parser.error("--name is only valid with --stage")
     if args.connection and args.env:
-        parser.error("--env resolves via the context file; --connection bypasses it — use one")
+        parser.error("--env resolves via the context file and --connection bypasses it, so use one or the other")
     return execute(
         args.sql,
         connection_override=args.connection,

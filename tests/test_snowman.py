@@ -410,7 +410,7 @@ class TestStage(SnowmanTestCase):
         files = self.staged_files(root)
         self.assertEqual(len(files), 1)
         body = files[0].read_text(encoding="utf-8")
-        self.assertIn("-- staged by snowman — NOT executed", body)
+        self.assertIn("-- staged by snowman, NOT executed", body)
         self.assertIn("-- purpose: create-t", body)
         self.assertIn("snow sql -f", body)
         self.assertIn("--connection analytics", body)

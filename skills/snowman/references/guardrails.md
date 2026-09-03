@@ -10,8 +10,9 @@ the enforced tier. The taught rules live in SKILL.md under "Guardrails
 Every query runs through the wrapper. Before anything reaches Snowflake, the
 wrapper:
 
-1. **Strips comments and string literals** (`/* */`, `--`, `//`, `'...'`) so
-   nothing hidden in a comment or quoted string can smuggle past the checks.
+1. **Strips comments and string literals** (`/* */`, `--`, `//`, `'...'`,
+   and dollar-quoted `$$...$$`) so nothing hidden in a comment or quoted
+   string can smuggle past the checks.
 2. **Rejects multiple statements.** `;`-separated statements are refused. A
    single trailing `;` is fine.
 3. **Checks the leading keyword.** It must be `SELECT`, `WITH`, `SHOW`,

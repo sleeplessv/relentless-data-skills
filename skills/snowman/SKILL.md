@@ -49,8 +49,8 @@ result in full to `.snowman/results/*.csv`. Before bootstrap nothing is saved, s
 narrow the query or pass `--max-rows 0`. String and nested-JSON cells are cut at 200 chars
 (`--max-cell N`, `0` for full values). `--json` prints a compact JSON array instead, for VARIANT-heavy results.
 
-The wrapper also relays the project root `.env`, if present, into the `snow`
-subprocess. That relay is how encrypted key-pair connections get their passphrase.
+The wrapper also relays the nearest `.env` at or above the project root, if
+any, into the `snow` subprocess. That relay is how encrypted key-pair connections get their passphrase.
 Never source `.env` yourself, and never print its contents.
 
 **Run outside the sandbox.** The `snow` CLI needs network access. A sandboxed
@@ -146,4 +146,4 @@ building it in dbt, investigating data-quality issues, discovering Snowflake obj
 
 Do not use snowman for executing writes (there is no execute path, only staging), for creating connections or
 storing credentials (the user does that with `snow connection add`), or for non-Snowflake databases.
-snowman's only credential handling is relaying the project root `.env` to `snow`. It never prints or stores what it finds there.
+snowman's only credential handling is relaying the nearest `.env` at or above the project root to `snow`. It never prints or stores what it finds there.

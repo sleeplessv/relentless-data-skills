@@ -67,8 +67,8 @@ the connection name.
 snowman relays one credential, and never stores, prints, or asks for it. If
 your connection uses key-pair auth with an encrypted private key, put the
 passphrase in the project root `.env` (for example
-`PRIVATE_KEY_PASSPHRASE=...`). The wrapper loads `.env` into the `snow`
-subprocess on every query. The existing shell environment always wins over
+`PRIVATE_KEY_PASSPHRASE=...`). The wrapper loads the nearest `.env` at or above the
+project root into the `snow` subprocess on every query. The existing shell environment always wins over
 `.env`. Keep `.env` gitignored as usual. With several key-pair connections
 whose passphrases differ (for example separate dev and prod accounts), use
 `snow`'s per-connection form in `.env` instead:

@@ -45,6 +45,13 @@ executes writes itself.
 - **Cost discipline (taught).** Bounding scans with `LIMIT`/`SAMPLE`, avoiding
   full scans, and minding the warehouse are taught in `references/guardrails.md`
   rather than hard-blocked (reliable cost detection needs real parsing).
+- **Output shaping.** Results come back as CSV (header row, empty cell =
+  NULL, nested values as compact JSON), a fraction of the tokens of the
+  CLI's indented JSON. The wrapper shows 50 rows and writes an overflowing
+  result in full to `.snowman/results/` (gitignored), cuts cells at 200
+  chars, flags each of those with a `#` footer line, and flattens the CLI's
+  error panel to one `ERROR:` line. `--max-rows`, `--max-cell`, and `--json`
+  lift or change the defaults.
 - **Workflows.** Exploration, profiling, hypothesis testing, and investigation
   playbooks in `references/workflows.md`.
 
@@ -94,9 +101,10 @@ It activates when you explore Snowflake data or ask to profile/investigate it.
 - `references/guardrails.md`: full guardrail policy (hard-enforced vs taught).
 - `references/workflows.md`: exploration / profiling / hypothesis / investigation.
 - `scripts/snowman.py`: the read-only wrapper (stdlib only). Ships with the
-  skill; reads the per-project context to resolve the connection. Also owns
-  `--stage`, which writes (never executes) DML/DDL scripts to
-  `.snowman/staged/`.
+  skill; reads the per-project context to resolve the connection, renders
+  results as capped CSV (or `--json`) with spill files under
+  `.snowman/results/`, and flattens error output. Also owns `--stage`, which
+  writes (never executes) DML/DDL scripts to `.snowman/staged/`.
 
 ## Maintenance / CI
 

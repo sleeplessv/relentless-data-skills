@@ -18,7 +18,8 @@ Every query runs through the wrapper. Before anything reaches Snowflake it:
    MERGE, TRUNCATE, DROP, CREATE, ALTER, REPLACE, GRANT, REVOKE, CALL,
    EXECUTE, COPY, PUT, REMOVE, UNDROP, USE, SET, …`. This catches
    `WITH … INSERT` and similar. Present → refused.
-5. **Injects** `--connection <from context>` and `--format JSON`; reads the
+5. **Injects** `--connection <from context>` and `--format JSON_EXT`, then
+   renders the result itself (see "Output shaping" below); reads the
    connection from `.snowman/context.md` and **refuses to run with no context
    file**. In a multi-environment context (`environments:` map, separate
    dev/prod accounts) it resolves `--env <name>`, falling back to
@@ -32,6 +33,33 @@ On refusal the wrapper prints `BLOCKED: <reason>` to stderr and **exits
 non-zero**. When you see that, do **not** work around it. The request was not
 read-only. If the user asked a read-only question, rephrase the query. If the
 user explicitly asked for a data/schema change, stage it (below).
+
+### Output shaping
+
+The wrapper parses snow's JSON and prints it as CSV: header row first, an
+empty cell is NULL, VARIANT/OBJECT/ARRAY cells are compact JSON, numbers are
+untouched. Lines starting with `# ` are wrapper footers, never data, in this
+order:
+
+- `# empty cells are NULL` when any shown cell was NULL.
+- `# some cells truncated to 200 chars; pass --max-cell 0 for full values`
+  when a string or nested-JSON cell exceeded `--max-cell N` (default 200)
+  and was cut to `<prefix>…(+K chars)`.
+- `# showing 50 of 1203 rows; full result: .snowman/results/<timestamp>__<sha1-8>.csv; add LIMIT or a WHERE filter to narrow, or pass --max-rows 0`
+  when the result exceeded `--max-rows N` (default 50). The spill file holds
+  every row, untruncated, and is gitignored via a `.gitignore` the wrapper
+  maintains in `.snowman/results/`, like staged files; cleanup is the
+  user's. In bootstrap mode (`--connection`, no context file) nothing is
+  saved and the footer says so.
+- `# 0 rows` for an empty result.
+
+`--json` prints the same capped rows as a compact JSON array instead (NULL
+stays `null`), for VARIANT-heavy results you want to `json.loads`. In that
+mode NUMBER (Decimal) columns arrive as quoted strings such as `"42"`, which
+is snow's JSON encoder behaviour, so parse them rather than expecting bare
+numbers. Errors arrive on stderr as one
+`ERROR: <code> (<sqlstate>): <query id>: <message>` line with snow's exit
+code forwarded (5 = SQL error).
 
 ### Note on the keyword scan
 

@@ -6,9 +6,19 @@ narrow fast, keep queries small.
 
 ## Exploration: discover what's there
 
-1. `SHOW DATABASES` → `SHOW SCHEMAS IN DATABASE <db>` → `SHOW TABLES IN SCHEMA <db>.<schema>`
-2. `DESCRIBE TABLE <db>.<schema>.<table>`: columns and types.
-3. `SELECT * FROM <db>.<schema>.<table> SAMPLE (100 ROWS)`: eyeball real data.
+1. `SHOW TERSE DATABASES` → `SHOW TERSE SCHEMAS IN DATABASE <db> LIMIT 50` →
+   `SHOW TERSE TABLES IN SCHEMA <db>.<schema> LIMIT 50` (add
+   `STARTS WITH '<prefix>'` to narrow). Project the columns you need in the
+   same statement with the pipe operator:
+   `SHOW TABLES IN SCHEMA <db>.<schema> LIMIT 50 ->> SELECT "name","rows","bytes" FROM $1`.
+   SHOW/DESCRIBE column names are lowercase and must be double-quoted; `$1`
+   is valid only in `FROM`.
+2. `DESCRIBE TABLE <db>.<schema>.<table> ->> SELECT "name","type","null?" FROM $1`:
+   columns and types without the ten mostly-null DESCRIBE columns.
+3. `SELECT <col1>, <col2>, ... FROM <db>.<schema>.<table> SAMPLE (20 ROWS)`:
+   eyeball real data with a column list, or `SAMPLE (20 ROWS)` on a narrow
+   table. The wrapper shows 50 rows and saves the rest to a file;
+   `--max-rows N` changes the cap.
 4. `SELECT GET_DDL('TABLE', '<db>.<schema>.<table>')`: full definition.
 5. Use `INFORMATION_SCHEMA` for metadata at scale (e.g. all columns in a
    schema) instead of describing tables one by one.

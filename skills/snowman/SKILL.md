@@ -30,43 +30,43 @@ per-project and committed to the repo (names only, never secrets; see
 ## Running queries, always via the wrapper
 
 Never call `snow sql` directly. Every query goes through the wrapper, which
-injects the connection + `--format JSON` and enforces read-only:
+injects the connection, enforces read-only, and returns CSV:
 
 ```bash
 python3 <skill-dir>/scripts/snowman.py "<SQL>"
 ```
 
 `<skill-dir>` is this skill's directory. The wrapper reads the connection
-from `.snowman/context.md`, so you never pass `--connection` yourself (the
-only exception is the bootstrap, before the context file exists; see
-[references/install.md](references/install.md)).
+from `.snowman/context.md`; never pass `--connection` yourself except during
+the bootstrap, before the context exists ([references/install.md](references/install.md)).
+
+Output is CSV (header row; empty cell = NULL; nested values as compact JSON)
+plus `#` footer lines, which are notes, never data. 50 rows are shown
+(`--max-rows N`, `0` = all) and an overflowing result is saved in full to
+`.snowman/results/*.csv`; string and nested-JSON cells are cut at 200 chars (`--max-cell N`).
+`--json` prints a compact JSON array instead, for VARIANT-heavy results.
 
 The wrapper also relays the project root `.env` (if present) into the `snow`
-subprocess. This is how key-pair connections with an encrypted private key
-get their passphrase. Never source `.env` yourself, and never print its
-contents.
+subprocess, which is how encrypted key-pair connections get their
+passphrase. Never source `.env` yourself, and never print its contents.
 
-**Run outside the sandbox.** The `snow` CLI needs network access to reach
-Snowflake; a sandboxed shell blocks it, and the failure surfaces as a
-DNS/connection error that looks like a broken connection config. Run every
-wrapper (and `snow`) command with sandboxing disabled. If a query fails with
-a connection/DNS error, suspect the sandbox first. Do not start debugging
-the connection setup.
+**Run outside the sandbox.** The `snow` CLI needs network access; a
+sandboxed shell blocks it and the failure surfaces as a DNS/connection error
+that looks like a broken connection config. Run every wrapper (and `snow`)
+command with sandboxing disabled. If a query fails with a connection/DNS
+error, suspect the sandbox first, not the connection setup.
 
-On an auth-looking failure (private key, passphrase, JWT, OAuth, token) the
-wrapper looks up the connection's authenticator and prints a hint matched to
-it: browser auth (OAuth/SSO) needs the user to run
-`snow connection test -c <name>` in their own terminal once. A browser
-opens and `snow` caches the token; key-pair auth needs the passphrase in the
-project root `.env` (e.g. `PRIVATE_KEY_PASSPHRASE=...`). Relay the hint to
-the user; do not debug `connections.toml`, ask for the passphrase, or try to
-drive the browser flow from inside the session.
+On an auth-looking failure the wrapper prints a hint matched to the
+connection's authenticator: browser auth (OAuth/SSO) needs the user to run
+`snow connection test -c <name>` in their own terminal once (`snow` caches
+the token); key-pair auth needs the passphrase in the project root `.env`
+(e.g. `PRIVATE_KEY_PASSPHRASE=...`). Relay the hint; do not debug
+`connections.toml`, ask for the passphrase, or drive the browser flow.
 
-If the wrapper exits with `BLOCKED: …`, **do not work around it**. The
-statement was non-read-only. If the user asked a read-only question, rephrase
-the query. If the user genuinely asked for a data/schema change, use staging
-(below). **Never stage SQL the user didn't ask to have run.** Staging is
-driven by the user's stated intent, not by a block you want to get past.
+If the wrapper exits with `BLOCKED: …`, **do not work around it**: the
+statement was non-read-only. Rephrase a read-only question; stage (below) a
+change the user genuinely asked for. **Never stage SQL the user didn't ask
+to have run.** Staging follows stated intent, not a block you want past.
 
 ## Environments (dev/prod in separate accounts)
 
@@ -115,8 +115,11 @@ for the full policy and refusal messages):
 
 These are **taught, not hard-blocked** (apply them yourself):
 
-- **Cost hygiene.** Bound exploratory `SELECT *` with `LIMIT`/`SAMPLE`;
-  avoid full scans on large tables; surface the target warehouse first.
+- **Cost hygiene.** Bound exploratory reads with `LIMIT`/`SAMPLE`; avoid
+  full scans on large tables; surface the target warehouse first.
+- **Lean metadata.** Prefer `SHOW TERSE`, `LIMIT`, `STARTS WITH`, and
+  `->> SELECT "col",... FROM $1` to project SHOW/DESCRIBE output; never
+  `SELECT *` on a wide table without a column list or a small `SAMPLE`.
 - **Start broad, then narrow.** Databases, then schemas, then tables, then
   DESCRIBE, then SAMPLE; prefer several focused queries over one large one.
   Narrow toward the question asked: an anomaly you pass on the way gets a
@@ -131,9 +134,8 @@ These are **taught, not hard-blocked** (apply them yourself):
 
 ## Workflows
 
-Load [references/workflows.md](references/workflows.md) for the playbooks:
-exploration, profiling, hypothesis testing, and investigation. Pull the one
-matching the user's intent; don't load all of it pre-emptively.
+Load [references/workflows.md](references/workflows.md) for the playbook
+matching the user's intent: exploration, profiling, hypothesis, investigation.
 
 ## When to use / not use
 
@@ -144,6 +146,5 @@ scripts for manual execution.
 
 **Don't use for:** *executing* writes (there is no execute path for DML/DDL,
 only staging), creating connections or storing credentials (the user does
-that with `snow connection add`), or non-Snowflake databases. The only
-credential handling snowman does is relaying the project root `.env` to the
-`snow` subprocess, opaquely.
+that with `snow connection add`), or non-Snowflake databases. Its only
+credential handling is relaying the project root `.env` to `snow`, opaquely.

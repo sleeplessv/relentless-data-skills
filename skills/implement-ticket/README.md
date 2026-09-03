@@ -22,7 +22,7 @@ is off.
 - **Verification before "done"**: baselines the test suite before editing, then runs a type-check + test feedback loop until both are green, then a runtime smoke check with separate paths for servers (start, hit endpoint, read logs) and CLIs/libraries/pipelines (representative invocation, exit code 0).
 - **PR hygiene**: draft PR within the first commits, repo PR template if present, a full-diff read before marking ready, Summary + Test plan sized to the change, marks ready for review but never merges.
 - **Stop conditions**: ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the ticket, park it as `needs-info` (solo runs), and hand back to the human; explicitly re-requesting the parked ticket resumes it.
-- **Orchestrated dispatch**: a sanctioned override contract (`base_branch`, `open_pr: false`, blockers pre-merged) so a feature orchestrator like `implement-feature` can run it per-ticket against an integration branch without per-ticket PRs.
+- **Orchestrated dispatch**: a sanctioned override contract (`base_branch`, `open_pr: false`, an inherited test `baseline`, blockers pre-merged) so a feature orchestrator like `implement-feature` can run it per-ticket against an integration branch without per-ticket PRs, pre-edit suite runs, or prose-skill loading.
 
 ## Conventions it expects
 
@@ -50,7 +50,8 @@ npx skills add sleeplessv/relentless-data-skills/skills/implement-ticket
 The skill also references `tdd` and `code-review`, plus
 `principle-laziness-protocol`, `unslop`, and `technical-writing` for its
 code-frugality and prose standards; without those three it falls back to the
-one-line minimums baked into the skill.
+one-line minimums baked into the skill. The two prose skills load in solo runs
+only, where the skill writes a PR body.
 
 It activates when you say "implement ticket #N", "implement issue #N", or
 "grab the next ready ticket".
@@ -58,6 +59,7 @@ It activates when you say "implement ticket #N", "implement issue #N", or
 ## Files
 
 - `SKILL.md` is the full workflow: selection, claiming, branching, implementation, tests, smoke check, PR finalisation, stop conditions.
+- `references/auto-pick.md` is the solo-run auto-pick query and its load-bearing details, read only when no ticket number is given.
 - `plugin.json` is the Claude Code plugin manifest.
 
 ## Requirements

@@ -14,10 +14,12 @@ a feature run yourself, so it pays zero always-on context load.
 - **Work-set resolution**: accepts a spec number, a ticket list/range, or both. Spec
   alone → discovers its open tickets (`## Parent` scan plus native sub-issues); tickets alone → resolves the parent spec for
   context; both → the explicit list wins. The spec is always context, never a work
-  item. The resolved work-set is announced before any branch is created; closed
-  tickets are silently skipped; a cycle in the blocking graph stops the run. A
-  fresh work-set of exactly one ticket skips the orchestration entirely and hands
-  off to `implement-ticket` directly.
+  item. Closed tickets are skipped by name; a cycle in the blocking graph stops the
+  run. A fresh work-set of exactly one ticket skips the orchestration entirely and
+  hands off to `implement-ticket` directly. The same dispatch prepares the tree:
+  cuts the integration branch, records a test baseline on it, and writes handoff
+  files (spec, per-ticket criteria, commands, decisions log) that every later
+  dispatch reads by path instead of receiving the spec pasted into its prompt.
 - **One integration branch**: `feat/spec-<N>-<slug>` off the default branch; all
   ticket work merges here, and it is the only branch that ever points at `main`.
 - **Topological waves**: every currently-unblocked ticket is dispatched in parallel
@@ -25,14 +27,17 @@ a feature run yourself, so it pays zero always-on context load.
   integration dispatch merges each wave, so blockers are always merged before their
   dependants start.
 - **Gates at both levels**: each ticket subagent keeps `implement-ticket`'s
-  types+tests loop and runtime smoke check, and each wave gets a targeted
-  verification after its merge; after the last wave, a separate verification
-  dispatch (full suite + smoke) and a separate `code-review` dispatch (whole
-  feature diff, spec as intent) run on the unified integration branch, with fix
-  dispatches looping until green or stopping after three strikes.
-- **One feature PR**: created ready-for-review only when everything is green, with
-  Summary, Test plan, and `Closes #n` lines for every implemented ticket, plus the
-  spec, but only once every open ticket of the spec is covered. Never merged by the agent.
+  types+tests loop and runtime smoke check (inheriting the baseline rather than
+  re-running the suite before editing), and the integrate dispatch runs the merged
+  tickets' tests on the merged tree before anything is pushed (a red merge is
+  handled as a semantic conflict); after the last wave, a verification dispatch
+  (full suite + smoke) and a `code-review` dispatch (whole feature diff, spec as
+  intent) run in parallel on the unified integration branch, with one fix dispatch
+  per strike looping until green or stopping after three strikes.
+- **One feature PR**: one dispatch authors and executes the Verification plan, then
+  creates the PR ready-for-review, with Summary, Test plan, and `Closes #n` lines for
+  every implemented ticket, plus the spec, but only once every open ticket of the
+  spec is covered. Never merged by the agent.
 - **Drain-around-failure + resume**: a three-strikes ticket pushes its WIP branch
   and comments findings; its dependants are skipped, independent tickets continue,
   and the run verifies the integration branch, then stops before Review and the PR
@@ -66,16 +71,18 @@ Install `orchestrator-mode`, `implement-ticket`, and (ideally) `code-review`
 alongside it. This skill composes them rather than restating them. It also
 references `principle-laziness-protocol`, `unslop`, and `technical-writing` for
 its code-frugality and prose standards; without them it falls back to the
-one-line minimums baked into the skill.
+one-line minimums baked into the skill. Only the PR dispatch loads the two prose
+skills; ticket dispatches write commit messages and skip them.
 
 ## Files
 
-- `SKILL.md` is the full workflow: work-set resolution, integration branch, waves,
-  integration gates, feature PR, stop conditions.
+- `SKILL.md` is the full workflow: work-set resolution and tree preparation, waves,
+  integration gates, Verification plan + feature PR, stop conditions.
 - `references/reference.md` is per-dispatch contracts disclosed from the workflow:
-  resolver commands and evidence rules, the wave-integration contract, the review
-  spec-source override, the Verification plan authoring contract, the feature PR
-  body contract. Dispatch prompts pass its absolute path and section anchor.
+  resolver commands and evidence rules, tree preparation (integration branch,
+  baseline, handoff files), the wave-integration contract, the review spec-source
+  override, the Verification plan authoring contract, the feature PR body
+  contract. Dispatch prompts pass its absolute path and section anchor.
 
 ## Maintenance / CI
 

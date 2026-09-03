@@ -77,7 +77,11 @@ def connection_listing(connection: str, parameters: dict) -> Outcome:
 
 
 class SnowmanTestCase(unittest.TestCase):
-    """Shared helpers: Blocked assertions and a temp project to chdir into."""
+    """Shared helpers: Blocked assertions and temp projects passed by path.
+
+    Resolution is tested by passing a start path. Only the entry points
+    (execute, stage, main) still read the CWD, and their tests use ``enter``.
+    """
 
     def setUp(self) -> None:
         self._original_cwd = os.getcwd()
@@ -93,21 +97,23 @@ class SnowmanTestCase(unittest.TestCase):
         return reason
 
     def make_project(self, frontmatter: str = SINGLE_CONN_FRONTMATTER) -> Path:
-        """Create a temp project with .snowman/context.md and chdir into it."""
-        root = Path(tempfile.mkdtemp(prefix="snowman-test-")).resolve()
-        self.addCleanup(self._rmtree, root)
+        """Create a temp project with .snowman/context.md; return its root."""
+        root = self.make_bare_dir()
         snowman_dir = root / ".snowman"
         snowman_dir.mkdir()
         (snowman_dir / "context.md").write_text(frontmatter, encoding="utf-8")
-        os.chdir(root)
         return root
 
     def make_bare_dir(self) -> Path:
-        """Create a temp dir with no context file and chdir into it."""
+        """Create a temp dir with no context file; return it."""
         root = Path(tempfile.mkdtemp(prefix="snowman-test-")).resolve()
         self.addCleanup(self._rmtree, root)
-        os.chdir(root)
         return root
+
+    def enter(self, path: Path) -> Path:
+        """chdir into `path` for tests that go through execute, stage, or main."""
+        os.chdir(path)
+        return path
 
     @staticmethod
     def _rmtree(path: Path) -> None:
@@ -280,55 +286,59 @@ class TestParseFrontmatter(SnowmanTestCase):
         self.assert_blocked(snowman.parse_frontmatter, context, match="frontmatter")
 
 
-class TestResolveConnection(SnowmanTestCase):
-    def context_with(self, text: str) -> Path:
-        root = self.make_bare_dir()
-        context = root / "context.md"
-        context.write_text(text, encoding="utf-8")
-        return context
+class TestResolveTarget(SnowmanTestCase):
+    """resolve_target: context lookup, frontmatter, connection choice, .env."""
+
+    def resolve(self, start: Path, env: str | None = None, **kwargs) -> snowman.Target:
+        return snowman.resolve_target(start, None, env, **kwargs)
 
     def test_legacy_single_connection(self):
-        context = self.context_with(SINGLE_CONN_FRONTMATTER)
-        self.assertEqual(snowman.resolve_connection(context, None), ("analytics", None))
+        root = self.make_project(SINGLE_CONN_FRONTMATTER)
+        self.assertEqual(
+            self.resolve(root),
+            snowman.Target("analytics", None, root, root / ".snowman", None),
+        )
+
+    def test_walks_up_from_a_nested_start(self):
+        root = self.make_project()
+        nested = root / "models" / "marts"
+        nested.mkdir(parents=True)
+        target = self.resolve(nested)
+        self.assertEqual(target.project_root, root)
+        self.assertEqual(target.snowman_dir, root / ".snowman")
+
+    def test_blocks_without_bootstrap(self):
+        root = self.make_bare_dir()
+        self.assert_blocked(self.resolve, root, match="bootstrap")
 
     def test_legacy_rejects_env_flag(self):
-        context = self.context_with(SINGLE_CONN_FRONTMATTER)
-        self.assert_blocked(
-            snowman.resolve_connection, context, "dev", match="--env was given"
-        )
+        root = self.make_project(SINGLE_CONN_FRONTMATTER)
+        self.assert_blocked(self.resolve, root, "dev", match="--env was given")
 
     def test_legacy_missing_connection_blocks(self):
-        context = self.context_with("---\nowner: someone\n---\n")
-        self.assert_blocked(
-            snowman.resolve_connection, context, None, match="no `connection:`"
-        )
+        root = self.make_project("---\nowner: someone\n---\n")
+        self.assert_blocked(self.resolve, root, match="no `connection:`")
 
     def test_multi_env_explicit(self):
-        context = self.context_with(MULTI_ENV_FRONTMATTER)
-        self.assertEqual(
-            snowman.resolve_connection(context, "prod"), ("acme_prod", "prod")
-        )
+        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        target = self.resolve(root, "prod")
+        self.assertEqual((target.connection, target.environment), ("acme_prod", "prod"))
 
     def test_multi_env_falls_back_to_default(self):
-        context = self.context_with(MULTI_ENV_FRONTMATTER)
-        self.assertEqual(snowman.resolve_connection(context, None), ("acme_dev", "dev"))
+        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        target = self.resolve(root)
+        self.assertEqual((target.connection, target.environment), ("acme_dev", "dev"))
 
     def test_multi_env_unknown_env_blocks(self):
-        context = self.context_with(MULTI_ENV_FRONTMATTER)
-        self.assert_blocked(
-            snowman.resolve_connection, context, "staging", match="unknown environment"
-        )
+        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        self.assert_blocked(self.resolve, root, "staging", match="unknown environment")
 
     def test_multi_env_no_default_and_no_flag_blocks(self):
-        context = self.context_with(
-            "---\nenvironments:\n  dev:\n    connection: acme_dev\n---\n"
-        )
-        self.assert_blocked(
-            snowman.resolve_connection, context, None, match="default_env"
-        )
+        root = self.make_project("---\nenvironments:\n  dev:\n    connection: acme_dev\n---\n")
+        self.assert_blocked(self.resolve, root, match="default_env")
 
     def test_both_forms_blocks(self):
-        context = self.context_with(
+        root = self.make_project(
             "---\n"
             "connection: legacy\n"
             "environments:\n"
@@ -337,27 +347,57 @@ class TestResolveConnection(SnowmanTestCase):
             "default_env: dev\n"
             "---\n"
         )
-        self.assert_blocked(
-            snowman.resolve_connection, context, None, match="exactly one form"
-        )
+        self.assert_blocked(self.resolve, root, match="exactly one form")
 
     def test_stage_requires_explicit_env(self):
-        context = self.context_with(MULTI_ENV_FRONTMATTER)
-        self.assert_blocked(
-            snowman.resolve_connection,
-            context,
-            None,
-            for_stage=True,
-            match="requires --env",
-        )
+        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        self.assert_blocked(self.resolve, root, for_stage=True, match="requires --env")
+
+    def test_stage_with_env_resolves(self):
+        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        target = self.resolve(root, "prod", for_stage=True)
+        self.assertEqual(target.environment, "prod")
 
     def test_env_without_connection_value_blocks(self):
-        context = self.context_with(
+        root = self.make_project(
             "---\nenvironments:\n  dev:\n    role: analyst\ndefault_env: dev\n---\n"
         )
-        self.assert_blocked(
-            snowman.resolve_connection, context, None, match="no `connection:` value"
-        )
+        self.assert_blocked(self.resolve, root, match="no `connection:` value")
+
+    def test_connection_override_skips_context(self):
+        root = self.make_bare_dir()
+        target = snowman.resolve_target(root, "bootstrap_conn", None)
+        self.assertEqual(target, snowman.Target("bootstrap_conn", None, None, None, None))
+
+    def test_env_file_at_project_root(self):
+        root = self.make_project()
+        (root / ".env").write_text("X=1\n", encoding="utf-8")
+        nested = root / "a"
+        nested.mkdir()
+        self.assertEqual(self.resolve(nested).env_file, root / ".env")
+
+    def test_env_file_above_project_root_is_found(self):
+        parent = self.make_bare_dir()
+        (parent / ".env").write_text("X=1\n", encoding="utf-8")
+        root = parent / "project"
+        (root / ".snowman").mkdir(parents=True)
+        (root / ".snowman" / "context.md").write_text(SINGLE_CONN_FRONTMATTER, encoding="utf-8")
+        self.assertEqual(self.resolve(root).env_file, parent / ".env")
+
+    def test_env_file_below_project_root_is_ignored(self):
+        root = self.make_project()
+        nested = root / "a"
+        nested.mkdir()
+        (nested / ".env").write_text("X=1\n", encoding="utf-8")
+        self.assertIsNone(self.resolve(nested).env_file)
+
+    def test_bootstrap_mode_walks_up_for_env_file(self):
+        root = self.make_bare_dir()
+        (root / ".env").write_text("X=1\n", encoding="utf-8")
+        nested = root / "a" / "b"
+        nested.mkdir(parents=True)
+        target = snowman.resolve_target(nested, "c", None)
+        self.assertEqual(target.env_file, root / ".env")
 
 
 class TestDotenv(SnowmanTestCase):
@@ -399,26 +439,15 @@ class TestDotenv(SnowmanTestCase):
         self.assertEqual(merged, dict(os.environ))
 
 
-class TestDiscovery(SnowmanTestCase):
-    def test_find_context_walks_up(self):
-        root = self.make_project()
-        nested = root / "models" / "marts"
-        nested.mkdir(parents=True)
-        os.chdir(nested)
-        self.assertEqual(snowman.find_context(), root / ".snowman" / "context.md")
-
-    def test_find_context_blocks_without_bootstrap(self):
-        self.make_bare_dir()
-        self.assert_blocked(snowman.find_context, match="bootstrap")
-
-    def test_find_env_file_walks_up(self):
+class TestFindEnvFile(SnowmanTestCase):
+    def test_walks_up(self):
         root = self.make_bare_dir()
         (root / ".env").write_text("X=1\n", encoding="utf-8")
         nested = root / "a" / "b"
         nested.mkdir(parents=True)
         self.assertEqual(snowman.find_env_file(nested), root / ".env")
 
-    def test_find_env_file_none_when_absent(self):
+    def test_none_when_absent(self):
         root = self.make_bare_dir()
         self.assertIsNone(snowman.find_env_file(root))
 
@@ -434,7 +463,7 @@ class TestStage(SnowmanTestCase):
         return sorted((root / ".snowman" / "staged").glob("*.sql"))
 
     def test_stages_file_without_executing(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         output = self.run_stage("CREATE TABLE t (id INT)", "create-t", None)
         self.assertIn("STAGED (not executed)", output)
         files = self.staged_files(root)
@@ -447,12 +476,12 @@ class TestStage(SnowmanTestCase):
         self.assertIn("CREATE TABLE t (id INT)", body)
 
     def test_accepts_multi_statement_dml(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         self.run_stage("INSERT INTO t VALUES (1); UPDATE t SET x = 2;", "backfill", None)
         self.assertEqual(len(self.staged_files(root)), 1)
 
     def test_destructive_keywords_warn_but_never_block(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         self.run_stage("DROP TABLE old; TRUNCATE TABLE older;", "teardown", None)
         body = self.staged_files(root)[0].read_text(encoding="utf-8")
         self.assertIn("WARNING", body)
@@ -460,38 +489,38 @@ class TestStage(SnowmanTestCase):
         self.assertIn("TRUNCATE", body)
 
     def test_non_destructive_script_has_no_warning(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         self.run_stage("INSERT INTO t VALUES (1)", "insert-row", None)
         body = self.staged_files(root)[0].read_text(encoding="utf-8")
         self.assertNotIn("WARNING", body)
 
     def test_maintains_gitignore(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         self.run_stage("SELECT 1", "noop", None)
         gitignore = root / ".snowman" / "staged" / ".gitignore"
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
 
     def test_empty_script_blocks(self):
-        self.make_project()
+        self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "   ", "noop", None, match="empty")
 
     def test_name_normalised_to_slug(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         self.run_stage("SELECT 1", "Add  User--Table!", None)
         self.assertIn("add-user-table", self.staged_files(root)[0].name)
 
     def test_unusable_name_blocks(self):
-        self.make_project()
+        self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "SELECT 1", "!!!", None, match="empty slug")
 
     def test_multi_env_requires_env_flag(self):
-        self.make_project(MULTI_ENV_FRONTMATTER)
+        self.enter(self.make_project(MULTI_ENV_FRONTMATTER))
         self.assert_blocked(
             snowman.stage, "SELECT 1", "noop", None, match="requires --env"
         )
 
     def test_multi_env_stamps_env_in_filename_and_header(self):
-        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        root = self.enter(self.make_project(MULTI_ENV_FRONTMATTER))
         self.run_stage("SELECT 1", "noop", "prod")
         staged = self.staged_files(root)[0]
         self.assertIn("prod__noop", staged.name)
@@ -499,7 +528,7 @@ class TestStage(SnowmanTestCase):
         self.assertIn("-- target environment: prod (connection: acme_prod)", body)
 
     def test_filename_collision_bumps_suffix(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         fixed = datetime(2026, 1, 2, 3, 4, 5)
         fake_datetime = mock.Mock(now=mock.Mock(return_value=fixed))
         with mock.patch.object(snowman, "datetime", fake_datetime):
@@ -512,7 +541,7 @@ class TestStage(SnowmanTestCase):
         )
 
     def test_stage_blocks_without_context(self):
-        self.make_bare_dir()
+        self.enter(self.make_bare_dir())
         self.assert_blocked(snowman.stage, "SELECT 1", "noop", None, match="bootstrap")
 
 
@@ -671,12 +700,12 @@ class TestCleanSnowStderr(SnowmanTestCase):
 class TestSpillFullResult(SnowmanTestCase):
     def test_writes_full_untruncated_csv_and_gitignore(self):
         root = self.make_project()
-        context = root / ".snowman" / "context.md"
+        snowman_dir = root / ".snowman"
         rows = [{"N": i, "S": "x" * 500, "V": None} for i in range(70)]
         fixed = datetime(2026, 9, 3, 18, 12, 0)
         fake_datetime = mock.Mock(now=mock.Mock(return_value=fixed))
         with mock.patch.object(snowman, "datetime", fake_datetime):
-            path = snowman.spill_full_result(rows, "SELECT 1", context)
+            path = snowman.spill_full_result(rows, "SELECT 1", snowman_dir)
         self.assertEqual(path.parent, root / ".snowman" / "results")
         self.assertRegex(path.name, r"^20260903-181200__[0-9a-f]{8}\.csv$")
         body = path.read_text(encoding="utf-8")
@@ -731,14 +760,14 @@ class TestExecute(SnowmanTestCase):
         return sql_calls[0]
 
     def test_blocked_sql_never_reaches_snow(self):
-        self.make_project()
+        self.enter(self.make_project())
         snow = fake_snow({})
         with mock.patch.object(snowman, "run_snow", snow):
             self.assert_blocked(snowman.execute, "DROP TABLE t")
         self.assertEqual(snow.calls, [])
 
     def test_runs_snow_with_resolved_connection(self):
-        self.make_project()
+        self.enter(self.make_project())
         code, _, _ = self.run_execute({"sql": OK}, "SELECT 1")
         self.assertEqual(code, 0)
         self.assertEqual(
@@ -748,7 +777,7 @@ class TestExecute(SnowmanTestCase):
         )
 
     def test_json_ext_result_rendered_as_csv_with_footers(self):
-        self.make_project()
+        self.enter(self.make_project())
         payload = json.dumps(
             [{"A": 1, "O": {"k": 1}, "N": None}, {"A": 2, "O": [1], "N": "x" * 300}],
             indent=4,
@@ -767,7 +796,7 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual(err, "")
 
     def test_row_cap_spills_full_result_and_footers(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         payload = json.dumps([{"N": i} for i in range(1203)])
         code, out, _ = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
@@ -784,10 +813,10 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual((root / rel).read_text(encoding="utf-8").count("\n"), 1204)
 
     def test_spill_footer_path_is_relative_to_cwd(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         sub = root / "analysis" / "q1"
         sub.mkdir(parents=True)
-        os.chdir(sub)
+        self.enter(sub)
         payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
         footer = out.splitlines()[-1]
@@ -799,7 +828,7 @@ class TestExecute(SnowmanTestCase):
         )
 
     def test_row_cap_in_bootstrap_mode_skips_spill(self):
-        root = self.make_bare_dir()
+        root = self.enter(self.make_bare_dir())
         payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute(
             {"sql": (0, payload, "")}, "SELECT 1", connection_override="c"
@@ -812,7 +841,7 @@ class TestExecute(SnowmanTestCase):
         self.assertFalse((root / ".snowman").exists())
 
     def test_max_rows_zero_and_json_flag(self):
-        self.make_project()
+        self.enter(self.make_project())
         payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute(
             {"sql": (0, payload, "")}, "SELECT 1", max_rows=0, fmt="json"
@@ -820,55 +849,55 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual(json.loads(out), [{"N": i} for i in range(60)])
 
     def test_empty_result_notes_zero_rows(self):
-        self.make_project()
+        self.enter(self.make_project())
         _, out, _ = self.run_execute({"sql": (0, "[]\n", "")}, "SELECT 1")
         self.assertEqual(out, "# 0 rows\n")
 
     def test_unparseable_stdout_relayed_raw(self):
-        self.make_project()
+        self.enter(self.make_project())
         code, out, _ = self.run_execute({"sql": (3, "not json at all\n", "")}, "SELECT 1")
         self.assertEqual(code, 3)
         self.assertEqual(out, "not json at all\n")
 
     def test_sql_error_panel_cleaned_and_exit_code_forwarded(self):
-        self.make_project()
+        self.enter(self.make_project())
         code, out, err = self.run_execute({"sql": (5, "", PANEL_STDERR)}, "SELECT 1")
         self.assertEqual(code, 5)
         self.assertEqual(out, "")
         self.assertEqual(err, PANEL_CLEANED)
 
     def test_forwards_snow_exit_code_and_stderr(self):
-        self.make_project()
+        self.enter(self.make_project())
         code, out, err = self.run_execute({"sql": (1, "", "some snow error\n")}, "SELECT 1")
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
         self.assertEqual(err, "some snow error\n")
 
     def test_multi_env_picks_connection(self):
-        self.make_project(MULTI_ENV_FRONTMATTER)
+        self.enter(self.make_project(MULTI_ENV_FRONTMATTER))
         self.run_execute({"sql": OK}, "SELECT 1", env="prod")
         self.assertIn("acme_prod", self.sql_args())
 
     def test_multi_env_default_fallback(self):
-        self.make_project(MULTI_ENV_FRONTMATTER)
+        self.enter(self.make_project(MULTI_ENV_FRONTMATTER))
         self.run_execute({"sql": OK}, "SELECT 1")
         self.assertIn("acme_dev", self.sql_args())
 
     def test_connection_override_skips_context(self):
-        self.make_bare_dir()  # no context file at all
+        self.enter(self.make_bare_dir())  # no context file at all
         code, _, _ = self.run_execute({"sql": OK}, "SELECT 1", connection_override="bootstrap_conn")
         self.assertEqual(code, 0)
         self.assertIn("bootstrap_conn", self.sql_args())
 
     def test_blocks_without_context_and_without_override(self):
-        self.make_bare_dir()
+        self.enter(self.make_bare_dir())
         snow = fake_snow({})
         with mock.patch.object(snowman, "run_snow", snow):
             self.assert_blocked(snowman.execute, "SELECT 1", match="bootstrap")
         self.assertEqual(snow.calls, [])
 
     def test_dotenv_relayed_to_snow_process_env_wins(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         (root / ".env").write_text(
             "RELAYED_ONLY=from_dotenv\nALREADY_SET=from_dotenv\n", encoding="utf-8"
         )
@@ -878,13 +907,23 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual(env["RELAYED_ONLY"], "from_dotenv")
         self.assertEqual(env["ALREADY_SET"], "from_process")
 
+    def test_bootstrap_mode_relays_dotenv_found_above_cwd(self):
+        root = self.make_bare_dir()
+        (root / ".env").write_text("FROM_ABOVE=yes\n", encoding="utf-8")
+        nested = root / "a" / "b"
+        nested.mkdir(parents=True)
+        self.enter(nested)
+        self.run_execute({"sql": OK}, "SELECT 1", connection_override="c")
+        _, env = self.snow.calls[0]
+        self.assertEqual(env["FROM_ABOVE"], "yes")
+
     def test_missing_snow_cli_blocks(self):
-        self.make_project()
+        self.enter(self.make_project())
         with mock.patch.object(snowman, "run_snow", side_effect=snowman.Blocked("`snow` CLI not found on PATH.")):
             self.assert_blocked(snowman.execute, "SELECT 1", match="`snow` CLI not found")
 
     def test_auth_failure_inside_rich_panel_still_hints(self):
-        self.make_project()
+        self.enter(self.make_project())
         panel = (
             "╭─ Error ──────────────────────────────────────────────────╮\n"
             "│ 250001 (08001): Failed to connect to DB: could not       │\n"
@@ -905,7 +944,7 @@ class TestExecute(SnowmanTestCase):
         self.assertIn("hint: this looks like a key-pair auth failure", err)
 
     def test_non_auth_failure_gets_no_hint(self):
-        self.make_project()
+        self.enter(self.make_project())
         code, _, err = self.run_execute({"sql": (1, "", "syntax error\n")}, "SELECT 1")
         self.assertEqual(code, 1)
         self.assertNotIn("hint:", err)
@@ -1032,7 +1071,7 @@ class TestMainCli(SnowmanTestCase):
         )
 
     def test_main_routes_to_execute(self):
-        self.make_project()
+        self.enter(self.make_project())
         snow = fake_snow({"sql": OK})
         with mock.patch.object(snowman, "run_snow", snow):
             self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 0)
@@ -1046,7 +1085,7 @@ class TestMainCli(SnowmanTestCase):
         return stderr.getvalue()
 
     def test_main_renders_refusal_once_and_exits_2(self):
-        self.make_project()
+        self.enter(self.make_project())
         snow = fake_snow({})
         with mock.patch.object(snowman, "run_snow", snow):
             err = self.run_main_blocked(["DROP TABLE t"])
@@ -1054,12 +1093,12 @@ class TestMainCli(SnowmanTestCase):
         self.assertEqual(err, "BLOCKED: non-read-only statement (leading keyword: DROP).\n")
 
     def test_main_renders_stage_refusal(self):
-        self.make_project(MULTI_ENV_FRONTMATTER)
+        self.enter(self.make_project(MULTI_ENV_FRONTMATTER))
         err = self.run_main_blocked(["--stage", "--name", "noop", "SELECT 1"])
         self.assertTrue(err.startswith("BLOCKED: staging in a multi-environment project"), err)
 
     def test_main_renders_missing_snow_cli(self):
-        self.make_project()
+        self.enter(self.make_project())
         with mock.patch.object(
             snowman, "run_snow", side_effect=snowman.Blocked("`snow` CLI not found on PATH.")
         ):
@@ -1067,7 +1106,7 @@ class TestMainCli(SnowmanTestCase):
         self.assertEqual(err, "BLOCKED: `snow` CLI not found on PATH.\n")
 
     def test_main_routes_to_stage(self):
-        root = self.make_project()
+        root = self.enter(self.make_project())
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
             self.assertEqual(

@@ -25,8 +25,9 @@ Execute mode (default):
     its discovery queries through the guardrail before the context exists;
   * strips comments + string literals, then rejects anything that is not a
     single read-only statement;
-  * loads the project's ``.env`` (if any) into the ``snow`` subprocess
-    environment. Existing process env always wins. Values and var names are
+  * loads the nearest ``.env`` at or above the project root (or above the
+    CWD in bootstrap mode) into the ``snow`` subprocess environment.
+    Existing process env always wins. Values and var names are
     never printed. This is what makes key-pair connections with an encrypted
     private key work: the passphrase lives in ``.env``, not in any config
     snowman touches;
@@ -79,6 +80,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 # Leading keyword must be one of these (read-only statements only).
 ALLOWED_LEADING = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
@@ -125,9 +127,9 @@ class Blocked(Exception):
     """
 
 
-def find_context() -> Path:
-    """Walk up from CWD to find .snowman/context.md."""
-    here = Path.cwd().resolve()
+def find_context(start: Path) -> Path:
+    """Walk up from `start` to find .snowman/context.md."""
+    here = start.resolve()
     for d in (here, *here.parents):
         candidate = d / ".snowman" / "context.md"
         if candidate.is_file():
@@ -245,6 +247,44 @@ def find_env_file(start: Path) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+class Target(NamedTuple):
+    """The resolved connection, environment, and paths for one run.
+
+    In bootstrap mode (``--connection`` given) there is no context file yet,
+    so ``project_root`` and ``snowman_dir`` are ``None``.
+    """
+
+    connection: str
+    environment: str | None
+    project_root: Path | None
+    snowman_dir: Path | None
+    env_file: Path | None
+
+
+def resolve_target(
+    start: Path, connection: str | None, env: str | None, *, for_stage: bool = False
+) -> Target:
+    """Resolve where one run goes, walking up from `start`.
+
+    A ``connection`` override skips the context file (bootstrap mode).
+    Otherwise the nearest ``.snowman/context.md`` supplies the connection,
+    with ``env`` choosing among its environments. The ``.env`` is the nearest
+    one at or above the project root, or above ``start`` in bootstrap mode.
+    Raises ``Blocked`` for a missing context file or a bad frontmatter.
+    """
+    if connection:
+        environment = project_root = snowman_dir = None
+    else:
+        context = find_context(start)
+        connection, environment = resolve_connection(context, env, for_stage=for_stage)
+        snowman_dir = context.parent
+        project_root = snowman_dir.parent
+    return Target(
+        connection, environment, project_root, snowman_dir,
+        find_env_file(project_root or start),
+    )
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -573,9 +613,9 @@ def gitignored_dir(path: Path) -> Path:
     return path
 
 
-def spill_full_result(rows: list[dict], sql: str, context: Path) -> Path:
-    """Write every row, untruncated, as CSV under ``.snowman/results/``."""
-    results_dir = gitignored_dir(context.parent / "results")
+def spill_full_result(rows: list[dict], sql: str, snowman_dir: Path) -> Path:
+    """Write every row, untruncated, as CSV under ``<snowman_dir>/results/``."""
+    results_dir = gitignored_dir(snowman_dir / "results")
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
     path = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}__{digest}.csv"
     text, _ = render_rows(rows, fmt="csv", max_rows=0, max_cell=0)
@@ -592,11 +632,9 @@ def stage(sql: str, name: str, env: str | None) -> int:
     if not slug:
         raise Blocked(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
 
-    context = find_context()
-    connection, env_name = resolve_connection(context, env, for_stage=True)
-    project_root = context.parent.parent
-
-    staged_dir = gitignored_dir(context.parent / "staged")
+    target = resolve_target(Path.cwd(), None, env, for_stage=True)
+    connection, env_name = target.connection, target.environment
+    staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
     now = datetime.now()
     env_part = f"{env_name}__" if env_name else ""
@@ -606,7 +644,7 @@ def stage(sql: str, name: str, env: str | None) -> int:
     while path.exists():
         path = staged_dir / f"{base}-{bump}.sql"
         bump += 1
-    rel = path.relative_to(project_root)
+    rel = path.relative_to(target.project_root)
 
     run_cmd = f"snow sql -f {rel} --connection {connection}"
     destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
@@ -644,16 +682,8 @@ def execute(
         raise Blocked("empty query.")
     enforce_read_only(sql)
 
-    context: Path | None = None
-    if connection_override:
-        # Bootstrap mode: no context file yet, so search for .env from CWD.
-        connection = connection_override
-        env_file = find_env_file(Path.cwd())
-    else:
-        context = find_context()
-        connection, _ = resolve_connection(context, env)
-        project_env = context.parent.parent / ".env"
-        env_file = project_env if project_env.is_file() else None
+    target = resolve_target(Path.cwd(), connection_override, env)
+    connection, env_file = target.connection, target.env_file
 
     sub_env = snow_env(env_file)
     returncode, stdout, stderr = run_snow(
@@ -679,10 +709,10 @@ def execute(
         else:
             full_note = None
             if max_rows and len(rows) > max_rows:
-                if context is None:
+                if target.snowman_dir is None:
                     full_note = "no context file yet so the full result was not saved"
                 else:
-                    spilled = spill_full_result(rows, sql, context)
+                    spilled = spill_full_result(rows, sql, target.snowman_dir)
                     rel = os.path.relpath(spilled, Path.cwd())
                     full_note = f"full result: {rel}"
             text, footers = render_rows(

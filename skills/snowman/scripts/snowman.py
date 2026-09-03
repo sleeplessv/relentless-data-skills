@@ -117,9 +117,12 @@ AUTH_ERROR_RE = re.compile(
 BROWSER_AUTHENTICATORS = {"OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER"}
 
 
-def die(reason: str) -> "NoReturn":  # type: ignore[name-defined]
-    print(f"BLOCKED: {reason}", file=sys.stderr)
-    raise SystemExit(BLOCK)
+class Blocked(Exception):
+    """A guardrail refusal. ``str(exc)`` is the reason.
+
+    Raised anywhere the wrapper refuses to proceed and rendered once, in
+    ``main``, as ``BLOCKED: <reason>`` on stderr with exit code ``BLOCK``.
+    """
 
 
 def find_context() -> Path:
@@ -129,7 +132,7 @@ def find_context() -> Path:
         candidate = d / ".snowman" / "context.md"
         if candidate.is_file():
             return candidate
-    die(
+    raise Blocked(
         "no .snowman/context.md found in this project. Run the snowman "
         "bootstrap first (see references/install.md)."
     )
@@ -145,7 +148,7 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
     """
     text = context.read_text(encoding="utf-8")
     if not text.startswith("---"):
-        die(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
+        raise Blocked(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
     _, _, rest = text.partition("---")
     front, _, _ = rest.partition("---")
 
@@ -196,41 +199,41 @@ def resolve_connection(
 
     if environments:
         if top.get("connection"):
-            die(
+            raise Blocked(
                 f"{context} defines both `connection:` and `environments:`. "
                 "Keep exactly one form."
             )
         if for_stage and not env:
-            die(
+            raise Blocked(
                 "staging in a multi-environment project requires --env <name>. "
                 "The staged file's run command targets a real account, so "
                 f"the environment must be explicit. Defined: {', '.join(environments)}."
             )
         chosen = env or top.get("default_env")
         if not chosen:
-            die(
+            raise Blocked(
                 f"{context} has `environments:` but no `default_env:`. Add "
                 "one to the frontmatter, or pass --env <name>."
             )
         if chosen not in environments:
-            die(
+            raise Blocked(
                 f"unknown environment {chosen!r}. {context} defines: "
                 f"{', '.join(environments)}."
             )
         connection = environments[chosen].get("connection")
         if not connection:
-            die(f"environment {chosen!r} in {context} has no `connection:` value.")
+            raise Blocked(f"environment {chosen!r} in {context} has no `connection:` value.")
         return connection, chosen
 
     if env:
-        die(
+        raise Blocked(
             f"--env was given but {context} defines a single `connection:` "
             "with no `environments:` map. Drop --env, or convert the "
             "frontmatter to the multi-environment form."
         )
     connection = top.get("connection")
     if not connection:
-        die(f"{context} frontmatter has no `connection:` value.")
+        raise Blocked(f"{context} frontmatter has no `connection:` value.")
     return connection, None
 
 
@@ -347,14 +350,25 @@ def strip_for_analysis(sql: str) -> str:
     """Remove block comments, line comments, and string literals.
 
     The result is used ONLY for the read-only checks. The original SQL is
-    what actually runs. Blanking string literals stops semicolons and keywords
-    inside quotes from triggering false rejects.
+    what actually runs. Blanking string literals (single-quoted and
+    dollar-quoted) stops semicolons and keywords inside quotes from
+    triggering false rejects.
     """
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)        # /* block */
     sql = re.sub(r"--[^\n]*", " ", sql)                       # -- line
     sql = re.sub(r"//[^\n]*", " ", sql)                       # // line (Snowflake)
+    sql = re.sub(r"\$\$.*?\$\$", " '' ", sql, flags=re.S)     # $$dollar quoted$$
     sql = re.sub(r"'(?:[^']|'')*'", " '' ", sql)             # 'string literals'
     return sql
+
+
+def keywords_in(sql: str, words: set[str]) -> set[str]:
+    """Return the members of ``words`` present as bare words in ``sql``.
+
+    ``sql`` should already be through ``strip_for_analysis``. The match is
+    case-insensitive and the result uses the spelling from ``words``.
+    """
+    return {kw for kw in words if re.search(rf"\b{kw}\b", sql, flags=re.I)}
 
 
 def enforce_read_only(sql: str) -> None:
@@ -362,24 +376,21 @@ def enforce_read_only(sql: str) -> None:
 
     statements = [s for s in cleaned.split(";") if s.strip()]
     if len(statements) > 1:
-        die("multiple statements detected. Submit one statement at a time.")
+        raise Blocked("multiple statements detected. Submit one statement at a time.")
     if not statements:
-        die("empty query.")
+        raise Blocked("empty query.")
 
     first = statements[0].strip()
     leading = re.match(r"[A-Za-z_]+", first)
     if not leading:
-        die("could not identify a leading SQL keyword.")
+        raise Blocked("could not identify a leading SQL keyword.")
     word = leading.group(0).upper()
     if word not in ALLOWED_LEADING:
-        die(f"non-read-only statement (leading keyword: {word}).")
+        raise Blocked(f"non-read-only statement (leading keyword: {word}).")
 
-    found = {
-        kw for kw in WRITE_KEYWORDS
-        if re.search(rf"\b{kw}\b", cleaned, flags=re.I)
-    }
+    found = keywords_in(cleaned, WRITE_KEYWORDS)
     if found:
-        die(f"write or DDL keyword present: {', '.join(sorted(found))}.")
+        raise Blocked(f"write or DDL keyword present: {', '.join(sorted(found))}.")
 
 
 DEFAULT_MAX_ROWS = 50
@@ -538,11 +549,11 @@ def spill_full_result(rows: list[dict], sql: str, context: Path) -> Path:
 def stage(sql: str, name: str, env: str | None) -> int:
     """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
     if not sql.strip():
-        die("empty script. Nothing to stage.")
+        raise Blocked("empty script. Nothing to stage.")
 
     slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")
     if not slug:
-        die(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
+        raise Blocked(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
 
     context = find_context()
     connection, env_name = resolve_connection(context, env, for_stage=True)
@@ -561,10 +572,7 @@ def stage(sql: str, name: str, env: str | None) -> int:
     rel = path.relative_to(project_root)
 
     run_cmd = f"snow sql -f {rel} --connection {connection}"
-    destructive = sorted(
-        kw for kw in DESTRUCTIVE_KEYWORDS
-        if re.search(rf"\b{kw}\b", strip_for_analysis(sql), flags=re.I)
-    )
+    destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
     header = [
         "-- staged by snowman, NOT executed",
         f"-- purpose: {slug}",
@@ -596,7 +604,7 @@ def execute(
     max_cell: int = DEFAULT_MAX_CELL,
 ) -> int:
     if not sql.strip():
-        die("empty query.")
+        raise Blocked("empty query.")
     enforce_read_only(sql)
 
     context: Path | None = None
@@ -618,8 +626,7 @@ def execute(
     try:
         result = subprocess.run(cmd, env=sub_env, capture_output=True)
     except FileNotFoundError:
-        print("BLOCKED: `snow` CLI not found on PATH.", file=sys.stderr)
-        return BLOCK
+        raise Blocked("`snow` CLI not found on PATH.")
 
     stderr = result.stderr.decode(errors="replace")
     if stderr:
@@ -703,19 +710,25 @@ def main(argv: list[str]) -> int:
             parser.error("--connection is not valid with --stage")
         if args.json:
             parser.error("--json is only valid when executing")
-        return stage(args.sql, args.name, args.env)
-    if args.name:
+    elif args.name:
         parser.error("--name is only valid with --stage")
-    if args.connection and args.env:
+    elif args.connection and args.env:
         parser.error("--env resolves via the context file and --connection bypasses it, so use one or the other")
-    return execute(
-        args.sql,
-        connection_override=args.connection,
-        env=args.env,
-        fmt="json" if args.json else "csv",
-        max_rows=args.max_rows,
-        max_cell=args.max_cell,
-    )
+
+    try:
+        if args.stage:
+            return stage(args.sql, args.name, args.env)
+        return execute(
+            args.sql,
+            connection_override=args.connection,
+            env=args.env,
+            fmt="json" if args.json else "csv",
+            max_rows=args.max_rows,
+            max_cell=args.max_cell,
+        )
+    except Blocked as refusal:
+        print(f"BLOCKED: {refusal}", file=sys.stderr)
+        return BLOCK
 
 
 if __name__ == "__main__":

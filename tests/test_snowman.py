@@ -60,22 +60,20 @@ def fake_connection_list(connection: str, parameters: dict) -> types.SimpleNames
 
 
 class SnowmanTestCase(unittest.TestCase):
-    """Shared helpers: BLOCKED assertions and a temp project to chdir into."""
+    """Shared helpers: Blocked assertions and a temp project to chdir into."""
 
     def setUp(self) -> None:
         self._original_cwd = os.getcwd()
         self.addCleanup(os.chdir, self._original_cwd)
 
     def assert_blocked(self, fn, *args, match: str = "", **kwargs) -> str:
-        stderr = io.StringIO()
-        with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as cm:
+        """Assert `fn(...)` raises Blocked; return the reason for further checks."""
+        with self.assertRaises(snowman.Blocked) as cm:
             fn(*args, **kwargs)
-        self.assertEqual(cm.exception.code, snowman.BLOCK)
-        message = stderr.getvalue()
-        self.assertIn("BLOCKED:", message)
+        reason = str(cm.exception)
         if match:
-            self.assertIn(match, message)
-        return message
+            self.assertIn(match, reason)
+        return reason
 
     def make_project(self, frontmatter: str = SINGLE_CONN_FRONTMATTER) -> Path:
         """Create a temp project with .snowman/context.md and chdir into it."""
@@ -121,6 +119,21 @@ class TestStripForAnalysis(SnowmanTestCase):
     def test_escaped_quotes_stay_inside_literal(self):
         cleaned = snowman.strip_for_analysis("SELECT 'it''s a DROP'")
         self.assertNotIn("DROP", cleaned)
+
+    def test_dollar_quoted_strings_blanked(self):
+        cleaned = snowman.strip_for_analysis("SELECT $$DROP TABLE t; it's$$ AS s")
+        self.assertNotIn("DROP", cleaned)
+        self.assertNotIn(";", cleaned)
+        snowman.enforce_read_only("SELECT $$DROP$$")  # must not raise
+
+
+class TestKeywordsIn(SnowmanTestCase):
+    def test_returns_bare_words_case_insensitively(self):
+        found = snowman.keywords_in("select 1; Drop table t; insert into x", {"DROP", "INSERT", "USE"})
+        self.assertEqual(found, {"DROP", "INSERT"})
+
+    def test_ignores_words_embedded_in_identifiers(self):
+        self.assertEqual(snowman.keywords_in("SELECT created, updates FROM t", {"UPDATE", "CREATE"}), set())
 
 
 class TestEnforceReadOnly(SnowmanTestCase):
@@ -836,12 +849,8 @@ class TestExecute(SnowmanTestCase):
 
     def test_missing_snow_cli_blocks(self):
         self.make_project()
-        stderr = io.StringIO()
-        with mock.patch.object(
-            snowman.subprocess, "run", side_effect=FileNotFoundError
-        ), contextlib.redirect_stderr(stderr):
-            self.assertEqual(snowman.execute("SELECT 1"), snowman.BLOCK)
-        self.assertIn("`snow` CLI not found", stderr.getvalue())
+        with mock.patch.object(snowman.subprocess, "run", side_effect=FileNotFoundError):
+            self.assert_blocked(snowman.execute, "SELECT 1", match="`snow` CLI not found")
 
     def run_failing_auth(self, sql_stderr: bytes, lookup) -> str:
         """Execute with a failing snow call followed by a connection lookup."""
@@ -1048,6 +1057,31 @@ class TestMainCli(SnowmanTestCase):
         ) as run:
             self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 0)
         run.assert_called_once()
+
+    def run_main_blocked(self, argv: list) -> str:
+        """Run main() expecting a refusal; return stderr after checking the exit code."""
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            self.assertEqual(snowman.main(["snowman.py", *argv]), snowman.BLOCK)
+        return stderr.getvalue()
+
+    def test_main_renders_refusal_once_and_exits_2(self):
+        self.make_project()
+        with mock.patch.object(snowman.subprocess, "run") as run:
+            err = self.run_main_blocked(["DROP TABLE t"])
+        run.assert_not_called()
+        self.assertEqual(err, "BLOCKED: non-read-only statement (leading keyword: DROP).\n")
+
+    def test_main_renders_stage_refusal(self):
+        self.make_project(MULTI_ENV_FRONTMATTER)
+        err = self.run_main_blocked(["--stage", "--name", "noop", "SELECT 1"])
+        self.assertTrue(err.startswith("BLOCKED: staging in a multi-environment project"), err)
+
+    def test_main_renders_missing_snow_cli(self):
+        self.make_project()
+        with mock.patch.object(snowman.subprocess, "run", side_effect=FileNotFoundError):
+            err = self.run_main_blocked(["SELECT 1"])
+        self.assertEqual(err, "BLOCKED: `snow` CLI not found on PATH.\n")
 
     def test_main_routes_to_stage(self):
         root = self.make_project()

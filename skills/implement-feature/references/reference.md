@@ -20,8 +20,9 @@ Contract for the step 2 integrate dispatch. On escalation the resolver dispatch 
 
 - Merge the wave's `status: success` branches into the integration branch in ascending ticket number; mechanical conflicts resolved in place, semantic ones escalated to one resolver dispatch, per orchestrator-mode. If the resolver also fails, `git merge --abort` so the main tree sits clean at the last pushed tip, then stop per SKILL.md's Stop conditions.
 - Push the integration branch; **only after the push succeeds**, comment "merged into `<integration branch>`" on each merged ticket — including this wave's `already_satisfied` ones.
-- Cleanup: remove every wave worktree, returned as `worktree_path` or not (failed ones too — their WIP is pushed); any branch the harness auto-created per worktree (identify via `git worktree list --porcelain`; delete nothing not found that way); and the merged branches.
-- Return contract: `merged_tickets`, `conflicts_found`, `worktrees_cleaned`, `integration_tip`.
+- Cleanup: remove every wave worktree, returned as `worktree_path` or not (failed ones too — their WIP is pushed); and any branch the harness auto-created per worktree (identify via `git worktree list --porcelain`; delete nothing not found that way).
+- **Delete merged ticket branches, on origin and locally** — only after the push and the "merged into" comments have succeeded, for every ticket branch this wave merged (`status: success`) or superseded (`status: already_satisfied`): `git push origin --delete <branch>` when `origin/<branch>` exists, then `git branch -d <branch>`. Never `-D`: integration merges are true merges, so a `-d` refusal means the merge did not land — report it and move on. Report per-branch failures; never abort the batch over one. **Never delete** the integration branch, the default branch, or a failed ticket's WIP branch. This is the only place these branches can be cleaned up: the feature PR records the integration branch as its head, so `cleanup-merged-branches` never sees a ticket branch as merged.
+- Return contract: `merged_tickets`, `conflicts_found`, `worktrees_cleaned`, `branches_deleted` (per branch: name, local and remote outcome), `integration_tip`.
 
 ## Integration review
 

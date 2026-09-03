@@ -77,9 +77,11 @@ Repeat until the work-set drains, reporting once per wave (what merged, what is 
    `resume_branch` when step 0 found a WIP branch for it.
 3. **Integrate**: a dedicated dispatch merges the wave's `status: success` branches
    into the integration branch, pushes it, comments "merged into" on the merged
-   tickets, and cleans up worktrees and branches — its full contract (merge order,
-   conflict escalation to one resolver, comment-after-push, cleanup rules, return
-   fields) is [references/reference.md#wave-integration](references/reference.md#wave-integration).
+   tickets, cleans up worktrees, and deletes the merged ticket branches locally **and
+   on origin** — its full contract (merge order, conflict escalation to one resolver,
+   comment-after-push, deletion rules, return fields) is
+   [references/reference.md#wave-integration](references/reference.md#wave-integration).
+   The wave report names branch-deletion failures only, never the successes.
    A semantic conflict that survives the resolver leaves the main tree clean at the
    last pushed tip and stops the run per Stop conditions. The orchestrator opens the
    next wave only on a returned `integration_tip`, after a targeted test dispatch —

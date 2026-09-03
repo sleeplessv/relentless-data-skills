@@ -162,8 +162,8 @@
     {
       "name": "orchestrator-mode",
       "source": "./skills/orchestrator-mode",
-      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself: plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, and Cortex Code.",
-      "version": "0.2.0",
+      "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself: plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, Cortex Code, and Codex.",
+      "version": "0.3.0",
       "author": {
         "name": "sleeplessv"
       },
@@ -175,11 +175,14 @@
         "subagents",
         "delegation",
         "multi-agent",
-        "task-tool",
+        "agent-tool",
         "cortex-code",
         "snowflake",
         "parallel",
-        "workflow"
+        "workflow",
+        "cursor",
+        "codex",
+        "worktrees"
       ]
     },
     {

@@ -11,7 +11,7 @@ Take a spec and its tickets from open → integration branch → parallel ticket
 integrated review + tests → verification plan → **one feature PR** into the default branch.
 
 Operate under the `orchestrator-mode` skill for the whole run. Every git / gh / file /
-test action below is a subagent dispatch (its 1–3-sentence report rule yields to this
+test action below is a subagent dispatch (its 1-3-sentence report rule yields to this
 skill's per-wave and close-out reports). Per-ticket work composes the `implement-ticket`
 skill via its **Orchestrated dispatch** contract.
 
@@ -35,7 +35,7 @@ skill via its **Orchestrated dispatch** contract.
 - **Implement the work-set at the scope its tickets ask for, as the smallest change that solves it.** Adjacent bugs, refactors, and cleanups get reported in the feature PR body, not fixed. Ticket dispatches inherit the frugality bar via `implement-ticket`; step 2 fix dispatch prompts carry it explicitly (the `principle-laziness-protocol` skill when installed): prefer deletion over addition and the smallest diff that fixes it.
 - **One dispatch per ticket per wave.** No helper or double-check agents alongside it, none to re-read what a dispatch already returned. Only the dispatches steps 0-3 already prescribe (setup, integration, resolver, post-resolution tests, gates, fixes, plan + PR) run beside it.
 - Dispatch prompts tell the subagent to invoke `implement-ticket`; if subagents cannot load skills, paste its body verbatim into the prompt. Per-dispatch contracts live in [references/reference.md](references/reference.md). A prompt that cites a contract or a handoff file carries its **absolute path** (plus the section anchor for a contract; subagents cannot resolve skill-relative links) and tells the subagent to read it first.
-- **Every ticket dispatch gets worktree isolation, even a one-ticket wave.** This is deliberately stricter than orchestrator-mode Rule 7, so the main tree never leaves the integration branch. Use the delegation tool's native worktree isolation (orchestrator-mode reference, Tool Mapping); none available → stop and say so rather than sharing the main tree.
+- **Every ticket dispatch gets worktree isolation, even a one-ticket wave.** This is deliberately stricter than orchestrator-mode Rule 7, so the main tree never leaves the integration branch. Use the delegation tool's native worktree isolation (orchestrator-mode reference, Tool Mapping); none available → stop and say so rather than sharing the main tree. The harness worktree may branch from the remote default branch rather than the integration tip (Claude Code does unless `worktree.baseRef` is `head`), which is why every ticket dispatch cuts its own branch from `base_branch` per `implement-ticket` and never commits to the harness branch. That pinned cut supersedes Parallel Writes step 3's `base_sha` check, so ticket returns carry no `base_sha`.
 
 ## Workflow
 

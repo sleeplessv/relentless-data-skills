@@ -613,17 +613,34 @@ def gitignored_dir(path: Path) -> Path:
     return path
 
 
-def spill_full_result(rows: list[dict], sql: str, snowman_dir: Path) -> Path:
+def unique_path(directory: Path, base: str, suffix: str, now: datetime) -> Path:
+    """``<directory>/<timestamp>__<base><suffix>`` that does not exist yet.
+
+    The timestamp is ``now`` to the second. A clash appends ``-1``, ``-2``
+    and so on to ``base`` until the name is free.
+    """
+    stem = f"{now:%Y%m%d-%H%M%S}__{base}"
+    path = directory / f"{stem}{suffix}"
+    bump = 1
+    while path.exists():
+        path = directory / f"{stem}-{bump}{suffix}"
+        bump += 1
+    return path
+
+
+def spill_full_result(
+    rows: list[dict], sql: str, snowman_dir: Path, *, now: datetime | None = None
+) -> Path:
     """Write every row, untruncated, as CSV under ``<snowman_dir>/results/``."""
     results_dir = gitignored_dir(snowman_dir / "results")
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
-    path = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}__{digest}.csv"
+    path = unique_path(results_dir, digest, ".csv", now or datetime.now())
     text, _ = render_rows(rows, fmt="csv", max_rows=0, max_cell=0)
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def stage(sql: str, name: str, env: str | None) -> int:
+def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) -> int:
     """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
     if not sql.strip():
         raise Blocked("empty script. Nothing to stage.")
@@ -636,14 +653,9 @@ def stage(sql: str, name: str, env: str | None) -> int:
     connection, env_name = target.connection, target.environment
     staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
-    now = datetime.now()
+    now = now or datetime.now()
     env_part = f"{env_name}__" if env_name else ""
-    base = f"{now:%Y%m%d-%H%M%S}__{env_part}{slug}"
-    path = staged_dir / f"{base}.sql"
-    bump = 1
-    while path.exists():
-        path = staged_dir / f"{base}-{bump}.sql"
-        bump += 1
+    path = unique_path(staged_dir, f"{env_part}{slug}", ".sql", now)
     rel = path.relative_to(target.project_root)
 
     run_cmd = f"snow sql -f {rel} --connection {connection}"

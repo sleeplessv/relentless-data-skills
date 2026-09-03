@@ -530,10 +530,8 @@ class TestStage(SnowmanTestCase):
     def test_filename_collision_bumps_suffix(self):
         root = self.enter(self.make_project())
         fixed = datetime(2026, 1, 2, 3, 4, 5)
-        fake_datetime = mock.Mock(now=mock.Mock(return_value=fixed))
-        with mock.patch.object(snowman, "datetime", fake_datetime):
-            self.run_stage("SELECT 1", "noop", None)
-            self.run_stage("SELECT 2", "noop", None)
+        self.run_stage("SELECT 1", "noop", None, now=fixed)
+        self.run_stage("SELECT 2", "noop", None, now=fixed)
         names = [f.name for f in self.staged_files(root)]
         self.assertEqual(
             names,
@@ -697,15 +695,29 @@ class TestCleanSnowStderr(SnowmanTestCase):
         self.assertEqual(snowman.clean_snow_stderr(""), "")
 
 
+class TestUniquePath(SnowmanTestCase):
+    def test_timestamp_base_and_suffix(self):
+        root = self.make_bare_dir()
+        path = snowman.unique_path(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5))
+        self.assertEqual(path, root / "20260102-030405__noop.sql")
+
+    def test_bumps_while_the_path_exists(self):
+        root = self.make_bare_dir()
+        now = datetime(2026, 1, 2, 3, 4, 5)
+        (root / "20260102-030405__noop.sql").touch()
+        (root / "20260102-030405__noop-1.sql").touch()
+        path = snowman.unique_path(root, "noop", ".sql", now)
+        self.assertEqual(path.name, "20260102-030405__noop-2.sql")
+        self.assertFalse(path.exists())
+
+
 class TestSpillFullResult(SnowmanTestCase):
     def test_writes_full_untruncated_csv_and_gitignore(self):
         root = self.make_project()
         snowman_dir = root / ".snowman"
         rows = [{"N": i, "S": "x" * 500, "V": None} for i in range(70)]
         fixed = datetime(2026, 9, 3, 18, 12, 0)
-        fake_datetime = mock.Mock(now=mock.Mock(return_value=fixed))
-        with mock.patch.object(snowman, "datetime", fake_datetime):
-            path = snowman.spill_full_result(rows, "SELECT 1", snowman_dir)
+        path = snowman.spill_full_result(rows, "SELECT 1", snowman_dir, now=fixed)
         self.assertEqual(path.parent, root / ".snowman" / "results")
         self.assertRegex(path.name, r"^20260903-181200__[0-9a-f]{8}\.csv$")
         body = path.read_text(encoding="utf-8")
@@ -714,6 +726,16 @@ class TestSpillFullResult(SnowmanTestCase):
         self.assertNotIn("…", body)
         gitignore = root / ".snowman" / "results" / ".gitignore"
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
+
+    def test_same_sql_in_the_same_second_keeps_both_results(self):
+        snowman_dir = self.make_project() / ".snowman"
+        fixed = datetime(2026, 9, 3, 18, 12, 0)
+        first = snowman.spill_full_result([{"N": 1}], "SELECT 1", snowman_dir, now=fixed)
+        second = snowman.spill_full_result([{"N": 2}], "SELECT 1", snowman_dir, now=fixed)
+        self.assertNotEqual(first, second)
+        self.assertEqual(second.name, first.stem + "-1.csv")
+        self.assertIn("1", first.read_text(encoding="utf-8"))
+        self.assertIn("2", second.read_text(encoding="utf-8"))
 
 
 class TestRunSnow(SnowmanTestCase):

@@ -23,7 +23,7 @@ Execute mode (default):
   * refuses to run if no context file exists (bootstrap not done), unless
     ``--connection <name>`` overrides it, which is how the bootstrap routes
     its discovery queries through the guardrail before the context exists;
-  * strips comments + string literals, then rejects anything that is not a
+  * strips comments + quoted regions, then rejects anything that is not a
     single read-only statement;
   * loads the nearest ``.env`` at or above the project root (or above the
     CWD in bootstrap mode) into the ``snow`` subprocess environment.
@@ -118,6 +118,10 @@ AUTH_ERROR_RE = re.compile(
 # (key-pair auth is itself JWT-based and OAuth failures also mention tokens),
 # hence the authenticator lookup.
 BROWSER_AUTHENTICATORS = {"OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER"}
+ANALYSIS_TOKEN_RE = re.compile(
+    r"/\*.*?\*/|--[^\n]*|//[^\n]*|\$\$.*?\$\$|'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"",
+    flags=re.S,
+)
 
 
 class Blocked(Exception):
@@ -324,10 +328,18 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
     return merged
 
 
+class SnowResult(NamedTuple):
+    """Decoded result of one ``snow`` CLI call."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
 def run_snow(
     args: list[str], env: dict[str, str], *, timeout: float | None = None
-) -> tuple[int, str, str]:
-    """Run ``snow <args>`` and return ``(returncode, stdout, stderr)`` as text.
+) -> SnowResult:
+    """Run ``snow <args>`` and return its decoded result.
 
     ``args`` is the argv after the binary name, so ``args[0]`` is the snow
     subcommand. This is the only place the wrapper touches ``subprocess``,
@@ -340,7 +352,7 @@ def run_snow(
         )
     except FileNotFoundError:
         raise Blocked("`snow` CLI not found on PATH.")
-    return (
+    return SnowResult(
         result.returncode,
         result.stdout.decode(errors="replace"),
         result.stderr.decode(errors="replace"),
@@ -355,8 +367,8 @@ def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     fails or the connection isn't listed. Callers fall back to generic guidance.
     """
     try:
-        _, stdout, _ = run_snow(["connection", "list", "--format", "JSON"], env, timeout=30)
-        for item in json.loads(stdout):
+        result = run_snow(["connection", "list", "--format", "JSON"], env, timeout=30)
+        for item in json.loads(result.stdout):
             if item.get("connection_name") == connection:
                 params = item.get("parameters")
                 return params if isinstance(params, dict) else {}
@@ -425,21 +437,14 @@ def auth_hint_for(
 
 
 def strip_for_analysis(sql: str) -> str:
-    """Remove block comments, line comments, and string literals.
+    """Remove comments, string literals, and quoted identifiers.
 
     The result is used ONLY for the read-only checks. The original SQL is
-    what actually runs. Blanking string literals (single-quoted and
-    dollar-quoted, matched together so neither kind can hide inside the
-    other) stops semicolons and keywords inside quotes from triggering
-    false rejects.
+    what actually runs. Matching every ignored token in one leftmost-first
+    pass stops quote or comment markers inside one token from starting
+    another token that swallows executable SQL.
     """
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)        # /* block */
-    sql = re.sub(r"--[^\n]*", " ", sql)                       # -- line
-    sql = re.sub(r"//[^\n]*", " ", sql)                       # // line (Snowflake)
-    # $$dollar quoted$$ and 'string literals' in one leftmost-wins pass, so a
-    # $$ inside a single-quoted literal cannot pair with a later one.
-    sql = re.sub(r"\$\$.*?\$\$|'(?:[^']|'')*'", " '' ", sql, flags=re.S)
-    return sql
+    return ANALYSIS_TOKEN_RE.sub(" ", sql)
 
 
 def keywords_in(sql: str, words: set[str]) -> set[str]:
@@ -701,26 +706,26 @@ def execute(
     connection, env_file = target.connection, target.env_file
 
     sub_env = snow_env(env_file)
-    returncode, stdout, stderr = run_snow(
+    result = run_snow(
         ["sql", "-q", sql, "--connection", connection,
          "--format", "JSON_EXT", "--enhanced-exit-codes"],
         sub_env,
     )
 
-    if stderr:
-        sys.stderr.write(clean_snow_stderr(stderr))
-    if returncode != 0:
-        hint = auth_hint_for(stderr, connection, env_file, sub_env)
+    if result.stderr:
+        sys.stderr.write(clean_snow_stderr(result.stderr))
+    if result.returncode != 0:
+        hint = auth_hint_for(result.stderr, connection, env_file, sub_env)
         if hint:
             print(hint, file=sys.stderr)
 
-    if stdout.strip():
+    if result.stdout.strip():
         try:
-            rows = json.loads(stdout)
+            rows = json.loads(result.stdout)
         except ValueError:
             rows = None
         if not isinstance(rows, list):
-            sys.stdout.write(stdout)  # unexpected shape: relay raw
+            sys.stdout.write(result.stdout)  # unexpected shape: relay raw
         else:
             full_note = None
             if max_rows and len(rows) > max_rows:
@@ -736,7 +741,7 @@ def execute(
             sys.stdout.write(text)
             for line in footers:
                 print(line)
-    return returncode
+    return result.returncode
 
 
 def main(argv: list[str]) -> int:

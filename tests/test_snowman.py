@@ -48,15 +48,15 @@ default_env: dev
 """
 
 
-Outcome = tuple  # (returncode, stdout, stderr), what run_snow returns
+Outcome = snowman.SnowResult
 
-OK: Outcome = (0, "", "")
+OK = Outcome(0, "", "")
 
 
 def fake_snow(outcomes: dict[str, Outcome]):
     """A stand-in for snowman.run_snow keyed by subcommand (``args[0]``).
 
-    ``outcomes`` maps ``"sql"`` or ``"connection"`` to the tuple run_snow
+    ``outcomes`` maps ``"sql"`` or ``"connection"`` to the result run_snow
     would return, so tests describe results instead of scripting call order.
     A subcommand with no outcome raises KeyError. ``fake.calls`` records
     every ``(args, env)`` pair.
@@ -73,7 +73,9 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
 def connection_listing(connection: str, parameters: dict) -> Outcome:
     """A successful `snow connection list --format JSON` outcome."""
-    return (0, json.dumps([{"connection_name": connection, "parameters": parameters}]), "")
+    return Outcome(
+        0, json.dumps([{"connection_name": connection, "parameters": parameters}]), ""
+    )
 
 
 class SnowmanTestCase(unittest.TestCase):
@@ -243,6 +245,12 @@ class TestEnforceReadOnly(SnowmanTestCase):
         self.assert_blocked(
             snowman.enforce_read_only,
             "SELECT 'a$$b'; DELETE FROM t WHERE c = '$$'",
+        )
+
+    def test_blocks_dollar_signs_split_across_two_quoted_identifiers(self):
+        self.assert_blocked(
+            snowman.enforce_read_only,
+            'SELECT 1 AS "$$"; DROP TABLE t; SELECT 1 AS "$$"',
         )
 
     def test_allows_dollar_quoted_literal(self):
@@ -765,7 +773,9 @@ class TestRunSnow(SnowmanTestCase):
         completed = types.SimpleNamespace(returncode=5, stdout=b"[]\n", stderr=b"bad \xff\n")
         with mock.patch.object(snowman.subprocess, "run", return_value=completed) as run:
             result = snowman.run_snow(["sql", "-q", "SELECT 1"], {"A": "1"})
-        self.assertEqual(result, (5, "[]\n", "bad �\n"))
+        self.assertEqual(result.returncode, 5)
+        self.assertEqual(result.stdout, "[]\n")
+        self.assertEqual(result.stderr, "bad �\n")
         self.assertEqual(run.call_args[0][0], ["snow", "sql", "-q", "SELECT 1"])
         self.assertEqual(run.call_args[1]["env"], {"A": "1"})
         self.assertTrue(run.call_args[1]["capture_output"])
@@ -824,7 +834,7 @@ class TestExecute(SnowmanTestCase):
             [{"A": 1, "O": {"k": 1}, "N": None}, {"A": 2, "O": [1], "N": "x" * 300}],
             indent=4,
         )
-        code, out, err = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
+        code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
         lines = out.splitlines()
         self.assertEqual(lines[0], "A,O,N")
@@ -840,7 +850,7 @@ class TestExecute(SnowmanTestCase):
     def test_row_cap_spills_full_result_and_footers(self):
         root = self.enter(self.make_project())
         payload = json.dumps([{"N": i} for i in range(1203)])
-        code, out, _ = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
+        code, out, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
         lines = out.splitlines()
         self.assertEqual(len(lines), 52)  # header + 50 rows + footer
@@ -860,7 +870,7 @@ class TestExecute(SnowmanTestCase):
         sub.mkdir(parents=True)
         self.enter(sub)
         payload = json.dumps([{"N": i} for i in range(60)])
-        _, out, _ = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
+        _, out, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         footer = out.splitlines()[-1]
         rel = footer.split("full result: ")[1].split(";")[0]
         self.assertTrue(rel.startswith("../../.snowman/results/"), rel)
@@ -873,7 +883,7 @@ class TestExecute(SnowmanTestCase):
         root = self.enter(self.make_bare_dir())
         payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute(
-            {"sql": (0, payload, "")}, "SELECT 1", connection_override="c"
+            {"sql": Outcome(0, payload, "")}, "SELECT 1", connection_override="c"
         )
         self.assertIn(
             "# showing 50 of 60 rows; no context file yet so the full result was "
@@ -886,37 +896,45 @@ class TestExecute(SnowmanTestCase):
         self.enter(self.make_project())
         payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute(
-            {"sql": (0, payload, "")}, "SELECT 1", max_rows=0, fmt="json"
+            {"sql": Outcome(0, payload, "")}, "SELECT 1", max_rows=0, fmt="json"
         )
         self.assertEqual(json.loads(out), [{"N": i} for i in range(60)])
 
     def test_empty_result_notes_zero_rows(self):
         self.enter(self.make_project())
-        _, out, _ = self.run_execute({"sql": (0, "[]\n", "")}, "SELECT 1")
+        _, out, _ = self.run_execute({"sql": Outcome(0, "[]\n", "")}, "SELECT 1")
         self.assertEqual(out, "# 0 rows\n")
 
     def test_unparseable_stdout_relayed_raw(self):
         self.enter(self.make_project())
-        code, out, _ = self.run_execute({"sql": (3, "not json at all\n", "")}, "SELECT 1")
+        code, out, _ = self.run_execute(
+            {"sql": Outcome(3, "not json at all\n", "")}, "SELECT 1"
+        )
         self.assertEqual(code, 3)
         self.assertEqual(out, "not json at all\n")
 
     def test_json_object_stdout_relayed_raw_without_footer(self):
         self.enter(self.make_project())
-        code, out, _ = self.run_execute({"sql": (0, '{"a": 1}\n', "")}, "SELECT 1")
+        code, out, _ = self.run_execute(
+            {"sql": Outcome(0, '{"a": 1}\n', "")}, "SELECT 1"
+        )
         self.assertEqual(code, 0)
         self.assertEqual(out, '{"a": 1}\n')
 
     def test_sql_error_panel_cleaned_and_exit_code_forwarded(self):
         self.enter(self.make_project())
-        code, out, err = self.run_execute({"sql": (5, "", PANEL_STDERR)}, "SELECT 1")
+        code, out, err = self.run_execute(
+            {"sql": Outcome(5, "", PANEL_STDERR)}, "SELECT 1"
+        )
         self.assertEqual(code, 5)
         self.assertEqual(out, "")
         self.assertEqual(err, PANEL_CLEANED)
 
     def test_forwards_snow_exit_code_and_stderr(self):
         self.enter(self.make_project())
-        code, out, err = self.run_execute({"sql": (1, "", "some snow error\n")}, "SELECT 1")
+        code, out, err = self.run_execute(
+            {"sql": Outcome(1, "", "some snow error\n")}, "SELECT 1"
+        )
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
         self.assertEqual(err, "some snow error\n")
@@ -979,7 +997,7 @@ class TestExecute(SnowmanTestCase):
             "╰──────────────────────────────────────────────────────────╯\n"
         )
         code, _, err = self.run_execute(
-            {"sql": (1, "", panel),
+            {"sql": Outcome(1, "", panel),
              "connection": connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"})},
             "SELECT 1",
         )
@@ -993,7 +1011,9 @@ class TestExecute(SnowmanTestCase):
 
     def test_non_auth_failure_gets_no_hint(self):
         self.enter(self.make_project())
-        code, _, err = self.run_execute({"sql": (1, "", "syntax error\n")}, "SELECT 1")
+        code, _, err = self.run_execute(
+            {"sql": Outcome(1, "", "syntax error\n")}, "SELECT 1"
+        )
         self.assertEqual(code, 1)
         self.assertNotIn("hint:", err)
         self.assertEqual([args[0] for args, _ in self.snow.calls], ["sql"])
@@ -1049,7 +1069,7 @@ class TestAuthHintFor(SnowmanTestCase):
             ("not listed", connection_listing("other", {"authenticator": "SNOWFLAKE_JWT"})),
             ("other authenticator", connection_listing("analytics", {"authenticator": "OAUTH_CLIENT_CREDENTIALS"})),
             ("empty parameters", connection_listing("analytics", {})),
-            ("garbage output", (0, "not json", "")),
+            ("garbage output", Outcome(0, "not json", "")),
         ):
             with self.subTest(lookup=label):
                 hint = self.hint("JWT token is invalid", lookup)

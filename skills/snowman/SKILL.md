@@ -112,8 +112,8 @@ The wrapper hard-enforces these (see [references/guardrails.md](references/guard
 - **Read-only only.** The leading keyword must be `SELECT`, `WITH`, `SHOW`,
   `DESCRIBE`, `DESC`, or `EXPLAIN`. Any write or DDL keyword anywhere is refused.
 - **Single statement.** `;`-separated multi-statements are refused. A single trailing `;` is fine.
-- **Comment- and string-safe.** The wrapper strips comments and string
-  literals before the check, so a hidden `DROP` cannot slip through.
+- **Comment- and quote-safe.** The wrapper strips comments, string literals,
+  and quoted identifiers before the check, so a hidden `DROP` cannot slip through.
 
 These are taught, not hard-blocked. Apply them yourself:
 

@@ -31,7 +31,7 @@ never executes writes.
   filename and header. Single-account projects keep the plain `connection:`
   form.
 - **Hard read-only guardrail.** Every query goes through the wrapper,
-  `scripts/snowman.py`, which strips comments and strings, rejects
+  `scripts/snowman.py`, which strips comments and quoted regions, rejects
   multi-statements, requires a read-only leading keyword (`SELECT`, `WITH`,
   `SHOW`, `DESCRIBE`, `DESC`, or `EXPLAIN`), and refuses any write or DDL keyword
   anywhere. On refusal it exits non-zero with a `BLOCKED: ...` reason. This

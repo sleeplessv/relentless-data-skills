@@ -1,7 +1,7 @@
 {
   "name": "fabric-lineage-dag",
   "version": "0.1.0",
-  "description": "Build an interactive data-lineage DAG for a Microsoft Fabric Git-exported medallion workspace — five parallel stdlib extractors (pipelines and schedules, JSON-config Silver, JSON-config Gold and wrapper notebooks, notebook code, TMDL semantic models and PBIR reports) write one agreed graph schema, a merge step aliases ids, derives live/fork flags and writes a validation report, and a dagre+d3 single-file page renders overview and focus lineage with a Coverage & gaps panel.",
+  "description": "Build an interactive data-lineage DAG for a Microsoft Fabric Git-exported medallion workspace. Five parallel stdlib extractors (pipelines and schedules, JSON-config Silver, JSON-config Gold and wrapper notebooks, notebook code, TMDL semantic models and PBIR reports) write one agreed graph schema, a merge step aliases ids, derives live and fork flags and writes a validation report, and a dagre+d3 single-file page renders overview and focus lineage with a Coverage & gaps panel.",
   "author": {
     "name": "sleeplessv"
   },

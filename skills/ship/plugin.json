@@ -1,7 +1,7 @@
 {
   "name": "ship",
   "version": "0.1.0",
-  "description": "Take working-tree changes from branch to merged PR in one pass — branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches/PRs.",
+  "description": "Take working-tree changes from branch to merged PR in one pass: branch off main, commit smart-git-commit style, open a PR, then squash-merge and delete the local and remote branch. Command-only: /ship asks before merging, /ship clean goes straight through. Detects unrelated changes and offers to split them into separate branches and PRs.",
   "author": {
     "name": "sleeplessv"
   },

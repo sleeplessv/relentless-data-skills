@@ -233,6 +233,26 @@ class TestEnforceReadOnly(SnowmanTestCase):
     def test_blocks_when_no_leading_keyword(self):
         self.assert_blocked(snowman.enforce_read_only, "42", match="leading SQL keyword")
 
+    def test_blocks_dollar_signs_split_across_two_literals(self):
+        # '$$' inside two separate '...' literals must not pair up into one
+        # dollar-quoted string that swallows the statements between them.
+        self.assert_blocked(
+            snowman.enforce_read_only,
+            "SELECT 'x$$' || 'y'; DROP TABLE t; SELECT '$$z'",
+        )
+        self.assert_blocked(
+            snowman.enforce_read_only,
+            "SELECT 'a$$b'; DELETE FROM t WHERE c = '$$'",
+        )
+
+    def test_allows_dollar_quoted_literal(self):
+        self.assert_allowed("SELECT $$DROP$$")
+
+    def test_mixed_dollar_and_single_quoted_literals(self):
+        sql = "SELECT $$a$$ , 'b$$c' , $$d$$"
+        self.assertNotIn("$$", snowman.strip_for_analysis(sql))
+        self.assert_allowed(sql)
+
 
 class TestParseFrontmatter(SnowmanTestCase):
     def write_context(self, text: str) -> Path:
@@ -880,6 +900,12 @@ class TestExecute(SnowmanTestCase):
         code, out, _ = self.run_execute({"sql": (3, "not json at all\n", "")}, "SELECT 1")
         self.assertEqual(code, 3)
         self.assertEqual(out, "not json at all\n")
+
+    def test_json_object_stdout_relayed_raw_without_footer(self):
+        self.enter(self.make_project())
+        code, out, _ = self.run_execute({"sql": (0, '{"a": 1}\n', "")}, "SELECT 1")
+        self.assertEqual(code, 0)
+        self.assertEqual(out, '{"a": 1}\n')
 
     def test_sql_error_panel_cleaned_and_exit_code_forwarded(self):
         self.enter(self.make_project())

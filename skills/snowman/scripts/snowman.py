@@ -38,7 +38,8 @@ Execute mode (default):
     tokens of snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
     rows are shown and, when a context file exists, the full result is
     written to ``.snowman/results/<timestamp>__<sha1-8 of SQL>.csv``
-    (gitignored). ``--max-cell N`` (default 200) cuts longer string cells
+    (gitignored); a same-second clash gets a ``-1``, ``-2`` suffix.
+    ``--max-cell N`` (default 200) cuts longer string cells
     to ``<prefix>…(+K chars)``. ``0`` lifts either cap. ``--json`` prints a
     compact JSON array instead of CSV. Notes about NULLs, truncated cells
     and the row cap are appended as ``# ...`` footer lines, the only
@@ -428,14 +429,16 @@ def strip_for_analysis(sql: str) -> str:
 
     The result is used ONLY for the read-only checks. The original SQL is
     what actually runs. Blanking string literals (single-quoted and
-    dollar-quoted) stops semicolons and keywords inside quotes from
-    triggering false rejects.
+    dollar-quoted, matched together so neither kind can hide inside the
+    other) stops semicolons and keywords inside quotes from triggering
+    false rejects.
     """
     sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)        # /* block */
     sql = re.sub(r"--[^\n]*", " ", sql)                       # -- line
     sql = re.sub(r"//[^\n]*", " ", sql)                       # // line (Snowflake)
-    sql = re.sub(r"\$\$.*?\$\$", " '' ", sql, flags=re.S)     # $$dollar quoted$$
-    sql = re.sub(r"'(?:[^']|'')*'", " '' ", sql)             # 'string literals'
+    # $$dollar quoted$$ and 'string literals' in one leftmost-wins pass, so a
+    # $$ inside a single-quoted literal cannot pair with a later one.
+    sql = re.sub(r"\$\$.*?\$\$|'(?:[^']|'')*'", " '' ", sql, flags=re.S)
     return sql
 
 

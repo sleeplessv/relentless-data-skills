@@ -4,8 +4,9 @@ Standard library only, like the script itself. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-Nothing here ever talks to Snowflake: execute() tests mock subprocess.run,
-and stage mode never executes by design.
+Nothing here ever talks to Snowflake: execute() tests replace run_snow with
+fake_snow, only TestRunSnow patches subprocess.run, and stage mode never
+executes by design.
 """
 from __future__ import annotations
 
@@ -47,16 +48,32 @@ default_env: dev
 """
 
 
-def fake_completed(
-    returncode: int = 0, stderr: bytes = b"", stdout: bytes = b""
-) -> types.SimpleNamespace:
-    return types.SimpleNamespace(returncode=returncode, stderr=stderr, stdout=stdout)
+Outcome = tuple  # (returncode, stdout, stderr), what run_snow returns
+
+OK: Outcome = (0, "", "")
 
 
-def fake_connection_list(connection: str, parameters: dict) -> types.SimpleNamespace:
-    """A successful `snow connection list --format JSON` result."""
-    listing = [{"connection_name": connection, "parameters": parameters}]
-    return fake_completed(stdout=json.dumps(listing).encode())
+def fake_snow(outcomes: dict[str, Outcome]):
+    """A stand-in for snowman.run_snow keyed by subcommand (``args[0]``).
+
+    ``outcomes`` maps ``"sql"`` or ``"connection"`` to the tuple run_snow
+    would return, so tests describe results instead of scripting call order.
+    A subcommand with no outcome raises KeyError. ``fake.calls`` records
+    every ``(args, env)`` pair.
+    """
+    calls: list[tuple[list, dict]] = []
+
+    def run(args: list[str], env: dict, *, timeout=None) -> Outcome:
+        calls.append((args, env))
+        return outcomes[args[0]]
+
+    run.calls = calls
+    return run
+
+
+def connection_listing(connection: str, parameters: dict) -> Outcome:
+    """A successful `snow connection list --format JSON` outcome."""
+    return (0, json.dumps([{"connection_name": connection, "parameters": parameters}]), "")
 
 
 class SnowmanTestCase(unittest.TestCase):
@@ -670,41 +687,73 @@ class TestSpillFullResult(SnowmanTestCase):
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
 
 
+class TestRunSnow(SnowmanTestCase):
+    """The one place subprocess.run is patched: run_snow owns the snow argv."""
+
+    def test_prepends_snow_and_decodes_output(self):
+        completed = types.SimpleNamespace(returncode=5, stdout=b"[]\n", stderr=b"bad \xff\n")
+        with mock.patch.object(snowman.subprocess, "run", return_value=completed) as run:
+            result = snowman.run_snow(["sql", "-q", "SELECT 1"], {"A": "1"})
+        self.assertEqual(result, (5, "[]\n", "bad �\n"))
+        self.assertEqual(run.call_args[0][0], ["snow", "sql", "-q", "SELECT 1"])
+        self.assertEqual(run.call_args[1]["env"], {"A": "1"})
+        self.assertTrue(run.call_args[1]["capture_output"])
+        self.assertIsNone(run.call_args[1]["timeout"])
+
+    def test_relays_timeout(self):
+        completed = types.SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+        with mock.patch.object(snowman.subprocess, "run", return_value=completed) as run:
+            snowman.run_snow(["connection", "list"], {}, timeout=30)
+        self.assertEqual(run.call_args[1]["timeout"], 30)
+
+    def test_missing_binary_blocks(self):
+        with mock.patch.object(snowman.subprocess, "run", side_effect=FileNotFoundError):
+            self.assert_blocked(snowman.run_snow, ["sql"], {}, match="`snow` CLI not found")
+
+
 class TestExecute(SnowmanTestCase):
-    def test_blocked_sql_never_reaches_snow(self):
-        self.make_project()
-        with mock.patch.object(snowman.subprocess, "run") as run:
-            self.assert_blocked(snowman.execute, "DROP TABLE t")
-        run.assert_not_called()
+    def run_execute(self, outcomes: dict, *args, **kwargs) -> tuple:
+        """Run execute() against fake snow outcomes; return (code, stdout, stderr).
 
-    def test_runs_snow_with_resolved_connection(self):
-        self.make_project()
-        with mock.patch.object(
-            snowman.subprocess, "run", return_value=fake_completed()
-        ) as run:
-            self.assertEqual(snowman.execute("SELECT 1"), 0)
-        cmd = run.call_args[0][0]
-        self.assertEqual(
-            cmd,
-            ["snow", "sql", "-q", "SELECT 1", "--connection", "analytics",
-             "--format", "JSON_EXT", "--enhanced-exit-codes"],
-        )
-
-    def run_execute(self, result, *args, **kwargs) -> tuple:
-        """Run execute() against a fake snow result; return (code, stdout, stderr)."""
+        ``self.snow`` keeps the fake so a test can inspect ``self.snow.calls``.
+        """
+        self.snow = fake_snow(outcomes)
         stdout, stderr = io.StringIO(), io.StringIO()
-        with mock.patch.object(snowman.subprocess, "run", return_value=result), \
+        with mock.patch.object(snowman, "run_snow", self.snow), \
                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             code = snowman.execute(*args, **kwargs)
         return code, stdout.getvalue(), stderr.getvalue()
+
+    def sql_args(self) -> list:
+        """The argv of the one `snow sql` call the fake recorded."""
+        sql_calls = [args for args, _ in self.snow.calls if args[0] == "sql"]
+        self.assertEqual(len(sql_calls), 1)
+        return sql_calls[0]
+
+    def test_blocked_sql_never_reaches_snow(self):
+        self.make_project()
+        snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", snow):
+            self.assert_blocked(snowman.execute, "DROP TABLE t")
+        self.assertEqual(snow.calls, [])
+
+    def test_runs_snow_with_resolved_connection(self):
+        self.make_project()
+        code, _, _ = self.run_execute({"sql": OK}, "SELECT 1")
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            self.sql_args(),
+            ["sql", "-q", "SELECT 1", "--connection", "analytics",
+             "--format", "JSON_EXT", "--enhanced-exit-codes"],
+        )
 
     def test_json_ext_result_rendered_as_csv_with_footers(self):
         self.make_project()
         payload = json.dumps(
             [{"A": 1, "O": {"k": 1}, "N": None}, {"A": 2, "O": [1], "N": "x" * 300}],
             indent=4,
-        ).encode()
-        code, out, err = self.run_execute(fake_completed(stdout=payload), "SELECT 1")
+        )
+        code, out, err = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
         lines = out.splitlines()
         self.assertEqual(lines[0], "A,O,N")
@@ -719,8 +768,8 @@ class TestExecute(SnowmanTestCase):
 
     def test_row_cap_spills_full_result_and_footers(self):
         root = self.make_project()
-        payload = json.dumps([{"N": i} for i in range(1203)]).encode()
-        code, out, _ = self.run_execute(fake_completed(stdout=payload), "SELECT 1")
+        payload = json.dumps([{"N": i} for i in range(1203)])
+        code, out, _ = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
         lines = out.splitlines()
         self.assertEqual(len(lines), 52)  # header + 50 rows + footer
@@ -739,8 +788,8 @@ class TestExecute(SnowmanTestCase):
         sub = root / "analysis" / "q1"
         sub.mkdir(parents=True)
         os.chdir(sub)
-        payload = json.dumps([{"N": i} for i in range(60)]).encode()
-        _, out, _ = self.run_execute(fake_completed(stdout=payload), "SELECT 1")
+        payload = json.dumps([{"N": i} for i in range(60)])
+        _, out, _ = self.run_execute({"sql": (0, payload, "")}, "SELECT 1")
         footer = out.splitlines()[-1]
         rel = footer.split("full result: ")[1].split(";")[0]
         self.assertTrue(rel.startswith("../../.snowman/results/"), rel)
@@ -751,9 +800,9 @@ class TestExecute(SnowmanTestCase):
 
     def test_row_cap_in_bootstrap_mode_skips_spill(self):
         root = self.make_bare_dir()
-        payload = json.dumps([{"N": i} for i in range(60)]).encode()
+        payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute(
-            fake_completed(stdout=payload), "SELECT 1", connection_override="c"
+            {"sql": (0, payload, "")}, "SELECT 1", connection_override="c"
         )
         self.assertIn(
             "# showing 50 of 60 rows; no context file yet so the full result was "
@@ -764,109 +813,89 @@ class TestExecute(SnowmanTestCase):
 
     def test_max_rows_zero_and_json_flag(self):
         self.make_project()
-        payload = json.dumps([{"N": i} for i in range(60)]).encode()
+        payload = json.dumps([{"N": i} for i in range(60)])
         _, out, _ = self.run_execute(
-            fake_completed(stdout=payload), "SELECT 1", max_rows=0, fmt="json"
+            {"sql": (0, payload, "")}, "SELECT 1", max_rows=0, fmt="json"
         )
         self.assertEqual(json.loads(out), [{"N": i} for i in range(60)])
 
     def test_empty_result_notes_zero_rows(self):
         self.make_project()
-        _, out, _ = self.run_execute(fake_completed(stdout=b"[]\n"), "SELECT 1")
+        _, out, _ = self.run_execute({"sql": (0, "[]\n", "")}, "SELECT 1")
         self.assertEqual(out, "# 0 rows\n")
 
     def test_unparseable_stdout_relayed_raw(self):
         self.make_project()
-        code, out, _ = self.run_execute(
-            fake_completed(returncode=3, stdout=b"not json at all\n"), "SELECT 1"
-        )
+        code, out, _ = self.run_execute({"sql": (3, "not json at all\n", "")}, "SELECT 1")
         self.assertEqual(code, 3)
         self.assertEqual(out, "not json at all\n")
 
     def test_sql_error_panel_cleaned_and_exit_code_forwarded(self):
         self.make_project()
-        code, out, err = self.run_execute(
-            fake_completed(returncode=5, stderr=PANEL_STDERR.encode()), "SELECT 1"
-        )
+        code, out, err = self.run_execute({"sql": (5, "", PANEL_STDERR)}, "SELECT 1")
         self.assertEqual(code, 5)
         self.assertEqual(out, "")
         self.assertEqual(err, PANEL_CLEANED)
 
     def test_forwards_snow_exit_code_and_stderr(self):
         self.make_project()
-        code, out, err = self.run_execute(
-            fake_completed(returncode=1, stderr=b"some snow error\n"), "SELECT 1"
-        )
+        code, out, err = self.run_execute({"sql": (1, "", "some snow error\n")}, "SELECT 1")
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
         self.assertEqual(err, "some snow error\n")
 
     def test_multi_env_picks_connection(self):
         self.make_project(MULTI_ENV_FRONTMATTER)
-        with mock.patch.object(
-            snowman.subprocess, "run", return_value=fake_completed()
-        ) as run:
-            snowman.execute("SELECT 1", env="prod")
-        self.assertIn("acme_prod", run.call_args[0][0])
+        self.run_execute({"sql": OK}, "SELECT 1", env="prod")
+        self.assertIn("acme_prod", self.sql_args())
 
     def test_multi_env_default_fallback(self):
         self.make_project(MULTI_ENV_FRONTMATTER)
-        with mock.patch.object(
-            snowman.subprocess, "run", return_value=fake_completed()
-        ) as run:
-            snowman.execute("SELECT 1")
-        self.assertIn("acme_dev", run.call_args[0][0])
+        self.run_execute({"sql": OK}, "SELECT 1")
+        self.assertIn("acme_dev", self.sql_args())
 
     def test_connection_override_skips_context(self):
         self.make_bare_dir()  # no context file at all
-        with mock.patch.object(
-            snowman.subprocess, "run", return_value=fake_completed()
-        ) as run:
-            self.assertEqual(
-                snowman.execute("SELECT 1", connection_override="bootstrap_conn"), 0
-            )
-        self.assertIn("bootstrap_conn", run.call_args[0][0])
+        code, _, _ = self.run_execute({"sql": OK}, "SELECT 1", connection_override="bootstrap_conn")
+        self.assertEqual(code, 0)
+        self.assertIn("bootstrap_conn", self.sql_args())
 
     def test_blocks_without_context_and_without_override(self):
         self.make_bare_dir()
-        with mock.patch.object(snowman.subprocess, "run") as run:
+        snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", snow):
             self.assert_blocked(snowman.execute, "SELECT 1", match="bootstrap")
-        run.assert_not_called()
+        self.assertEqual(snow.calls, [])
 
     def test_dotenv_relayed_to_snow_process_env_wins(self):
         root = self.make_project()
         (root / ".env").write_text(
             "RELAYED_ONLY=from_dotenv\nALREADY_SET=from_dotenv\n", encoding="utf-8"
         )
-        with mock.patch.dict(os.environ, {"ALREADY_SET": "from_process"}), \
-                mock.patch.object(
-                    snowman.subprocess, "run", return_value=fake_completed()
-                ) as run:
-            snowman.execute("SELECT 1")
-        env = run.call_args[1]["env"]
+        with mock.patch.dict(os.environ, {"ALREADY_SET": "from_process"}):
+            self.run_execute({"sql": OK}, "SELECT 1")
+        _, env = self.snow.calls[0]
         self.assertEqual(env["RELAYED_ONLY"], "from_dotenv")
         self.assertEqual(env["ALREADY_SET"], "from_process")
 
     def test_missing_snow_cli_blocks(self):
         self.make_project()
-        with mock.patch.object(snowman.subprocess, "run", side_effect=FileNotFoundError):
+        with mock.patch.object(snowman, "run_snow", side_effect=snowman.Blocked("`snow` CLI not found on PATH.")):
             self.assert_blocked(snowman.execute, "SELECT 1", match="`snow` CLI not found")
 
-    def run_failing_auth(self, sql_stderr: bytes, lookup) -> str:
-        """Execute with a failing snow call followed by a connection lookup."""
-        stderr = io.StringIO()
-        with mock.patch.object(
-            snowman.subprocess, "run",
-            side_effect=[fake_completed(returncode=1, stderr=sql_stderr), lookup],
-        ), contextlib.redirect_stderr(stderr):
-            self.assertEqual(snowman.execute("SELECT 1"), 1)
-        return stderr.getvalue()
+    def run_failing_auth(self, sql_stderr: str, lookup: Outcome) -> str:
+        """Execute with a failing snow call and the given connection lookup outcome."""
+        code, _, err = self.run_execute(
+            {"sql": (1, "", sql_stderr), "connection": lookup}, "SELECT 1"
+        )
+        self.assertEqual(code, 1)
+        return err
 
     def test_auth_failure_keypair_hint(self):
         self.make_project()
         output = self.run_failing_auth(
-            b"could not decrypt private key\n",
-            fake_connection_list(
+            "could not decrypt private key\n",
+            connection_listing(
                 "analytics",
                 {"authenticator": "SNOWFLAKE_JWT", "private_key_file": "/k.pem"},
             ),
@@ -878,10 +907,8 @@ class TestExecute(SnowmanTestCase):
     def test_auth_failure_browser_hint(self):
         self.make_project()
         output = self.run_failing_auth(
-            b"OAuth access token expired\n",
-            fake_connection_list(
-                "analytics", {"authenticator": "OAUTH_AUTHORIZATION_CODE"}
-            ),
+            "OAuth access token expired\n",
+            connection_listing("analytics", {"authenticator": "OAUTH_AUTHORIZATION_CODE"}),
         )
         self.assertIn("authenticates in a browser", output)
         self.assertIn("snow connection test -c analytics", output)
@@ -896,8 +923,7 @@ class TestExecute(SnowmanTestCase):
             "╰──────────────────────────────────────────────────────────╯\n"
         )
         output = self.run_failing_auth(
-            panel.encode(),
-            fake_connection_list("analytics", {"authenticator": "SNOWFLAKE_JWT"}),
+            panel, connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"})
         )
         self.assertIn(
             "ERROR: 250001 (08001): Failed to connect to DB: could not decrypt private key\n",
@@ -909,8 +935,8 @@ class TestExecute(SnowmanTestCase):
     def test_auth_failure_unknown_gets_combined_hint(self):
         self.make_project()
         output = self.run_failing_auth(
-            b"JWT token is invalid\n",
-            fake_completed(stdout=b"not json"),  # lookup fails -> generic hint
+            "JWT token is invalid\n",
+            (0, "not json", ""),  # lookup fails -> generic hint
         )
         self.assertIn("PRIVATE_KEY_PASSPHRASE", output)
         self.assertIn("snow connection test -c analytics", output)
@@ -919,20 +945,17 @@ class TestExecute(SnowmanTestCase):
         root = self.make_project()
         (root / ".env").write_text("PRIVATE_KEY_PASSPHRASE=x\n", encoding="utf-8")
         output = self.run_failing_auth(
-            b"bad passphrase\n",
-            fake_connection_list("analytics", {"authenticator": "SNOWFLAKE_JWT"}),
+            "bad passphrase\n",
+            connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"}),
         )
         self.assertIn("a .env was loaded from", output)
 
     def test_non_auth_failure_gets_no_hint(self):
         self.make_project()
-        stderr = io.StringIO()
-        with mock.patch.object(
-            snowman.subprocess, "run",
-            return_value=fake_completed(returncode=1, stderr=b"syntax error\n"),
-        ), contextlib.redirect_stderr(stderr):
-            self.assertEqual(snowman.execute("SELECT 1"), 1)
-        self.assertNotIn("hint:", stderr.getvalue())
+        code, _, err = self.run_execute({"sql": (1, "", "syntax error\n")}, "SELECT 1")
+        self.assertEqual(code, 1)
+        self.assertNotIn("hint:", err)
+        self.assertEqual([args[0] for args, _ in self.snow.calls], ["sql"])
 
 
 class TestAuthClassification(SnowmanTestCase):
@@ -960,28 +983,22 @@ class TestAuthClassification(SnowmanTestCase):
 
 
 class TestConnectionParams(SnowmanTestCase):
-    def lookup(self, result) -> dict | None:
-        with mock.patch.object(snowman.subprocess, "run", return_value=result):
+    def lookup(self, outcome: Outcome) -> dict | None:
+        with mock.patch.object(snowman, "run_snow", fake_snow({"connection": outcome})):
             return snowman.connection_params("analytics", dict(os.environ))
 
     def test_returns_parameters_for_listed_connection(self):
-        params = self.lookup(
-            fake_connection_list("analytics", {"authenticator": "SNOWFLAKE_JWT"})
-        )
+        params = self.lookup(connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"}))
         self.assertEqual(params, {"authenticator": "SNOWFLAKE_JWT"})
 
     def test_none_when_connection_not_listed(self):
-        self.assertIsNone(
-            self.lookup(fake_connection_list("other", {"authenticator": "X"}))
-        )
+        self.assertIsNone(self.lookup(connection_listing("other", {"authenticator": "X"})))
 
     def test_none_on_garbage_output(self):
-        self.assertIsNone(self.lookup(fake_completed(stdout=b"not json")))
+        self.assertIsNone(self.lookup((0, "not json", "")))
 
     def test_none_when_snow_missing(self):
-        with mock.patch.object(
-            snowman.subprocess, "run", side_effect=FileNotFoundError
-        ):
+        with mock.patch.object(snowman, "run_snow", side_effect=snowman.Blocked("missing")):
             self.assertIsNone(snowman.connection_params("analytics", {}))
 
 
@@ -1052,11 +1069,10 @@ class TestMainCli(SnowmanTestCase):
 
     def test_main_routes_to_execute(self):
         self.make_project()
-        with mock.patch.object(
-            snowman.subprocess, "run", return_value=fake_completed()
-        ) as run:
+        snow = fake_snow({"sql": OK})
+        with mock.patch.object(snowman, "run_snow", snow):
             self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 0)
-        run.assert_called_once()
+        self.assertEqual(len(snow.calls), 1)
 
     def run_main_blocked(self, argv: list) -> str:
         """Run main() expecting a refusal; return stderr after checking the exit code."""
@@ -1067,9 +1083,10 @@ class TestMainCli(SnowmanTestCase):
 
     def test_main_renders_refusal_once_and_exits_2(self):
         self.make_project()
-        with mock.patch.object(snowman.subprocess, "run") as run:
+        snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", snow):
             err = self.run_main_blocked(["DROP TABLE t"])
-        run.assert_not_called()
+        self.assertEqual(snow.calls, [])
         self.assertEqual(err, "BLOCKED: non-read-only statement (leading keyword: DROP).\n")
 
     def test_main_renders_stage_refusal(self):
@@ -1079,7 +1096,9 @@ class TestMainCli(SnowmanTestCase):
 
     def test_main_renders_missing_snow_cli(self):
         self.make_project()
-        with mock.patch.object(snowman.subprocess, "run", side_effect=FileNotFoundError):
+        with mock.patch.object(
+            snowman, "run_snow", side_effect=snowman.Blocked("`snow` CLI not found on PATH.")
+        ):
             err = self.run_main_blocked(["SELECT 1"])
         self.assertEqual(err, "BLOCKED: `snow` CLI not found on PATH.\n")
 

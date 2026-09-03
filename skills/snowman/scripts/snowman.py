@@ -283,6 +283,29 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
     return merged
 
 
+def run_snow(
+    args: list[str], env: dict[str, str], *, timeout: float | None = None
+) -> tuple[int, str, str]:
+    """Run ``snow <args>`` and return ``(returncode, stdout, stderr)`` as text.
+
+    ``args`` is the argv after the binary name, so ``args[0]`` is the snow
+    subcommand. This is the only place the wrapper touches ``subprocess``,
+    and the one name tests patch to keep Snowflake out of the picture.
+    Raises ``Blocked`` when the ``snow`` binary is not on PATH.
+    """
+    try:
+        result = subprocess.run(
+            ["snow", *args], capture_output=True, env=env, timeout=timeout
+        )
+    except FileNotFoundError:
+        raise Blocked("`snow` CLI not found on PATH.")
+    return (
+        result.returncode,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+    )
+
+
 def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     """Look up a connection's parameters through ``snow connection list``.
 
@@ -291,11 +314,8 @@ def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     fails or the connection isn't listed. Callers fall back to generic guidance.
     """
     try:
-        result = subprocess.run(
-            ["snow", "connection", "list", "--format", "JSON"],
-            capture_output=True, env=env, timeout=30,
-        )
-        for item in json.loads(result.stdout.decode(errors="replace")):
+        _, stdout, _ = run_snow(["connection", "list", "--format", "JSON"], env, timeout=30)
+        for item in json.loads(stdout):
             if item.get("connection_name") == connection:
                 params = item.get("parameters")
                 return params if isinstance(params, dict) else {}
@@ -618,24 +638,19 @@ def execute(
         project_env = context.parent.parent / ".env"
         env_file = project_env if project_env.is_file() else None
 
-    cmd = [
-        "snow", "sql", "-q", sql, "--connection", connection,
-        "--format", "JSON_EXT", "--enhanced-exit-codes",
-    ]
     sub_env = snow_env(env_file)
-    try:
-        result = subprocess.run(cmd, env=sub_env, capture_output=True)
-    except FileNotFoundError:
-        raise Blocked("`snow` CLI not found on PATH.")
+    returncode, stdout, stderr = run_snow(
+        ["sql", "-q", sql, "--connection", connection,
+         "--format", "JSON_EXT", "--enhanced-exit-codes"],
+        sub_env,
+    )
 
-    stderr = result.stderr.decode(errors="replace")
     if stderr:
         sys.stderr.write(clean_snow_stderr(stderr))
-    if result.returncode != 0 and AUTH_ERROR_RE.search(stderr):
+    if returncode != 0 and AUTH_ERROR_RE.search(stderr):
         kind = classify_auth(connection_params(connection, sub_env))
         print(auth_hint(kind, connection, env_file), file=sys.stderr)
 
-    stdout = result.stdout.decode(errors="replace")
     if stdout.strip():
         try:
             rows = json.loads(stdout)
@@ -658,7 +673,7 @@ def execute(
             sys.stdout.write(text)
             for line in footers:
                 print(line)
-    return result.returncode
+    return returncode
 
 
 def main(argv: list[str]) -> int:

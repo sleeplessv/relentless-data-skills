@@ -23,10 +23,11 @@ Execute mode (default):
   * refuses to run if no context file exists (bootstrap not done), unless
     ``--connection <name>`` overrides it, which is how the bootstrap routes
     its discovery queries through the guardrail before the context exists;
-  * strips comments + string literals, then rejects anything that is not a
+  * strips comments + quoted regions, then rejects anything that is not a
     single read-only statement;
-  * loads the project's ``.env`` (if any) into the ``snow`` subprocess
-    environment. Existing process env always wins. Values and var names are
+  * loads the nearest ``.env`` at or above the project root (or above the
+    CWD in bootstrap mode) into the ``snow`` subprocess environment.
+    Existing process env always wins. Values and var names are
     never printed. This is what makes key-pair connections with an encrypted
     private key work: the passphrase lives in ``.env``, not in any config
     snowman touches;
@@ -37,7 +38,8 @@ Execute mode (default):
     tokens of snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
     rows are shown and, when a context file exists, the full result is
     written to ``.snowman/results/<timestamp>__<sha1-8 of SQL>.csv``
-    (gitignored). ``--max-cell N`` (default 200) cuts longer string cells
+    (gitignored); a same-second clash gets a ``-1``, ``-2`` suffix.
+    ``--max-cell N`` (default 200) cuts longer string cells
     to ``<prefix>…(+K chars)``. ``0`` lifts either cap. ``--json`` prints a
     compact JSON array instead of CSV. Notes about NULLs, truncated cells
     and the row cap are appended as ``# ...`` footer lines, the only
@@ -79,6 +81,7 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import NamedTuple
 
 # Leading keyword must be one of these (read-only statements only).
 ALLOWED_LEADING = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
@@ -115,21 +118,28 @@ AUTH_ERROR_RE = re.compile(
 # (key-pair auth is itself JWT-based and OAuth failures also mention tokens),
 # hence the authenticator lookup.
 BROWSER_AUTHENTICATORS = {"OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER"}
+ANALYSIS_TOKEN_RE = re.compile(
+    r"/\*.*?\*/|--[^\n]*|//[^\n]*|\$\$.*?\$\$|'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"",
+    flags=re.S,
+)
 
 
-def die(reason: str) -> "NoReturn":  # type: ignore[name-defined]
-    print(f"BLOCKED: {reason}", file=sys.stderr)
-    raise SystemExit(BLOCK)
+class Blocked(Exception):
+    """A guardrail refusal. ``str(exc)`` is the reason.
+
+    Raised anywhere the wrapper refuses to proceed and rendered once, in
+    ``main``, as ``BLOCKED: <reason>`` on stderr with exit code ``BLOCK``.
+    """
 
 
-def find_context() -> Path:
-    """Walk up from CWD to find .snowman/context.md."""
-    here = Path.cwd().resolve()
+def find_context(start: Path) -> Path:
+    """Walk up from `start` to find .snowman/context.md."""
+    here = start.resolve()
     for d in (here, *here.parents):
         candidate = d / ".snowman" / "context.md"
         if candidate.is_file():
             return candidate
-    die(
+    raise Blocked(
         "no .snowman/context.md found in this project. Run the snowman "
         "bootstrap first (see references/install.md)."
     )
@@ -145,7 +155,7 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
     """
     text = context.read_text(encoding="utf-8")
     if not text.startswith("---"):
-        die(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
+        raise Blocked(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
     _, _, rest = text.partition("---")
     front, _, _ = rest.partition("---")
 
@@ -196,41 +206,41 @@ def resolve_connection(
 
     if environments:
         if top.get("connection"):
-            die(
+            raise Blocked(
                 f"{context} defines both `connection:` and `environments:`. "
                 "Keep exactly one form."
             )
         if for_stage and not env:
-            die(
+            raise Blocked(
                 "staging in a multi-environment project requires --env <name>. "
                 "The staged file's run command targets a real account, so "
                 f"the environment must be explicit. Defined: {', '.join(environments)}."
             )
         chosen = env or top.get("default_env")
         if not chosen:
-            die(
+            raise Blocked(
                 f"{context} has `environments:` but no `default_env:`. Add "
                 "one to the frontmatter, or pass --env <name>."
             )
         if chosen not in environments:
-            die(
+            raise Blocked(
                 f"unknown environment {chosen!r}. {context} defines: "
                 f"{', '.join(environments)}."
             )
         connection = environments[chosen].get("connection")
         if not connection:
-            die(f"environment {chosen!r} in {context} has no `connection:` value.")
+            raise Blocked(f"environment {chosen!r} in {context} has no `connection:` value.")
         return connection, chosen
 
     if env:
-        die(
+        raise Blocked(
             f"--env was given but {context} defines a single `connection:` "
             "with no `environments:` map. Drop --env, or convert the "
             "frontmatter to the multi-environment form."
         )
     connection = top.get("connection")
     if not connection:
-        die(f"{context} frontmatter has no `connection:` value.")
+        raise Blocked(f"{context} frontmatter has no `connection:` value.")
     return connection, None
 
 
@@ -242,6 +252,44 @@ def find_env_file(start: Path) -> Path | None:
         if candidate.is_file():
             return candidate
     return None
+
+
+class Target(NamedTuple):
+    """The resolved connection, environment, and paths for one run.
+
+    In bootstrap mode (``--connection`` given) there is no context file yet,
+    so ``project_root`` and ``snowman_dir`` are ``None``.
+    """
+
+    connection: str
+    environment: str | None
+    project_root: Path | None
+    snowman_dir: Path | None
+    env_file: Path | None
+
+
+def resolve_target(
+    start: Path, connection: str | None, env: str | None, *, for_stage: bool = False
+) -> Target:
+    """Resolve where one run goes, walking up from `start`.
+
+    A ``connection`` override skips the context file (bootstrap mode).
+    Otherwise the nearest ``.snowman/context.md`` supplies the connection,
+    with ``env`` choosing among its environments. The ``.env`` is the nearest
+    one at or above the project root, or above ``start`` in bootstrap mode.
+    Raises ``Blocked`` for a missing context file or a bad frontmatter.
+    """
+    if connection:
+        environment = project_root = snowman_dir = None
+    else:
+        context = find_context(start)
+        connection, environment = resolve_connection(context, env, for_stage=for_stage)
+        snowman_dir = context.parent
+        project_root = snowman_dir.parent
+    return Target(
+        connection, environment, project_root, snowman_dir,
+        find_env_file(project_root or start),
+    )
 
 
 def load_dotenv(path: Path) -> dict[str, str]:
@@ -280,6 +328,37 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
     return merged
 
 
+class SnowResult(NamedTuple):
+    """Decoded result of one ``snow`` CLI call."""
+
+    returncode: int
+    stdout: str
+    stderr: str
+
+
+def run_snow(
+    args: list[str], env: dict[str, str], *, timeout: float | None = None
+) -> SnowResult:
+    """Run ``snow <args>`` and return its decoded result.
+
+    ``args`` is the argv after the binary name, so ``args[0]`` is the snow
+    subcommand. This is the only place the wrapper touches ``subprocess``,
+    and the one name tests patch to keep Snowflake out of the picture.
+    Raises ``Blocked`` when the ``snow`` binary is not on PATH.
+    """
+    try:
+        result = subprocess.run(
+            ["snow", *args], capture_output=True, env=env, timeout=timeout
+        )
+    except FileNotFoundError:
+        raise Blocked("`snow` CLI not found on PATH.")
+    return SnowResult(
+        result.returncode,
+        result.stdout.decode(errors="replace"),
+        result.stderr.decode(errors="replace"),
+    )
+
+
 def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     """Look up a connection's parameters through ``snow connection list``.
 
@@ -288,11 +367,8 @@ def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     fails or the connection isn't listed. Callers fall back to generic guidance.
     """
     try:
-        result = subprocess.run(
-            ["snow", "connection", "list", "--format", "JSON"],
-            capture_output=True, env=env, timeout=30,
-        )
-        for item in json.loads(result.stdout.decode(errors="replace")):
+        result = run_snow(["connection", "list", "--format", "JSON"], env, timeout=30)
+        for item in json.loads(result.stdout):
             if item.get("connection_name") == connection:
                 params = item.get("parameters")
                 return params if isinstance(params, dict) else {}
@@ -343,18 +419,41 @@ def auth_hint(kind: str, connection: str, env_file: Path | None) -> str:
     )
 
 
+def auth_hint_for(
+    stderr: str, connection: str, env_file: Path | None, env: dict[str, str]
+) -> str | None:
+    """The one-line auth hint for a failed snow call, or None if it does
+    not look like an auth failure.
+
+    Wraps the trigger regex, the ``snow connection list`` lookup, the
+    authenticator classification, and the wording. A lookup that fails for
+    any reason (including a missing ``snow`` binary) yields the combined
+    hint rather than no hint.
+    """
+    if not AUTH_ERROR_RE.search(stderr):
+        return None
+    kind = classify_auth(connection_params(connection, env))
+    return auth_hint(kind, connection, env_file)
+
+
 def strip_for_analysis(sql: str) -> str:
-    """Remove block comments, line comments, and string literals.
+    """Remove comments, string literals, and quoted identifiers.
 
     The result is used ONLY for the read-only checks. The original SQL is
-    what actually runs. Blanking string literals stops semicolons and keywords
-    inside quotes from triggering false rejects.
+    what actually runs. Matching every ignored token in one leftmost-first
+    pass stops quote or comment markers inside one token from starting
+    another token that swallows executable SQL.
     """
-    sql = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)        # /* block */
-    sql = re.sub(r"--[^\n]*", " ", sql)                       # -- line
-    sql = re.sub(r"//[^\n]*", " ", sql)                       # // line (Snowflake)
-    sql = re.sub(r"'(?:[^']|'')*'", " '' ", sql)             # 'string literals'
-    return sql
+    return ANALYSIS_TOKEN_RE.sub(" ", sql)
+
+
+def keywords_in(sql: str, words: set[str]) -> set[str]:
+    """Return the members of ``words`` present as bare words in ``sql``.
+
+    ``sql`` should already be through ``strip_for_analysis``. The match is
+    case-insensitive and the result uses the spelling from ``words``.
+    """
+    return {kw for kw in words if re.search(rf"\b{kw}\b", sql, flags=re.I)}
 
 
 def enforce_read_only(sql: str) -> None:
@@ -362,24 +461,21 @@ def enforce_read_only(sql: str) -> None:
 
     statements = [s for s in cleaned.split(";") if s.strip()]
     if len(statements) > 1:
-        die("multiple statements detected. Submit one statement at a time.")
+        raise Blocked("multiple statements detected. Submit one statement at a time.")
     if not statements:
-        die("empty query.")
+        raise Blocked("empty query.")
 
     first = statements[0].strip()
     leading = re.match(r"[A-Za-z_]+", first)
     if not leading:
-        die("could not identify a leading SQL keyword.")
+        raise Blocked("could not identify a leading SQL keyword.")
     word = leading.group(0).upper()
     if word not in ALLOWED_LEADING:
-        die(f"non-read-only statement (leading keyword: {word}).")
+        raise Blocked(f"non-read-only statement (leading keyword: {word}).")
 
-    found = {
-        kw for kw in WRITE_KEYWORDS
-        if re.search(rf"\b{kw}\b", cleaned, flags=re.I)
-    }
+    found = keywords_in(cleaned, WRITE_KEYWORDS)
     if found:
-        die(f"write or DDL keyword present: {', '.join(sorted(found))}.")
+        raise Blocked(f"write or DDL keyword present: {', '.join(sorted(found))}.")
 
 
 DEFAULT_MAX_ROWS = 50
@@ -525,46 +621,53 @@ def gitignored_dir(path: Path) -> Path:
     return path
 
 
-def spill_full_result(rows: list[dict], sql: str, context: Path) -> Path:
-    """Write every row, untruncated, as CSV under ``.snowman/results/``."""
-    results_dir = gitignored_dir(context.parent / "results")
+def unique_path(directory: Path, base: str, suffix: str, now: datetime) -> Path:
+    """``<directory>/<timestamp>__<base><suffix>`` that does not exist yet.
+
+    The timestamp is ``now`` to the second. A clash appends ``-1``, ``-2``
+    and so on to ``base`` until the name is free.
+    """
+    stem = f"{now:%Y%m%d-%H%M%S}__{base}"
+    path = directory / f"{stem}{suffix}"
+    bump = 1
+    while path.exists():
+        path = directory / f"{stem}-{bump}{suffix}"
+        bump += 1
+    return path
+
+
+def spill_full_result(
+    rows: list[dict], sql: str, snowman_dir: Path, *, now: datetime | None = None
+) -> Path:
+    """Write every row, untruncated, as CSV under ``<snowman_dir>/results/``."""
+    results_dir = gitignored_dir(snowman_dir / "results")
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
-    path = results_dir / f"{datetime.now():%Y%m%d-%H%M%S}__{digest}.csv"
+    path = unique_path(results_dir, digest, ".csv", now or datetime.now())
     text, _ = render_rows(rows, fmt="csv", max_rows=0, max_cell=0)
     path.write_text(text, encoding="utf-8")
     return path
 
 
-def stage(sql: str, name: str, env: str | None) -> int:
+def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) -> int:
     """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
     if not sql.strip():
-        die("empty script. Nothing to stage.")
+        raise Blocked("empty script. Nothing to stage.")
 
     slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")
     if not slug:
-        die(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
+        raise Blocked(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
 
-    context = find_context()
-    connection, env_name = resolve_connection(context, env, for_stage=True)
-    project_root = context.parent.parent
+    target = resolve_target(Path.cwd(), None, env, for_stage=True)
+    connection, env_name = target.connection, target.environment
+    staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
-    staged_dir = gitignored_dir(context.parent / "staged")
-
-    now = datetime.now()
+    now = now or datetime.now()
     env_part = f"{env_name}__" if env_name else ""
-    base = f"{now:%Y%m%d-%H%M%S}__{env_part}{slug}"
-    path = staged_dir / f"{base}.sql"
-    bump = 1
-    while path.exists():
-        path = staged_dir / f"{base}-{bump}.sql"
-        bump += 1
-    rel = path.relative_to(project_root)
+    path = unique_path(staged_dir, f"{env_part}{slug}", ".sql", now)
+    rel = path.relative_to(target.project_root)
 
     run_cmd = f"snow sql -f {rel} --connection {connection}"
-    destructive = sorted(
-        kw for kw in DESTRUCTIVE_KEYWORDS
-        if re.search(rf"\b{kw}\b", strip_for_analysis(sql), flags=re.I)
-    )
+    destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
     header = [
         "-- staged by snowman, NOT executed",
         f"-- purpose: {slug}",
@@ -596,53 +699,40 @@ def execute(
     max_cell: int = DEFAULT_MAX_CELL,
 ) -> int:
     if not sql.strip():
-        die("empty query.")
+        raise Blocked("empty query.")
     enforce_read_only(sql)
 
-    context: Path | None = None
-    if connection_override:
-        # Bootstrap mode: no context file yet, so search for .env from CWD.
-        connection = connection_override
-        env_file = find_env_file(Path.cwd())
-    else:
-        context = find_context()
-        connection, _ = resolve_connection(context, env)
-        project_env = context.parent.parent / ".env"
-        env_file = project_env if project_env.is_file() else None
+    target = resolve_target(Path.cwd(), connection_override, env)
+    connection, env_file = target.connection, target.env_file
 
-    cmd = [
-        "snow", "sql", "-q", sql, "--connection", connection,
-        "--format", "JSON_EXT", "--enhanced-exit-codes",
-    ]
     sub_env = snow_env(env_file)
-    try:
-        result = subprocess.run(cmd, env=sub_env, capture_output=True)
-    except FileNotFoundError:
-        print("BLOCKED: `snow` CLI not found on PATH.", file=sys.stderr)
-        return BLOCK
+    result = run_snow(
+        ["sql", "-q", sql, "--connection", connection,
+         "--format", "JSON_EXT", "--enhanced-exit-codes"],
+        sub_env,
+    )
 
-    stderr = result.stderr.decode(errors="replace")
-    if stderr:
-        sys.stderr.write(clean_snow_stderr(stderr))
-    if result.returncode != 0 and AUTH_ERROR_RE.search(stderr):
-        kind = classify_auth(connection_params(connection, sub_env))
-        print(auth_hint(kind, connection, env_file), file=sys.stderr)
+    if result.stderr:
+        sys.stderr.write(clean_snow_stderr(result.stderr))
+    if result.returncode != 0:
+        hint = auth_hint_for(result.stderr, connection, env_file, sub_env)
+        if hint:
+            print(hint, file=sys.stderr)
 
-    stdout = result.stdout.decode(errors="replace")
-    if stdout.strip():
+    if result.stdout.strip():
         try:
-            rows = json.loads(stdout)
+            rows = json.loads(result.stdout)
         except ValueError:
             rows = None
         if not isinstance(rows, list):
-            sys.stdout.write(stdout)  # unexpected shape: relay raw
+            sys.stdout.write(result.stdout)  # unexpected shape: relay raw
         else:
             full_note = None
             if max_rows and len(rows) > max_rows:
-                if context is None:
+                if target.snowman_dir is None:
                     full_note = "no context file yet so the full result was not saved"
                 else:
-                    spilled = spill_full_result(rows, sql, context)
+                    spilled = spill_full_result(rows, sql, target.snowman_dir)
                     rel = os.path.relpath(spilled, Path.cwd())
                     full_note = f"full result: {rel}"
             text, footers = render_rows(
@@ -703,19 +793,25 @@ def main(argv: list[str]) -> int:
             parser.error("--connection is not valid with --stage")
         if args.json:
             parser.error("--json is only valid when executing")
-        return stage(args.sql, args.name, args.env)
-    if args.name:
+    elif args.name:
         parser.error("--name is only valid with --stage")
-    if args.connection and args.env:
+    elif args.connection and args.env:
         parser.error("--env resolves via the context file and --connection bypasses it, so use one or the other")
-    return execute(
-        args.sql,
-        connection_override=args.connection,
-        env=args.env,
-        fmt="json" if args.json else "csv",
-        max_rows=args.max_rows,
-        max_cell=args.max_cell,
-    )
+
+    try:
+        if args.stage:
+            return stage(args.sql, args.name, args.env)
+        return execute(
+            args.sql,
+            connection_override=args.connection,
+            env=args.env,
+            fmt="json" if args.json else "csv",
+            max_rows=args.max_rows,
+            max_cell=args.max_cell,
+        )
+    except Blocked as refusal:
+        print(f"BLOCKED: {refusal}", file=sys.stderr)
+        return BLOCK
 
 
 if __name__ == "__main__":

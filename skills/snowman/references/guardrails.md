@@ -10,8 +10,9 @@ the enforced tier. The taught rules live in SKILL.md under "Guardrails
 Every query runs through the wrapper. Before anything reaches Snowflake, the
 wrapper:
 
-1. **Strips comments and string literals** (`/* */`, `--`, `//`, `'...'`) so
-   nothing hidden in a comment or quoted string can smuggle past the checks.
+1. **Strips comments and quoted regions** (`/* */`, `--`, `//`, `'...'`,
+   `"..."`, and dollar-quoted `$$...$$`) in one lexical pass so markers in
+   one region cannot smuggle executable SQL past the checks.
 2. **Rejects multiple statements.** `;`-separated statements are refused. A
    single trailing `;` is fine.
 3. **Checks the leading keyword.** It must be `SELECT`, `WITH`, `SHOW`,
@@ -69,8 +70,8 @@ unknown connection).
 
 ### Note on the keyword scan
 
-The check matches whole words against the comment-stripped and
-string-stripped SQL. Identifiers like `update_date` or `created_at` do not
+The check matches whole words against the comment- and quote-stripped SQL.
+Identifiers like `update_date` or `created_at` do not
 trigger it, because the `_` keeps them part of the same word. A read-only
 query that uses one of the listed words as a bare word (for example an alias
 named `set`) is blocked too.

@@ -31,7 +31,7 @@ never executes writes.
   filename and header. Single-account projects keep the plain `connection:`
   form.
 - **Hard read-only guardrail.** Every query goes through the wrapper,
-  `scripts/snowman.py`, which strips comments and strings, rejects
+  `scripts/snowman.py`, which strips comments and quoted regions, rejects
   multi-statements, requires a read-only leading keyword (`SELECT`, `WITH`,
   `SHOW`, `DESCRIBE`, `DESC`, or `EXPLAIN`), and refuses any write or DDL keyword
   anywhere. On refusal it exits non-zero with a `BLOCKED: ...` reason. This
@@ -67,8 +67,8 @@ the connection name.
 snowman relays one credential, and never stores, prints, or asks for it. If
 your connection uses key-pair auth with an encrypted private key, put the
 passphrase in the project root `.env` (for example
-`PRIVATE_KEY_PASSPHRASE=...`). The wrapper loads `.env` into the `snow`
-subprocess on every query. The existing shell environment always wins over
+`PRIVATE_KEY_PASSPHRASE=...`). The wrapper loads the nearest `.env` at or above the
+project root into the `snow` subprocess on every query. The existing shell environment always wins over
 `.env`. Keep `.env` gitignored as usual. With several key-pair connections
 whose passphrases differ (for example separate dev and prod accounts), use
 `snow`'s per-connection form in `.env` instead:

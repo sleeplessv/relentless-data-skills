@@ -50,8 +50,8 @@ what changed.
 - **Committer-date commit windowing.** Commits are found with
   `gh search commits` windowed on the committer date, so work is
   credited to the week it landed; a squash-merge commit carries the
-  merge moment, not the original authoring dates. Accepted limits of
-  commit search: it indexes default branches only, and it matches the
+  merge moment, not the original authoring dates. Commit search has two
+  accepted limits: it indexes default branches only, and it matches the
   actor by GitHub account, which requires the commit email to be linked
   to that account.
 - **Closed-issue edge.** Search has no closed-by qualifier, so closed

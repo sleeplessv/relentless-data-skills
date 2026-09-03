@@ -6,7 +6,7 @@ instance's tag (e.g. `/docs/v0.57/api/card`); get the tag from
 `GET /api/session/properties` → `version.tag`.
 
 The URLs below are a convenience cache, validated by CI. **The Metabase API is
-versioned with the app and changes between releases** — when
+versioned with the app and changes between releases.** When
 [api-reference.md](api-reference.md) is missing something or an endpoint
 behaves unexpectedly, fetch the live page rather than guessing.
 

@@ -1,4 +1,4 @@
-# dltHub AI Workbench / dlt Docs Map
+# dltHub AI Workbench / dlt docs map
 
 **Durable contract (won't rot):**
 - OSS dlt docs index => https://dlthub.com/docs/llms.txt
@@ -9,7 +9,7 @@
 
 The URLs below are a convenience cache, validated by CI. **If any fails or a
 CLI command is rejected, re-fetch the relevant index / raw README and
-re-resolve — do not invent URLs or flags.**
+re-resolve. Do not invent URLs or flags.**
 
 ## AI Workbench (setup, toolkits, CLI)
 - workbench README (commands, toolkit table, agent notes) => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-workbench/master/README.md

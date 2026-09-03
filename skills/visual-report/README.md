@@ -1,19 +1,19 @@
 # visual-report
 
-The **`visual-report`** agent skill turns a subject — a system, a process,
-research findings, a decision — into a **single self-contained HTML document
-that carries its meaning in visuals**, not paragraphs. One file: portable, no
-build step — though Tailwind and Mermaid load from CDNs, so it renders fully
+The **`visual-report`** agent skill turns a subject (a system, a process,
+research findings, a decision) into a **single self-contained HTML document
+that carries its meaning in visuals**, not paragraphs. One file, portable, no
+build step, though Tailwind and Mermaid load from CDNs, so it renders fully
 only with network access.
 
 ## What it does
 
-- **Explore** — gathers the substance worth drawing (walks the codebase via a single `Explore` subagent dispatch, organizes what's already in the conversation, or reads the sources you point it at) instead of dumping files into the report.
-- **Visualize** — writes one self-contained HTML file (Tailwind + Mermaid via CDN, plus hand-built CSS/SVG), verifies the diagrams actually render, and opens it. Every major idea earns a visual and the report runs as long as the subject has ideas — no filler sections; if a section needs a paragraph to be understood, the visual gets redrawn.
-- **Grill loop** — interviews you about what the report gets wrong or underweights, one question at a time with a recommended answer, iterating on the same file.
+- **Explore.** Gathers the substance worth drawing: walks the codebase via a single `Explore` subagent dispatch, organizes what's already in the conversation, or reads the sources you point it at, instead of dumping files into the report.
+- **Visualize.** Writes one self-contained HTML file (Tailwind + Mermaid via CDN, plus hand-built CSS/SVG), verifies the diagrams actually render, and opens it. Every major idea earns a visual and the report runs as long as the subject has ideas, with no filler sections; if a section needs a paragraph to be understood, the visual gets redrawn.
+- **Grill loop.** Interviews you about what the report gets wrong or underweights, one question at a time with a recommended answer, iterating on the same file.
 
-The only runtime dependencies are the Tailwind CDN and the Mermaid ESM import;
-light interactivity is inline vanilla JS only — no extra libraries, no build step.
+The only runtime dependencies are the Tailwind CDN and the Mermaid ESM import.
+Light interactivity is inline vanilla JS only, no extra libraries, no build step.
 
 ## How it works
 
@@ -43,13 +43,13 @@ HTML writeup of a system, process, or set of findings.
 
 ## Files
 
-- `SKILL.md` — core: the explore → visualize → grill process, output rules, and ADR handling.
-- `references/HTML-REPORT.md` — the HTML scaffold, diagram recipes, interactivity rules, and house style.
-- `references/VISUAL-LANGUAGE.md` — the glossary of named diagram patterns and how to pick between them.
+- `SKILL.md`: core; the explore, visualize, grill process, output rules, and ADR handling.
+- `references/HTML-REPORT.md`: the HTML scaffold, diagram recipes, interactivity rules, and house style.
+- `references/VISUAL-LANGUAGE.md`: the glossary of named diagram patterns and how to pick between them.
 
 ## Maintenance / CI
 
 Repo CI lints this skill's `SKILL.md` (frontmatter, "Use when" trigger, line
-budget) via `scripts/lint_skill.py` — see the
+budget) via `scripts/lint_skill.py`. See the
 [root README](../../README.md#maintenance--ci). This skill ships no
 `references/docs-map.md`, so the doc-URL liveness check skips it.

@@ -1,6 +1,6 @@
 # HTML Report Format
 
-The report is a single self-contained HTML file. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped relationships reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections, collapses). This file is the **build recipes** — *how* to construct each pattern. For *which* pattern to pick (and the rule to mix them, not default to Mermaid), see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
+The report is a single self-contained HTML file. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped relationships reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections, collapses). This file is the **build recipes**, *how* to construct each pattern. For *which* pattern to pick (and the rule to mix them, not default to Mermaid), see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
 
 ## Scaffold
 
@@ -16,7 +16,7 @@ The report is a single self-contained HTML file. Tailwind and Mermaid both come 
       mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
     </script>
     <style>
-      /* Headings: tight, heavy grotesque sans — system stack only, no web font. */
+      /* Headings: tight, heavy grotesque sans; system stack only, no web font. */
       .display {                      /* main title / h1 */
         font-family: "Helvetica Neue", Arial, system-ui, sans-serif;
         font-weight: 800;
@@ -48,7 +48,7 @@ The report is a single self-contained HTML file. Tailwind and Mermaid both come 
 
 ## Header
 
-Title, date, and a compact legend mapping the visual vocabulary you actually use (solid box = X, dashed line = seam, red = warning/leak, thick band = the consolidated thing). No throat-clearing intro paragraph — straight into the content.
+Title, date, and a compact legend mapping the visual vocabulary you actually use (solid box = X, dashed line = seam, red = warning/leak, thick band = the consolidated thing). No throat-clearing intro paragraph. Go straight into the content.
 
 The top-level title gets `.display` paired with a tight line-height (`leading-[1.05]`). Example: `<h1 class="display text-5xl leading-[1.05]">…</h1>`.
 
@@ -56,22 +56,22 @@ The top-level title gets `.display` paired with a tight line-height (`leading-[1
 
 The visuals carry the weight. Prose is sparse and plain. Each major idea is one `<section>` or `<article>`:
 
-- **Title** — short, names the idea. Every section heading gets `.subhead` (e.g. `<h2 class="subhead text-2xl">…</h2>`), so the document reads as one type system.
-- **Badge row** (optional) — status or category tags. Pick a small palette: emerald for "strong/done," amber for "watch/in-progress," slate for "neutral/speculative."
-- **The visual** — the centrepiece. Pick the pattern that fits (below). Before/after pairs sit side by side in two columns.
-- **One sentence of framing** — what the visual shows. Not a paragraph.
-- **Takeaways** — bullets, ≤6 words each.
-- **ADR callout** (if applicable) — one line in an amber-tinted box (_"follows ADR-0012"_).
+- **Title.** Short, names the idea. Every section heading gets `.subhead` (e.g. `<h2 class="subhead text-2xl">…</h2>`), so the document reads as one type system.
+- **Badge row** (optional). Status or category tags. Pick a small palette: emerald for "strong/done," amber for "watch/in-progress," slate for "neutral/speculative."
+- **The visual.** The centerpiece. Pick the pattern that fits (below). Before/after pairs sit side by side in two columns.
+- **One sentence of framing.** What the visual shows. Not a paragraph.
+- **Takeaways.** Bullets, at most 6 words each.
+- **ADR callout** (if applicable). One line in an amber-tinted box (_"follows ADR-0012"_).
 
 ## Diagram patterns
 
-Build recipes for each pattern. For *when* to pick each — and the rule to mix them rather than default to Mermaid — see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
+Build recipes for each pattern. For *when* to pick each, and the rule to mix them rather than default to Mermaid, see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
 
 ### Mermaid graph
 
 A Mermaid `flowchart`, `graph`, or `sequenceDiagram`. Wrap it in a Tailwind card so it doesn't feel parachuted in. Use `classDef` to colour the edges that matter (accent indigo, red for the problem path).
 
-Quote any node label containing parentheses, colons, or HTML (`A["Store (cache)"]`) — unquoted, they break the parse and the diagram renders as an error blob instead of failing loudly.
+Quote any node label containing parentheses, colons, or HTML (`A["Store (cache)"]`). Unquoted, they break the parse and the diagram renders as an error blob instead of failing loudly.
 
 ```html
 <div class="rounded-lg border border-slate-200 bg-white p-4">
@@ -96,7 +96,7 @@ Stack horizontal bands (`h-12 border-l-4`) for the layers a request/call/process
 
 ### Mass diagram
 
-Two rectangles per item — one for surface area, one for what's behind it. Shallow: surface nearly as tall as substance. Deep: surface short, substance tall.
+Two rectangles per item: one for surface area, one for what's behind it. Shallow: surface nearly as tall as substance. Deep: surface short, substance tall.
 
 ### Collapse
 
@@ -118,22 +118,22 @@ Plain `<div>` bars sized with inline `style="width: 64%"`, value labelled at the
 
 Allowed, kept minimal and self-contained:
 
-- **CSS only** for motion where possible — keyframes, `transition`, `:hover`/`:target` reveals.
-- **Inline vanilla JS** for collapsibles, tabs, and before→after toggles. No frameworks, no extra CDN libraries beyond Tailwind + Mermaid — keep the output self-contained.
+- **CSS only** for motion where possible: keyframes, `transition`, `:hover`/`:target` reveals.
+- **Inline vanilla JS** for collapsibles, tabs, and before-to-after toggles. No frameworks, no extra CDN libraries beyond Tailwind + Mermaid, to keep the output self-contained.
 
 If an interaction needs a library, it doesn't belong in this report.
 
 ## Style guidance
 
-This is the house style — apply it, don't reinvent per report.
+This is the house style. Apply it, don't reinvent per report.
 
 - Lean editorial, not corporate-dashboard. Generous whitespace.
-- **Headings are a tight, heavy grotesque sans — never serif.** Apply `.display` to the top-level title (with `leading-[1.05]`) and `.subhead` to every section heading, so the whole document reads as one type system. Both classes use a system font stack only — no `font-serif`, no Google Fonts or other web fonts unless the user explicitly asks, which would break self-containment. This governs titles and headings only — body text, small uppercase eyebrow labels, and monospace code labels are unaffected.
-- Colour sparingly: one accent (indigo or emerald) plus red for problems/warnings and amber for callouts. Resist a rainbow.
+- **Headings are a tight, heavy grotesque sans, never serif.** Apply `.display` to the top-level title (with `leading-[1.05]`) and `.subhead` to every section heading, so the whole document reads as one type system. Both classes use a system font stack only: no `font-serif`, no Google Fonts or other web fonts unless the user explicitly asks, which would break self-containment. This governs titles and headings only; body text, small uppercase eyebrow labels, and monospace code labels are unaffected.
+- Color sparingly: one accent (indigo or emerald) plus red for problems/warnings and amber for callouts. Resist a rainbow.
 - Keep diagrams ~320px tall so before/after pairs sit side by side without scrolling.
-- Use `text-xs uppercase tracking-wider` for labels inside diagrams — they should read as schematic, not as UI chrome.
+- Use `text-xs uppercase tracking-wider` for labels inside diagrams. They should read as schematic, not as UI chrome.
 - Static by default; the only motion is the CSS/inline-JS interactivity above.
 
 ## Tone
 
-Plain English, concise. No hedging, no "it's worth noting that…". If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `CONTEXT.md`, an ADR's terms), use that vocabulary exactly — don't drift into synonyms.
+Plain English, concise. No hedging, no "it's worth noting that...". If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `CONTEXT.md`, an ADR's terms), use that vocabulary exactly; don't drift into synonyms.

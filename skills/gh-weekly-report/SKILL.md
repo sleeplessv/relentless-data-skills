@@ -17,8 +17,8 @@ to what changed.
 
 Everything deterministic lives in two bundled stdlib-only scripts; the
 agent's job is judgment: bucketing the work, writing the narratives, and
-summarising the week. Report the week, nothing more: problems the report
-surfaces go in the summary, never into follow-up work — do not open
+summarising the week. Report the week, nothing more. Problems the report
+surfaces go in the summary, never into follow-up work; do not open
 issues or change any repo. The whole run is two script calls around one
 pass over one JSON file, so run it inline; no subagents, and no fan-out
 per repo or bucket.
@@ -86,7 +86,7 @@ name with current-period activity to a narrative string. Per repo, 2 to
 Markdown links to the items mentioned. For the dominant repo (the one
 with the most item occurrences across current-period lists), extend the
 narrative with a structured per-work-type breakdown: one line per
-bucket present in that repo listing its items, and nothing else — no
+bucket present in that repo listing its items, and nothing else: no
 per-item commentary, no restating the narrative. Render keeps the text
 verbatim and warns on keys matching no current-period repo.
 

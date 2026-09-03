@@ -1,13 +1,13 @@
 ---
 name: dbt-runner
-description: Use when running any dbt command (build, run, test, compile, seed, deps) or debugging a dbt failure — connection and auth errors, parse errors, hanging or silently-empty runs, and dbt-fusion quirks. Enforces preflight checks and output-capture discipline before the first dbt invocation of a session, and maps error signatures to causes and fixes. Bootstraps a per-project .dbt-runner/context.md on first use.
+description: Use when running any dbt command (build, run, test, compile, seed, deps) or debugging a dbt failure, including connection and auth errors, parse errors, hanging or silently-empty runs, and dbt-fusion quirks. Enforces preflight checks and output-capture discipline before the first dbt invocation of a session, and maps error signatures to causes and fixes. Bootstraps a per-project .dbt-runner/context.md on first use.
 ---
 
 # dbt-runner
 
 Invocation discipline and failure triage for running dbt against a warehouse.
 Half of all "dbt is broken" sessions are environment problems detectable
-before the first command, and most of the rest are misread output — this
+before the first command, and most of the rest are misread output. This
 skill front-loads the former and catalogues the latter.
 
 ## First action, every invocation
@@ -20,10 +20,10 @@ Check for **`.dbt-runner/context.md`** in the dbt project root.
 - **Present** → load it; it is the source of truth for this project's dbt
   setup (profile, target, engine, required env-var *names*, project lore).
 
-The context file holds **names only, never secrets** — no env-var values,
+The context file holds **names only, never secrets**: no env-var values,
 no passphrases. It is committed to the project repo.
 
-## Preflight — once per session, before the first dbt command
+## Preflight, once per session, before the first dbt command
 
 ```bash
 python3 <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>
@@ -32,16 +32,16 @@ python3 <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>
 Static checks only (sandbox-safe, no network): required env vars set, the
 private key file exists, `dbt_packages/` present with a clean
 `package-lock.yml`, and the profile/target resolve in `profiles.yml`. One
-line per check (`OK`/`FAIL`/`SKIP`), non-zero exit on any `FAIL` — fix every
+line per check (`OK`/`FAIL`/`SKIP`), non-zero exit on any `FAIL`. Fix every
 `FAIL` before running dbt; each line says how. Don't re-run it before every
 command; once per session is the contract, plus once more after any
 environment change (new shell, edited `.env`, switched target).
 
-## Invocation rules — every dbt command
+## Invocation rules, every dbt command
 
 1. **Invoke via the context file's `runner`, never bare `dbt`.** dbt-fusion
    ships as `dbt`, so PATH often resolves to a different engine than the one
-   the project pins — a fusion binary on a core project hard-errors on
+   the project pins: a fusion binary on a core project hard-errors on
    deprecations and never reaches SQL compilation, which reads as "the project
    is broken". If the context file has no `runner`, derive it (`uv.lock` →
    `uv run dbt`, `poetry.lock` → `poetry run dbt`, `.venv/` →
@@ -50,8 +50,8 @@ environment change (new shell, edited `.env`, switched target).
 2. **Run outside the sandbox.** dbt needs network access to the warehouse.
    In a sandboxed shell it fails with DNS/connection errors that masquerade
    as auth problems. If you see a connection error, suspect the sandbox
-   *first* — do not start debugging credentials.
-3. **Never pipe dbt output — redirect to a logfile.** Piped output
+   *first*, and do not start debugging credentials.
+3. **Never pipe dbt output; redirect to a logfile.** Piped output
    (`dbt build | tail`) can buffer and return blank. Always:
    ```bash
    <runner> build --select <sel> > /tmp/dbt_run.log 2>&1
@@ -74,14 +74,14 @@ environment change (new shell, edited `.env`, switched target).
 ## Reading the result
 
 `dbt build` exiting non-zero does **not** mean models failed to build.
-Read the summary line — `PASS=… WARN=… ERROR=…` — and distinguish three
+Read the summary line, `PASS=… WARN=… ERROR=…`, and distinguish three
 outcomes before reacting (this trichotomy is the authoritative reference;
 failures.md points here):
 
-- **Run error** — a model errored; its SQL or upstream is broken.
-- **Test failure** — models built fine, a data test failed. Fix data or
+- **Run error.** A model errored; its SQL or upstream is broken.
+- **Test failure.** Models built fine, a data test failed. Fix data or
   test, don't touch the build invocation.
-- **Warning** — `severity: warn` tests print WARN and do *not* fail the
+- **Warning.** `severity: warn` tests print WARN and do *not* fail the
   run. Don't "fix" a warning as if it were a failure, and don't report a
   warned run as broken.
 
@@ -89,27 +89,27 @@ failures.md points here):
 
 Fix the failure in front of you, at the scope it demands. Model refactors,
 test additions, and cleanup the failure did not require get reported, not
-performed. Work the escalation ladder below inline — it is greps and file
+performed. Work the escalation ladder below inline: it is greps and file
 lookups, not subagent work.
 
-Escalation ladder — in order, no skipping:
+Escalation ladder, in order, no skipping:
 
 1. Grep the logfile for the error signature and look it up in
-   [references/failures.md](references/failures.md) — entries are keyed by
+   [references/failures.md](references/failures.md). Entries are keyed by
    the verbatim string, with causes ranked by prior.
 2. If the signature looks like connection/auth and the static preflight
    passes, run the live check:
    `python3 <skill-dir>/scripts/preflight.py --connect` (outside the
    sandbox).
 3. If the context file says `engine: fusion`, also check
-   [references/fusion.md](references/fusion.md) — fusion has failure modes
+   [references/fusion.md](references/fusion.md). Fusion has failure modes
    with misleading error messages (unit-test fixture inference, blocked
    sibling tests).
 
 Project-specific lore (seed/test couplings, known-slow models, schema
-quirks) accumulates in the context file's **Project lore** section — append
+quirks) accumulates in the context file's **Project lore** section. Append
 a line or two when you learn something the hard way, not a writeup.
 
 While a build runs, speak up only on a finding or a change of direction.
-Report back leading with the outcome — what the run did, or what the root
-cause was — then the supporting detail.
+Report back leading with the outcome, what the run did or what the root
+cause was, then the supporting detail.

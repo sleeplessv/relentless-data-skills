@@ -31,7 +31,7 @@ Everything else — claiming (step 1), environment setup before the baseline (th
 
 **Make the smallest change that solves the ticket.** Prefer deletion over addition, keep the call hierarchy flat, and put each decision in one place; a diff a maintainer would find exhausting is the wrong solution. The `principle-laziness-protocol` skill, when installed, is the full protocol — follow it.
 
-**Prose published to git or GitHub (commit messages, PR titles and bodies, ticket comments, the Summary, Test plan, and Verification plan) follows the `technical-writing` and `unslop` skills when installed.** Baked-in minimum either way: plain words, active voice, one thought per sentence, and no em dashes (—) — use a comma, colon, or parentheses, or rewrite the sentence.
+**Before writing any prose published to git or GitHub (commit messages, PR titles and bodies, ticket comments, the Summary, Test plan, and Verification plan), invoke the `technical-writing` and `unslop` skills if installed, and write that prose to their standard.** This governs prose the skill authors, not the ticket body it reads. Baked-in minimum either way: plain words, active voice, one thought per sentence, and no em dashes (use a comma, colon, or parentheses, or rewrite the sentence).
 
 **Run network commands outside the sandbox.** Run every `gh` and `git fetch`/`pull`/`push` with sandboxing disabled — a sandboxed shell blocks network and fails with a misleading DNS/connection error; on a connection error, suspect the sandbox first.
 

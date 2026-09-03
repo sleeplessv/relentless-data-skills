@@ -26,7 +26,7 @@ skill via its **Orchestrated dispatch** contract.
 
 ## Rules
 
-- **Prose published to git or GitHub (PR body, ticket and spec comments, commit messages) follows the `technical-writing` and `unslop` skills when installed; baked-in minimum either way: plain words, active voice, and no em dashes (—)** — use commas, colons, or parentheses. Dispatch prompts that write such prose carry this rule (subagents may not have the skills).
+- **Before writing any prose published to git or GitHub (PR body, ticket and spec comments, commit messages), invoke the `technical-writing` and `unslop` skills if installed, and write that prose to their standard; baked-in minimum either way: plain words, active voice, and no em dashes** (use commas, colons, or parentheses). Dispatch prompts that write such prose carry this rule, and tell the subagent to invoke both skills itself (subagents may not have them loaded already).
 - **Network `gh` / `git fetch|pull|push` run outside the sandbox** — every dispatch prompt says so.
 - The spec is context, never a work item.
 - **Implement the work-set at the scope its tickets ask for, as the smallest change that solves it** — adjacent bugs, refactors, and cleanups get reported in the feature PR body, not fixed. Ticket dispatches inherit the frugality bar via `implement-ticket`; steps 3–4 fix dispatch prompts carry it explicitly (the `principle-laziness-protocol` skill when installed): prefer deletion over addition and the smallest diff that fixes it.

@@ -1,134 +1,124 @@
-# snowman guardrails
+# snowman guardrails and output
 
-Two tiers: rules the wrapper enforces, which no prompt can talk it out of,
-and rules you apply as discipline (taught, not blocked). This file describes
-the enforced tier. The taught rules live in SKILL.md under "Guardrails
-(summary)".
+## SQL filtering
 
-## Hard-enforced by `scripts/snowman.py`
+`scripts/snowman.py` applies a conservative lexical check before query execution:
 
-Every query runs through the wrapper. Before anything reaches Snowflake, the
-wrapper:
+1. Mask comments, string literals, and quoted identifiers before checking
+   keywords and statement separators. Comment and quote boundaries share one pass.
+2. Reject multiple statements. One trailing semicolon is accepted.
+3. Require `SELECT`, `WITH`, `SHOW`, `DESCRIBE`, `DESC`, or `EXPLAIN` first.
+4. Reject write and DDL keywords such as `INSERT`, `CREATE`, `DROP`, and `CALL`,
+   including after `WITH`. `REPLACE(...)` and `GET(...)` are allowed function
+   calls. Their statement forms are still rejected.
+5. Reject all `SYSTEM$...(...)` calls, including quoted names, and sequence
+   advancement through `.NEXTVAL` or `GETNEXTVAL(...)`.
 
-1. **Strips comments and quoted regions** (`/* */`, `--`, `//`, `'...'`,
-   `"..."`, and dollar-quoted `$$...$$`) in one lexical pass so markers in
-   one region cannot smuggle executable SQL past the checks.
-2. **Rejects multiple statements.** `;`-separated statements are refused. A
-   single trailing `;` is fine.
-3. **Checks the leading keyword.** It must be `SELECT`, `WITH`, `SHOW`,
-   `DESCRIBE` (or `DESC`), or `EXPLAIN`. Anything else is refused.
-4. **Scans for write and DDL keywords anywhere.** The list includes `INSERT,
-   UPDATE, DELETE, MERGE, TRUNCATE, DROP, CREATE, ALTER, REPLACE, GRANT,
-   REVOKE, CALL, EXECUTE, COPY, PUT, REMOVE, UNDROP, USE, SET` and more. This
-   scan catches `WITH ... INSERT` and similar. If any of them appears, the
-   wrapper refuses the query.
-5. **Injects** `--connection <from context>` and `--format JSON_EXT`, appends
-   `DESCRIBE RESULT LAST_QUERY_ID()` as a second statement so the same
-   session also returns the result's column types, then renders the result
-   itself (see "Output shaping" below). It reads the
-   connection from `.snowman/context.md` and refuses to run with no context
-   file. In a multi-environment context (`environments:` map, separate dev
-   and prod accounts) it resolves `--env <name>`, falling back to
-   `default_env`. It blocks an unknown environment name, `--env` against a
-   single-`connection:` context, a context defining both forms, and a
-   multi-environment context with no `default_env` when no `--env` is given.
-   Environment selection is per-query. There is no sticky "current
-   environment" state.
+This is not a SQL parser or a universal side-effect boundary. UDFs and external
+functions can perform actions the filter cannot detect. A least-privilege
+Snowflake role and trusted read functions are still required. The check also
+rejects some valid reads. Bare aliases named `set`, for example, match a blocked
+keyword, while `update_date` does not. `SYSTEM$` reads are blocked as a group.
 
-On refusal the wrapper prints `BLOCKED: <reason>` to stderr and exits with
-code 2. Nothing has reached Snowflake at that point.
+After validation, the wrapper resolves the connection and `default_warehouse`
+from project context. An explicit environment selects its own settings.
+Queries fall back to `default_env`. Unknown environments, mixed context forms,
+and `--env` with a single-account context are rejected. `--connection` bypasses
+context for bootstrap and retains the named connection's warehouse setting.
 
-### Output shaping
+The CLI call uses `--format JSON_EXT --enhanced-exit-codes` and appends
+`DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. This second
+statement provides schema metadata for the preview and saved result.
 
-The wrapper parses snow's JSON and prints it as CSV. The header row comes
-first. An empty cell is NULL. An empty string is `""` (a quoted empty
-field), so the two are distinguishable in the output and in the spill file.
-pandas and DuckDB read both as NULL by default; pass `keep_default_na=False`
-or `allow_quoted_nulls=false` to keep the difference. VARIANT, OBJECT, and
-ARRAY cells are compact JSON. Numbers are untouched. Lines starting with `# `
-are wrapper footers, never data, in this order:
+## Output
 
-- `# types: AMOUNT NUMBER(10,2), ORDER_TS TIMESTAMP_NTZ(9), PAYLOAD VARIANT`
-  for the columns whose Snowflake type the CSV text cannot carry: NUMBER with
-  a non-zero scale (which arrives as a quoted string like `1.50`), FLOAT,
-  DATE, TIME, TIMESTAMP, VARIANT, OBJECT, ARRAY, BINARY, GEOGRAPHY. Strings,
-  booleans, and integer NUMBER columns are omitted. The types come from the
-  `DESCRIBE RESULT` statement the wrapper runs with the query.
-- `# empty cells are NULL` when any shown cell was NULL, `# "" is an empty
-  string` when any shown cell was an empty string, or one line saying both.
-- `# some cells truncated to 200 chars; pass --max-cell 0 for full values`
-  when a string or nested-JSON cell exceeded `--max-cell N` (default 200)
-  and was cut to `<prefix>…(+K chars)`.
-- `# showing 50 of 1203 rows; full result: .snowman/results/<timestamp>__<sha1-8>.csv; add LIMIT or a WHERE filter to narrow, or pass --max-rows 0`
-  when the result exceeded `--max-rows N` (default 50). The spill file holds
-  every row, untruncated. It is gitignored through a `.gitignore` the wrapper
-  maintains in `.snowman/results/`, like staged files, and cleanup is the
-  user's. In bootstrap mode (`--connection`, no context file) nothing is
-  saved and the footer says so.
-- `# 0 rows` for an empty result.
+Successful query stdout contains data only. All type, NULL, truncation, and
+recovery notes go to stderr as `# ...` lines. Preserve the separate streams
+when parsing. A physical CSV line beginning `#` can be part of a quoted cell.
 
-`--json` prints the same capped rows as a compact JSON array instead (NULL
-stays `null`), for VARIANT-heavy results you want to `json.loads`. `--json`
-output keeps the row cap and truncates string cells only. In that mode
-NUMBER columns with a scale arrive as quoted strings, for example `"1.50"`,
-while integer values are bare. That is snow's JSON encoder behaviour, so
-parse them rather than expecting bare numbers.
+CSV has a header, with these cell representations:
 
-SQL errors arrive on stderr as one
-`ERROR: <code> (<sqlstate>): <query id>: <message>` line, with snow's exit
-code forwarded (5 = SQL error). Other errors, such as an unknown connection
-name, arrive as a one-line `ERROR: <message>` with snow's exit code (1 for an
-unknown connection).
+| Value | CSV representation |
+| --- | --- |
+| NULL | Empty unquoted field |
+| Empty string | `""` |
+| Boolean | `true` or `false` |
+| Object or array | Compact JSON, CSV-quoted as needed |
 
-### Note on the keyword scan
+Multiline cells follow CSV quoting. Standard readers may collapse NULL and an
+empty string. Use a reader that preserves quoted-empty fields when the
+distinction matters, or use `--json`.
 
-The check matches whole words against the comment- and quote-stripped SQL.
-Identifiers like `update_date` or `created_at` do not
-trigger it, because the `_` keeps them part of the same word. A read-only
-query that uses one of the listed words as a bare word (for example an alias
-named `set`) is blocked too.
+`--json` produces one compact JSON array. Empty results are `[]` plus a newline.
+CSV empty results have no data output. Both emit `# 0 rows` on stderr.
+Complete nested objects and arrays retain their JSON types. Scaled NUMBER
+values may arrive from the CLI as strings such as `"1.50"`. Schema metadata
+identifies their Snowflake type.
 
-## Staging writes: `--stage` (never executed)
+### Preview limits and recovery
 
-`python3 scripts/snowman.py --stage "<SQL>" --name <purpose-slug>` writes the
-SQL to `.snowman/staged/<timestamp>__<slug>.sql` instead of running it.
-Execution is always the user's manual act. snowman has no execute path for
-writes, by design.
+| Option | Default | Bound |
+| --- | ---: | --- |
+| `--max-rows N` | 50 | Rows shown |
+| `--max-cell N` | 200 | Retained characters of rendered cell text |
+| `--max-output N` | 16000 | UTF-8 data bytes on stdout |
 
-What stage mode enforces and what it deliberately does not:
+`0` removes an individual bound. Negative values are rejected. A positive JSON
+byte limit must be at least 3 to fit `[]` and its newline. These limits bound
+output, not query work or the size of the result fetched from Snowflake.
 
-- **Requires the context file**, same as the execute path. The staged file's
-  header embeds the exact `snow sql -f <file> --connection <conn>` run
-  command, which needs the connection name from `.snowman/context.md`.
-- **Multi-environment projects require an explicit `--env`.** There is no
-  `default_env` fallback for staging, because the header's run command
-  targets a real account. The environment lands in the filename
-  (`<timestamp>__<env>__<slug>.sql`) and in a `-- target environment:` header
-  line, so the reviewing human sees the target twice before the run command.
-- **No read-only check, no single-statement check.** A real migration is
-  several statements. The execute-path rules exist to protect execution, and
-  nothing executes here. Only an empty script is refused.
-- **Destructive keywords warn, never block.** `DROP`, `TRUNCATE`, `DELETE`,
-  `REPLACE`, `GRANT`, `REVOKE`, and `REMOVE` add a `-- WARNING:` line to the
-  file header so the reviewing human sees the dangerous bits flagged.
-- **Gitignored scratch.** The wrapper maintains `.snowman/staged/.gitignore`
-  (`*`), so staged scripts never land in the repo. There is no lifecycle
-  machinery. After the user runs a script, cleanup is theirs.
+Cell truncation appends `…(+K chars)` after the retained prefix. In JSON mode,
+a truncated cell becomes a string. Truncated objects and arrays contain
+shortened compact JSON text, with an explicit stderr notice. Complete rows are
+omitted to meet the byte limit, keeping JSON and CSV valid. A CSV header that
+alone exceeds the byte limit is omitted with all rows.
 
-## Applied by you (taught, not blocked)
+A `# types:` note lists types that plain text cannot convey, such as scaled
+NUMBER, FLOAT, DATE, TIMESTAMP, and VARIANT. The type note has a separate
+1,024-byte cap. Other diagnostics and recovery notices are outside the data
+byte limit.
 
-The wrapper deliberately does not enforce cost rules. Reliably telling a
-runaway scan from a cheap aggregate needs real parsing, and false rejects on
-`COUNT(*)` would be worse than the cost. The taught list (cost hygiene, lean
-metadata, broad then narrow, reporting, database scope) lives in SKILL.md
-under "Guardrails (summary)". One rule lives only here:
+Any row, cell, data-byte, or type-note truncation saves the complete CLI result:
 
-- **Production gets extra care.** Even though everything is read-only, treat
-  `env: prod` databases, and prod environments in multi-account projects,
-  with extra care: smaller samples, tighter filters, no expensive scans.
+```json
+{"rows":[{"AMOUNT":"1.50"}],"types":[{"name":"AMOUNT","type":"NUMBER(10,2)"}]}
+```
 
-## Database scope
+The artifact preserves all returned rows and `DESCRIBE RESULT` records.
+Project queries save to gitignored `.snowman/results/<timestamp>__<sql-hash>.json`.
+Bootstrap saves to a private `snowman-results-*` temporary directory.
+The stderr `# full result:` notice gives the path relative to the current
+working directory for project results, or an absolute bootstrap path.
+Inspect only needed fields locally. The wrapper does not delete artifacts.
 
-The context file lists in-scope databases as a focus hint, not a wall. The
-wrapper does not block queries to out-of-scope databases. Snowflake roles
-already gate real read access.
+## Failures
+
+`BLOCKED: <reason>` on stderr exits with code 2 before querying. The reason
+can describe SQL, context, configuration, or invalid limits. It does not imply
+that the submitted SQL was a write.
+
+Unexpected CLI output and artifact-save failures occur after a query. They
+produce `ERROR:` diagnostics that state the query already ran. The wrapper
+emits no data stdout for these failures. It rejects inconsistent row shapes
+rather than silently dropping fields.
+
+CLI errors retain their exit code. Rich error panels become `ERROR: ...` lines
+on stderr. Failed-query stdout is suppressed. Authentication failures may add
+a hint matched to the connection's authenticator. See
+[authentication](install.md#authentication) for the corresponding setup.
+
+## Staging
+
+`--stage "<SQL>" --name <purpose-slug>` writes SQL for manual execution.
+It requires context and, for multiple environments, an explicit `--env`.
+It accepts DML, DDL, and multiple statements. Empty scripts are rejected.
+
+Files are gitignored under `.snowman/staged/<timestamp>__<slug>.sql`.
+Multi-environment filenames also contain the environment. The header identifies
+the target and includes a shell-quoted `snow sql -f ... --connection ...` command
+with `--warehouse` when context specifies one. Run commands use paths relative
+to the project root.
+
+Destructive keywords add a `-- WARNING:` header, but do not prevent staging.
+Stage mode prints `STAGED (not executed): <path>` and `run with: <command>`.
+It does not execute or clean up scripts.

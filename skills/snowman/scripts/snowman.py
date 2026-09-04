@@ -1,75 +1,13 @@
 #!/usr/bin/env python3
-"""snowman: read-only guardrail wrapper around the Snowflake ``snow`` CLI.
+"""Snowflake query previews and SQL staging using the named-connection snow CLI.
 
-Every snowman query goes through here. The wrapper makes one ironclad
-guarantee: **only read-only, single-statement SQL ever reaches Snowflake.**
-Cost discipline (LIMIT or SAMPLE, full-scan avoidance) is taught in
-``references/guardrails.md`` and is NOT enforced here. See that file.
+A best-effort lexical filter rejects writes, SYSTEM$ calls and sequence
+advancement. It cannot prove UDFs or external functions have no side effects;
+use a least-privilege connection and only trusted read functions.
 
-Usage:
-    python3 snowman.py "<SQL>"
-    python3 snowman.py --env <name> "<SQL>"
-    python3 snowman.py --connection <name> "<SQL>"
-    python3 snowman.py [--max-rows N] [--max-cell N] [--json] "<SQL>"
-    python3 snowman.py --stage "<SQL>" --name <purpose-slug> [--env <name>]
-
-Execute mode (default):
-  * resolves the project's ``.snowman/context.md`` (walks up from CWD) and
-    reads the connection from its YAML frontmatter. Two frontmatter forms:
-    a single ``connection:`` (one account), or an ``environments:`` map plus
-    ``default_env:`` (dev and prod in separate accounts). With environments,
-    ``--env <name>`` picks one per query and ``default_env`` is the fallback.
-    Selection is stateless, never sticky;
-  * refuses to run if no context file exists (bootstrap not done), unless
-    ``--connection <name>`` overrides it, which is how the bootstrap routes
-    its discovery queries through the guardrail before the context exists;
-  * strips comments + quoted regions, then rejects anything that is not a
-    single read-only statement;
-  * loads the nearest ``.env`` at or above the project root (or above the
-    CWD in bootstrap mode) into the ``snow`` subprocess environment.
-    Existing process env always wins. Values and var names are
-    never printed. This is what makes key-pair connections with an encrypted
-    private key work: the passphrase lives in ``.env``, not in any config
-    snowman touches;
-  * on success runs ``snow sql -q "<SQL>\n;DESCRIBE RESULT LAST_QUERY_ID()"
-    --connection <conn> --format JSON_EXT --enhanced-exit-codes`` (the
-    second statement fetches the result's column types in the same
-    session), parses the JSON result and prints it as CSV (header row
-    first, a NULL is an empty cell, an empty string is ``""``, and VARIANT,
-    OBJECT, and ARRAY cells are compact JSON). CSV costs a third to a fifth
-    of the tokens of snow's indented JSON. Output is capped: ``--max-rows N`` (default 50)
-    rows are shown and, when a context file exists, the full result is
-    written to ``.snowman/results/<timestamp>__<sha1-8 of SQL>.csv``
-    (gitignored); a same-second clash gets a ``-1``, ``-2`` suffix.
-    ``--max-cell N`` (default 200) cuts longer string cells
-    to ``<prefix>…(+K chars)``. ``0`` lifts either cap. ``--json`` prints a
-    compact JSON array instead of CSV. Notes about column types that CSV
-    cannot carry (scaled NUMBER, dates and timestamps, VARIANT), NULLs,
-    truncated cells and the row cap are appended as ``# ...`` footer lines,
-    the only non-data lines on stdout;
-  * relays snow's stderr with the Rich error panel flattened to one
-    ``ERROR: ...`` line, and forwards snow's exit code (5 = SQL error, 2 =
-    argument error, other snow errors keep snow's own code). If snow fails
-    with an auth-looking error, looks up the connection's authenticator
-    through ``snow connection list`` (local config read, no secrets) and
-    appends a one-line hint matched to the auth method: complete the browser
-    login (OAuth or SSO), or put the key-pair passphrase in ``.env``;
-  * on refusal prints ``BLOCKED: <reason>`` to stderr and exits non-zero.
-
-Stage mode (``--stage``):
-  * never executes anything. Writes the SQL to
-    ``.snowman/staged/<timestamp>__<slug>.sql`` for the user to review and
-    run manually;
-  * accepts any SQL, including DML or DDL and multi-statement scripts. The
-    only check is non-emptiness. Destructive keywords add a warning line to
-    the file header. They never block;
-  * still requires ``.snowman/context.md`` (the header's run command needs
-    the connection name). In a multi-environment project ``--env`` is
-    REQUIRED. The run command targets a real account, so the environment
-    must be explicit. It also lands in the filename and a header line;
-  * keeps ``.snowman/staged/`` gitignored through a ``.gitignore`` it maintains.
-
-Standard library only.
+Stdout contains CSV or a compact JSON array; notes go to stderr. Truncated
+previews save complete rows and schema for local inspection. See SKILL.md
+and references/guardrails.md for the usage and limits. Standard library only.
 """
 from __future__ import annotations
 
@@ -79,8 +17,10 @@ import io
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
@@ -132,6 +72,10 @@ class Blocked(Exception):
     Raised anywhere the wrapper refuses to proceed and rendered once, in
     ``main``, as ``BLOCKED: <reason>`` on stderr with exit code ``BLOCK``.
     """
+
+
+class ResultProcessingError(Exception):
+    """Snow succeeded, but its result could not be decoded or preserved."""
 
 
 def find_context(start: Path) -> Path:
@@ -268,6 +212,7 @@ class Target(NamedTuple):
     project_root: Path | None
     snowman_dir: Path | None
     env_file: Path | None
+    warehouse: str | None = None
 
 
 def resolve_target(
@@ -281,16 +226,20 @@ def resolve_target(
     one at or above the project root, or above ``start`` in bootstrap mode.
     Raises ``Blocked`` for a missing context file or a bad frontmatter.
     """
+    warehouse = None
     if connection:
         environment = project_root = snowman_dir = None
     else:
         context = find_context(start)
         connection, environment = resolve_connection(context, env, for_stage=for_stage)
+        top, environments = parse_frontmatter(context)
+        settings = environments[environment] if environment else top
+        warehouse = settings.get("default_warehouse")
         snowman_dir = context.parent
         project_root = snowman_dir.parent
     return Target(
         connection, environment, project_root, snowman_dir,
-        find_env_file(project_root or start),
+        find_env_file(project_root or start), warehouse,
     )
 
 
@@ -475,13 +424,28 @@ def enforce_read_only(sql: str) -> None:
     if word not in ALLOWED_LEADING:
         raise Blocked(f"non-read-only statement (leading keyword: {word}).")
 
-    found = keywords_in(cleaned, WRITE_KEYWORDS)
+    # REPLACE and GET are also read functions. Only exempt call syntax;
+    # their statement forms still fail the leading-keyword/write checks.
+    write_scan = re.sub(r"\b(?:REPLACE|GET)\s*(?=\()", " ", cleaned, flags=re.I)
+    found = keywords_in(write_scan, WRITE_KEYWORDS)
     if found:
         raise Blocked(f"write or DDL keyword present: {', '.join(sorted(found))}.")
+
+    # Retain quoted identifiers for this check, but still discard literals
+    # and comments. Quoting a system function must not bypass the filter.
+    callable_sql = ANALYSIS_TOKEN_RE.sub(
+        lambda match: match.group(0) if match.group(0).startswith('"') else " ", sql
+    )
+    if re.search(r'(?<![\w$])"?SYSTEM\$[\w$]+"?\s*\(', callable_sql, re.I):
+        raise Blocked("SYSTEM$ function calls are outside supported read queries.")
+    if re.search(r'\.\s*"?NEXTVAL"?(?![\w$])|(?<![\w$])"?GETNEXTVAL"?\s*\(', callable_sql, re.I):
+        raise Blocked("sequence advancement is outside supported read queries.")
 
 
 DEFAULT_MAX_ROWS = 50
 DEFAULT_MAX_CELL = 200
+DEFAULT_MAX_OUTPUT = 16000
+MAX_TYPE_NOTE_BYTES = 1024
 
 
 def render_cell(value) -> str | None:
@@ -514,8 +478,7 @@ def csv_field(text: str | None, *, force_quote: bool = False) -> str:
 
 
 def write_csv_row(out: io.StringIO, cells: list[str | None]) -> None:
-    """Write one CSV line. A first cell starting with ``#`` is force-quoted so
-    no data line can be mistaken for a ``# ...`` footer."""
+    """Write one CSV record, quoting leading hashes for human readability."""
     fields = [csv_field(cell) for cell in cells]
     if cells and cells[0] is not None and cells[0].startswith("#"):
         fields[0] = csv_field(cells[0], force_quote=True)
@@ -554,82 +517,113 @@ def types_footer(describe_rows: list[dict] | None) -> str | None:
     return f"# types: {', '.join(notable)}" if notable else None
 
 
+def validate_limits(fmt: str, max_rows: int, max_cell: int, max_output: int) -> None:
+    for name, value in (("max-rows", max_rows), ("max-cell", max_cell), ("max-output", max_output)):
+        if value < 0:
+            raise Blocked(f"--{name} must be nonnegative; 0 means unlimited.")
+    if fmt == "json" and 0 < max_output < 3:
+        raise Blocked("--max-output must be 0 or at least 3 bytes for JSON ([] plus newline).")
+
+
 def render_rows(
     rows: list[dict],
     *,
     fmt: str = "csv",
     max_rows: int = DEFAULT_MAX_ROWS,
     max_cell: int = DEFAULT_MAX_CELL,
+    max_output: int = DEFAULT_MAX_OUTPUT,
     full_note: str | None = None,
     types: list[dict] | None = None,
-) -> tuple[str, list[str]]:
-    """Shape a JSON_EXT result for the agent: ``(text, footer_lines)``.
+) -> tuple[str, list[str], bool]:
+    """Return data text, stderr notes, and whether any result detail was cut.
 
-    ``fmt`` is ``csv`` (header row, NULL as empty cell, empty string as
-    ``""``, nested values as compact JSON) or ``json`` (compact array, NULL
-    stays ``null``). Rows past ``max_rows`` and characters past ``max_cell``
-    are cut (0 = unlimited). ``full_note`` is spliced into the row-cap footer
-    to say where (or whether) the full result was saved. ``types`` is the
-    ``DESCRIBE RESULT`` row list for the same query, if fetched; it feeds a
-    ``# types:`` footer. Footers all start with ``# ``.
+    Limits apply to rows, cell characters and UTF-8 data bytes. Zero lifts
+    that limit. Oversized nested JSON cells become truncated JSON text;
+    complete nested values retain their types. Whole rows are omitted when
+    the byte budget runs out. Type notes have a separate 1024-byte ceiling.
     """
+    validate_limits(fmt, max_rows, max_cell, max_output)
     total = len(rows)
-    if total == 0:
-        return "", ["# 0 rows"]
-    shown = rows[:max_rows] if max_rows else rows
-    columns = list(shown[0].keys())
+    columns = list(rows[0]) if rows else []
+    header = io.StringIO()
+    if fmt == "csv" and columns:
+        write_csv_row(header, columns)
+    prefix = "[" if fmt == "json" else header.getvalue()
+    suffix = "]\n" if fmt == "json" else ""
+    used = len((prefix + suffix).encode("utf-8"))
+    budget_cut = bool(max_output and used > max_output)
+    if budget_cut:
+        prefix = ""  # A CSV header can exceed the budget by itself.
+    pieces: list[str] = []
+    had_null = had_empty = cell_cut = nested_cut = False
+    candidates = rows[:max_rows] if max_rows else rows
+    for row in candidates:
+        if budget_cut:
+            break
+        csv_cells: list[str | None] = []
+        json_cells: dict = {}
+        row_null = row_empty = row_cut = row_nested_cut = False
+        for col in columns:
+            value = row.get(col)
+            text = render_cell(value)
+            cut = False
+            if text is not None:
+                text, cut = truncate_cell(text, max_cell)
+            row_cut |= cut
+            if fmt == "json":
+                json_cells[col] = text if cut else value
+                row_nested_cut |= cut and isinstance(value, (dict, list))
+            else:
+                row_null |= value is None
+                row_empty |= value == ""
+                csv_cells.append(text)
+        if fmt == "json":
+            piece = ("," if pieces else "") + json.dumps(json_cells, separators=(",", ":"), ensure_ascii=False)
+        else:
+            line = io.StringIO()
+            write_csv_row(line, csv_cells)
+            piece = line.getvalue()
+        size = len(piece.encode("utf-8"))
+        if max_output and used + size > max_output:
+            budget_cut = True
+            break
+        pieces.append(piece)
+        used += size
+        had_null |= row_null
+        had_empty |= row_empty
+        cell_cut |= row_cut
+        nested_cut |= row_nested_cut
 
-    had_null = False
-    had_empty = False
-    truncated_any = False
-    out = io.StringIO()
-    if fmt == "json":
-        shaped = []
-        for row in shown:
-            cells = {}
-            for col in columns:
-                value = row.get(col)
-                if isinstance(value, str):
-                    value, cut = truncate_cell(value, max_cell)
-                    truncated_any |= cut
-                cells[col] = value
-            shaped.append(cells)
-        out.write(json.dumps(shaped, separators=(",", ":"), ensure_ascii=False))
-        out.write("\n")
-    else:
-        write_csv_row(out, columns)
-        for row in shown:
-            cells = []
-            for col in columns:
-                value = row.get(col)
-                had_null |= value is None
-                had_empty |= value == ""
-                text = render_cell(value)
-                if text is not None:
-                    text, cut = truncate_cell(text, max_cell)
-                    truncated_any |= cut
-                cells.append(text)
-            write_csv_row(out, cells)
-
-    footers = []
+    notes = []
+    type_cut = False
     if (note := types_footer(types)):
-        footers.append(note)
+        encoded = note.encode("utf-8")
+        if len(encoded) > MAX_TYPE_NOTE_BYTES:
+            ending = "... [type notes shortened]"
+            note = encoded[:MAX_TYPE_NOTE_BYTES - len(ending)].decode("utf-8", errors="ignore") + ending
+            type_cut = True
+        notes.append(note)
+    if not rows:
+        notes.append("# 0 rows")
     if had_null and had_empty:
-        footers.append('# empty cells are NULL; "" is an empty string')
+        notes.append('# empty cells are NULL; "" is an empty string')
     elif had_null:
-        footers.append("# empty cells are NULL")
+        notes.append("# empty cells are NULL")
     elif had_empty:
-        footers.append('# "" is an empty string')
-    if truncated_any:
-        footers.append(
-            f"# some cells truncated to {max_cell} chars; pass --max-cell 0 for full values"
-        )
-    if len(shown) < total:
-        footers.append(
-            f"# showing {len(shown)} of {total} rows; {full_note}; add LIMIT or a "
-            "WHERE filter to narrow, or pass --max-rows 0"
-        )
-    return out.getvalue(), footers
+        notes.append('# "" is an empty string')
+    if cell_cut:
+        notes.append(f"# some cells truncated to {max_cell} chars; pass --max-cell 0 for full values")
+    if nested_cut:
+        notes.append("# truncated nested JSON cells are shown as JSON text strings")
+    if len(pieces) < total:
+        note = f"# showing {len(pieces)} of {total} rows"
+        if full_note:
+            note += f"; {full_note}"
+        notes.append(note + "; narrow the query or raise --max-rows/--max-output")
+    if budget_cut:
+        notes.append(f"# data preview limited to {max_output} UTF-8 bytes; pass --max-output 0 for unlimited")
+    truncated = cell_cut or type_cut or budget_cut or len(pieces) < total
+    return prefix + "".join(pieces) + suffix, notes, truncated
 
 
 def clean_snow_stderr(text: str) -> str:
@@ -691,14 +685,17 @@ def unique_path(directory: Path, base: str, suffix: str, now: datetime) -> Path:
 
 
 def spill_full_result(
-    rows: list[dict], sql: str, snowman_dir: Path, *, now: datetime | None = None
+    rows: list[dict], sql: str, snowman_dir: Path | None, *,
+    types: list[dict] | None = None, now: datetime | None = None,
 ) -> Path:
-    """Write every row, untruncated, as CSV under ``<snowman_dir>/results/``."""
-    results_dir = gitignored_dir(snowman_dir / "results")
+    """Save lossless rows and DESCRIBE schema. Bootstrap uses a private temp dir."""
+    results_dir = (gitignored_dir(snowman_dir / "results") if snowman_dir
+                   else Path(tempfile.mkdtemp(prefix="snowman-results-")))
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
-    path = unique_path(results_dir, digest, ".csv", now or datetime.now())
-    text, _ = render_rows(rows, fmt="csv", max_rows=0, max_cell=0)
-    path.write_text(text, encoding="utf-8")
+    path = unique_path(results_dir, digest, ".json", now or datetime.now())
+    with path.open("x", encoding="utf-8") as out:
+        json.dump({"rows": rows, "types": types or []}, out, separators=(",", ":"), ensure_ascii=False)
+        out.write("\n")
     return path
 
 
@@ -713,6 +710,7 @@ def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) 
 
     target = resolve_target(Path.cwd(), None, env, for_stage=True)
     connection, env_name = target.connection, target.environment
+    assert target.snowman_dir is not None and target.project_root is not None
     staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
     now = now or datetime.now()
@@ -720,7 +718,10 @@ def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) 
     path = unique_path(staged_dir, f"{env_part}{slug}", ".sql", now)
     rel = path.relative_to(target.project_root)
 
-    run_cmd = f"snow sql -f {rel} --connection {connection}"
+    run_args = ["snow", "sql", "-f", str(rel), "--connection", connection]
+    if target.warehouse:
+        run_args += ["--warehouse", target.warehouse]
+    run_cmd = shlex.join(run_args)
     destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
     header = [
         "-- staged by snowman, NOT executed",
@@ -775,11 +776,13 @@ def split_result(parsed) -> tuple[list | None, list[dict] | None]:
     """``(rows, describe_rows)`` from snow's JSON_EXT stdout. Two statements
     come back as ``[[rows...], [describe rows...]]``; a lone ``[rows...]``
     (or the ``[]`` snow prints on failure) has no types. Anything else is
-    ``(None, None)`` so the caller relays it raw."""
+    ``(None, None)`` so the caller refuses an unexpected output format."""
     if not isinstance(parsed, list):
         return None, None
     if len(parsed) == 2 and all(isinstance(part, list) for part in parsed):
-        return parsed[0], parsed[1]
+        if all(isinstance(row, dict) for part in parsed for row in part):
+            return parsed[0], parsed[1]
+        return None, None
     if all(isinstance(row, dict) for row in parsed):
         return parsed, None
     return None, None
@@ -793,7 +796,9 @@ def execute(
     fmt: str = "csv",
     max_rows: int = DEFAULT_MAX_ROWS,
     max_cell: int = DEFAULT_MAX_CELL,
+    max_output: int = DEFAULT_MAX_OUTPUT,
 ) -> int:
+    validate_limits(fmt, max_rows, max_cell, max_output)
     if not sql.strip():
         raise Blocked("empty query.")
     enforce_read_only(sql)
@@ -802,11 +807,11 @@ def execute(
     connection, env_file = target.connection, target.env_file
 
     sub_env = snow_env(env_file)
-    result = run_snow(
-        ["sql", "-q", with_describe(sql), "--connection", connection,
-         "--format", "JSON_EXT", "--enhanced-exit-codes"],
-        sub_env,
-    )
+    query_args = ["sql", "-q", with_describe(sql), "--connection", connection,
+                  "--format", "JSON_EXT", "--enhanced-exit-codes"]
+    if target.warehouse:
+        query_args += ["--warehouse", target.warehouse]
+    result = run_snow(query_args, sub_env)
 
     if result.stderr:
         sys.stderr.write(clean_snow_stderr(result.stderr))
@@ -814,32 +819,30 @@ def execute(
         hint = auth_hint_for(result.stderr, connection, env_file, sub_env)
         if hint:
             print(hint, file=sys.stderr)
+        return result.returncode
 
-    if result.stdout.strip():
+    try:
+        rows, types = split_result(json.loads(result.stdout))
+    except ValueError:
+        rows = types = None
+    if not isinstance(rows, list):
+        raise ResultProcessingError("unexpected snow output; expected JSON row arrays. Check the CLI version and diagnostics.")
+    if rows and any(row.keys() != rows[0].keys() for row in rows[1:]):
+        raise ResultProcessingError("inconsistent result columns; cannot safely render these rows.")
+    text, notes, truncated = render_rows(
+        rows, fmt=fmt, max_rows=max_rows, max_cell=max_cell,
+        max_output=max_output, types=types,
+    )
+    if truncated:
         try:
-            rows, types = split_result(json.loads(result.stdout))
-        except ValueError:
-            rows = types = None
-        if result.returncode != 0 and result.stdout.strip() in ("[", "[]"):
-            pass  # what a failed query leaves on stdout; stderr has the error
-        elif not isinstance(rows, list):
-            sys.stdout.write(result.stdout)  # unexpected shape: relay raw
-        else:
-            full_note = None
-            if max_rows and len(rows) > max_rows:
-                if target.snowman_dir is None:
-                    full_note = "no context file yet so the full result was not saved"
-                else:
-                    spilled = spill_full_result(rows, sql, target.snowman_dir)
-                    rel = os.path.relpath(spilled, Path.cwd())
-                    full_note = f"full result: {rel}"
-            text, footers = render_rows(
-                rows, fmt=fmt, max_rows=max_rows, max_cell=max_cell,
-                full_note=full_note, types=types,
-            )
-            sys.stdout.write(text)
-            for line in footers:
-                print(line)
+            spilled = spill_full_result(rows, sql, target.snowman_dir, types=types)
+        except OSError as exc:
+            raise ResultProcessingError(f"cannot save full result: {exc}") from exc
+        location = os.path.relpath(spilled, Path.cwd()) if target.snowman_dir else str(spilled)
+        notes.append(f"# full result: {location}")
+    sys.stdout.write(text)
+    for line in notes:
+        print(line, file=sys.stderr)
     return result.returncode
 
 
@@ -879,9 +882,13 @@ def main(argv: list[str]) -> int:
         f"…(+K chars) tail (default {DEFAULT_MAX_CELL}, 0 = unlimited)",
     )
     parser.add_argument(
+        "--max-output", type=int, default=DEFAULT_MAX_OUTPUT, metavar="BYTES",
+        help=f"UTF-8 data bytes to print (default {DEFAULT_MAX_OUTPUT}, 0 = unlimited); notes go to stderr",
+    )
+    parser.add_argument(
         "--json", action="store_true",
         help="print rows as a compact JSON array instead of CSV (nested "
-        "VARIANT, OBJECT, and ARRAY values stay real JSON)",
+        "VARIANT, OBJECT, and ARRAY values retain JSON types unless truncated)",
     )
     args = parser.parse_args(argv[1:])
 
@@ -907,10 +914,14 @@ def main(argv: list[str]) -> int:
             fmt="json" if args.json else "csv",
             max_rows=args.max_rows,
             max_cell=args.max_cell,
+            max_output=args.max_output,
         )
     except Blocked as refusal:
         print(f"BLOCKED: {refusal}", file=sys.stderr)
         return BLOCK
+    except ResultProcessingError as failure:
+        print(f"ERROR: query already ran; {failure} Do not rerun automatically.", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

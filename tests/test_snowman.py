@@ -50,7 +50,7 @@ default_env: dev
 
 Outcome = snowman.SnowResult
 
-OK = Outcome(0, "", "")
+OK = Outcome(0, "[]", "")
 
 
 def fake_snow(outcomes: dict[str, Outcome]):
@@ -185,6 +185,23 @@ class TestEnforceReadOnly(SnowmanTestCase):
 
     def test_lowercase_select_allowed(self):
         self.assert_allowed("select 1")
+
+    def test_read_functions_with_write_keyword_names_are_allowed(self):
+        self.assert_allowed("SELECT REPLACE('abc', 'a', 'z'), GET(PARSE_JSON('{}'), 'a')")
+        self.assert_blocked(snowman.enforce_read_only, "GET @stage file:///tmp/")
+        self.assert_blocked(snowman.enforce_read_only, "CREATE OR REPLACE TABLE t (a INT)")
+
+    def test_operational_selects_are_blocked(self):
+        for sql in (
+            "SELECT SYSTEM$CANCEL_QUERY('id')",
+            'SELECT "SYSTEM$CANCEL_QUERY"(\'id\')',
+            "SELECT system$abort_transaction(1)",
+            "SELECT seq.nextval",
+            'SELECT "seq"."NEXTVAL"',
+            "SELECT * FROM TABLE(GETNEXTVAL(seq))",
+        ):
+            with self.subTest(sql=sql):
+                self.assert_blocked(snowman.enforce_read_only, sql)
 
     def test_trailing_semicolon_is_one_statement(self):
         self.assert_allowed("SELECT 1;")
@@ -575,42 +592,42 @@ class TestRenderRows(SnowmanTestCase):
     """Output shaping: CSV by default, nulls as empty cells, nested as JSON."""
 
     def test_csv_header_then_rows(self):
-        text, footers = snowman.render_rows(
-            [{"A": 1, "B": "x"}, {"A": 2, "B": "y"}], fmt="csv", max_rows=50, max_cell=200
+        text, footers, _ = snowman.render_rows(
+            [{"A": 1, "B": "x"}, {"A": 2, "B": "y"}], fmt="csv", max_rows=50, max_cell=200, max_output=16000
         )
         self.assertEqual(text, "A,B\n1,x\n2,y\n")
         self.assertEqual(footers, [])
 
     def test_null_renders_empty_with_footer(self):
-        text, footers = snowman.render_rows(
-            [{"A": None, "B": "x"}], fmt="csv", max_rows=50, max_cell=200
+        text, footers, _ = snowman.render_rows(
+            [{"A": None, "B": "x"}], fmt="csv", max_rows=50, max_cell=200, max_output=16000
         )
         self.assertEqual(text, "A,B\n,x\n")
         self.assertEqual(footers, ["# empty cells are NULL"])
 
     def test_empty_string_is_quoted_and_noted(self):
-        text, footers = snowman.render_rows(
-            [{"A": "", "B": "x"}], fmt="csv", max_rows=50, max_cell=200
+        text, footers, _ = snowman.render_rows(
+            [{"A": "", "B": "x"}], fmt="csv", max_rows=50, max_cell=200, max_output=16000
         )
         self.assertEqual(text, 'A,B\n"",x\n')
         self.assertEqual(footers, ['# "" is an empty string'])
 
     def test_null_and_empty_string_share_one_footer(self):
-        text, footers = snowman.render_rows(
-            [{"A": "", "B": None}, {"A": None, "B": ""}], fmt="csv", max_rows=50, max_cell=200
+        text, footers, _ = snowman.render_rows(
+            [{"A": "", "B": None}, {"A": None, "B": ""}], fmt="csv", max_rows=50, max_cell=200, max_output=16000
         )
         self.assertEqual(text, 'A,B\n"",\n,""\n')
         self.assertEqual(footers, ['# empty cells are NULL; "" is an empty string'])
 
     def test_json_mode_keeps_null_and_empty_string_distinct_without_footer(self):
-        text, footers = snowman.render_rows(
+        text, footers, _ = snowman.render_rows(
             [{"A": "", "B": None}], fmt="json", max_rows=50, max_cell=200
         )
         self.assertEqual(text, '[{"A":"","B":null}]\n')
         self.assertEqual(footers, [])
 
     def test_cells_with_comma_quote_or_newline_are_quoted(self):
-        text, _ = snowman.render_rows(
+        text, _, _ = snowman.render_rows(
             [{"A": "a,b", "B": 'say "hi"', "C": "l1\nl2", "D": "plain"}],
             fmt="csv", max_rows=50, max_cell=200,
         )
@@ -628,7 +645,7 @@ class TestRenderRows(SnowmanTestCase):
             {"name": "O", "type": "OBJECT"},
             {"name": "V", "type": "VARIANT"},
         ]
-        _, footers = snowman.render_rows(
+        _, footers, _ = snowman.render_rows(
             [{"ID": 1}], fmt="csv", max_rows=50, max_cell=200, types=describe
         )
         self.assertEqual(
@@ -639,44 +656,44 @@ class TestRenderRows(SnowmanTestCase):
 
     def test_types_footer_absent_when_all_plain_or_no_describe(self):
         describe = [{"name": "ID", "type": "NUMBER"}, {"name": "S", "type": "VARCHAR(10)"}]
-        _, footers = snowman.render_rows(
+        _, footers, _ = snowman.render_rows(
             [{"ID": 1}], fmt="csv", max_rows=50, max_cell=200, types=describe
         )
         self.assertEqual(footers, [])
-        _, footers = snowman.render_rows([{"ID": 1}], fmt="csv", max_rows=50, max_cell=200)
+        _, footers, _ = snowman.render_rows([{"ID": 1}], fmt="csv", max_rows=50, max_cell=200)
         self.assertEqual(footers, [])
 
     def test_nested_values_render_as_compact_json(self):
-        text, _ = snowman.render_rows(
-            [{"O": {"k": [1, 2]}, "L": ["a", None]}], fmt="csv", max_rows=50, max_cell=200
+        text, _, _ = snowman.render_rows(
+            [{"O": {"k": [1, 2]}, "L": ["a", None]}], fmt="csv", max_rows=50, max_cell=200, max_output=16000
         )
         self.assertEqual(text, 'O,L\n"{""k"":[1,2]}","[""a"",null]"\n')
 
     def test_numbers_untouched_and_booleans_lowercase(self):
-        text, _ = snowman.render_rows(
+        text, _, _ = snowman.render_rows(
             [{"F": 3.14159265358979, "I": 7, "B": True, "C": False}],
             fmt="csv", max_rows=50, max_cell=200,
         )
         self.assertEqual(text, "F,I,B,C\n3.14159265358979,7,true,false\n")
 
     def test_first_cell_starting_with_hash_is_quoted(self):
-        text, _ = snowman.render_rows(
+        text, _, _ = snowman.render_rows(
             [{"TAG": "#top", "N": 1}, {"TAG": "plain", "N": 2}, {"TAG": "#", "N": 3}],
             fmt="csv", max_rows=50, max_cell=200,
         )
         self.assertEqual(text, 'TAG,N\n"#top",1\nplain,2\n"#",3\n')
 
     def test_first_cell_hash_quoted_in_single_column_result(self):
-        text, _ = snowman.render_rows([{"TAG": "#only"}], fmt="csv", max_rows=50, max_cell=200)
+        text, _, _ = snowman.render_rows([{"TAG": "#only"}], fmt="csv", max_rows=50, max_cell=200)
         self.assertEqual(text, 'TAG\n"#only"\n')
 
     def test_empty_result_prints_zero_rows_note(self):
-        text, footers = snowman.render_rows([], fmt="csv", max_rows=50, max_cell=200)
+        text, footers, _ = snowman.render_rows([], fmt="csv", max_rows=50, max_cell=200)
         self.assertEqual(text, "")
         self.assertEqual(footers, ["# 0 rows"])
 
     def test_cell_truncation_suffix_and_footer(self):
-        text, footers = snowman.render_rows(
+        text, footers, _ = snowman.render_rows(
             [{"S": "abcdefghij"}], fmt="csv", max_rows=50, max_cell=4
         )
         self.assertEqual(text, "S\nabcd…(+6 chars)\n")
@@ -691,7 +708,7 @@ class TestRenderRows(SnowmanTestCase):
 
     def test_row_cap_footer(self):
         rows = [{"N": i} for i in range(1203)]
-        text, footers = snowman.render_rows(
+        text, footers, _ = snowman.render_rows(
             rows, fmt="csv", max_rows=50, max_cell=200,
             full_note="full result: .snowman/results/20260903-181200__ab12cd34.csv",
         )
@@ -699,19 +716,18 @@ class TestRenderRows(SnowmanTestCase):
         self.assertEqual(
             footers,
             ["# showing 50 of 1203 rows; full result: "
-             ".snowman/results/20260903-181200__ab12cd34.csv; add LIMIT or a "
-             "WHERE filter to narrow, or pass --max-rows 0"],
+             ".snowman/results/20260903-181200__ab12cd34.csv; narrow the query or raise --max-rows/--max-output"],
         )
 
     def test_max_rows_zero_is_unlimited(self):
         rows = [{"N": i} for i in range(1203)]
-        text, footers = snowman.render_rows(rows, fmt="csv", max_rows=0, max_cell=200)
+        text, footers, _ = snowman.render_rows(rows, fmt="csv", max_rows=0, max_cell=200)
         self.assertEqual(text.count("\n"), 1204)
         self.assertEqual(footers, [])
 
     def test_footer_order_types_null_truncation_cap(self):
         rows = [{"S": "abcdefghij", "N": None}] * 3
-        _, footers = snowman.render_rows(
+        _, footers, _ = snowman.render_rows(
             rows, fmt="csv", max_rows=2, max_cell=4, full_note="full result: x.csv",
             types=[{"name": "N", "type": "DATE"}],
         )
@@ -725,11 +741,12 @@ class TestRenderRows(SnowmanTestCase):
 
     def test_json_output_is_compact_and_parseable(self):
         rows = [{"O": {"k": 1}, "S": "abcdefghij", "N": None}]
-        text, footers = snowman.render_rows(rows, fmt="json", max_rows=50, max_cell=4)
-        self.assertEqual(text, '[{"O":{"k":1},"S":"abcd…(+6 chars)","N":null}]\n')
-        self.assertEqual(json.loads(text)[0]["O"], {"k": 1})
+        text, footers, _ = snowman.render_rows(rows, fmt="json", max_rows=50, max_cell=4)
+        self.assertEqual(text, '[{"O":"{\\"k\\"…(+3 chars)","S":"abcd…(+6 chars)","N":null}]\n')
+        self.assertEqual(json.loads(text)[0]["O"], '{"k"…(+3 chars)')
         self.assertEqual(
-            footers, ["# some cells truncated to 4 chars; pass --max-cell 0 for full values"]
+            footers, ["# some cells truncated to 4 chars; pass --max-cell 0 for full values",
+                      "# truncated nested JSON cells are shown as JSON text strings"]
         )
 
 
@@ -794,16 +811,16 @@ class TestUniquePath(SnowmanTestCase):
 
 
 class TestSpillFullResult(SnowmanTestCase):
-    def test_writes_full_untruncated_csv_and_gitignore(self):
+    def test_writes_full_untruncated_json_and_gitignore(self):
         root = self.make_project()
         snowman_dir = root / ".snowman"
         rows = [{"N": i, "S": "x" * 500, "V": None} for i in range(70)]
         fixed = datetime(2026, 9, 3, 18, 12, 0)
         path = snowman.spill_full_result(rows, "SELECT 1", snowman_dir, now=fixed)
         self.assertEqual(path.parent, root / ".snowman" / "results")
-        self.assertRegex(path.name, r"^20260903-181200__[0-9a-f]{8}\.csv$")
+        self.assertRegex(path.name, r"^20260903-181200__[0-9a-f]{8}\.json$")
         body = path.read_text(encoding="utf-8")
-        self.assertEqual(body.count("\n"), 71)
+        self.assertEqual(json.loads(body), {"rows": rows, "types": []})
         self.assertIn("x" * 500, body)
         self.assertNotIn("…", body)
         gitignore = root / ".snowman" / "results" / ".gitignore"
@@ -815,7 +832,7 @@ class TestSpillFullResult(SnowmanTestCase):
         first = snowman.spill_full_result([{"N": 1}], "SELECT 1", snowman_dir, now=fixed)
         second = snowman.spill_full_result([{"N": 2}], "SELECT 1", snowman_dir, now=fixed)
         self.assertNotEqual(first, second)
-        self.assertEqual(second.name, first.stem + "-1.csv")
+        self.assertEqual(second.name, first.stem + "-1.json")
         self.assertIn("1", first.read_text(encoding="utf-8"))
         self.assertIn("2", second.read_text(encoding="utf-8"))
 
@@ -872,6 +889,86 @@ class TestExecute(SnowmanTestCase):
             self.assert_blocked(snowman.execute, "DROP TABLE t")
         self.assertEqual(snow.calls, [])
 
+    def test_json_stdout_is_one_array_with_metadata_on_stderr(self):
+        self.enter(self.make_project())
+        schema = [{"name": "V", "type": "VARIANT"}]
+        for rows in ([{"V": {"a": 1}}], []):
+            with self.subTest(rows=rows):
+                payload = json.dumps([rows, schema])
+                code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1", fmt="json")
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(out), rows)
+                self.assertIn("# types: V VARIANT", err)
+
+    def test_multiline_csv_never_shares_stream_with_metadata(self):
+        import csv
+
+        self.enter(self.make_project())
+        payload = json.dumps([{"V": "first\n# 0 rows\nlast", "N": None}])
+        _, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+        self.assertEqual(list(csv.reader(io.StringIO(out))), [["V", "N"], ["first\n# 0 rows\nlast", ""]])
+        self.assertEqual(err, "# empty cells are NULL\n")
+
+    def test_all_truncated_previews_save_lossless_rows_and_schema(self):
+        root = self.enter(self.make_project())
+        rows = [{"V": {"deep": ["x" * 1000] * 1000}, "DDL": "a" * 5000}]
+        schema = [{"name": "V", "type": "VARIANT"}, {"name": "DDL", "type": "VARCHAR"}]
+        for fmt in ("csv", "json"):
+            with self.subTest(fmt=fmt):
+                _, out, err = self.run_execute({"sql": Outcome(0, json.dumps([rows, schema]), "")}, "SELECT 1", fmt=fmt)
+                self.assertLessEqual(len(out.encode("utf-8")), 16000)
+                if fmt == "json":
+                    self.assertEqual(len(json.loads(out)), 1)
+                path = Path(err.split("full result: ")[1].splitlines()[0])
+                saved = json.loads((root / path).read_text())
+                self.assertEqual(saved, {"rows": rows, "types": schema})
+
+    def test_output_budget_omits_complete_rows_in_both_formats(self):
+        import csv
+
+        self.enter(self.make_project())
+        rows = [{f"C{i}": "é" * 200 for i in range(100)}] * 50
+        for fmt in ("csv", "json"):
+            with self.subTest(fmt=fmt):
+                _, out, err = self.run_execute({"sql": Outcome(0, json.dumps(rows), "")}, "SELECT 1", fmt=fmt)
+                self.assertLessEqual(len(out.encode("utf-8")), 16000)
+                if fmt == "json":
+                    self.assertEqual(json.loads(out), [])
+                else:
+                    self.assertEqual(len(list(csv.reader(io.StringIO(out)))), 1)
+                self.assertIn("showing 0 of 50 rows", err)
+                self.assertIn("full result:", err)
+
+    def test_large_schema_notes_are_bounded_and_preserved_in_artifact(self):
+        root = self.enter(self.make_project())
+        schema = [{"name": "é" * 200 + str(i), "type": "VARIANT"} for i in range(100)]
+        _, out, err = self.run_execute({"sql": Outcome(0, json.dumps([[], schema]), "")}, "SELECT 1", fmt="json")
+        self.assertEqual(json.loads(out), [])
+        self.assertLessEqual(len(err.splitlines()[0].encode("utf-8")), 1024)
+        self.assertIn("type notes shortened", err)
+        path = root / err.split("full result: ")[1].splitlines()[0]
+        self.assertEqual(json.loads(path.read_text())["types"], schema)
+
+    def test_invalid_limits_block_before_snow_is_called(self):
+        for limits in ({"max_rows": -1}, {"max_cell": -1}, {"max_output": -1},
+                       {"fmt": "json", "max_output": 1}, {"fmt": "json", "max_output": 2}):
+            with self.subTest(limits=limits):
+                self.assert_blocked(self.run_execute, {}, "SELECT 1", **limits)
+                self.assertEqual(self.snow.calls, [])
+
+    def test_smallest_json_budget_keeps_valid_empty_array(self):
+        self.enter(self.make_project())
+        _, out, err = self.run_execute({"sql": Outcome(0, '[{"N":1}]', "")}, "SELECT 1", fmt="json", max_output=3)
+        self.assertEqual(out, "[]\n")
+        self.assertIn("full result:", err)
+
+    def test_malformed_success_output_is_refused_without_raw_stdout(self):
+        self.enter(self.make_project())
+        for payload in ("not json" * 10000, '{"error":"bad"}', '[[1],[]]'):
+            with self.subTest(payload=payload[:20]):
+                with self.assertRaisesRegex(snowman.ResultProcessingError, "unexpected snow output"):
+                    self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+
     def test_runs_snow_with_resolved_connection(self):
         self.enter(self.make_project())
         code, _, _ = self.run_execute({"sql": OK}, "SELECT 1")
@@ -882,6 +979,17 @@ class TestExecute(SnowmanTestCase):
              "--connection", "analytics",
              "--format", "JSON_EXT", "--enhanced-exit-codes"],
         )
+
+    def test_context_warehouse_is_applied_for_selected_environment(self):
+        for context, env, expected in (
+            (SINGLE_CONN_FRONTMATTER.replace("connection: analytics", "connection: analytics\ndefault_warehouse: SMALL_WH"), None, "SMALL_WH"),
+            (MULTI_ENV_FRONTMATTER.replace("connection: acme_prod", "connection: acme_prod\n    default_warehouse: PROD_WH"), "prod", "PROD_WH"),
+        ):
+            with self.subTest(env=env):
+                self.enter(self.make_project(context))
+                self.run_execute({"sql": OK}, "SELECT 1", env=env)
+                args = self.sql_args()
+                self.assertEqual(args[args.index("--warehouse") + 1], expected)
 
     def test_describe_appended_after_trailing_semicolon_and_comment(self):
         self.assertEqual(
@@ -933,14 +1041,15 @@ class TestExecute(SnowmanTestCase):
         ])
         code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
-        self.assertEqual(out, "A,B\n1,1.50\n# types: B NUMBER(10,2)\n")
-        self.assertEqual(err, "")
+        self.assertEqual(out, "A,B\n1,1.50\n")
+        self.assertEqual(err, "# types: B NUMBER(10,2)\n")
 
     def test_two_statement_empty_result_reports_zero_rows(self):
         self.enter(self.make_project())
         payload = json.dumps([[], [{"name": "A", "type": "DATE"}]])
-        _, out, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
-        self.assertEqual(out, "# 0 rows\n")
+        _, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+        self.assertEqual(out, "")
+        self.assertIn("# 0 rows\n", err)
 
     def test_split_result_shapes(self):
         self.assertEqual(snowman.split_result([[{"A": 1}], [{"name": "A"}]]),
@@ -963,55 +1072,48 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual(lines[1], '1,"{""k"":1}",')
         self.assertEqual(lines[2], '2,[1],' + "x" * 200 + "…(+100 chars)")
         self.assertEqual(
-            lines[3:],
+            err.splitlines()[:2],
             ["# empty cells are NULL",
              "# some cells truncated to 200 chars; pass --max-cell 0 for full values"],
         )
-        self.assertEqual(err, "")
+        self.assertEqual(lines[3:], [])
+        self.assertIn("# full result:", err)
 
-    def test_row_cap_spills_full_result_and_footers(self):
+    def test_row_cap_spills_full_result_with_recovery_on_stderr(self):
         root = self.enter(self.make_project())
-        payload = json.dumps([{"N": i} for i in range(1203)])
-        code, out, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+        rows = [{"N": i} for i in range(1203)]
+        code, out, err = self.run_execute({"sql": Outcome(0, json.dumps(rows), "")}, "SELECT 1")
         self.assertEqual(code, 0)
-        lines = out.splitlines()
-        self.assertEqual(len(lines), 52)  # header + 50 rows + footer
-        footer = lines[-1]
-        self.assertRegex(
-            footer,
-            r"^# showing 50 of 1203 rows; full result: "
-            r"\.snowman/results/\d{8}-\d{6}__[0-9a-f]{8}\.csv; add LIMIT or a WHERE "
-            r"filter to narrow, or pass --max-rows 0$",
-        )
-        rel = footer.split("full result: ")[1].split(";")[0]
-        self.assertEqual((root / rel).read_text(encoding="utf-8").count("\n"), 1204)
+        self.assertEqual(len(out.splitlines()), 51)
+        self.assertIn("# showing 50 of 1203 rows", err)
+        rel = err.split("full result: ")[1].splitlines()[0]
+        self.assertRegex(rel, r"^\.snowman/results/\d{8}-\d{6}__[0-9a-f]{8}\.json$")
+        self.assertEqual(json.loads((root / rel).read_text())["rows"], rows)
 
-    def test_spill_footer_path_is_relative_to_cwd(self):
+    def test_spill_path_is_relative_to_cwd(self):
         root = self.enter(self.make_project())
         sub = root / "analysis" / "q1"
         sub.mkdir(parents=True)
         self.enter(sub)
         payload = json.dumps([{"N": i} for i in range(60)])
-        _, out, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
-        footer = out.splitlines()[-1]
-        rel = footer.split("full result: ")[1].split(";")[0]
+        _, _, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
+        rel = err.split("full result: ")[1].splitlines()[0]
         self.assertTrue(rel.startswith("../../.snowman/results/"), rel)
+        self.assertEqual((Path.cwd() / rel).resolve(), root / ".snowman" / "results" / Path(rel).name)
         self.assertTrue((Path.cwd() / rel).is_file())
-        self.assertEqual(
-            (Path.cwd() / rel).resolve(), root / ".snowman" / "results" / Path(rel).name
-        )
 
-    def test_row_cap_in_bootstrap_mode_skips_spill(self):
+    def test_bootstrap_truncation_saves_in_private_temporary_directory(self):
         root = self.enter(self.make_bare_dir())
-        payload = json.dumps([{"N": i} for i in range(60)])
-        _, out, _ = self.run_execute(
-            {"sql": Outcome(0, payload, "")}, "SELECT 1", connection_override="c"
+        rows = [{"N": i} for i in range(60)]
+        _, out, err = self.run_execute(
+            {"sql": Outcome(0, json.dumps(rows), "")}, "SELECT 1", connection_override="c"
         )
-        self.assertIn(
-            "# showing 50 of 60 rows; no context file yet so the full result was "
-            "not saved; add LIMIT or a WHERE filter to narrow, or pass --max-rows 0",
-            out,
-        )
+        self.assertIn("# showing 50 of 60 rows", err)
+        path = Path(err.split("full result: ")[1].splitlines()[0])
+        self.addCleanup(self._rmtree, path.parent)
+        self.assertTrue(path.is_absolute())
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(json.loads(path.read_text())["rows"], rows)
         self.assertFalse((root / ".snowman").exists())
 
     def test_max_rows_zero_and_json_flag(self):
@@ -1025,23 +1127,15 @@ class TestExecute(SnowmanTestCase):
     def test_empty_result_notes_zero_rows(self):
         self.enter(self.make_project())
         _, out, _ = self.run_execute({"sql": Outcome(0, "[]\n", "")}, "SELECT 1")
-        self.assertEqual(out, "# 0 rows\n")
+        self.assertEqual(out, "")
 
-    def test_unparseable_stdout_relayed_raw(self):
+    def test_failed_query_raw_stdout_is_suppressed(self):
         self.enter(self.make_project())
         code, out, _ = self.run_execute(
             {"sql": Outcome(3, "not json at all\n", "")}, "SELECT 1"
         )
         self.assertEqual(code, 3)
-        self.assertEqual(out, "not json at all\n")
-
-    def test_json_object_stdout_relayed_raw_without_footer(self):
-        self.enter(self.make_project())
-        code, out, _ = self.run_execute(
-            {"sql": Outcome(0, '{"a": 1}\n', "")}, "SELECT 1"
-        )
-        self.assertEqual(code, 0)
-        self.assertEqual(out, '{"a": 1}\n')
+        self.assertEqual(out, "")
 
     def test_sql_error_panel_cleaned_and_exit_code_forwarded(self):
         self.enter(self.make_project())
@@ -1213,6 +1307,38 @@ class TestAuthHintFor(SnowmanTestCase):
 
 
 class TestMainCli(SnowmanTestCase):
+    def test_result_shape_errors_report_query_already_ran_without_stdout(self):
+        self.enter(self.make_project())
+        for payload in ("", " \n", "not json", '{"error":"bad"}', '[[1],[]]',
+                        '[{"A":1},{"B":2}]', '[[{"A":1},{"A":2,"B":3}],[]]'):
+            with self.subTest(payload=payload):
+                snow = fake_snow({"sql": Outcome(0, payload, "")})
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with mock.patch.object(snowman, "run_snow", snow), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = snowman.main(["snowman.py", "--json", "SELECT 1"])
+                self.assertEqual(len(snow.calls), 1)
+                self.assertEqual(code, 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertTrue(stderr.getvalue().startswith("ERROR: query already ran;"))
+                self.assertNotIn("BLOCKED:", stderr.getvalue())
+                self.assertIn("Do not rerun automatically", stderr.getvalue())
+
+    def test_spill_error_reports_query_already_ran_without_stdout(self):
+        root = self.enter(self.make_project())
+        (root / ".snowman" / "results").write_text("not a directory")
+        snow = fake_snow({"sql": Outcome(0, json.dumps([{"DDL": "x" * 500}]), "")})
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(snowman, "run_snow", snow), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = snowman.main(["snowman.py", "SELECT 1"])
+        self.assertEqual(len(snow.calls), 1)
+        self.assertEqual(code, 1)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertTrue(stderr.getvalue().startswith("ERROR: query already ran;"))
+        self.assertIn("cannot save full result", stderr.getvalue())
+        self.assertNotIn("BLOCKED:", stderr.getvalue())
+
     def assert_usage_error(self, argv: list, match: str) -> None:
         stderr = io.StringIO()
         with contextlib.redirect_stderr(stderr), self.assertRaises(SystemExit) as cm:
@@ -1250,14 +1376,14 @@ class TestMainCli(SnowmanTestCase):
             argv = ["snowman.py", "--max-rows", "5", "--max-cell", "10", "--json", "SELECT 1"]
             self.assertEqual(snowman.main(argv), 0)
         execute.assert_called_once_with(
-            "SELECT 1", connection_override=None, env=None, fmt="json", max_rows=5, max_cell=10
+            "SELECT 1", connection_override=None, env=None, fmt="json", max_rows=5, max_cell=10, max_output=16000
         )
 
     def test_main_output_flag_defaults(self):
         with mock.patch.object(snowman, "execute", return_value=0) as execute:
             self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 0)
         execute.assert_called_once_with(
-            "SELECT 1", connection_override=None, env=None, fmt="csv", max_rows=50, max_cell=200
+            "SELECT 1", connection_override=None, env=None, fmt="csv", max_rows=50, max_cell=200, max_output=16000
         )
 
     def test_main_routes_to_execute(self):

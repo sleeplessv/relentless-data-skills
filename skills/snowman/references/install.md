@@ -1,78 +1,35 @@
-# snowman bootstrap (first run in a project)
+# Bootstrap a project's Snowflake context
 
-You are here because the project has no `.snowman/context.md`. Your job is
-to discover this project's Snowflake architecture and write that file, so
-every later invocation has a per-project source of truth.
+Use this guide when `.snowman/context.md` is absent or the user requests a
+refresh. Discover what the account can tell you. Reuse choices and authorization
+already supplied, and ask only for unresolved preferences.
 
-**Style: discovery-first, in the style of the `grilling` skill.** Don't interrogate the user for
-things the account can tell you. Run the read-only SQL and propose what you
-found. Ask only for the genuine decisions. One decision at a time, with a
-recommended answer. All discovery here is read-only and goes through the
-wrapper (`python3 <skill-dir>/scripts/snowman.py "<SQL>"`), except the
-connection-listing step, which uses the `snow` CLI directly.
+## Choose connections
 
-All `snow` commands need network access to reach Snowflake. Run them with
-sandboxing disabled. In a sandboxed shell they fail with DNS or connection
-errors that look like a broken connection config.
+List named connections with `snow connection list`. This local CLI operation
+is the exception to routing SQL through the wrapper. Use an explicitly named
+connection, or the sole available connection, without another confirmation.
+With several plausible connections, ask which belong to this project. If the
+user chooses several accounts, also ask for their environment names.
 
-## Step 0: pick the connections (the only step not through the wrapper)
+If no connection exists, ask the user to run `snow connection add` in their own
+terminal. The user owns credential setup. Snowman does not create connections.
 
-snowman uses named `snow` CLI connections only. It never creates
-connections, and never handles credentials, key pairs, or `account`,
-`user`, or `password` settings.
+Before context exists, run discovery with:
 
 ```bash
-snow connection list
+python3 <skill-dir>/scripts/snowman.py --connection <chosen> "<SQL>"
 ```
 
-- If there is exactly one connection, propose it and ask the user to confirm.
-- If there are several, list them and ask which connections this project
-  uses. If the user picks more than one, ask what environment each one is
-  (for example `acme-dev` is `dev` and `acme-prod` is `prod`). If the user
-  already named a connection in their request, take it without asking. One
-  connection means the single-environment flow below. Several means
-  multi-environment, with separate accounts mapped as named environments.
-  Environment names are the user's choice (`dev`, `staging`, `prod`, or others).
-- If there are none, stop. Tell the user to run `snow connection add`
-  themselves, then re-invoke snowman. That command is interactive, and SSO
-  or MFA may open a browser.
+Stop passing `--connection` after writing context. The override uses the named
+connection's warehouse setting. Queries require network access. Follow the
+execution and failure guidance in [SKILL.md](../SKILL.md#handle-failures).
 
-**Check each chosen connection's `authenticator`** in the
-`snow connection list` output before running anything. The auth method
-decides one setup step:
+## Discover and resolve preferences
 
-- **Browser auth** (`OAUTH_AUTHORIZATION_CODE` or `EXTERNALBROWSER`): have
-  the user run `snow connection test -c <name>` in their own terminal,
-  before the discovery sweep. A browser opens, they complete the login,
-  and `snow` caches the token. Wrapper queries then run without prompting.
-  Don't rely on the browser opening mid-query: wrapper calls run
-  non-interactively and time out while the user is still logging in.
-- **Key-pair auth** (`SNOWFLAKE_JWT` or a `private_key_file`) with an
-  encrypted private key: its passphrase must live in the project root
-  `.env` (for example `PRIVATE_KEY_PASSPHRASE=...`). The wrapper relays
-  `.env` to the `snow` subprocess. If the first query fails mentioning a
-  private key, passphrase, or JWT, tell the user to add that line to `.env`.
-  Never ask for the passphrase or print `.env` contents. With several
-  key-pair connections whose passphrases differ, one `PRIVATE_KEY_PASSPHRASE`
-  cannot serve both. Point the user at `snow`'s per-connection form instead
-  (`SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...`), still in
-  `.env`.
-
-> From here on, every command is the read-only wrapper. The wrapper needs the
-> connection, but the context file does not exist yet, so for the discovery
-> sweep only, pass it explicitly:
-> `python3 <skill-dir>/scripts/snowman.py --connection <chosen> "<SQL>"`.
-> Drop `--connection` as soon as the context file is written.
-
-## Step 1: announce the read-only sweep, then run it (one gate)
-
-Tell the user: "I'll run these read-only `SHOW` and `SELECT` commands to map
-the account, nothing is written. OK?" (multi-environment: "... against each
-account ..."). Gate once for the whole batch, not per statement, not per
-account. Then run them, one wrapper call per statement, because the wrapper
-rejects multi-statement submissions. In a multi-environment project run the
-whole sweep once per environment, passing that environment's connection
-with `--connection`:
+Announce the relevant discovery queries, then run them under the user's existing
+Snowflake request. There is no separate approval gate for each query or account.
+For multiple environments, run against each chosen connection:
 
 ```sql
 SELECT CURRENT_ROLE(), CURRENT_WAREHOUSE(), CURRENT_REGION()
@@ -81,126 +38,103 @@ SHOW WAREHOUSES ->> SELECT "name","size","state","auto_suspend" FROM $1
 SHOW ROLES ->> SELECT "name" FROM $1
 ```
 
-## Step 2: decisions (ask these, and recommend an answer for each)
+Inspect authentication setup below only when needed. Successful existing
+sessions do not need another login. If the requested scope already identifies
+a database or schema, discover that scope instead of inventorying the account.
 
-In a multi-environment project, ask 1 and 3 per environment. Each account
-has its own databases and warehouses.
+Ask remaining setup questions together, with recommendations:
 
-1. **Which databases** to include in scope? Recommend the ones the current
-   role can read. Let the user trim.
-2. *Single-environment only:* **which databases are production**
-   (`env: prod`)? Recommend flagging anything named or described as prod or
-   raw. In a multi-environment project the environment a database sits under
-   is its env, so skip this. snowman never executes writes anywhere (DML or
-   DDL is only ever staged for the user to run manually), but the flag
-   documents intent and drives the extra-care rule in `references/guardrails.md`.
-3. **Default warehouse** for ad-hoc queries? Recommend the smallest ad-hoc
-   or analytics warehouse you saw.
-4. *Multi-environment only:* **`default_env`**, which environment queries
-   hit when none is named. Recommend the non-prod one. The user may
-   legitimately prefer prod (snowman is read-only either way).
+- Databases to record. Start with the requested scope and let the user expand it.
+- Which databases are production in a single-account project. Confirm ambiguous
+  names rather than assuming every raw database is production.
+- Default warehouse per account. Recommend an appropriate small warehouse from
+  the available choices. The wrapper passes it to queries and staged run commands.
+- Default environment for multiple accounts. Recommend the non-production one.
 
-For each in-scope database, enumerate schemas (still read-only):
+Enumerate schemas only for the selected databases:
 
 ```sql
 SHOW TERSE SCHEMAS IN DATABASE <db>
 ```
 
-## Step 3: render the context, confirm, then write (one gate)
+## Write context
 
-Compose `.snowman/context.md` (template below), show it to the user, get
-approval, then write it to the project root (`.snowman/context.md`). It is
-safe to commit: names only, no secrets. Suggest the user commit it.
+Write `.snowman/context.md` using the resolved choices and observed metadata.
+Existing authorization covers this local setup. Show the resulting file and
+summarize any assumptions rather than asking for another approval. Record names
+and architecture only, and keep the file in version control.
 
-**Single-environment frontmatter** (one account, per-database `env:` flags):
+Use one of these mutually exclusive frontmatter forms. A single account uses:
 
 ```yaml
 ---
-connection: <chosen-connection-name>
+connection: <chosen-connection>
 default_warehouse: <warehouse>
 databases:
-  - name: <db>
-    env: dev        # or prod
-# snowman never executes writes. User-requested DML or DDL is staged to
-# .snowman/staged/ (gitignored) for manual execution.
+  - name: <database>
+    env: dev
 ---
 ```
 
-**Multi-environment frontmatter** (separate accounts). The environment name
-is the env, so there are no per-database flags, and each environment carries
-its own connection and default warehouse. The two forms are mutually exclusive:
+For multiple accounts, each environment holds its connection and warehouse.
+The environment name replaces per-database environment flags:
 
 ```yaml
 ---
-default_env: <env>            # queries hit this unless --env says otherwise
+default_env: dev
 environments:
   dev:
-    connection: <dev-connection-name>
-    default_warehouse: <warehouse>
-    databases: [<db>, <db>]
+    connection: <dev-connection>
+    default_warehouse: <dev-warehouse>
+    databases: [<database>]
   prod:
-    connection: <prod-connection-name>
-    default_warehouse: <warehouse>
-    databases: [<db>, <db>]
-# snowman never executes writes. User-requested DML or DDL is staged to
-# .snowman/staged/ (gitignored) for manual execution. Staging here always
-# needs an explicit --env.
+    connection: <prod-connection>
+    default_warehouse: <prod-warehouse>
+    databases: [<database>]
 ---
 ```
 
-**Body** (multi-environment: repeat the sections per environment, for example
-`## Databases (dev)` and `## Databases (prod)`):
+`default_warehouse` is optional. If omitted, the connection's setting applies.
+Use the body for facts that help later investigations, without repeating
+frontmatter. Include database purpose, relevant schemas, warehouse sizes and
+auto-suspend settings, observed roles, and the discovery date. For multiple
+accounts, group those facts by environment. Do not invent access grants from
+a role name or mark an untested database as readable.
 
-```markdown
-# Snowflake context for <project>
+## Offer project routing
 
-_Discovered <by snowman bootstrap>. Names only, no credentials. Edit freely.
-Re-run the bootstrap to refresh._
-
-## Connection
-`<chosen-connection-name>` (named `snow` CLI connection)
-
-## Databases
-| Database | Env | Purpose |
-|----------|-----|---------|
-| <db>     | dev | <note>  |
-
-## Warehouses
-| Warehouse | Size | Purpose | Auto-suspend |
-|-----------|------|---------|--------------|
-| <wh>      | <sz> | <note>  | <s>          |
-
-## Roles
-| Role | Access |
-|------|--------|
-| <role> | <note> |
-
-## Schemas (in-scope databases)
-### <db>
-- <schema>: <note>
-```
-
-## Step 4: route Snowflake work to snowman (one gate)
-
-Skills compete with the agent's habit of calling `snow sql` directly. A
-routing rule in the project's agent instructions makes the skill fire
-reliably. Check `AGENTS.md` and `CLAUDE.md` in the project root. If either
-already mentions `snowman`, skip this step. Otherwise propose appending this
-block and gate once:
+Check root `AGENTS.md` and `CLAUDE.md`. If either already routes Snowflake work
+to snowman, continue. Otherwise offer this project instruction once, unless
+adding it is already authorized:
 
 ```markdown
 ## Snowflake
 
-All Snowflake access goes through the `snowman` skill: queries run through its
-read-only wrapper, and requested changes are staged under `.snowman/staged/`,
-never executed.
+Use the `snowman` skill for Snowflake queries. Stage requested database changes
+under `.snowman/staged/` for manual execution.
 ```
 
-Append to `AGENTS.md` if it exists, else to `CLAUDE.md` if it exists, else
-create `AGENTS.md` with just this block. If the user declines, move on.
-Never re-propose within the session.
+Append to `AGENTS.md` if present, otherwise `CLAUDE.md`, or create `AGENTS.md`.
+If the user declines, continue without asking again during the session.
+Once context is written, resume the original request through the wrapper.
 
-## Done
+## Authentication
 
-Confirm the file is written, then switch to the wrapper for all further
-queries and proceed with the user's original request.
+On failure, relay the wrapper's hint matched to the named connection's
+authenticator. Consult the connection list for its auth method if needed.
+Do not edit `connections.toml`, inspect private keys, or ask for secrets.
+
+For `OAUTH_AUTHORIZATION_CODE` or `EXTERNALBROWSER`, ask the user to run
+`snow connection test -c <name>` in their terminal and complete login.
+The CLI can then reuse its cached token. Do not drive the browser flow.
+
+For an encrypted key-pair connection, the passphrase can come from the shell
+environment or the nearest `.env` at or above the project root. Bootstrap
+searches from the current directory. The wrapper relays `.env` values into the
+CLI subprocess, with existing shell values taking precedence. It never sources
+the file as shell code. Keep `.env` gitignored and never print its contents.
+
+If the hint identifies a missing passphrase, tell the user to set
+`PRIVATE_KEY_PASSPHRASE=...` locally. For connections with different passphrases,
+use `SNOWFLAKE_CONNECTIONS_<NAME>_PRIVATE_KEY_PASSPHRASE=...` instead. The user
+supplies those values privately.

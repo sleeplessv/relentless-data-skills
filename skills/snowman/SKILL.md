@@ -1,152 +1,114 @@
 ---
 name: snowman
-description: Use when doing any Snowflake work, including running a query, exploring data, profiling tables, testing hypotheses, investigating data-quality issues, discovering schemas and warehouses, or staging a data or schema change. Every snow CLI call goes through this skill.
+description: Use when querying Snowflake, discovering objects, profiling data, testing transformation hypotheses, investigating data quality, or staging SQL changes. Every snow CLI call goes through this skill.
 ---
 
-<!-- SKILL.md sits at the 150-line budget that scripts/lint_skill.py enforces, so the long lines are deliberate. -->
 # snowman
 
-snowman is read-only Snowflake exploration through the `snow` CLI: schema
-discovery, data profiling, hypothesis testing, and data-quality investigation.
-**snowman never executes writes and never mutates production.** Every query
-runs through a guardrail wrapper, `scripts/snowman.py`, which rejects anything
-that is not a single read-only statement. When the user asks for a change, the
-wrapper stages the DML or DDL as a script for the user to run. snowman never runs it.
+Use `scripts/snowman.py` for Snowflake queries and stage user-requested changes
+for manual execution. Its lexical filter rejects write statements and known
+side-effecting constructs. It cannot prove that UDFs or external functions are
+read-only. Use a least-privilege connection and trusted read functions.
 
-## First action, every invocation
+## Load project context
 
-Check for `.snowman/context.md` in the project root (the wrapper finds it by walking up from the current directory).
+Find and load `.snowman/context.md` by walking up from the current directory.
+If absent, follow [the bootstrap](references/install.md) before proceeding.
+Queries require context, except bootstrap discovery with `--connection <name>`.
+Once context exists, let the wrapper resolve the connection from it.
 
-- If the file is absent, this is a first run. Read
-  [references/install.md](references/install.md) and run the bootstrap, which
-  discovers the connection, databases, warehouses, and roles, writes
-  `.snowman/context.md`, and offers a Snowflake routing rule for the project's
-  `AGENTS.md` or `CLAUDE.md`. Then continue.
-- If the file is present, load it. The context file is the source of truth
-  for this project's Snowflake architecture. Continue with the user's request.
+Context records project architecture and connection names, never credentials.
+Keep it in version control. Database scope is a focus hint, not an access
+restriction. Query other databases when the user's question requires them.
 
-**Refuse to run queries when no context file exists.** The context file is
-per-project and committed to the repo. It holds names only, never secrets
-(see [references/install.md](references/install.md)).
+## Run queries
 
-## Running queries, always through the wrapper
-
-Never call `snow sql` directly. Every query goes through the wrapper, which
-injects the connection, enforces read-only, and returns CSV:
+Every SQL query goes through the wrapper:
 
 ```bash
 python3 <skill-dir>/scripts/snowman.py "<SQL>"
 ```
 
-`<skill-dir>` is this skill's directory. The wrapper reads the connection
-from `.snowman/context.md`. Never pass `--connection` yourself, except during
-the bootstrap, before the context file exists ([references/install.md](references/install.md)).
+`<skill-dir>` is this skill's directory. Submit one statement per call.
+The wrapper appends `DESCRIBE RESULT` to obtain column types in the same session.
+It applies `default_warehouse` from the selected context. If absent, the named
+connection's warehouse setting applies.
 
-Output is CSV (header row, empty cell for NULL, `""` for an empty string, nested
-values as compact JSON) plus `#` footer lines, which are notes, never data. A
-`# types:` footer names the columns whose type the text cannot show (scaled
-NUMBER, DATE and TIMESTAMP, VARIANT), so no DESCRIBE round trip is needed to
-read `1.50` as a number or `2026-09-03` as a date. The wrapper shows 50 rows
-(`--max-rows N`, `0` for all). When a context file exists, it saves an overflowing
-result in full to `.snowman/results/*.csv`. Before bootstrap nothing is saved, so
-narrow the query or pass `--max-rows 0`. String and nested-JSON cells are cut at 200 chars
-(`--max-cell N`, `0` for full values). `--json` prints a compact JSON array instead, for VARIANT-heavy results.
+Stdout contains only CSV data, or a compact JSON array with `--json`.
+Types, truncation notices, and artifact paths go to stderr. Keep the streams
+separate when parsing. CSV cells can contain newlines or lines beginning `#`.
+An empty CSV cell represents NULL, `""` represents an empty string, and nested
+values are compact JSON. Empty JSON results are `[]`.
 
-The wrapper also relays the nearest `.env` at or above the project root, if
-any, into the `snow` subprocess. That relay is how encrypted key-pair connections get their passphrase.
-Never source `.env` yourself, and never print its contents.
+Defaults are 50 rows, 200 retained characters per cell plus a truncation marker,
+and 16,000 UTF-8 bytes of data output. Change them with `--max-rows`, `--max-cell`,
+and `--max-output`. `0` lifts the corresponding limit. JSON preserves nested
+objects and arrays unless truncated, when the cell becomes shortened JSON text.
 
-**Run outside the sandbox.** The `snow` CLI needs network access. A sandboxed
-shell blocks it, and the failure surfaces as a DNS or connection error that
-looks like a broken connection config. Run every wrapper and `snow` command
-with sandboxing disabled. If a query fails with a connection or DNS error,
-suspect the sandbox first, not the connection setup.
+Any truncated result saves full rows and schema as JSON. Follow the stderr
+`# full result:` path and inspect the needed fields locally instead of rerunning
+the query or loading the whole file into context. See
+[output details](references/guardrails.md#output) when parsing or recovering results.
 
-On an auth-looking failure the wrapper prints a hint matched to the
-connection's authenticator. Browser auth (OAuth or SSO) needs the user to run
-`snow connection test -c <name>` in their own terminal once, after which `snow`
-caches the token. Key-pair auth with an encrypted key needs the passphrase in
-the project root `.env` (for example `PRIVATE_KEY_PASSPHRASE=...`). Relay the
-hint. Do not debug `connections.toml`, ask for the passphrase, or drive the browser flow.
+## Handle failures
 
-If the wrapper exits with `BLOCKED: ...`, **do not work around it**. The
-statement was not read-only. If the user asked a read-only question, rephrase
-the query. If the user explicitly asked for a change, stage it (below). **Never
-stage SQL the user did not ask to have run.** Staging follows stated intent,
-not a block you want past.
+Read the reason after `BLOCKED:`. It describes a refusal before querying,
+including SQL, context, or configuration problems. Fix setup failures or
+reformulate an authorized read. Stage changes only when
+the user requested them. Never bypass the wrapper to evade a refusal.
 
-## Environments (dev and prod in separate accounts)
+Queries need network access. Use the environment's permitted execution mode.
+If diagnostics identify a sandbox network restriction, use its approval flow
+for network access. DNS errors alone do not establish the cause.
 
-When the context frontmatter has an `environments:` map (one entry per
-account, each with its own connection, as described in
-[references/install.md](references/install.md)), selection is stateless and per-query:
+For authentication failures, relay the wrapper's hint and follow
+[authentication setup](references/install.md#authentication).
+The wrapper relays the nearest `.env` at or above the project root to `snow`.
+Never source or print that file, request secrets, or edit connection credentials.
 
-- Queries hit `default_env` unless you pass `--env <name>`. Pass it only when
-  the user explicitly asks about another environment, and say which
-  environment you are querying when it is not the default.
-- **Staging requires an explicit `--env`** in these projects. If the user did
-  not say which environment a change targets, **ask**. Never infer. The
-  environment name lands in the staged filename and header so the reviewer sees the target.
-- Single-account projects keep the plain `connection:` form. The wrapper
-  rejects `--env` there.
+## Select an environment
 
-## Staging writes, never executed
+With an `environments:` map, queries use `default_env`. Pass `--env <name>`
+when the user requests another environment, and identify it in the update.
+Selection is per-query. Single-account contexts use `connection:` and reject `--env`.
 
-When the user explicitly asks for a change (add a column, backfill, create a
-table, or similar), write the SQL but **stage it instead of running it**:
+Staging in multi-environment projects requires an explicit `--env`.
+If the user has not named the change's target environment, ask before staging.
+Reuse an already stated target without another confirmation.
+
+## Stage requested changes
+
+When the user asks for DML or DDL, prepare the SQL and stage it:
 
 ```bash
 python3 <skill-dir>/scripts/snowman.py --stage "<SQL>" --name <purpose-slug>
 ```
 
-- The wrapper writes `.snowman/staged/<timestamp>__<slug>.sql` with a header
-  that holds the exact `snow sql -f ... --connection ...` command to run it.
-  The file is gitignored, may hold several statements, and may use any keyword.
-- **Nothing is executed.** Relay the file path and run command to the user.
-  Running the file, then deleting it, is their business.
-- `--name` is the purpose in kebab-case. It becomes the filename the user
-  reviews, so make it say what the staged script does.
-- Staging still requires `.snowman/context.md` (bootstrap first).
+Add the chosen `--env` for multi-environment projects. Staging requires context
+and accepts several statements. Name the script for its purpose in kebab-case.
+The wrapper writes a gitignored file under `.snowman/staged/` and prints its path
+and manual run command, including the connection and configured warehouse.
+Relay both and any destructive-keyword warning. The user executes and cleans up
+the script. Snowman does neither.
 
-## Guardrails (summary)
+## Explore efficiently
 
-The wrapper hard-enforces these (see [references/guardrails.md](references/guardrails.md) for the full policy and refusal messages):
+- Start from the narrowest known scope. For an exact table, inspect that table.
+  Discover databases or schemas only when their names are missing.
+- Bound exploratory reads with filters, `LIMIT`, or `SAMPLE`. Preview limits
+  reduce output, not query cost. Use smaller samples and tighter filters in prod.
+  Before a heavy query, state the configured warehouse or verify
+  `CURRENT_WAREHOUSE()` when no warehouse is configured in context.
+- Prefer `SHOW TERSE` and project metadata with `->> SELECT "col" FROM $1`.
+  Use plain `SHOW` for `rows` and `bytes`, which TERSE omits. Project columns
+  explicitly when TERSE does not shrink an object's output.
+- Select the columns needed for the question. Investigate incidental anomalies
+  only when relevant. Otherwise mention them briefly in the answer.
+- Run related queries together in your investigation. Delegate only broad,
+  independent work, not each query or table.
+- State the first query's purpose, update when findings change direction, and
+  lead the answer with the finding rather than a dump of rows.
 
-- **Read-only only.** The leading keyword must be `SELECT`, `WITH`, `SHOW`,
-  `DESCRIBE`, `DESC`, or `EXPLAIN`. Any write or DDL keyword anywhere is refused.
-- **Single statement.** `;`-separated multi-statements are refused. A single trailing `;` is fine.
-- **Comment- and quote-safe.** The wrapper strips comments, string literals,
-  and quoted identifiers before the check, so a hidden `DROP` cannot slip through.
-
-These are taught, not hard-blocked. Apply them yourself:
-
-- **Cost hygiene.** Bound exploratory reads with `LIMIT` or `SAMPLE`. Avoid
-  full scans on large tables. State which warehouse the queries will use, from
-  `CURRENT_WAREHOUSE()` or the context file, before the first heavy query.
-- **Lean metadata.** Prefer `SHOW TERSE`, `LIMIT`, `STARTS WITH`, and `->> SELECT "col",... FROM $1` to project SHOW and DESCRIBE output.
-  `SHOW TERSE` omits `rows` and `bytes`, so for sizes project the plain `SHOW` (example in [references/workflows.md](references/workflows.md)). Snowflake ignores TERSE for some objects, such as warehouses, and there projection is what shrinks the output. Never `SELECT *` on a wide table without a column list or a small `SAMPLE`.
-- **Start broad, then narrow.** Databases, then schemas, then tables, then
-  DESCRIBE, then SAMPLE. Prefer several focused queries over one large one.
-  Narrow toward the question asked. An anomaly you pass on the way gets a
-  sentence in the answer, not an investigation of its own.
-- **Run the queries yourself.** No subagent per query or per table, and none
-  to re-check a result you have. Use one only for a wide, independent investigation.
-- **Report, don't narrate.** One sentence on what you are looking for before
-  the first query, then updates only when a result changes direction. Lead with
-  the finding, rows after, large result sets truncated to what matters.
-- **Database scope** is an advisory focus hint in the context file, not a
-  hard wall. Snowflake roles already gate real read access. If the user needs a
-  database that is not listed, query it and offer to re-run the bootstrap to record it.
-
-## Workflows
-
-Load [references/workflows.md](references/workflows.md) for the playbook matching the user's intent: exploration, profiling, hypothesis, investigation.
-
-## When to use and when not to
-
-Use snowman for exploring schemas, profiling tables, validating a transformation hypothesis as a SELECT before
-building it in dbt, investigating data-quality issues, discovering Snowflake objects, and staging user-requested DML or DDL as scripts for manual execution.
-
-Do not use snowman for executing writes (there is no execute path, only staging), for creating connections or
-storing credentials (the user does that with `snow connection add`), or for non-Snowflake databases.
-snowman's only credential handling is relaying the nearest `.env` at or above the project root to `snow`. It never prints or stores what it finds there.
+Load [workflows](references/workflows.md) for exploration, profiling, hypothesis
+testing, investigation, or staging examples. Read
+[guardrail details](references/guardrails.md) when a SQL refusal needs explanation.

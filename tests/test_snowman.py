@@ -901,6 +901,19 @@ class TestExecute(SnowmanTestCase):
             "SELECT ';' AS S\n;DESCRIBE RESULT LAST_QUERY_ID()",
         )
 
+    def test_trailing_literal_or_quoted_identifier_is_kept(self):
+        for sql in (
+            "SELECT 1 WHERE x = 'abc'",
+            "SELECT 1 WHERE x = 'a; b'",
+            "SELECT 1 WHERE x = 'abc  '",
+            'SELECT 1 FROM "My Table"',
+            "SELECT $$raw$$",
+        ):
+            self.assertEqual(
+                snowman.with_describe(sql + ";  -- c"),
+                f"{sql}\n;DESCRIBE RESULT LAST_QUERY_ID()",
+            )
+
     def test_failed_query_stdout_fragment_is_not_relayed(self):
         self.enter(self.make_project())
         for fragment in ("[\n", "[]\n"):

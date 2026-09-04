@@ -746,13 +746,25 @@ def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) 
 DESCRIBE_RESULT = "DESCRIBE RESULT LAST_QUERY_ID()"
 
 
+def mask_for_trim(match: re.Match) -> str:
+    """Same-length stand-in for a comment or literal. Comments become spaces
+    so a trailing one is trimmed; literals and quoted identifiers become
+    ``x`` so the trim stops at their closing quote instead of eating them.
+    Deliberately differs from ``strip_for_analysis``, which blanks literals
+    too: here their length and non-whitespace content must survive."""
+    token = match.group(0)
+    if token.startswith(("--", "//", "/*")):
+        return " " * len(token)
+    return "x" * len(token)
+
+
 def with_describe(sql: str) -> str:
     """Append ``DESCRIBE RESULT LAST_QUERY_ID()`` as a second statement so one
     ``snow`` session returns the rows and their column types. The ``;`` goes
     on its own line so a trailing ``--`` comment cannot swallow it. Any
     trailing ``;`` on the query (even one followed by a comment) is cut so no
     empty statement sits between, which Snowflake would reject."""
-    masked = ANALYSIS_TOKEN_RE.sub(lambda m: " " * len(m.group(0)), sql)
+    masked = ANALYSIS_TOKEN_RE.sub(mask_for_trim, sql)
     body = masked.rstrip()
     while body.endswith(";"):
         body = body[:-1].rstrip()

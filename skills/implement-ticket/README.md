@@ -1,37 +1,18 @@
 # implement-ticket
 
-The **`implement-ticket`** agent skill: take a ticket (on GitHub: an issue) from
-open → ticket branch → working code → green tests + runtime smoke check →
-draft PR, with explicit stop conditions instead of improvising when something
-is off.
+Take a GitHub ticket through implementation, applicable checks, and a ready-for-review PR.
+The workflow can select the lowest-numbered eligible ready ticket, or use an explicit number.
+It preserves unrelated work, checks ownership before claiming, and records the base and PR
+target explicitly. Failed work remains recoverable, including when a push fails.
 
-> **Renamed from `implement-issue`.** The workflow steps are unchanged, but new
-> branches are named `feat/ticket-<N>-<slug>` instead of `feat/issue-<N>-<slug>`
-> (the legacy form is still recognised when detecting existing branches); update
-> any CI filters or branch tooling keyed on the old prefix. The vocabulary
-> follows the spec/ticket terminology (a *spec* is broken into *tickets*; on
-> GitHub or GitLab a ticket is stored as an issue). If you installed
-> `implement-issue`, remove it and reinstall under the new name.
+Tests and runtime or artifact checks provide completion evidence. A feature-dispatched worker
+uses a pinned base and returns criterion evidence and preservation state without creating its
+own PR or changing the issue lifecycle. The coordinator owns those actions.
 
-## What it does
-
-- **Ticket selection**: works a given `#N`, or auto-picks the lowest-numbered open ticket labelled `ready-for-agent` (excluding specs, detected by their body headings, plus the `spec`/`prd` labels where a repo carries them, and skipping tickets that are already assigned or carry a stop-condition label).
-- **Claiming**: assigns itself and comments on the ticket so two agents never grab the same ticket.
-- **Safe branching**: refuses to branch over a dirty working tree, honours repo naming conventions, and handles blocked-by chains (branches off the blocker's branch, or stops if the blocker hasn't started).
-- **Task-aware implementation**: builds testable backend work in red-green tracer bullets (deferring to the `tdd` skill; refactoring belongs to the review pass, not the loop), and implements frontend, notebook, and exploratory data work directly where the test suite can't pin the behaviour.
-- **Verification before "done"**: baselines the test suite before editing, then runs a type-check + test feedback loop until both are green, then a runtime smoke check with separate paths for servers (start, hit endpoint, read logs) and CLIs/libraries/pipelines (representative invocation, exit code 0).
-- **PR hygiene**: draft PR within the first commits, repo PR template if present, a full-diff read before marking ready, Summary + Test plan sized to the change, marks ready for review but never merges.
-- **Stop conditions**: ambiguous criteria, scope labels, unstarted blockers, or three failed fix attempts → push the WIP branch, comment findings on the ticket, park it as `needs-info` (solo runs), and hand back to the human; explicitly re-requesting the parked ticket resumes it.
-- **Orchestrated dispatch**: a sanctioned override contract (`base_branch`, `open_pr: false`, an inherited test `baseline`, blockers pre-merged) so a feature orchestrator like `implement-feature` can run it per-ticket against an integration branch without per-ticket PRs, pre-edit suite runs, or prose-skill loading.
-
-## Conventions it expects
-
-The auto-pick path assumes a light triage vocabulary: `ready-for-agent` marks
-tickets an agent may take. Specs (which should be broken into tickets first)
-are excluded by their body headings; current `to-spec` labels the spec itself
-`ready-for-agent` and applies no `spec` label, though the `spec`/`prd` labels
-are still honoured where present. Without any of this you can still invoke it
-with an explicit ticket number.
+[SKILL.md](SKILL.md) is the workflow. [Auto-pick](references/auto-pick.md) is loaded only for
+selection, and [Orchestrated dispatch](references/orchestrated.md) only for feature workers.
+Legacy `feat/ticket-*` and `feat/issue-*` branches remain recognizable; new branches follow
+the current environment's naming convention.
 
 ## Install
 
@@ -47,24 +28,7 @@ npx skills add sleeplessv/relentless-data-skills/skills/implement-ticket
 /plugin install implement-ticket@relentless-data-skills
 ```
 
-The skill also references `tdd` and `code-review`, plus
-`principle-laziness-protocol`, `unslop`, and `technical-writing` for its
-code-frugality and prose standards; without those three it falls back to the
-one-line minimums baked into the skill. The two prose skills load in solo runs
-only, where the skill writes a PR body.
+## Validation
 
-It activates when you say "implement ticket #N", "implement issue #N", or
-"grab the next ready ticket".
-
-## Files
-
-- `SKILL.md` is the full workflow: selection, claiming, branching, implementation, tests, smoke check, PR finalisation, stop conditions.
-- `references/auto-pick.md` is the solo-run auto-pick query and its load-bearing details, read only when no ticket number is given.
-- `plugin.json` is the Claude Code plugin manifest.
-
-## Requirements
-
-- `git` and the [`gh` CLI](https://cli.github.com/), authenticated against the target repo.
-- Network access to GitHub: `gh` and `git fetch`/`pull`/`push` must run
-  outside any sandboxed shell, or they fail with misleading DNS/connection
-  errors.
+Repository CI checks skill frontmatter and line budgets with `scripts/lint_skill.py`,
+and registry consistency with `scripts/sync_registry.py --check`.

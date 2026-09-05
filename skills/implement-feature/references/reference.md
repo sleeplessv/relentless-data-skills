@@ -1,67 +1,136 @@
-# Implement Feature: Reference
+# Implement feature reference
 
-Per-dispatch contracts disclosed from [SKILL.md](../SKILL.md). A dispatch prompt cites a section by this file's absolute path plus the anchor; the subagent reads its section and executes it.
+Pass absolute paths and the needed section to each worker. Full ticket bodies, command logs,
+and decisions stay in artifacts; returns contain compact outcomes and an index.
 
 ## Work-set resolution
 
-Commands and evidence rules for the first half of the step 0 dispatch.
+Resolve the repository, default branch, spec, and explicit ticket arguments using `gh` and git.
+For spec-only input, collect its open tickets. For explicit tickets, keep that list authoritative
+and resolve any shared parent as context. Reject conflicting parent specs with concrete evidence.
+Skip closed tickets by name; closure alone does not prove dependency implementation is present.
 
-- **Spec ticket listing** (run whenever a spec is in play: in spec-only mode it is the work-set, otherwise it is `spec_open_tickets`, the data step 3 needs for `Closes #<spec>`): scan bodies for a `## Parent` section referencing `#<spec>` (the reliable link; current `to-tickets` doesn't dependably create native sub-issues). The match must be anchored to the heading: a prose mention of `#<spec>` elsewhere in a body is not a link, and `gh search issues` cannot express this:
-  `gh issue list --state open --limit 500 --json number,title,body --jq '[.[] | select((.body // "") | test("(?m)^(## Parent[^\n]*[\r\n]+[^#\n]*|Part of )#<spec>\\b"))]'`
-  (the alternation also catches wayfinder's `Part of #<n>` fallback and CRLF bodies; `[^#\n]*` keeps `#90 supersedes #<spec>` out). Union in the native sub-issue results (`gh api repos/<owner>/<repo>/issues/<spec>/sub_issues --jq '.[].number'`, empty or 404 is normal), dedupe by number, keep open issues only. A ticket given by number: `gh issue view <n> --json number,title,body,labels,assignees,state`.
-- **Blocking edges**: for every work-set ticket, union the native dependency API (`gh api repos/<owner>/<repo>/issues/<n>/dependencies/blocked_by --jq '.[].number'`) with the body scan. The body scan is per-ticket, never skipped because the API returned edges elsewhere. Body-side extraction (accepts `## Blocked by` sections, inline `Blocked by #n`, and `Depends on #n`; anchored, so prose mentions don't count):
-  `--jq '[ (.body//"") | scan("(?mi)^(?:##\\s*)?(?:Blocked by|Depends on)\\b[^\n]*(?:\n[ \t]*[-*][^\n]*)*") | scan("#[0-9]+") ]'`
-- **Feedback-loop commands**: read `AGENTS.md`, `CLAUDE.md`, `CONTRIBUTING.md`, the package manifest (`pyproject.toml`, `package.json`, `Makefile`), CI workflows, and `docker-compose.yml`, in that order, for install, type-check, test, and run commands. Record "none configured" explicitly for a command that is absent; it is a different fact from "ran, clean".
-- **Default branch**: `gh repo view --json defaultBranchRef -q .defaultBranchRef.name`.
-- **Integration branch discovery**: probe origin with `git ls-remote origin 'feat/*'` for `feat/spec-<N>-*`, the legacy `feat/prd-<N>-*`, or the `feat/<slug>` a prior no-spec run named (exit 0 with no lines = no branch; non-zero = network failure, stop and report), then fetch just the branch found: the merged-evidence scan needs its history.
-- **Merged evidence** (resume only): a ticket is **merged** iff it carries a "merged into" comment naming the discovered branch (under any accepted name), or a commit on `<default>..<integration branch>` matches `#<N>\b`, `ticket-<N>\b`, or the legacy `issue-<N>\b` in a closing or subject position (`closes/fixes #<N>`, a `ticket-<N>` branch slug; a bare mention like `revert #<N>` or `see #<N>` is not evidence; report it and ask). Also collect any pushed `feat/ticket-<N>-*` (or legacy `feat/issue-<N>-*`) WIP branch.
+Paginate every list used to claim complete coverage. The REST issues endpoint includes PRs;
+exclude entries with `pull_request`. For body links, inspect an anchored `## Parent` section or
+`Part of #N` line, excluding fenced examples. Union these with native sub-issues, deduplicating
+open tickets by number. Use `gh api --paginate` for sub-issues and dependency endpoints as well.
+Distinguish API errors and unsupported endpoints from successful empty lists. Incomplete lookup
+coverage cannot prove the spec is complete.
+
+For each selected ticket, read body, comments, labels, assignees, and native blocked-by edges.
+Union native edges with anchored `Blocked by` or `Depends on` declarations and lists inside
+those sections. Ordinary issue mentions and parent-child relationships are not blocking edges.
+Confirm concrete acceptance criteria and ticket rather than spec classification. Check ownership
+before any authorized claim. `needs-info`, `needs-triage`, or `wontfix` needs resolution; a WIP
+branch alone does not prove agent-authored triage. An explicit current user instruction can
+resolve a prior agent stop. Track which lifecycle changes this run actually owns.
+
+Build the graph and detect cycles. An unresolved open blocker outside the selected set requires
+a dependency decision, not expansion of scope. Check that purportedly satisfied blockers are
+present in the integration base. Discover integration and WIP branches from local and remote
+refs using the configured and legacy naming conventions. Matches only identify candidates;
+resolve multiple candidates through recorded task identity and commits, never arbitrary order.
+
+On resume, comments and commit subjects are leads. Verify recorded integration SHAs are reachable
+and inspect intervening reverts or changed behavior. Classify a ticket as satisfied only with
+criterion evidence on the current tip. Preserve original baseline and decisions; do not infer
+completion or safe deletion from a historical "merged into" comment.
+
+Setup returns proposed `work_set`, `skipped_closed`, `spec_open_tickets`, coverage completeness,
+`graph`, eligibility evidence, `resume_state`, integration candidate and default branch, plus
+snapshot paths and any specific gate. The coordinator announces this before tree preparation.
 
 ## Tree preparation
 
-Second half of the step 0 dispatch, run only when no gate fired (SKILL.md step 0 lists the gates and the one-ticket / zero-ticket rules). The tree is already known clean.
+Read project conventions and discover install, lint/type-check, test, and run commands from
+repo instructions, manifests, and CI. Record missing commands explicitly and allocate external
+resources for parallel checks. Use configured execution permissions.
 
-- **Integration branch**: `git switch <default> && git pull --ff-only`, create `feat/spec-<N>-<slug>` (slug = kebab of the spec title; drop articles, conjunctions, and prepositions; keep the first five remaining words), push with `-u origin`. No spec in play → `feat/<slug>` with the slug the prompt carries. On resume: skip creation, switch to the **discovered name** (legacy names stay), `git pull --ff-only`, and push if local is ahead (a manual fix may be local-only). The main tree stays on this branch.
-- **Baseline**: run the install command, then the type-check and the full test suite once on the integration tip. Record the tip SHA and every failure as one line: the test id, then the file:line and failing assertion when the runner prints them. A missing type-checker is "none configured". This is the baseline every ticket dispatch inherits; none of them re-runs the suite before editing.
-- **Handoff files**, in the session scratchpad (absolute path from the prompt) under `implement-feature-<N>/` (the spec number, or the slug), overwritten on every run:
-  - `spec.md`: the spec body and acceptance criteria verbatim, nothing else (it doubles as code-review's spec source).
-  - `handoff.md`: `## Spec` (number and title; "none" on a no-spec run), `## Work-set` (one `### #<n> <title>` per ticket, then its acceptance criteria verbatim and its blockers), `## Feedback-loop commands` (install, type-check, test, run), `## Integration branch` (name, step-0 tip, baseline failures), `## Decisions log` (empty; integrate dispatches append one entry per wave).
-- **Return contract for the whole step 0 dispatch**: `work_set`, `skipped_closed`, `spec_open_tickets` (empty on a no-spec run), `graph`, `resume_state` (merged / WIP branch per ticket), `default_branch`, `integration_branch`, `integration_tip`, `baseline` (`tip`, `typecheck_failures`, `test_failures`), `handoff_paths` (both absolute), `gate` (the one that fired, with its evidence, else none).
+Preserve unrelated dirty work. Use a separate permitted integration checkout if the user's
+checkout cannot safely switch. Pin the initial default-branch commit as `original_base_sha`,
+create the integration branch from it, and record the explicit PR base. On resume, keep the
+existing branch identity and resolve local/remote divergence before fast-forwarding or pushing.
+Do not overwrite divergent history or user work.
+
+Run baseline checks on `original_base_sha` before editing. On resume, reuse that baseline and
+record current failures separately. If the record is missing, reconstruct the original base
+from reliable branch/PR history and test it in an isolated checkout. If it cannot be established,
+mark it unknown; do not accept existing integration failures as baseline exemptions.
+
+Keep a durable run directory outside tracked product files, in a permitted location. Reuse it
+on resume, updating snapshots while retaining earlier versions needed to explain changes:
+
+- `spec.md`, when a spec exists, holds context; `tickets/<N>.md` holds each full body and criteria.
+- `scope.md` identifies selected tickets and their completion obligations for review.
+- `handoff.md` holds command/resource setup, original baseline, current verified wave tip,
+  branch identities, decision log, failures, and unresolved questions. Append decisions.
+- A run record tracks exact owned worktrees/branches, initial and current SHAs, claim ownership,
+  integration evidence per ticket, artifact paths, and push results. Report its absolute path.
+
+Create native or manual ticket worktrees from the wave SHA in writable locations. Record creation
+ownership and initial branch names rather than later guessing by patterns. Return `integration_branch`,
+`integration_tip`, `original_base_sha`, original failures, `pr_base`, and all handoff/run-record paths.
 
 ## Wave integration
 
-Contract for the step 1 integrate dispatch. Inputs, pasted into its prompt: every ticket return of the wave (`status`, `branch`, `worktree_path`, `files_changed`, `tests_run`, `decisions_made`, `open_questions`), the integration branch name, the baseline, `handoff.md`'s absolute path. On escalation the resolver dispatch finishes the in-progress merge, continues step 1 for the remaining branches in order, inherits steps 2-7 for what it merges, and owns step 1's abort/reset fallback if it fails. Steps run in this order:
+Read worker artifacts using implement-ticket's orchestrated result contract. Record the
+wave-start SHA and last preserved remote SHA before merging. Confirm each success's `base_sha`
+matches the wave and its tested/pushed head matches the expected branch tip. A failed push,
+dirty worktree, or missing criterion evidence is not success.
 
-1. **Merge** the wave's `status: success` branches into the integration branch in ascending ticket number. A conflict is **mechanical** when both sides' text can be kept verbatim (imports, appended definitions, lockfiles, formatting): resolve it in place. It is **semantic** when the correct result is a line neither author wrote, or one side's change must be dropped: escalate it to one resolver dispatch, per orchestrator-mode. On escalation, stage your mechanical resolutions, leave the semantic files unmerged, and return `status: escalated` with `conflicts_found` listing resolved files, unmerged files and hunks, both branches, and both tickets' goals from `handoff.md`. If the resolver also fails: `git merge --abort` when a merge is in progress, otherwise `git reset --hard origin/<integration branch>` (never push first), so the main tree sits clean at the last pushed tip; return `status: aborted` and stop per SKILL.md's Stop conditions.
-2. **Test before pushing**: run the test files in each merged ticket's `files_changed` (fall back to its `tests_run` command when it names none), plus the tests covering any hunk you resolved. **Red** means any failure absent from `handoff.md`'s baseline failures; a baseline failure still failing is not red, name it in `tests_run`. A red merged tree is a **semantic conflict**: escalate it as in step 1 with the failures verbatim, each failing test's owning ticket, and the ticket whose diff touches the code under test (both from `files_changed`). Nothing red is pushed. You authored none of the merged code, so this run is not self-certification; a hunk you resolved is yours, and SKILL.md re-tests it in a separate dispatch.
-3. **Push** the integration branch; **only after the push succeeds**, comment "merged into `<integration branch>`" on each merged ticket, including this wave's `already_satisfied` ones.
-4. **Decisions log**: append one entry to `handoff.md` (`## Decisions log`) naming the wave's merged tickets and each dispatch's `decisions_made` and `open_questions`, verbatim. Later dispatches read it as the cumulative "Decisions made" block. The resolver appends when it inherits.
-5. **Cleanup**: a wave worktree is one returned as `worktree_path`, or one whose checked-out branch (per `git worktree list --porcelain`) is a wave ticket's `feat/ticket-<N>-*` branch or a harness branch (e.g. `wt-*`) at the wave's starting tip; leave every other worktree alone. Remove every wave worktree (failed ones too, their WIP is pushed). Then delete the harness-created branch each dispatch switched away from: a local branch named by the harness pattern, with no worktree and no `origin/` counterpart, pointing at this wave's starting integration tip (`git branch -d`). This is orchestrator-mode's Parallel Writes step 3 cleanup with the harness branch identified by pattern and tip instead of a returned `harness_branch` field. Delete nothing else here. Name them in `worktrees_cleaned`.
-6. **Delete merged ticket branches, on origin and locally.** With the integration branch checked out, after the push, the comments, and the cleanup have succeeded, for every ticket branch this wave merged (`status: success`) or superseded (`status: already_satisfied`): `git push origin --delete <branch>` when `origin/<branch>` exists, then `git branch -d <branch>`. Never `-D`: integration merges are true merges, so a "not fully merged" refusal means the merge did not land; report it and move on. A "checked out at" refusal means a worktree remains; report that instead. Report per-branch failures; never abort the batch over one. **Never delete** the integration branch, the default branch, or a failed ticket's WIP branch. This is the only place these branches can be cleaned up: the feature PR records the integration branch as its head, so `cleanup-merged-branches` never sees a ticket branch as merged.
-7. **Return**: `status` (`merged` / `escalated` / `aborted`), `merged_tickets`, `tests_run` (each command, its result, baseline failures seen), `conflicts_found` (per conflict: files, hunks or failing test ids, the two branches, resolved in place or escalated), `worktrees_cleaned` (worktrees and harness branches), `branches_deleted` (per branch: name, local and remote outcome), `integration_tip`.
+Merge successful tips in ticket-number order. Keep both writers' intent available for conflicts.
+Escalate semantic decisions to a resolver; even apparently mechanical changes require tests.
+On failure, abort only an active merge and report actual HEAD and earlier successful merges.
+Retain WIP and recovery evidence. Do not use an unconditional hard reset to make a report true.
+
+Run affected tests and relevant checks on the merged tree. An unchanged original baseline
+failure is reported separately; newly introduced failures require a fix. If anyone resolved
+hunks or added a fix, a separate worker runs Post-resolution tests before dependants proceed.
+Only after verification, push the integration tip and confirm the remote SHA. Append decisions,
+criterion evidence, and exact integrated commits to the durable record. Comment integration
+progress only with messaging authorization, including the commit SHA when posting.
+
+Cleanup follows orchestrator-mode's ownership and preservation rules. Use exact recorded
+resources only. Before removing any checkout, check uncommitted and untracked work and prove
+all needed commits are preserved. Failed or unpushed WIP remains. Before deleting a branch,
+prove its current local and remote tips are ancestors of the verified preserved integration
+head and it belongs to this run. Use an expected-tip lease for remote deletion where available;
+a changed remote tip is retained. `already_satisfied` never authorizes deleting unique WIP.
+
+Return `status` as merged, escalated, or blocked; integrated ticket IDs and commits, actual HEAD,
+verified and pushed SHAs, checks, conflicts, remaining merge state, dirty paths, and retained or
+cleaned resources. Keep detailed logs in the run artifact.
 
 ## Post-resolution tests
 
-Contract for the step 1 dispatch that runs after any hunk was resolved. Inputs: the integration branch name, the integrate (or resolver) return's `conflicts_found` verbatim, the baseline failures, `handoff.md`'s absolute path. Run the tests covering every resolved hunk and failing test id listed; red means any failure absent from the baseline. Return `status` (`green` / `red`), `tests_run`. On red the orchestrator sends one fix dispatch to the integration branch (the main tree); it commits, pushes, and returns the new `integration_tip`, which replaces the integrate dispatch's as the next wave's baseline SHA.
+A separate worker checks every resolved hunk and prior failing test at the supplied integration
+SHA. Return tested SHA, commands, results, and original baseline failures separately. On failure,
+one worker fixes in scope, then a separate worker verifies again. Do not advance the wave tip,
+publish an unverified fix as integration success, or clean up until this loop passes.
 
 ## Integration review
 
-The step 2 Review dispatch prompt carries the absolute path of `spec.md` (already outside the repo tree) and tells the subagent: that file is the spec source; skip code-review's own spec search entirely (its first choice, commit refs, would land on the *tickets* instead of the spec); do not ask the user; if `docs/agents/issue-tracker.md` is absent, note it in the report and continue, the spec is a file.
+Review `scope.md` and the selected ticket snapshots as completion obligations. The full spec is
+context only. Supply these sources explicitly to `code-review` so it need not rediscover intent
+from commit mentions. Use the recorded fixed PR-base commit and tested integration SHA. Report
+unselected criteria as out of scope. A no-spec run still has scope.md and ticket snapshots.
+Schedule any review children within capacity, or use independent direct reviews of standards
+and acceptance criteria when the review skill is unavailable.
 
 ## Verification plan
 
-Authoring contract for the step 3 dispatch.
-
-- **Few and critical**: at most **three scenarios**. A scenario earns its place only because automated tests could not have covered it (UI, data shape, an integration). If more qualify, keep the three with the highest cost of being wrong. No traceability list: uncovered criteria are simply absent; the Test plan records what ran.
-- **Shape**: optionally one line up top, "Run against <env>, ~N min", omitted when obvious. Each scenario is numbered copy-paste-ready **Steps** (preconditions and cleanup fold in as steps) plus one **What you should see** line.
-- **Not a test run**: the what-you-should-see line orients the human's judgement ("~1,200 rows, `order_total` populated from 2024 on"), never asserts pass/fail; acceptance is the human's call.
-- **Execute before publishing**: run every step against that environment; the observed output becomes the what-you-should-see text. A step the run's environment cannot reach is still authored, flagged "not executed, requires <env>".
-- **Waiver**: nothing qualifies (docs-only, config tweak, fully covered by tests) → the one-line form "No human verification beyond code review: <reason>", never a silently missing section.
+Use at most three critical scenarios requiring human judgement beyond automated checks.
+Each has copy-paste-ready steps, preconditions and cleanup where needed, and one "What you
+should see" line grounded in observed results. Execute reachable steps with safe inputs;
+label inaccessible ones "not executed, requires <environment>". Preserve uncovered acceptance
+criteria in the evidence record rather than silently declaring them verified. If none qualify,
+write "No human verification beyond code review: <reason>". Replace a prior plan on resume.
 
 ## Feature PR
 
-Body contract for the step 3 dispatch, executed after the plan above. The spec number and title are in `handoff.md`'s `## Spec`.
-
-- **`Closes` lines**: one per ticket in the prompt's `Closes` list, as given; the orchestrator computed it from step 0's merged evidence and this run's integrations, so there is nothing to re-scan. Add `Closes #<spec>` only when the prompt says the list covers step 0's `spec_open_tickets`; otherwise comment progress on the spec.
-- **Size the body to the change**: a line per ticket in the Summary, what actually ran in the Test plan (from the Verify report the prompt carries), no filler sections and no restated ticket bodies.
-- A prior run's feature PR gets its body updated in place: replace the old Verification plan section, never append a second one.
-- **Labels**: apply `awaiting-verification` to the spec, or to each work-set ticket when the run has no spec (`gh label create` it first if the repo lacks it), unless the plan is a waiver, when there is nothing to verify.
+Refresh complete open-ticket coverage before adding `Closes #<spec>`. Add closing lines only
+for tickets with current satisfaction evidence in the integrated head; close the spec only
+when every open ticket is covered. Use explicit `--base` and `--head` and the repo PR template.
+Create or update the existing feature PR, with Summary, actual Test plan, and Verification plan.
+Apply `awaiting-verification` only within authorized lifecycle ownership and when the plan has
+human scenarios. Preserve the final body locally if publication is blocked. Never merge the PR.

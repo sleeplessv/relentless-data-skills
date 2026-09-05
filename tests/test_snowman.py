@@ -900,6 +900,19 @@ class TestExecute(SnowmanTestCase):
                 self.assertEqual(json.loads(out), rows)
                 self.assertIn("# types: V VARIANT", err)
 
+    def test_empty_results_retain_plain_columns_and_types(self):
+        self.enter(self.make_project())
+        schema = [{"name": "ID", "type": "NUMBER(38,0)"}, {"name": "NAME", "type": "VARCHAR"}]
+        for fmt, expected in (("csv", "ID,NAME\n"), ("json", "[]\n")):
+            with self.subTest(fmt=fmt):
+                _, out, err = self.run_execute(
+                    {"sql": Outcome(0, json.dumps([[], schema]), "")}, "SELECT 1", fmt=fmt,
+                )
+                self.assertEqual(out, expected)
+                self.assertIn("# types: ID NUMBER(38,0), NAME VARCHAR", err)
+                self.assertIn("# 0 rows", err)
+                self.sql_args()
+
     def test_multiline_csv_never_shares_stream_with_metadata(self):
         import csv
 
@@ -948,6 +961,20 @@ class TestExecute(SnowmanTestCase):
         self.assertIn("type notes shortened", err)
         path = root / err.split("full result: ")[1].splitlines()[0]
         self.assertEqual(json.loads(path.read_text())["types"], schema)
+
+    def test_wide_empty_plain_schema_is_bounded_and_saved(self):
+        root = self.enter(self.make_project())
+        schema = [{"name": "COL" + str(i) + "x" * 200, "type": "VARCHAR"} for i in range(100)]
+        for fmt in ("csv", "json"):
+            with self.subTest(fmt=fmt):
+                _, out, err = self.run_execute(
+                    {"sql": Outcome(0, json.dumps([[], schema]), "")}, "SELECT 1", fmt=fmt,
+                )
+                self.assertEqual(out, "[]\n" if fmt == "json" else "")
+                self.assertLessEqual(len(err.splitlines()[0].encode()), 1024)
+                self.assertIn("type notes shortened", err)
+                path = root / err.split("full result: ")[1].splitlines()[0]
+                self.assertEqual(json.loads(path.read_text()), {"rows": [], "types": schema})
 
     def test_invalid_limits_block_before_snow_is_called(self):
         for limits in ({"max_rows": -1}, {"max_cell": -1}, {"max_output": -1},
@@ -1048,7 +1075,7 @@ class TestExecute(SnowmanTestCase):
         self.enter(self.make_project())
         payload = json.dumps([[], [{"name": "A", "type": "DATE"}]])
         _, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
-        self.assertEqual(out, "")
+        self.assertEqual(out, "A\n")
         self.assertIn("# 0 rows\n", err)
 
     def test_split_result_shapes(self):
@@ -1324,6 +1351,79 @@ class TestMainCli(SnowmanTestCase):
                 self.assertNotIn("BLOCKED:", stderr.getvalue())
                 self.assertIn("Do not rerun automatically", stderr.getvalue())
 
+    def test_processing_failures_preserve_received_payload_privately(self):
+        self.enter(self.make_project())
+        payloads = ["not json secret", '{"error":"secret"}', '[{"A":1},{"B":2}]',
+                    '[[1],[]]', '[[{"A":1}],[{"name":42,"type":"DATE"}]]',
+                    json.dumps([{"A": chr(0xD800)}])]
+        for payload in payloads:
+            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as recovery_root:
+                snow = fake_snow({"sql": Outcome(0, payload, "")})
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with mock.patch.object(snowman, "run_snow", snow), \
+                        mock.patch.object(tempfile, "tempdir", recovery_root), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = snowman.main(["snowman.py", "SELECT 1"])
+                self.assertEqual(code, 1)
+                self.assertEqual(len(snow.calls), 1)
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertIn("query already ran", stderr.getvalue())
+                self.assertNotIn("secret", stderr.getvalue())
+                path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
+                self.assertEqual(path.read_text(), payload)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertIn("Inspect this file locally", stderr.getvalue())
+
+    def test_subprocess_recovery_preserves_invalid_utf8_bytes(self):
+        root = self.enter(self.make_project())
+        payload = b"not json \xff\r\n"
+        calls = root / "calls.txt"
+        binary = root / "snow"
+        binary.write_text(
+            f"#!{sys.executable}\nimport sys\n"
+            f"with open({str(calls)!r}, 'a') as out: out.write('call\\n')\n"
+            f"sys.stdout.buffer.write({payload!r})\n"
+        )
+        binary.chmod(0o700)
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.dict(os.environ, {"PATH": str(root)}), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = snowman.main(["snowman.py", "SELECT 1"])
+        self.assertEqual(code, 1)
+        self.assertEqual(calls.read_text(), "call\n")
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertNotIn("not json", stderr.getvalue())
+        self.assertNotIn("�", stderr.getvalue())
+        path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
+        self.addCleanup(path.unlink)
+        self.assertEqual(path.read_bytes(), payload)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_empty_cli_output_reports_no_payload_to_recover(self):
+        self.enter(self.make_project())
+        for payload in ("", " \n"):
+            with self.subTest(payload=payload):
+                snow = fake_snow({"sql": Outcome(0, payload, "")})
+                stderr = io.StringIO()
+                with mock.patch.object(snowman, "run_snow", snow), contextlib.redirect_stderr(stderr):
+                    self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 1)
+                self.assertIn("no result output received", stderr.getvalue())
+                self.assertNotIn("# raw CLI stdout:", stderr.getvalue())
+                self.assertEqual(len(snow.calls), 1)
+
+    def test_recovery_storage_failure_reports_no_saved_copy(self):
+        self.enter(self.make_project())
+        snow = fake_snow({"sql": Outcome(0, "invalid secret payload", "")})
+        stderr = io.StringIO()
+        with mock.patch.object(snowman, "run_snow", snow), \
+                mock.patch.object(tempfile, "mkstemp", side_effect=OSError("disk full")), \
+                contextlib.redirect_stderr(stderr):
+            self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 1)
+        self.assertIn("could not save recovery copy", stderr.getvalue())
+        self.assertNotIn("# raw CLI stdout:", stderr.getvalue())
+        self.assertNotIn("secret", stderr.getvalue())
+        self.assertEqual(len(snow.calls), 1)
+
     def test_spill_error_reports_query_already_ran_without_stdout(self):
         root = self.enter(self.make_project())
         (root / ".snowman" / "results").write_text("not a directory")
@@ -1337,6 +1437,10 @@ class TestMainCli(SnowmanTestCase):
         self.assertEqual(stdout.getvalue(), "")
         self.assertTrue(stderr.getvalue().startswith("ERROR: query already ran;"))
         self.assertIn("cannot save full result", stderr.getvalue())
+        path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
+        self.addCleanup(path.unlink)
+        self.assertEqual(json.loads(path.read_text()), [{"DDL": "x" * 500}])
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertNotIn("BLOCKED:", stderr.getvalue())
 
     def assert_usage_error(self, argv: list, match: str) -> None:

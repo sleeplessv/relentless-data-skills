@@ -28,7 +28,12 @@ tables one by one. Check query cost before expanding a discovery query.
 
 ## Profile a table
 
-Profile a sample first on large tables. Expand only when the question requires it.
+For exact metrics, aggregate over the requested population. For exploration or
+estimates, sample and label the reported metrics as estimates.
+Use known row counts and bytes to assess cost. If size is unknown and changes
+the query plan, project `rows` and `bytes` from `SHOW TABLES` for the target.
+Choose filters and sampling from that evidence and the user's cost constraints.
+If those constraints prevent an exact answer, explain the limit before sampling.
 These examples use `<t>` for the selected table or sample:
 
 - Row count: `SELECT COUNT(*) AS n FROM <t>`.

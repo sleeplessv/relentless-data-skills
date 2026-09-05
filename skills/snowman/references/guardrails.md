@@ -50,7 +50,9 @@ empty string. Use a reader that preserves quoted-empty fields when the
 distinction matters, or use `--json`.
 
 `--json` produces one compact JSON array. Empty results are `[]` plus a newline.
-CSV empty results have no data output. Both emit `# 0 rows` on stderr.
+Empty CSV results retain the header when schema is available and fits the byte
+limit. Both formats emit `# 0 rows` and all available column names and types on
+stderr, subject to the type-note cap below.
 Complete nested objects and arrays retain their JSON types. Scaled NUMBER
 values may arrive from the CLI as strings such as `"1.50"`. Schema metadata
 identifies their Snowflake type.
@@ -74,9 +76,9 @@ omitted to meet the byte limit, keeping JSON and CSV valid. A CSV header that
 alone exceeds the byte limit is omitted with all rows.
 
 A `# types:` note lists types that plain text cannot convey, such as scaled
-NUMBER, FLOAT, DATE, TIMESTAMP, and VARIANT. The type note has a separate
-1,024-byte cap. Other diagnostics and recovery notices are outside the data
-byte limit.
+NUMBER, FLOAT, DATE, TIMESTAMP, and VARIANT. Empty results include plain types
+too. The type note has a separate 1,024-byte cap. Other diagnostics and recovery
+notices are outside the data byte limit.
 
 Any row, cell, data-byte, or type-note truncation saves the complete CLI result:
 
@@ -97,10 +99,16 @@ Inspect only needed fields locally. The wrapper does not delete artifacts.
 can describe SQL, context, configuration, or invalid limits. It does not imply
 that the submitted SQL was a write.
 
-Unexpected CLI output and artifact-save failures occur after a query. They
-produce `ERROR:` diagnostics that state the query already ran. The wrapper
-emits no data stdout for these failures. It rejects inconsistent row shapes
-rather than silently dropping fields.
+Unexpected CLI output, preview-processing failures, and artifact-save failures
+exit with code 1 and `ERROR: query already ran; ...`. Stdout stays empty.
+The wrapper rejects inconsistent row shapes rather than dropping fields.
+
+For these failures, the wrapper saves received CLI stdout unchanged to a private
+temporary file with mode `0600`. The `# raw CLI stdout:` notice gives its absolute
+path. Inspect the file locally as JSON_EXT if valid, or as unparsed text.
+This recovery file differs from the normalized full-result JSON above.
+Do not rerun automatically. If no output arrived or recovery storage also fails,
+the diagnostic states that no output or complete artifact is available.
 
 CLI errors retain their exit code. Rich error panels become `ERROR: ...` lines
 on stderr. Failed-query stdout is suppressed. Authentication failures may add

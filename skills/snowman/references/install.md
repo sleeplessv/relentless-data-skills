@@ -42,6 +42,7 @@ Inspect authentication setup below only when needed. Successful existing
 sessions do not need another login. If the requested scope already identifies
 a database or schema, discover that scope instead of inventorying the account.
 
+Check root `AGENTS.md` and `CLAUDE.md` for existing Snowflake routing.
 Ask remaining setup questions together, with recommendations:
 
 - Databases to record. Start with the requested scope and let the user expand it.
@@ -50,6 +51,8 @@ Ask remaining setup questions together, with recommendations:
 - Default warehouse per account. Recommend an appropriate small warehouse from
   the available choices. The wrapper passes it to queries and staged run commands.
 - Default environment for multiple accounts. Recommend the non-production one.
+- Whether to add [project routing](#apply-project-routing), if absent and not
+  already authorized. Bundle this offer with the other unresolved choices.
 
 Enumerate schemas only for the selected databases:
 
@@ -72,10 +75,12 @@ connection: <chosen-connection>
 default_warehouse: <warehouse>
 databases:
   - name: <database>
-    env: dev
+    env: <chosen-environment>
 ---
 ```
 
+Replace `<chosen-environment>` with each database's resolved classification,
+such as `dev` or `prod`.
 For multiple accounts, each environment holds its connection and warehouse.
 The environment name replaces per-database environment flags:
 
@@ -101,11 +106,9 @@ auto-suspend settings, observed roles, and the discovery date. For multiple
 accounts, group those facts by environment. Do not invent access grants from
 a role name or mark an untested database as readable.
 
-## Offer project routing
+## Apply project routing
 
-Check root `AGENTS.md` and `CLAUDE.md`. If either already routes Snowflake work
-to snowman, continue. Otherwise offer this project instruction once, unless
-adding it is already authorized:
+If routing is absent and adding it was authorized, write:
 
 ```markdown
 ## Snowflake
@@ -115,7 +118,7 @@ under `.snowman/staged/` for manual execution.
 ```
 
 Append to `AGENTS.md` if present, otherwise `CLAUDE.md`, or create `AGENTS.md`.
-If the user declines, continue without asking again during the session.
+If the user declined, continue without asking again during the session.
 Once context is written, resume the original request through the wrapper.
 
 ## Authentication

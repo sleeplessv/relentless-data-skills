@@ -38,7 +38,8 @@ Stdout contains only CSV data, or a compact JSON array with `--json`.
 Types, truncation notices, and artifact paths go to stderr. Keep the streams
 separate when parsing. CSV cells can contain newlines or lines beginning `#`.
 An empty CSV cell represents NULL, `""` represents an empty string, and nested
-values are compact JSON. Empty JSON results are `[]`.
+values are compact JSON. Empty results retain available column names and types
+on stderr, with a CSV header or JSON `[]` on stdout, subject to preview limits.
 
 Defaults are 50 rows, 200 retained characters per cell plus a truncation marker,
 and 16,000 UTF-8 bytes of data output. Change them with `--max-rows`, `--max-cell`,
@@ -56,6 +57,10 @@ Read the reason after `BLOCKED:`. It describes a refusal before querying,
 including SQL, context, or configuration problems. Fix setup failures or
 reformulate an authorized read. Stage changes only when
 the user requested them. Never bypass the wrapper to evade a refusal.
+If `snow` is missing from PATH, install Snowflake CLI before retrying.
+
+After a query-processing failure, inspect the reported `# raw CLI stdout:` file
+locally. It preserves received output for recovery. Do not rerun automatically.
 
 Queries need network access. Use the environment's permitted execution mode.
 If diagnostics identify a sandbox network restriction, use its approval flow

@@ -280,11 +280,12 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
 
 
 class SnowResult(NamedTuple):
-    """Decoded result of one ``snow`` CLI call."""
+    """Decoded CLI result plus original stdout bytes for lossless recovery."""
 
     returncode: int
     stdout: str
     stderr: str
+    stdout_bytes: bytes | None = None
 
 
 def run_snow(
@@ -307,6 +308,7 @@ def run_snow(
         result.returncode,
         result.stdout.decode(errors="replace"),
         result.stderr.decode(errors="replace"),
+        result.stdout,
     )
 
 
@@ -503,7 +505,7 @@ def type_is_plain(sql_type: str) -> bool:
     return False
 
 
-def types_footer(describe_rows: list[dict] | None) -> str | None:
+def types_footer(describe_rows: list[dict] | None, *, include_plain: bool = False) -> str | None:
     """``# types: COL TYPE, ...`` for the columns whose Snowflake type the CSV
     text cannot show (scaled NUMBER, FLOAT, DATE/TIME/TIMESTAMP, VARIANT,
     OBJECT, ARRAY, ...). ``describe_rows`` is the ``DESCRIBE RESULT`` output
@@ -512,7 +514,7 @@ def types_footer(describe_rows: list[dict] | None) -> str | None:
         f"{row['name']} {row['type']}"
         for row in describe_rows or []
         if isinstance(row, dict) and row.get("name") and row.get("type")
-        and not type_is_plain(str(row["type"]))
+        and (include_plain or not type_is_plain(str(row["type"])))
     ]
     return f"# types: {', '.join(notable)}" if notable else None
 
@@ -544,7 +546,7 @@ def render_rows(
     """
     validate_limits(fmt, max_rows, max_cell, max_output)
     total = len(rows)
-    columns = list(rows[0]) if rows else []
+    columns = list(rows[0]) if rows else [row["name"] for row in types or [] if row.get("name")]
     header = io.StringIO()
     if fmt == "csv" and columns:
         write_csv_row(header, columns)
@@ -596,7 +598,7 @@ def render_rows(
 
     notes = []
     type_cut = False
-    if (note := types_footer(types)):
+    if (note := types_footer(types, include_plain=not rows)):
         encoded = note.encode("utf-8")
         if len(encoded) > MAX_TYPE_NOTE_BYTES:
             ending = "... [type notes shortened]"
@@ -788,6 +790,28 @@ def split_result(parsed) -> tuple[list | None, list[dict] | None]:
     return None, None
 
 
+def preserve_failed_result(raw: str | bytes, reason: str) -> ResultProcessingError:
+    """Keep received CLI stdout privately when parsing, rendering or spilling fails."""
+    if not raw.strip():
+        return ResultProcessingError(f"{reason} no result output received; nothing to recover.")
+    path: str | None = None
+    try:
+        fd, path = tempfile.mkstemp(prefix="snowman-recovery-", suffix=".txt")
+        with os.fdopen(fd, "wb") as out:
+            out.write(raw if isinstance(raw, bytes) else raw.encode("utf-8"))
+    except OSError:
+        if path is not None:
+            try:
+                Path(path).unlink(missing_ok=True)
+            except OSError:
+                pass
+        return ResultProcessingError(f"{reason} could not save recovery copy; no complete artifact available.")
+    return ResultProcessingError(
+        f"{reason}\n# raw CLI stdout: {path}\n"
+        "# Inspect this file locally; JSON_EXT rows/schema if valid, otherwise unparsed output."
+    )
+
+
 def execute(
     sql: str,
     connection_override: str | None = None,
@@ -821,23 +845,32 @@ def execute(
             print(hint, file=sys.stderr)
         return result.returncode
 
+    raw = result.stdout_bytes if result.stdout_bytes is not None else result.stdout
     try:
         rows, types = split_result(json.loads(result.stdout))
-    except ValueError:
+    except (ValueError, RecursionError):
         rows = types = None
     if not isinstance(rows, list):
-        raise ResultProcessingError("unexpected snow output; expected JSON row arrays. Check the CLI version and diagnostics.")
+        raise preserve_failed_result(raw, "unexpected snow output; expected JSON row arrays.")
     if rows and any(row.keys() != rows[0].keys() for row in rows[1:]):
-        raise ResultProcessingError("inconsistent result columns; cannot safely render these rows.")
-    text, notes, truncated = render_rows(
-        rows, fmt=fmt, max_rows=max_rows, max_cell=max_cell,
-        max_output=max_output, types=types,
-    )
+        raise preserve_failed_result(raw, "inconsistent result columns; cannot safely render these rows.")
+    if types is not None and any(
+        not isinstance(row.get("name"), str) or not isinstance(row.get("type"), str)
+        for row in types
+    ):
+        raise preserve_failed_result(raw, "invalid DESCRIBE schema; expected string names and types.")
+    try:
+        text, notes, truncated = render_rows(
+            rows, fmt=fmt, max_rows=max_rows, max_cell=max_cell,
+            max_output=max_output, types=types,
+        )
+    except (ValueError, TypeError, RecursionError, OverflowError):
+        raise preserve_failed_result(raw, "cannot render result preview.") from None
     if truncated:
         try:
             spilled = spill_full_result(rows, sql, target.snowman_dir, types=types)
-        except OSError as exc:
-            raise ResultProcessingError(f"cannot save full result: {exc}") from exc
+        except (OSError, ValueError, TypeError, RecursionError, OverflowError):
+            raise preserve_failed_result(raw, "cannot save full result.") from None
         location = os.path.relpath(spilled, Path.cwd()) if target.snowman_dir else str(spilled)
         notes.append(f"# full result: {location}")
     sys.stdout.write(text)

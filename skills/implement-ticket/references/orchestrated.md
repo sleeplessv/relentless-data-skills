@@ -3,6 +3,8 @@
 Read only for a feature dispatch. The coordinator owns ticket eligibility, assignment,
 labels, external comments, and the feature PR. The worker implements its named ticket and
 returns evidence; it opens no ticket PR and does not change the issue lifecycle.
+The coordinator posts the required start and stop comments for this worker's attempt under
+SKILL.md's Ticket lifecycle comments. Worker silence on GitHub does not waive those comments.
 
 ## Inputs and setup
 
@@ -10,6 +12,8 @@ Read the ticket snapshot and handoff files at the supplied absolute paths. The s
 ticket's acceptance criteria define completion; the full spec informs design decisions.
 Inputs include `base_branch` as integration destination, immutable `base_sha`, original
 baseline SHA and failures, `worktree_path`, resource allocation, and optional `resume_branch`.
+Inputs also include the start-comment URL or a recorded posting failure. Surface a missing
+record to the coordinator before implementation so it can complete the lifecycle step.
 The coordinator records eligibility before dispatch. If live evidence contradicts its
 snapshot, return that discrepancy rather than claiming or silently overriding triage.
 
@@ -61,3 +65,5 @@ reported as durable remote WIP. Write detailed evidence to an artifact and retur
 confirmed publication of that head to the ticket branch. `already_satisfied` makes no claim
 that unique WIP commits can be deleted. `failed` preserves all uncommitted or unpushed work.
 The coordinator handles questions and may continue independent tickets.
+Return enough outcome and preservation detail for the coordinator to post the stop comment
+immediately, including when no code changed or the ticket was already satisfied.

@@ -66,6 +66,10 @@ on resume, updating snapshots while retaining earlier versions needed to explain
   branch identities, decision log, failures, and unresolved questions. Append decisions.
 - A run record tracks exact owned worktrees/branches, initial and current SHAs, claim ownership,
   integration evidence per ticket, artifact paths, and push results. Report its absolute path.
+- For each ticket attempt, record the worker ID, branch, start-comment URL, stop-comment URL,
+  and outcome. Record a posting failure and the saved comment body path when a URL is unavailable.
+  The tracker worker follows implement-ticket's Ticket lifecycle comments. Check these records
+  before dispatch and after each worker stops. Reconcile uncertain posts against GitHub before retrying.
 
 Create native or manual ticket worktrees from the wave SHA in writable locations. Record creation
 ownership and initial branch names rather than later guessing by patterns. Return `integration_branch`,

@@ -2,20 +2,24 @@
 
 The **`prefect`** agent skill for **Prefect 3**. It encodes only what an agent
 gets wrong by default: stale 3.x knowledge, unqueried instance state, and house
-standards. Everything else is fetched from the live Prefect docs, so advice
-tracks the latest docs instead of training data.
+standards. It checks version-sensitive advice against fetched Prefect docs
+or local API and CLI evidence for the project's installed version.
 
 ## What it does
 
-- **Doc-lookup protocol.** Resolves a topic via `docs.prefect.io/llms.txt`,
-  then fetches the page as markdown (`<page>.md`); never invents URLs; web
-  search is a fallback only. Works under network sandboxing, using the agent's
-  web-fetch instead of shell `curl`. Every answer names the doc page consulted,
-  or says "baseline knowledge" explicitly.
-- **CLI-first protocol.** Queries the live instance (`uv run prefect
-  deployment ls`, `flow-run inspect`, …) instead of guessing state, and checks
-  auth via `prefect config view` first. Read-only commands run eagerly;
-  destructive or hard-to-reverse ones are surfaced before running.
+- **Doc-lookup protocol.** Fetches the exact Markdown URL in
+  `docs.prefect.io/llms.txt`, with an HTML fallback when the fetch tool rejects
+  Markdown. Re-resolves missing pages through the index and uses web search
+  when direct lookup fails. Advice cites docs or local evidence and states
+  what remains unverified.
+- **CLI-first protocol.** Queries the live instance through the project's
+  established environment. An already-connected Prefect MCP server can also
+  provide read-only evidence. Checks effective settings and confirms access
+  with a read-only query, using the relevant Cloud or self-hosted auth path.
+  Destructive or hard-to-reverse actions are surfaced before running.
+- **Run diagnosis.** Uses state transitions and logs to identify the cause,
+  with separate checks for worker-backed pools, push and Managed pools, and
+  `serve()`. Startup code errors can produce `Crashed` runs too.
 - **Standards.** About 10 house opinions (lockfile-pinned 3.x, dev/prod split
   by pools and manifests, CI deploys, schedules on the deployment, secrets in
   blocks) plus three battle-tested patterns, each with its applicability
@@ -27,10 +31,10 @@ Targets the **Prefect 3.x** generation (no patch pin). Prefect 2.x is out of sco
 
 ## How it works
 
-The whole skill is a single SKILL.md (~100 lines, no `references/`). The
-durable contract is the lookup protocol (`llms.txt` → `<page>.md`); the only
-URLs it ships are five guardrail anchors, with a 404-means-re-resolve rule
-instead of a CI-checked URL cache.
+The whole skill is a single `SKILL.md`, with no `references/` directory.
+The lookup protocol uses exact URLs from `llms.txt` and accepts fetched
+Markdown or HTML. Five guardrail anchors point to common topics; the skill
+re-resolves them through the index if they move.
 
 ## Install
 
@@ -55,6 +59,6 @@ It activates automatically when you do Prefect 3 work or ask about Prefect.
 ## Maintenance / CI
 
 Repo CI lints this skill via **`scripts/lint_skill.py`** (frontmatter, "Use
-when" trigger in the description, line budget). There is deliberately no
-doc-URL liveness check: the skill carries no URL cache to rot, and its 404
-rule (re-fetch `llms.txt`, re-resolve) handles upstream page moves at use time.
+when" trigger in the description, line budget). There is no automated
+doc-URL liveness check for this skill. Its lookup protocol handles upstream
+page moves at use time; the linter does not validate Prefect API behavior.

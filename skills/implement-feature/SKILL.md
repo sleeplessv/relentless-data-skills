@@ -26,10 +26,11 @@ tracker, file, and test work; keep bulk evidence in handoff artifacts.
 - Pin each wave's immutable `base_sha`; return and verify it. The integration branch name is
   destination metadata, not a substitute for the SHA. Preserve the **original baseline** SHA
   and failures across resumes; the wave base advances only after verification.
-- The coordinator owns ticket eligibility and lifecycle. Workers do not claim tickets,
-  comment, relabel issues, or create per-ticket PRs. Existing authorization and configured
-  permissions govern external actions; comments require explicit messaging authorization.
-  Store proposed comments locally when absent. Do not prescribe blanket sandbox bypasses.
+- The coordinator owns ticket eligibility and lifecycle through its tracker worker. Implementing
+  workers do not claim tickets, comment, relabel issues, or create per-ticket PRs. Follow
+  implement-ticket's [Ticket lifecycle comments](../implement-ticket/SKILL.md#ticket-lifecycle-comments)
+  for every attempt. Reuse the user's comment authorization without asking again. Existing
+  authorization and configured permissions govern external actions.
 - Pass absolute artifact paths, relevant decisions, and compact return summaries. Reuse
   loaded skills and honor explicit prose and testing guidance. One worker owns each ticket;
   reserve capacity for leaf work and review children instead of spawning helpers inside it.
@@ -59,10 +60,13 @@ and the original baseline, ticket snapshots, and durable run record are availabl
 
 1. Select the ready tickets and pin `base_sha` to the verified integration tip. A setup
    worker records each assigned worktree and task-created branch before implementation.
+   Have the tracker worker claim eligible tickets and post their start comments before dispatch.
 2. Dispatch one worker per ticket within capacity. Supply its snapshot, handoff and run-record
    paths, `base_branch`, `base_sha`, original baseline, resource allocation, `open_pr: false`,
    and any evidence-backed `resume_branch`. Tell it to read implement-ticket's
    [Orchestrated dispatch contract](../implement-ticket/references/orchestrated.md).
+   Include the start-comment URL, or the recorded posting failure. On each worker's return or
+   interruption, have the tracker worker post its stop comment before integration or redispatch.
 3. A dedicated integration worker follows
    [Wave integration](references/reference.md#wave-integration). It checks the result SHAs,
    merges successes, tests the merged tree, records decisions, and reports actual merge state.
@@ -77,6 +81,7 @@ and the original baseline, ticket snapshots, and durable run record are availabl
 
 Report what merged and what is next once per wave, including unresolved preservation or cleanup
 failures. Done when every selected ticket is satisfied or recorded as failed or blocked downstream.
+Every started attempt must also have a stop-comment URL or an explicitly reported posting failure.
 
 ### 2. Integration gates
 
@@ -115,3 +120,5 @@ An interrupted merge is not proof the tree equals the last pushed tip. Return ac
 merge state, integrated tickets, dirty paths, and preservation status. Push only verified
 integration states, or explicitly authorized WIP to a separate recovery branch. Resume from
 that record; never relabel a current integration regression as a pre-existing baseline failure.
+Before pausing, cancelling, or handing off the feature, stop active ticket workers and post each
+started attempt's stop comment. Reconcile missing comments from interrupted runs before resuming.

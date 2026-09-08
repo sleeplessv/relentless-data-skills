@@ -29,9 +29,28 @@ implementation and verification steps below still apply. Solo runs skip that ref
 
 **Use configured execution permissions.** Run commands normally. If a necessary command
 is blocked, use the available scoped escalation and report a denial accurately. The task's
-existing authorization governs external mutations. Issue comments require explicit messaging
-authorization; otherwise keep the proposed findings in a local artifact. Record which
-assignments and labels this run changes and alter only those on a stop path.
+existing authorization governs external mutations. Reuse the user's authorization for lifecycle
+comments without asking again. Record which assignments and labels this run changes and alter
+only those on a stop path.
+
+### Ticket lifecycle comments
+
+Post a comment on the ticket when starting work and when stopping work on each attempt,
+including resumes. In solo runs, the implementing agent posts both comments. In feature runs,
+the coordinator posts them through its tracker worker on behalf of the implementing worker.
+
+- **Start:** after eligibility and workspace preflight, before implementation, post "Started
+  work on #<N> on branch `<branch>`." Identify a resume and the integration branch when relevant.
+- **Stop:** before ending the attempt, post "Stopped work on #<N>: <outcome>." Cover completion,
+  blockers, failure, pause, cancellation, and handoff. Include the PR or preserved branch and
+  HEAD, what remains, and any failed checks or required decision. A successful worker return
+  says "implementation complete, awaiting integration" until integration is verified.
+
+Use `gh issue comment <N> --repo <owner/repo> --body-file <comment-file>`. Record the returned
+comment URL in the findings or run record. A local draft or chat update does not satisfy this
+step. If posting is prohibited or fails, retain the body and report the missing comment and
+reason. Check ticket comments before retrying an uncertain post. On recovery from an abrupt
+interruption, reconcile the prior attempt's missing stop comment before posting a new start.
 
 ### 0. Resolve the ticket number
 
@@ -42,7 +61,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 `gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). `awaiting-verification` is not a stop: a prior run's PR awaits human verification; say so when announcing, proceed, and let step 8's re-authored Verification plan supersede the old one (under an orchestrated dispatch, mention it in `open_questions` prefixed `pre-existing:` instead: the orchestrator's feature-level plan is what supersedes it). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to
 self is advisory, not an exclusive lock. Complete the base and workspace preflight first;
 then claim within existing authorization and record whether this run added the assignment.
-Comment the chosen branch only when messaging is authorized.
+Post the start comment after step 3 completes.
 
 ### 2. Pick a base branch
 
@@ -66,6 +85,8 @@ existing WIP tip; work on a fresh attempt branch before rebasing onto `base_sha`
 a pushed branch is not already authorized. Abort an unsuccessful rebase explicitly. Keep
 its saved tip and findings available if rebuilding from the base is necessary. Report the
 actual branch and preservation state, including any push failure.
+
+Post and record the start comment before proceeding to step 4.
 
 ### 4. Explore before editing
 
@@ -108,7 +129,7 @@ Allocate separate ports and test resources for parallel workers, or serialize sh
 - Read the full `git diff <base_sha>...HEAD` yourself before marking ready, and fix what it surfaces: including refactoring the new code deferred from step 5 (adjacent-code refactors stay reported-only, per the scope rule). Reach for the `code-review` skill only when the diff is large or touches subsystems you didn't explore in step 4: one pass, and no review agents beyond it. A refactor re-enters step 6 (and step 7 when it touched a runtime path): green again before you push.
 - Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed). Size both to the change: no filler sections, no restating the diff.
 - Author the **Verification plan** (see `CONTEXT.md`) as its own PR-body section: at most **three scenarios**, each earning its place only because automated tests could not have covered it (UI, data shape, an integration). If more qualify, keep the three with the highest cost of being wrong; drop the rest silently: no traceability list, the Test plan already records what ran. Optionally one line up top, "Run against <env>, ~N min", omitted when obvious. Each scenario is numbered copy-paste-ready **Steps** (preconditions and cleanup fold in as steps) plus one **What you should see** line. Execute every step yourself before publishing: the observed output becomes the what-you-should-see text, orienting the human's judgement rather than asserting pass/fail; a step you cannot reach is authored anyway, flagged "not executed, requires <env>". If executing a step surfaces something evidently broken, that is a steps 6–7 failure: fix within the authorized scope, then re-author. Nothing qualifies (docs-only, config tweak, fully covered by tests) → a one-line waiver, "No human verification beyond code review: <reason>", never a silently missing section. On a resume, replace any prior plan section rather than appending. Then apply `awaiting-verification` to the ticket (`gh label create` it first if absent; skip when the plan is a waiver). Removing it is the human's, never yours.
-- `gh pr ready`, then close out leading with the outcome: PR URL and what landed in the first sentence, detail after. Do **not** merge; leave that to the human.
+- `gh pr ready`, then post and record the stop comment with the PR URL and outcome. Close out leading with the PR URL and what landed, detail after. Do **not** merge; leave that to the human.
 
 ## Stop conditions
 
@@ -122,7 +143,7 @@ Stop and surface to the user (do not improvise) if:
 
 When stopping, preserve work and report the actual branch, HEAD, worktree path, dirty files,
 and push outcome. Push WIP when authorized; a failed push leaves local work that must remain.
-Record the failure, attempts, and pending decisions in a local findings artifact. Publish it
-only when messaging is authorized. Leave any draft PR open and report its state accurately.
+Record the failure, attempts, and pending decisions in a local findings artifact. Post and record
+the stop comment with these findings. Leave any draft PR open and report its state accurately.
 In solo runs, release only a claim this run added; label changes require lifecycle ownership
 and existing authorization. In orchestrated runs, the feature coordinator owns the lifecycle.

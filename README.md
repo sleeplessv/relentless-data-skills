@@ -9,6 +9,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 <!-- skills-table:begin -->
 | Skill | What it does |
 | --- | --- |
+| [`code-review`](skills/code-review/) | Review changes since a fixed point against repository standards and the originating spec. Run both axes in parallel subagents and report their findings separately. |
 | [`dbt-runner`](skills/dbt-runner/) | Invocation discipline and failure triage for running dbt: a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Bootstrap a dlt ingestion project: install the dltHub AI Workbench project-scoped (only the toolkits the project needs), then layer Relentless Data house conventions (Snowflake, Prefect, DuckDB dev loop) as a committed always-on rule. Idempotent re-runs add new source types. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build an interactive data-lineage DAG for a Microsoft Fabric Git-exported medallion workspace. Five parallel stdlib extractors (pipelines and schedules, JSON-config Silver, JSON-config Gold and wrapper notebooks, notebook code, TMDL semantic models and PBIR reports) write one agreed graph schema, a merge step aliases ids, derives live and fork flags and writes a validation report, and a dagre+d3 single-file page renders overview and focus lineage with a Coverage & gaps panel. |
@@ -38,7 +39,7 @@ from their upstream repos.
 [mattpocock/skills](https://github.com/mattpocock/skills) is the flow the
 `implement-*` skills here plug into: `grill-with-docs` sharpens an idea,
 `to-spec` turns the thread into a spec, `to-tickets` splits it into tickets, and
-`implement` builds each one by driving `tdd`, closing with `code-review`. Run
+`implement` builds each one by driving `tdd`. Run
 `setup-matt-pocock-skills` once per repo first. It writes the issue-tracker,
 triage-label, and domain-doc conventions the rest assume, which is where this
 repo's `docs/agents/` files and the `## Agent skills` block in `CLAUDE.md` come
@@ -59,7 +60,7 @@ The rest we keep installed, by job:
 ```bash
 npx skills add mattpocock/skills -g -y \
   -s setup-matt-pocock-skills -s ask-matt \
-  -s grill-with-docs -s to-spec -s to-tickets -s implement -s tdd -s code-review \
+  -s grill-with-docs -s to-spec -s to-tickets -s implement -s tdd \
   -s grilling -s grill-me -s batch-grill-me -s to-questionnaire -s wayfinder \
   -s prototype -s handoff -s claude-handoff \
   -s triage -s diagnosing-bugs -s codebase-design \

@@ -5,7 +5,7 @@ artifacts. Scoped delegation applies to the named tasks; explicit orchestrator m
 until the user changes it. The main thread loads relevant skills, dispatches work, handles
 decisions, and reports outcomes.
 
-The workflow uses active tool schemas, bounded parallel waves, compact handoffs, and evidence
+The workflow uses active tool schemas, bounded parallel dispatches, compact handoffs, and evidence
 from the actual artifact. Parallel writers use isolated worktrees with pinned base commits.
 Cleanup requires recorded ownership and preservation evidence. Detailed rules live in
 [SKILL.md](SKILL.md), with conditional nesting and worktree procedures in

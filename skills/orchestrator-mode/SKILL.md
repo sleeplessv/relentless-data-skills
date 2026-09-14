@@ -36,7 +36,7 @@ Model overrides may require a non-full fork. Runtime schemas decide this, not ve
 2. **Dispatch independent work.** Assign each worker its task, owned files or resources,
    inputs, constraints, and return contract. Parallelize only within available capacity.
    Count the root, siblings, and descendants; keep a slot for executable leaf work.
-   Prefer flat waves. For a subtree that earns separate coordination, read
+   Prefer flat dispatches. For a subtree that earns separate coordination, read
    [Nesting](references/reference.md#nesting-sub-orchestrators) first.
 3. **Collect and continue.** Use completion notifications and available wait tools according
    to their actual semantics. Keep the turn active while required work remains. Resume an

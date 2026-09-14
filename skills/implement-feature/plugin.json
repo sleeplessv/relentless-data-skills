@@ -1,7 +1,7 @@
 {
   "name": "implement-feature",
   "version": "0.2.0",
-  "description": "Implement a whole feature as one PR: orchestrate subagents over a spec's tickets on a shared integration branch. Ticket branches land in waves, with integrated review + tests, then a single feature PR to main.",
+  "description": "Implement a spec or selected tickets as one feature PR. Dispatch ready tickets in parallel, integrate completed work, and release dependants after verification. Keep the PR draft until scope, review, and checks pass.",
   "author": {
     "name": "sleeplessv"
   },

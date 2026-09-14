@@ -4,20 +4,17 @@ argument-hint: "[ticket-number]"
 description: 'Implement a ticket (GitHub issue) end-to-end on a ticket branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement ticket #N", "implement issue #N", "implement the next ready ticket", or otherwise asks to take a ticket from open to PR.'
 ---
 
-# Implement Ticket
+# Implement ticket
 
-Take a ticket (on GitHub: an issue) from open → ticket branch → working code → green tests + runtime smoke check → PR ready with a Verification plan.
-
-## Inputs
-
-- Ticket number (optional, e.g. `#8` or `8`). If omitted, auto-select (see step 0).
-- Optional: target repo (defaults to the current `gh` remote).
+Implement a GitHub ticket with checks and a Verification plan. Use the supplied ticket number
+and repository, defaulting to the current `gh` remote and step 0's selection when omitted.
 
 ## Orchestrated dispatch
 
-For a feature dispatch, read [references/orchestrated.md](references/orchestrated.md)
-first. It owns the pinned-base, resume, lifecycle, no-PR, and return contracts; the
-implementation and verification steps below still apply. Solo runs skip that reference.
+For a feature dispatch, read [references/orchestrated.md](references/orchestrated.md) first.
+It owns setup, baseline provenance, resume, lifecycle, and the result contract. Skip steps 0 through 3,
+use step 4 for local exploration, then follow steps 5 through 7 and the self-review in step 8. The
+coordinator owns PRs, issue actions, and independent review. Solo runs use the full workflow.
 
 ## Workflow
 
@@ -92,7 +89,7 @@ Post and record the start comment before proceeding to step 4.
 
 Grep/search for the modules the ticket touches. Read `AGENTS.md`, `CONTEXT.md`, and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the ticket asks for it.
 
-Identify the **feedback-loop commands**: the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`), plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the configured type-check/lint and test commands on the pinned clean `base_sha` before editing, or reuse an original baseline with that proven SHA. On resume, use a separate checkout for this base check; failures on the WIP branch remain separate and cannot become baseline exemptions. Record commands, checked SHA, and original failures.
+For solo runs, identify the **feedback-loop commands**: the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`), plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the configured type-check/lint and test commands on the pinned clean `base_sha` before editing, or reuse an original baseline with that proven SHA. On resume, use a separate checkout for this base check; failures on the WIP branch remain separate and cannot become baseline exemptions. Record commands, checked SHA, and original failures.
 
 Done when you have: (a) the type-check and test commands, (b) the run command, and (c) recorded baseline results for all configured checks. Mark absent commands as absent, not passing.
 
@@ -105,7 +102,7 @@ Before choosing a path: an acceptance criterion that is subjective or unverifiab
 
 Throughout:
 
-- Open a **draft PR within the first 1–2 commits**: `git push -u origin HEAD` then `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body "Closes #<N>. <one-paragraph plan>"`. Use the repo's PR template (`.github/pull_request_template.md`) if one exists, keeping the `Closes #<N>` line. If `gh pr create` fails (permissions, branch protection), keep committing locally and surface the error at the end. Don't abort. If an open PR already exists for this branch (a prior attempt), update its body, stripping any stale stop-reason text, instead of creating a new one.
+- In solo runs, open a **draft PR within the first 1–2 commits**: `git push -u origin HEAD` then `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body "Closes #<N>. <one-paragraph plan>"`. Use the repo's PR template (`.github/pull_request_template.md`) if one exists, keeping the `Closes #<N>` line. If `gh pr create` fails (permissions, branch protection), keep committing locally and surface the error at the end. Don't abort. If an open PR already exists for this branch (a prior attempt), update its body, stripping any stale stop-reason text, instead of creating a new one.
 - Keep the loop **tight** while building: type-check and run the single test file you're touching as you go; save the full suite for step 6.
 - Keep commits scoped and conventional (`feat:`, `fix:`, `test:`, …).
 
@@ -126,7 +123,11 @@ Allocate separate ports and test resources for parallel workers, or serialize sh
 
 ### 8. Review, then finalise the PR
 
-- Read the full `git diff <base_sha>...HEAD` yourself before marking ready, and fix what it surfaces: including refactoring the new code deferred from step 5 (adjacent-code refactors stay reported-only, per the scope rule). Reach for the `code-review` skill only when the diff is large or touches subsystems you didn't explore in step 4: one pass, and no review agents beyond it. A refactor re-enters step 6 (and step 7 when it touched a runtime path): green again before you push.
+Read the full `git diff <base_sha>...HEAD` yourself and fix in-scope findings, including refactoring
+new code deferred from step 5. Rerun step 6 after fixes and step 7 for affected runtime paths.
+Feature workers return through their orchestrated contract without nested review. Solo runs continue:
+
+- Use `code-review` only for a large diff or unexplored subsystems. Run one pass, fix in-scope findings, and rerun affected checks.
 - Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed). Size both to the change: no filler sections, no restating the diff.
 - Author the **Verification plan** (see `CONTEXT.md`) as its own PR-body section: at most **three scenarios**, each earning its place only because automated tests could not have covered it (UI, data shape, an integration). If more qualify, keep the three with the highest cost of being wrong; drop the rest silently: no traceability list, the Test plan already records what ran. Optionally one line up top, "Run against <env>, ~N min", omitted when obvious. Each scenario is numbered copy-paste-ready **Steps** (preconditions and cleanup fold in as steps) plus one **What you should see** line. Execute every step yourself before publishing: the observed output becomes the what-you-should-see text, orienting the human's judgement rather than asserting pass/fail; a step you cannot reach is authored anyway, flagged "not executed, requires <env>". If executing a step surfaces something evidently broken, that is a steps 6–7 failure: fix within the authorized scope, then re-author. Nothing qualifies (docs-only, config tweak, fully covered by tests) → a one-line waiver, "No human verification beyond code review: <reason>", never a silently missing section. On a resume, replace any prior plan section rather than appending. Then apply `awaiting-verification` to the ticket (`gh label create` it first if absent; skip when the plan is a waiver). Removing it is the human's, never yours.
 - `gh pr ready`, then post and record the stop comment with the PR URL and outcome. Close out leading with the PR URL and what landed, detail after. Do **not** merge; leave that to the human.

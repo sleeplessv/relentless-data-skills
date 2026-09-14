@@ -12,6 +12,9 @@ Read the ticket snapshot and handoff files at the supplied absolute paths. The s
 ticket's acceptance criteria define completion; the full spec informs design decisions.
 Inputs include `base_branch` as integration destination, immutable `base_sha`, original
 baseline SHA and failures, `worktree_path`, resource allocation, and optional `resume_branch`.
+The pinned base belongs to this dispatch; keep it when unrelated integration work advances.
+Read supplied exploration notes before repeating shared investigation. Verify details against
+this checkout and record new decisions in this ticket's findings artifact.
 Inputs also include the start-comment URL or a recorded posting failure. Surface a missing
 record to the coordinator before implementation so it can complete the lifecycle step.
 The coordinator records eligibility before dispatch. If live evidence contradicts its
@@ -39,15 +42,18 @@ actual attempt checkout. Use configured permissions and the recorded command/res
 
 ## Implementation and verification
 
-Follow SKILL.md's scope, implementation, feedback-loop, artifact check, and full-diff review
-steps. Skip solo selection, claiming, PR creation and publication. Reuse loaded guidance;
-explicit skill requirements remain in force. No helper-agent fan-out inside the ticket.
+Follow SKILL.md's orchestrated route for implementation, checks, and self-review. Return
+questions to the coordinator and continue independent work within this ticket where possible.
+The feature gates own independent review; this worker owns its implementation evidence.
 
-Reuse the original recorded baseline failures. Compare a newly observed failure against
-`base_sha` in a safe separate checkout if needed, recording both SHAs. A failure introduced
-by this ticket must be fixed; a failure on the current integration base is reported separately
-and does not silently become an original baseline failure. Review `git diff <base_sha>...HEAD`,
-fix in-scope findings, and rerun affected checks before the final commit.
+Reuse setup's command and resource configuration and the original baseline at
+`original_base_sha`. The feature setup worker owns that baseline; an advanced dispatch base
+does not require every ticket to repeat the original full-suite run. Confirm the supplied
+baseline record identifies its SHA and results. Report missing provenance to the coordinator.
+Compare a newly observed failure against `base_sha` in a safe separate checkout when needed,
+recording both SHAs. Fix failures introduced by this ticket. Report failures already present
+at dispatch separately; they cannot become original baseline exemptions. Run the ticket's
+required checks on its final head even when original baseline evidence is reused.
 
 ## Result and preservation
 

@@ -6,8 +6,9 @@ It preserves unrelated work, checks ownership before claiming, and records the b
 target explicitly. Failed work remains recoverable, including when a push fails.
 
 Tests and runtime or artifact checks provide completion evidence. A feature-dispatched worker
-uses a pinned base and returns criterion evidence and preservation state without creating its
-own PR or changing the issue lifecycle. The coordinator owns those actions.
+uses its own pinned dispatch base, reuses the recorded original baseline, and returns criterion
+evidence and preservation state. It performs self-review; the coordinator owns independent
+feature review, PRs, and issue lifecycle actions.
 
 [SKILL.md](SKILL.md) is the workflow. [Auto-pick](references/auto-pick.md) is loaded only for
 selection, and [Orchestrated dispatch](references/orchestrated.md) only for feature workers.

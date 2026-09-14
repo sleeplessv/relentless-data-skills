@@ -44,7 +44,7 @@ fallback is authorized; otherwise it returns the missing capability for the pare
 4. **Integrate and verify.** One worker checks returned SHAs against the pinned base and
    merges only successful work. Resolve conflicts with both writers' intent available.
    Preserve the pre-merge tip and report actual state on failure. Aborting a merge may leave
-   earlier merges in the wave intact; do not claim it restored the last pushed tip. A separate
+   earlier successful merges intact; do not claim it restored the last pushed tip. A separate
    worker verifies any conflict resolution. Repeat fix then verification before releasing
    dependants or cleaning up.
 5. **Clean up.** Remove only resources explicitly recorded as task-created and still in their

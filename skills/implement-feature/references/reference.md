@@ -75,7 +75,11 @@ Keep a durable run directory outside tracked product files, in a permitted locat
 on resume, updating snapshots while retaining earlier versions needed to explain changes:
 
 - `spec.md`, when a spec exists, holds its requirements; `tickets/<N>.md` holds each body and criteria.
-- `scope.md` records completion mode, selected tickets, spec coverage, gaps, and scope decisions.
+  Keep these canonical snapshots separate from the review input.
+- `scope.md` is the composite originating spec for integration review. Record the completion mode,
+  selected tickets, source provenance and snapshot paths, spec coverage, gaps, and scope decisions.
+  Copy every enforceable obligation for that mode into a requirements section. Put parent-spec or
+  unselected requirements that provide context in a separate context-only section.
 - `handoff.md` holds command/resource setup, original baseline, current verified integration tip,
   branch identities, decision log, failures, and unresolved questions. Append decisions.
 - A run record tracks exact owned worktrees/branches, initial and current SHAs, claim ownership,
@@ -181,15 +185,19 @@ integration tip, publish an unverified fix as integration success, or clean up u
 
 ## Integration review
 
-Pass the recorded PR-base commit as `fixed_point` and the tested integration SHA as the immutable
-`review_head`. Pass `scope.md` and every selected ticket snapshot together as authoritative
-`spec_sources`, with the completion mode and source roles. When `spec.md` exists, pass it as an
-obligation source for `whole_spec` and a context-only source for `selected_tickets`. For
-`whole_spec`, review every spec requirement, its ticket coverage, and end-to-end behavior.
-Missing coverage blocks readiness until reconciled; ticket completion alone does not satisfy
-the spec. For `selected_tickets`, the parent spec supplies context and unselected requirements
-remain out of scope. A no-spec run still has `scope.md` and ticket snapshots. The authoritative
-set bypasses `code-review` source discovery and reaches its Spec worker as one composite scope.
+Before review, materialize `scope.md` from the canonical spec and ticket snapshots. For
+`whole_spec`, its requirements section contains every spec requirement, ticket coverage obligation,
+and end-to-end behavior. Missing coverage blocks readiness; ticket completion alone does not
+satisfy the spec. For `selected_tickets`, the requirements section contains every selected ticket
+criterion. Put the parent spec and unselected requirements in the context-only section. A no-spec
+run still materializes the selected ticket criteria in `scope.md`.
+
+Run the upstream `code-review` skill in an isolated checkout whose `HEAD` is the tested integration
+SHA. Pass the recorded PR-base commit as its normal fixed-point argument and the absolute
+`scope.md` path as the one originating spec. Instruct this invocation to treat `scope.md` as the
+complete authoritative spec, skip spec discovery and issue-tracker setup, and pass that document
+to its Spec worker. Tell the Spec worker to enforce only the requirements section and use the
+context-only section for interpretation without reporting its contents as missing requirements.
 Schedule any review children within capacity, or use independent direct reviews of standards
 and acceptance criteria when the review skill is unavailable.
 

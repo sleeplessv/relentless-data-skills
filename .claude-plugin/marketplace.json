@@ -7,27 +7,6 @@
   },
   "plugins": [
     {
-      "name": "code-review",
-      "source": "./skills/code-review",
-      "description": "Review changes since a fixed point against repository standards and the originating spec. Run both axes in parallel subagents and report their findings separately.",
-      "version": "0.1.0",
-      "author": {
-        "name": "sleeplessv"
-      },
-      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/code-review",
-      "repository": "https://github.com/sleeplessv/relentless-data-skills",
-      "license": "Apache-2.0",
-      "keywords": [
-        "code-review",
-        "standards",
-        "spec",
-        "diff",
-        "subagents",
-        "pull-requests",
-        "workflow"
-      ]
-    },
-    {
       "name": "dbt-runner",
       "source": "./skills/dbt-runner",
       "description": "Invocation discipline and failure triage for running dbt: a static preflight script kills environment failures before the first command, invocation rules prevent the self-inflicted ones (sandboxed shells, piped output, silent empty selections), and a signature-indexed catalogue maps error strings to ranked causes and fixes, including dbt-fusion quirks. Bootstraps a committed per-project context file.",

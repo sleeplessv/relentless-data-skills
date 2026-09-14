@@ -15,8 +15,9 @@ research, commit, and handoff pointers. Keep detailed evidence in durable artifa
 
 - Spec-only input promises the whole spec. An explicit ticket list defines the work-set;
   its parent spec supplies context. Record the completion mode and coverage gaps.
-- The **frontier** contains unowned tickets whose blockers are satisfied in the verified,
-  preserved integration tip. Each dispatch pins that tip as its immutable `base_sha`.
+- The **frontier** contains tickets with no active implementer whose blockers are satisfied
+  in the verified, preserved integration tip. Assignment to the authenticated actor is
+  advisory. Each dispatch pins that tip as its immutable `base_sha`.
 - Each ticket has its own branch and isolated worktree, even when only one is ready.
   The integration branch collects verified work. Preserve its identity on resume and
   keep the original baseline SHA and failures separate from later integration failures.
@@ -76,7 +77,8 @@ posting failure. Partial work stays draft and retains its remaining obligations.
 
 Use fresh workers for Verify and [Integration review](references/reference.md#integration-review)
 on a fixed integration SHA. Verify runs configured lint, type checks, tests, and the applicable
-runtime or artifact check. Review uses the recorded completion mode and fixed PR-base commit.
+runtime or artifact check. Review uses that SHA as its immutable review head with the recorded
+completion mode, authoritative scope sources, and fixed PR-base commit.
 
 On a four-slot runtime, finish Verify before a `code-review` worker that needs two children,
 or flatten its standards and criteria axes into root-owned workers. Use equivalent independent

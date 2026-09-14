@@ -20,6 +20,15 @@ record to the coordinator before implementation so it can complete the lifecycle
 The coordinator records eligibility before dispatch. If live evidence contradicts its
 snapshot, return that discrepancy rather than claiming or silently overriding triage.
 
+The run record defines active implementer ownership. Assignment to the authenticated actor is
+advisory and does not establish an active implementer. Report another active attempt
+or another person's assignment before implementation so the coordinator can reconcile it.
+The snapshot also records any pre-existing `awaiting-verification` label, PR, and Verification
+plan. Treat these as historical state, not completion evidence or a stop. Preserve the label
+because only a human removes it. Report the prior state in `open_questions` with a `pre-existing:`
+prefix; the coordinator replaces the prior plan with the feature-level plan and owns all PR and
+issue lifecycle actions.
+
 Confirm this is the assigned isolated checkout. Record its path, initial branch and HEAD,
 and which resources this run created. Cut the ticket branch from `base_sha`, verifying HEAD
 before edits, without checking out the integration branch. Native isolation may start at a

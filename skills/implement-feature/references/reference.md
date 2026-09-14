@@ -22,9 +22,15 @@ For each selected ticket, read body, comments, labels, assignees, and native blo
 Union native edges with anchored `Blocked by` or `Depends on` declarations and lists inside
 those sections. Ordinary issue mentions and parent-child relationships are not blocking edges.
 Confirm concrete acceptance criteria and ticket rather than spec classification. Check ownership
-before any authorized claim. `needs-info`, `needs-triage`, or `wontfix` needs resolution; a WIP
-branch alone does not prove agent-authored triage. An explicit current user instruction can
+before any authorized claim. An assignment to the authenticated actor is advisory and does not
+mean an implementer is active. Another active attempt in the run record or an assignment to
+someone else requires reconciliation. `needs-info`, `needs-triage`, or `wontfix` needs resolution;
+a WIP branch alone does not prove agent-authored triage. An explicit current user instruction can
 resolve a prior agent stop. Track which lifecycle changes this run actually owns.
+
+Treat a pre-existing `awaiting-verification` label, PR, or Verification plan as historical state.
+Record each one in the ticket snapshot and evaluate current criteria. The old plan does not satisfy
+the feature-level plan gate, and only a human removes the label.
 
 Build the graph and detect cycles. An unresolved open blocker outside the selected set requires
 a dependency decision, not expansion of scope. Check that purportedly satisfied blockers are
@@ -77,7 +83,10 @@ on resume, updating snapshots while retaining earlier versions needed to explain
   draft status, and last published head. Report the run record's absolute path.
 - For each ticket attempt, record the worker ID, branch, start-comment URL, stop-comment URL,
   outcome, immutable dispatch SHA, prerequisite evidence, and state: ready, running, completed,
-  integrated, failed, or blocked. Distinguish worker completion from verified integration.
+  integrated, satisfied, failed, or blocked. `satisfied` is terminal for a validated
+  `already_satisfied` outcome and records the current integration tested SHA plus criterion and
+  runtime evidence. It does not claim that a merge occurred. Distinguish worker completion from
+  verified integration.
   Record a posting failure and the saved comment body path when a URL is unavailable.
   The tracker worker follows implement-ticket's Ticket lifecycle comments. Check these records
   before dispatch and after each worker stops. Reconcile uncertain posts against GitHub before retrying.
@@ -109,9 +118,13 @@ integration slot. Use a slot released by completion before refilling it, or rese
 transient setup, tracker, and integration work. Reuse workers for these sequential roles instead
 of keeping separate service agents active. Count review children in the same capacity budget.
 
-Reconstruct running, completed, and integrated attempts from the run record on resume. Reconcile
-uncertain worker state before redispatch so only one worker owns a ticket. An `already_satisfied`
-result requires current criterion evidence before releasing dependants, just like a merged result.
+Reconstruct running, completed, integrated, and satisfied attempts from the run record on resume.
+An unowned ticket has no active implementer: no running worker or unresolved active attempt in
+the record. Assignment to the authenticated actor remains advisory. Reconcile uncertain worker
+state before redispatch so only one worker owns a ticket. A satisfied attempt stays terminal and
+does not trigger redispatch on resume. If later integration may have invalidated its evidence,
+revalidate the affected criteria at the current tip. Record the new tested SHA and evidence;
+create another attempt only if that evidence fails and implementation is needed. Preserve unique WIP.
 
 ## Ticket integration
 
@@ -119,6 +132,11 @@ Read worker artifacts using implement-ticket's orchestrated result contract. Bef
 record the actual integration HEAD and last preserved remote SHA. Match the result's `base_sha`
 to its recorded dispatch and confirm its tested, pushed head equals the expected branch tip.
 A failed push, dirty worktree, or missing criterion evidence is not success.
+
+When a worker returns `already_satisfied`, record `state: completed` until the coordinator
+validates every criterion and applicable runtime evidence on the current verified integration
+tip. Then record `state: satisfied`, the tested integration SHA, and the evidence, and release
+dependants without a merge. Retain unique prior WIP and its branch regardless of this transition.
 
 Accept an older dispatch base when it is an ancestor of the current integration HEAD and the
 record proves its prerequisites were satisfied at dispatch. Check intervening changes for
@@ -149,9 +167,10 @@ prove its current local and remote tips are ancestors of the verified preserved 
 head and it belongs to this run. Use an expected-tip lease for remote deletion where available;
 a changed remote tip is retained. `already_satisfied` never authorizes deleting unique WIP.
 
-Return `status` as merged, escalated, or blocked; integrated ticket IDs and commits, actual HEAD,
-verified and pushed SHAs, checks, conflicts, remaining merge state, dirty paths, and retained or
-cleaned resources. Keep detailed logs in the run artifact.
+Return `status` as merged, satisfied, escalated, or blocked. Use `satisfied` when every processed
+ticket was validated without a merge. Include integrated ticket IDs and commits, satisfied ticket
+IDs and evidence, actual HEAD, verified and pushed SHAs, checks, conflicts, remaining merge state,
+dirty paths, and retained or cleaned resources. Keep detailed logs in the run artifact.
 
 ## Post-resolution tests
 
@@ -162,12 +181,15 @@ integration tip, publish an unverified fix as integration success, or clean up u
 
 ## Integration review
 
-Review `scope.md` and the selected ticket snapshots at the tested integration SHA. For
-`whole_spec`, also review every spec requirement, its ticket coverage, and end-to-end behavior.
+Pass the recorded PR-base commit as `fixed_point` and the tested integration SHA as the immutable
+`review_head`. Pass `scope.md` and every selected ticket snapshot together as authoritative
+`spec_sources`, with the completion mode and source roles. When `spec.md` exists, pass it as an
+obligation source for `whole_spec` and a context-only source for `selected_tickets`. For
+`whole_spec`, review every spec requirement, its ticket coverage, and end-to-end behavior.
 Missing coverage blocks readiness until reconciled; ticket completion alone does not satisfy
 the spec. For `selected_tickets`, the parent spec supplies context and unselected requirements
-remain out of scope. Supply these sources and the completion mode explicitly to `code-review`.
-Use the recorded fixed PR-base commit. A no-spec run still has scope.md and ticket snapshots.
+remain out of scope. A no-spec run still has `scope.md` and ticket snapshots. The authoritative
+set bypasses `code-review` source discovery and reaches its Spec worker as one composite scope.
 Schedule any review children within capacity, or use independent direct reviews of standards
 and acceptance criteria when the review skill is unavailable.
 

@@ -18,6 +18,8 @@ claims against applicable fetched docs or local API/CLI evidence, and cite the
 source or command. Latest docs alone do not establish support in an older
 installation. If verification fails, state what remains unverified. For general
 questions without a project, state the version scope supported by the docs.
+For deployment incidents, check the affected worker, flow image, integration,
+or server version when relevant. The local CLI version does not establish those versions.
 
 Also on every Prefect answer:
 
@@ -55,7 +57,8 @@ Fetch relevant anchors and apply the verify gate before advising.
 When the answer lives in the Prefect instance, such as deployments, work
 pools, runs, blocks, or profiles, query it via the CLI. An already-connected
 Prefect MCP server can also supply read-only instance evidence; confirm its
-target before using it. Use the CLI or SDK for authorized mutations.
+target before using it. Use a read-only SDK/API query when the CLI cannot provide
+the needed evidence, including pagination. Use the CLI or SDK for authorized mutations.
 
 - **Invocation:** follow the project's documented dependency manager and
   environment. A `pyproject.toml` alone does not identify a uv project. Use
@@ -63,10 +66,16 @@ target before using it. Use the CLI or SDK for authorized mutations.
   for Poetry projects, or `prefect ...` in the intended active environment.
   Keep inspection from changing dependencies or lockfiles; check runner options
   locally when needed, since `uv run` can synchronize the environment.
-- **Auth preflight:** run `prefect config view` through the selected runner to
-  inspect the effective `PREFECT_API_URL` and active profile, with secrets masked.
+- **Auth preflight:** inspect the effective API endpoint and active profile
+  through the selected environment. Output only allowlisted target fields and
+  strip credentials, query strings, and fragments from displayed URLs. Report
+  authentication settings by presence, never their values. Filter before output
+  reaches the transcript. `prefect config view` with default masking can expose
+  tokens in `PREFECT_CLIENT_CUSTOM_HEADERS`; do not capture its unfiltered output.
   Account for overrides from environment variables, `.env`, `prefect.toml`, and
-  `pyproject.toml`; a profile change alone may not change the target. Confirm
+  `pyproject.toml`; a profile change alone may not change the target. For remote
+  inspection, establish the matching endpoint before querying. An ephemeral
+  local server is not evidence about a remote instance. Confirm
   access with a read-only query; displaying configuration does not verify auth.
   For Cloud auth failures, use the configured API-key path or interactive
   `prefect cloud login` when needed. For self-hosted servers, check the endpoint
@@ -86,7 +95,11 @@ or the root cause and stop there. Changing deployments, pools, or flow code is
 in scope only when that change is the task (see Boundary, above).
 
 - **Auditing a project:** diff deployed reality (deployments, pools, schedules,
-  via the CLI) against the repo's manifests; drift is the finding.
+  via read-only queries) against the repo's manifests. Check filters and pagination
+  before claiming an object is absent or the inventory is complete. Paginate via
+  SDK/API when necessary. Inspect expected deployments by identity to verify
+  missing claims; find unexpected deployments only from a complete inventory.
+  If coverage is incomplete, report that limit instead of asserting drift.
 - **Debugging a run:** inspect the run, state transitions, and logs before
   classifying the cause. `Crashed` can include broken imports or syntax errors
   during startup; the state alone does not establish an infrastructure cause.
@@ -95,6 +108,11 @@ in scope only when that change is the task (see Boundary, above).
   submission and infrastructure errors instead. For `serve()`, check the
   serving process and its subprocess logs. For zombie runs, confirm whether
   the execution process still exists before concluding it is dead.
+
+For implementation tasks, verify the changed flow imports and exercise the changed
+behavior with suitable local inputs. Validate deployment configuration against the
+installed version without deploying unless requested. Report checks and remaining
+limits. Match verification to the change; a live production run is not a default check.
 
 ## Standards (house opinions)
 

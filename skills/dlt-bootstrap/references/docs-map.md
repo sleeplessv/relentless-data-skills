@@ -12,8 +12,8 @@ CLI command is rejected, re-fetch the relevant index / raw README and
 re-resolve. Do not invent URLs or flags.**
 
 ## AI Workbench (setup, toolkits, CLI)
-- workbench README (commands, toolkit table, agent notes) => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-workbench/master/README.md
-- toolkit packaging + `dlthub ai` CLI reference => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-workbench/master/TOOLKITS.md
+- workbench README (commands, toolkit table, agent notes) => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/README.md
+- toolkit packaging + `dlthub ai` CLI reference => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/TOOLKITS.md
 - dlt[hub] installation => https://dlthub.com/docs/hub/getting-started/installation.md
 - dlthub CLI full reference => https://dlthub.com/docs/hub/command-line-interface.md
 - REST API source with the workbench (workflow walkthrough) => https://dlthub.com/docs/hub/ingestion/rest-api-source.md

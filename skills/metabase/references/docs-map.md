@@ -1,22 +1,26 @@
-# Metabase Docs Map
+# Metabase docs map
 
-**Durable contract (won't rot):** the API index is generated per release and
-lists every endpoint. Version-pin any URL below by replacing `latest` with the
-instance's tag (e.g. `/docs/v0.57/api/card`); get the tag from
-`GET /api/session/properties` → `version.tag`.
+The API has no separate version scheme. Available endpoints depend on the
+installed Metabase release. For the deployed instance's documentation, open
+`/api/docs` on that instance.
 
-The URLs below are a convenience cache, validated by CI. **The Metabase API is
-versioned with the app and changes between releases.** When
-[api-reference.md](api-reference.md) is missing something or an endpoint
-behaves unexpectedly, fetch the live page rather than guessing.
+Public documentation archives use release-series paths, such as
+`/docs/v0.57/api` and `/docs/v0.57/api.json`. The instance's `version.tag` can
+include a patch number, so do not substitute the full tag for `latest`.
+Public archives do not establish exact patch behavior.
+
+CI checks that the marked URLs resolve. When [api-reference.md](api-reference.md)
+lacks an endpoint or its behavior differs, consult the matching instance or
+release documentation.
 
 ## API
 
-- API index (all endpoints, generated per version) => https://www.metabase.com/docs/latest/api-documentation
-- card endpoints => https://www.metabase.com/docs/latest/api/card
-- dataset / query endpoints => https://www.metabase.com/docs/latest/api/dataset
-- dashboard endpoints => https://www.metabase.com/docs/latest/api/dashboard
-- search endpoint => https://www.metabase.com/docs/latest/api/search
+- Interactive API reference, rendered with JavaScript => https://www.metabase.com/docs/latest/api
+- OpenAPI schema for endpoint lookup => https://www.metabase.com/docs/latest/api.json
+
+In the schema's `paths` object, find endpoints under `/api/card`,
+`/api/dataset`, `/api/dashboard`, or `/api/search`. Match the HTTP method and
+path, including any trailing slash in the applicable release.
 
 ## Auth and usage
 

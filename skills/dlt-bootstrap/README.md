@@ -2,25 +2,22 @@
 
 The **`dlt-bootstrap`** agent skill: set a project up for [dlt](https://dlthub.com)
 pipeline development by installing dltHub's official
-[AI Workbench](https://github.com/dlt-hub/dlthub-ai-workbench) project-scoped,
+[AI Harness](https://github.com/dlt-hub/dlthub-ai-harness) project-scoped,
 then layering Relentless Data house conventions (Snowflake destination, Prefect
 orchestration, DuckDB dev loop) on top as an always-on rule.
 
-It is deliberately a hybrid. The heavy procedural knowledge, scaffolding,
-debugging, and validating pipelines, stays upstream in dltHub's nine toolkits,
-which this skill never forks or re-teaches. It owns the repeatable
-bootstrap and the per-project conventions layer.
+The dltHub toolkits provide the procedures for building, debugging, and
+validating pipelines. This skill handles project setup and conventions.
 
 ## What it does
 
 - **Detect, then interview.** Establishes venv/`dlt[hub]`/agent/git state by
   inspection, then asks at most three questions (source types, pipeline name,
   destination confirm).
-- **Install the workbench.** Runs `uv add "dlt[hub]"`, then `uv run dlthub init`,
-  then `uv run dlthub ai init --agent claude`, then `dlthub ai toolkit install` for
-  only the pipeline toolkits matching the project's source types. Never installs
-  `quick-start` (this skill is the entry point) or `dlthub-platform` (we ship
-  via Prefect).
+- **Install the workbench.** Installs the workbench and its MCP dependency,
+  configures the detected agent, and selects toolkits for the project's source
+  types. The [installation procedure](SKILL.md#install-verified-fast-path)
+  contains the commands and toolkit policy.
 - **Write the house rule.** Fills `references/rule-template.md` and commits it
   as `dlt-house-conventions.md` next to dltHub's own installed rules, so the
   conventions are always-on and apply even when the workbench's `/find-source`
@@ -32,11 +29,9 @@ bootstrap and the per-project conventions layer.
 
 ## How it works
 
-The skill is intentionally thin. Verified-today CLI commands are the fast
-path, and on any command failure it consults `references/docs-map.md` (rooted
-at the workbench's raw README and the two `llms.txt` docs indexes) instead of
-debugging blind, so upstream renames degrade to a doc lookup, not a broken
-bootstrap. The docs map is CI-checked weekly.
+The skill follows the installation procedure in `SKILL.md`. If a command
+fails, it consults the workbench README and documentation indexes linked in
+`references/docs-map.md`. CI checks the marked URLs weekly.
 
 ## Install
 
@@ -55,8 +50,9 @@ npx skills add -g sleeplessv/relentless-data-skills/skills/dlt-bootstrap
 /plugin install dlt-bootstrap@relentless-data-skills
 ```
 
-It activates when you set up dlt in a project, add a new source type, or work
-in a dlt project that lacks the house-conventions rule.
+Use it to set up dlt in a project or add a source type. When it notices a
+missing house-conventions rule during another task, it offers setup and
+continues the original task unless you accept.
 
 ## Files
 

@@ -28,7 +28,7 @@ Coverage & gaps panel that states what the graph had to guess or skip.
   pipelines with no schedule and no invoker, and more.
 - **Render.** dagre plus a 50 KB d3 bundle inlined under a strict CSP (Google
   Fonts only). Overview groups sources per database and Bronze per
-  schema + country (~300 nodes, under 100 ms). Focus mode walks the directional
+  schema + country. Focus mode walks the directional
   closure with a depth selector and a 400-node cap. Light/dark tokens, layer
   text tags so identity is never colour-alone, Playwright verification.
 
@@ -75,4 +75,4 @@ npx skills add sleeplessv/relentless-data-skills/skills/fabric-lineage-dag
 
 Repo CI runs `scripts/lint_skill.py` against this skill's `SKILL.md`
 (frontmatter, "Use when" trigger, line budget). See the
-[root README](../../README.md#maintenance--ci).
+[root README](../../README.md#maintenance-and-ci).

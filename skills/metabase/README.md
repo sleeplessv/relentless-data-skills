@@ -109,4 +109,4 @@ for the SQL behind one.
 Repo CI runs `scripts/lint_skill.py` against this skill's `SKILL.md`
 (frontmatter, "Use when" trigger, line budget), `scripts/check_doc_urls.py`
 against `references/docs-map.md`, and `tests/test_metabase.py` against
-`scripts/mb.py`. See the [root README](../../README.md#maintenance--ci).
+`scripts/mb.py`. See the [root README](../../README.md#maintenance-and-ci).

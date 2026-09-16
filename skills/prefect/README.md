@@ -20,10 +20,8 @@ or local API and CLI evidence for the project's installed version.
 - **Run diagnosis.** Uses state transitions and logs to identify the cause,
   with separate checks for worker-backed pools, push and Managed pools, and
   `serve()`. Startup code errors can produce `Crashed` runs too.
-- **Standards.** About 10 house opinions (lockfile-pinned 3.x, dev/prod split
-  by pools and manifests, CI deploys, schedules on the deployment, secrets in
-  blocks) plus three battle-tested patterns, each with its applicability
-  condition.
+- **Standards.** Covers version pinning, environment separation, CI deployments,
+  deployment schedules, and secrets in blocks. Patterns state when they apply.
 - **Guardrails.** The classic stale-knowledge traps: workers not agents, no
   `Deployment` object, changed 3.x caching/results/transactions semantics.
 

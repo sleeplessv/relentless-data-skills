@@ -1,17 +1,19 @@
 # dltHub AI Workbench / dlt docs map
 
-**Durable contract (won't rot):**
+**Official entry points:**
 - OSS dlt docs index => https://dlthub.com/docs/llms.txt
 - dltHub (platform + workbench) docs index => https://dlthub.com/docs/hub/llms.txt
 - Any docs page as clean markdown: append `.md` to its URL.
-- The workbench repo's README/TOOLKITS.md (raw, `master` branch) are the
-  source of truth for CLI commands and the toolkit list.
+- Read the workbench README and toolkit reference alongside installed-version
+  CLI help. Resolve conflicting guidance against actual installed artifacts.
 
-The URLs below are a convenience cache, validated by CI. **If any fails or a
+CI checks the URLs below for liveness, not content freshness or command behavior.
+**If any fails or a
 CLI command is rejected, re-fetch the relevant index / raw README and
 re-resolve. Do not invent URLs or flags.**
 
 ## AI Workbench (setup, toolkits, CLI)
+- Cursor rule format and activation => https://cursor.com/docs/rules
 - workbench README (commands, toolkit table, agent notes) => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/README.md
 - toolkit packaging + `dlthub ai` CLI reference => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/TOOLKITS.md
 - dlt[hub] installation => https://dlthub.com/docs/hub/getting-started/installation.md

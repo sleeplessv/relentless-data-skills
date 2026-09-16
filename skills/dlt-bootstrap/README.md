@@ -11,27 +11,25 @@ validating pipelines. This skill handles project setup and conventions.
 
 ## What it does
 
-- **Detect, then interview.** Establishes venv/`dlt[hub]`/agent/git state by
-  inspection, then asks at most three questions (source types, pipeline name,
-  destination confirm).
+- **Detect project state.** Finds standalone rules and managed memory sections,
+  reconciles recorded toolkits with installed files, and asks only for missing choices.
 - **Install the workbench.** Installs the workbench and its MCP dependency,
   configures the detected agent, and selects toolkits for the project's source
-  types. The [installation procedure](SKILL.md#install-verified-fast-path)
+  types. The [installation procedure](SKILL.md#install)
   contains the commands and toolkit policy.
-- **Write the house rule.** Fills `references/rule-template.md` and commits it
-  as `dlt-house-conventions.md` next to dltHub's own installed rules, so the
-  conventions are always-on and apply even when the workbench's `/find-source`
-  etc. are invoked directly. Frontmatter holds the install state for
-  idempotent incremental re-runs (for example, adding a second source type later).
-- **Verify and hand off.** Runs `dlthub ai status` plus an MCP registration check;
-  day-to-day work then runs through the workbench's own commands, and hardening
-  composes with `prefect`, `/ship`, and `snowman`.
+- **Write the house rule.** Uses a Claude project rule, a Cursor `.mdc` rule,
+  or a managed `AGENTS.md` section for Codex. Re-entry updates the existing rule
+  and preserves other project instructions. Warehouse guidance follows the chosen destination.
+- **Verify and hand off.** Checks installed files and MCP configuration, then
+  distinguishes completed setup from readiness after restart. Uses the selected
+  toolkit's entrypoint and available companion skills. Production guidance covers
+  snapshot and incremental strategies, development-mode removal, and repeated runs.
 
 ## How it works
 
-The skill follows the installation procedure in `SKILL.md`. If a command
-fails, it consults the workbench README and documentation indexes linked in
-`references/docs-map.md`. CI checks the marked URLs weekly.
+The skill checks the manual installation procedure against current upstream
+guidance and installed CLI help. The sources are linked in `references/docs-map.md`.
+CI checks marked URLs weekly for liveness, not installation behavior.
 
 ## Install
 
@@ -56,11 +54,13 @@ continues the original task unless you accept.
 
 ## Files
 
-- `SKILL.md` has the detection list, interview, verified install sequence, toolkit
+- `SKILL.md` has the detection list, project choices, install sequence, toolkit
   policy, rule-placement procedure, and guardrails.
 - `references/rule-template.md` is the house-conventions rule the bootstrap
   fills and commits into each project (frontmatter holds re-entry state).
-- `references/docs-map.md` has durable doc entry points plus a topic-to-URL cache
+- `references/rule-installation.md` covers agent-specific output, discovery,
+  migration, and verification.
+- `references/docs-map.md` has official doc entry points plus a topic-to-URL cache
   (CI-checked).
 
 ## Maintenance / CI
@@ -72,3 +72,6 @@ continues the original task unless you accept.
   trigger, and the line budget.
 - **`tests/test_dlt_bootstrap.py`** validates the rule template's
   frontmatter and required sections, and the docs map's durable entries.
+- [Behavior scenarios](../../tests/dlt-prefect-scenarios.md) cover generated rules,
+  re-entry, overrides, and Prefect inspection. Run these separately in isolated fixtures;
+  the automated checks above do not establish agent behavior.

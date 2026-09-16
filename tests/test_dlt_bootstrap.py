@@ -4,12 +4,13 @@ Standard library only. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-dlt-bootstrap ships no scripts — the bootstrap copies and fills
+dlt-bootstrap ships no scripts. The bootstrap copies and fills
 references/rule-template.md, so the template's structure is an interface:
 the frontmatter keys are the skill's re-entry state and the body sections
 are the house conventions agents rely on. These tests pin that interface,
 plus the docs-map's durable entry points (URL *liveness* is CI's job, in
-scripts/check_doc_urls.py).
+scripts/check_doc_urls.py). These structural checks do not establish agent
+behavior. See dlt-prefect-scenarios.md for isolated behavior evaluations.
 """
 from __future__ import annotations
 
@@ -111,17 +112,17 @@ class TestSkillWiring(unittest.TestCase):
     def test_references_are_wired(self) -> None:
         self.assertIn("references/rule-template.md", self.text)
         self.assertIn("references/docs-map.md", self.text)
+        self.assertIn("references/rule-installation.md", self.text)
 
-    def test_rule_filename_is_stated(self) -> None:
-        # The committed rule's filename is how incremental mode finds it.
-        self.assertIn("dlt-house-conventions.md", self.text)
+    def test_linked_references_exist(self) -> None:
+        for target in re.findall(r"\]\((references/[^)#]+)(?:#[^)]*)?\)", self.text):
+            self.assertTrue((SKILL_DIR / target).is_file(), target)
 
     # The next two pin fixes from the 2026-06-12 live dry run — both broke
     # silently when missing.
 
     def test_mcp_extras_in_install_path(self) -> None:
-        # Without dlthub[mcp] the workspace MCP never starts, and upstream's
-        # own warning suggests a dlt[workspace] extra that does not exist.
+        # Preserve the historical workaround until package evidence replaces it.
         self.assertIn('uv add "dlthub[mcp]"', self.text)
         self.assertIn("dlt[workspace]", self.text)
 

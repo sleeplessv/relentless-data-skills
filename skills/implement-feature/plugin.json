@@ -1,7 +1,7 @@
 {
   "name": "implement-feature",
   "version": "0.2.0",
-  "description": "Implement a spec or selected tickets as one feature PR. Dispatch ready tickets in parallel, integrate completed work, and release dependants after verification. Keep the PR draft until scope, review, and checks pass.",
+  "description": "Implement a feature specification or selected tickets as one verified pull request.",
   "author": {
     "name": "sleeplessv"
   },

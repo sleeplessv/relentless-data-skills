@@ -1,7 +1,7 @@
 {
   "name": "orchestrator-mode",
   "version": "0.3.0",
-  "description": "Forces the main thread to act as an orchestrator and delegate ALL work to subagents instead of doing it itself: plan, dispatch, verify with a separate agent, synthesize. Agent-neutral across Claude Code, Cursor, Cortex Code, and Codex.",
+  "description": "Coordinate work through subagents with scoped delegation, shared evidence, and verification.",
   "author": {
     "name": "sleeplessv"
   },

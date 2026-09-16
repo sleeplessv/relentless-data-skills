@@ -20,8 +20,8 @@ toolkits or source types change; do not delete it.
 ## Development loop
 
 - Develop locally against **DuckDB** with `dev_mode=True` and `.add_limit(1)`
-  on resources until the schema and data look right; only then remove limits
-  and promote to the production destination (`destination` in the frontmatter).
+  on resources until the schema and data look right. The limit counts yielded
+  items or batches, not necessarily individual rows.
 - Validate after every change: row counts, primary keys, nested-object
   handling. Use the workbench's validation skills and the local dashboard.
 
@@ -36,16 +36,21 @@ toolkits or source types change; do not delete it.
 ## Hardening and shipping
 
 - Production pipelines are wrapped in a **Prefect flow** and deployed per the
-  `prefect` conventions. Do **not** use dltHub-platform deployment
+  `prefect` conventions when that skill is available. Otherwise use the project's
+  deployment workflow and current Prefect docs. Do **not** use dltHub-platform deployment
   (`setup-runtime`) in this project.
-- Add incremental loading before calling a pipeline production-ready.
-- Ship via the `/ship` flow (branch → conventional commits → PR →
-  squash-merge).
+- Select a load strategy from the source's update and deletion semantics.
+  Use incremental loading with a reliable cursor or change feed. Use full
+  replacement for current-state snapshots when incremental capture is unsuitable.
+- Before promotion, set `dev_mode=False`, remove resource limits, and select
+  the production destination. Verify repeated runs keep a stable dataset and
+  handle new rows, updates, and deletions as the chosen strategy requires.
+- Use `/ship` when available. Otherwise follow the project's commit and PR
+  workflow within the user's requested scope.
 
 ## Warehouse inspection
 
-- Use the `snowman` skill for read-only inspection of what landed in
-  Snowflake (schema discovery, profiling, data-quality checks).
+- <warehouse-inspection>
 
 ## Naming conventions
 

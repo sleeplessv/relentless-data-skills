@@ -16,16 +16,17 @@ house rule applying automatically because it is a rule, not skill-mediated.
 
 ## First: check for the house rule
 
-Search the project for a committed `dlt-house-conventions.md`.
+Use [rule discovery and placement](references/rule-installation.md) to find
+standalone rules or managed memory sections, including uncommitted setup.
 
-- **Present** → incremental mode: read its frontmatter (`source_types`,
-  `toolkits_installed`), then do only what's missing. This typically means installing an
-  additional toolkit for a new source type and updating the frontmatter.
-- **Absent** → full bootstrap (below).
+- If present, read `source_types` and `toolkits_installed`. Reconcile that
+  record with installed toolkit files, MCP configuration, and the active agent.
+  Repair missing setup or add the requested source type without repeating completed work.
+- If absent, bootstrap below. Preserve existing workbench files and project configuration.
 
 If invoked proactively (the user was working on something else and the rule is
 merely missing), don't start the bootstrap. Note that the project lacks
-`dlt-house-conventions.md`, offer to run the setup, and return to the user's
+the house rule, offer to run the setup, and return to the user's
 actual task unless they accept.
 
 ## Detect, never ask
@@ -39,7 +40,9 @@ Establish by inspection, creating what's missing in the install step:
 - Existing `.dlt/` directory, existing pipelines, git repo state.
 - Where `dlthub ai init` placed its rules (see "Write the house rule").
 
-## Interview (three questions max, as plain prose)
+## Resolve project choices
+
+Use choices already supplied by the user or project. Ask only for missing information:
 
 1. **Source type(s)** this project ingests: REST API, SQL database, or files?
    Drives toolkit selection. Multiple is fine.
@@ -47,16 +50,17 @@ Establish by inspection, creating what's missing in the install step:
 3. **Destination.** Snowflake is the house default; confirm, allowing a
    per-client override (e.g. BigQuery) without editing this skill.
 
-## Install (verified fast path)
+## Install
 
-Say in one sentence what you're about to install, then run the sequence
-straight through. Speak again only for a failure, a decision the user must
-make, or the hand-off, not per command.
+Say what you will install. Run the sequence with the detected agent in place
+of `claude` and the selected toolkit in place of `<toolkit>`.
+Check the current upstream README and installed CLI help before changing dependencies.
+Record the package versions used.
 
 ```bash
 uv init                          # only if no pyproject.toml
 uv add "dlt[hub]"
-uv add "dlthub[mcp]"             # MCP server deps; without this the workspace MCP never starts
+uv add "dlthub[mcp]"             # MCP dependency choice; check installed-version requirements
 uv run dlthub init               # workspace init; follow its instructions (uv sync)
 uv run dlthub ai init --agent claude
 uv run dlthub ai toolkit install <toolkit> --agent claude   # per source type
@@ -67,9 +71,9 @@ If any command fails or a flag is rejected, suspect upstream drift before
 debugging: consult [references/docs-map.md](references/docs-map.md) (start at
 the workbench README) and re-derive the command. Never invent flags.
 
-Known upstream trap (verified 2026-06): if `dlthub ai status` warns to
-`pip install "dlt[workspace]"`, ignore it. That extra does not exist; the
-correct fix is `uv add "dlthub[mcp]"` (already in the fast path above).
+The June 2026 bootstrap needed `dlthub[mcp]` despite a warning naming
+`dlt[workspace]`. For another version, resolve warnings against package metadata
+and current CLI guidance before applying or removing that workaround.
 
 ## Toolkit policy
 
@@ -91,36 +95,31 @@ matching the interview answer:
 
 ## Write the house rule
 
-1. Copy [references/rule-template.md](references/rule-template.md) into the
-   project and fill every `<placeholder>` from the interview + detection.
-   Then re-read the frontmatter: every key from the template present, one per
-   line, no `<` left (easy to mangle `destination` / `dev_destination`).
-   Fill the template, don't grow it: no extra sections, no restating what the
-   workbench's own rules already cover.
-2. Name it `dlt-house-conventions.md` and place it **in the same location
-   where `dlthub ai init` installed its own rules** (find its
-   `dlthub-workspace.md`) so it is always-on for the same agent. If that agent
-   merges rules into a memory file (`CLAUDE.md` / `AGENTS.md`), append the
-   filled template as a clearly delimited managed section instead.
-3. Ensure the agent memory file carries dltHub's credential-safety line (it is
-   in the template); their installer does not add it for Claude Code.
-4. Commit the rule and the workbench-installed files. Never commit
-   `.dlt/secrets.toml`. Neither `uv init` nor `dlthub ai init` gitignores it
-   (the latter only writes `.claudeignore`). Add `secrets.toml` to
-   `.gitignore` if absent, then verify: `git check-ignore .dlt/secrets.toml`.
+1. Fill [references/rule-template.md](references/rule-template.md) from the
+   resolved choices. Preserve every frontmatter key and replace every placeholder.
+   Set `<warehouse-inspection>` to read-only inspection of the chosen destination.
+   For Snowflake, use `snowman` if available. For other destinations, name an
+   available connector or CLI and verify its inspection commands before use.
+   If none is available, state that inspection requires destination access.
+2. Apply [rule placement and verification](references/rule-installation.md).
+   Keep the template concise and preserve project-specific additions on re-entry.
+3. Add `secrets.toml` to `.gitignore` if absent before any commit.
+   Verify `git check-ignore .dlt/secrets.toml` and inspect the staged file list.
+   Never commit `.dlt/secrets.toml`. Commit the rule and intended setup files.
 
 ## Verify, then hand off
 
-- `uv run dlthub ai status` shows the agent and pipeline toolkits, but it omits
-  `init`; use `uv run dlthub ai toolkit list` to confirm the full set.
-- MCP: confirm `dlt-workspace-mcp` is registered for the agent (for Claude
-  Code, check the project `.mcp.json`).
-- Tell the user to **restart their agent session now**. The workbench skills
-  (`/find-source`, ...) and the MCP server are not active until they do.
-- Tell the user the working loop: `/find-source` → scaffold → secrets via the
-  MCP secrets tools → debug → validate on DuckDB → harden (incremental
-  loading, remove dev limits) → wrap in a Prefect flow (`prefect`) →
-  ship via `/ship` → inspect what landed in Snowflake with `snowman`.
+- Compare `uv run dlthub ai status` with `.dlt/.toolkits` and installed files,
+  including `init`. A toolkit catalog listing does not prove installation.
+- Check MCP registration and enablement for the active agent. After session
+  restart, verify a non-secret read-only MCP call and the selected toolkit's entry skill.
+  If restart is still needed, report setup written and runtime readiness pending.
+- Get each toolkit's entry skill from installed metadata or current upstream docs.
+  Hand off through that entrypoint, DuckDB validation, production hardening,
+  Prefect orchestration, shipping, and inspection of the selected destination.
+- Check whether `prefect`, `ship`, and destination-specific companions are available.
+  Name missing companions and give an available docs or CLI fallback.
+  Do not promise unavailable slash commands or install companions without a request.
 
 ## Guardrails
 

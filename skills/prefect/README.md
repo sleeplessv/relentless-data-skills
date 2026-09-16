@@ -16,10 +16,15 @@ or local API and CLI evidence for the project's installed version.
   established environment. An already-connected Prefect MCP server can also
   provide read-only evidence. Checks effective settings and confirms access
   with a read-only query, using the relevant Cloud or self-hosted auth path.
+  Filters authentication output before capture and checks inventory completeness
+  before drift claims. Uses paginated read-only SDK or API queries when needed.
   Destructive or hard-to-reverse actions are surfaced before running.
 - **Run diagnosis.** Uses state transitions and logs to identify the cause,
   with separate checks for worker-backed pools, push and Managed pools, and
   `serve()`. Startup code errors can produce `Crashed` runs too.
+- **Implementation checks.** Verifies the changed flow or deployment configuration
+  locally and reports remaining limits. Incident checks include the affected
+  runtime's version when the local installation is insufficient evidence.
 - **Standards.** Covers version pinning, environment separation, CI deployments,
   deployment schedules, and secrets in blocks. Patterns state when they apply.
 - **Guardrails.** The classic stale-knowledge traps: workers not agents, no
@@ -60,3 +65,7 @@ Repo CI lints this skill via **`scripts/lint_skill.py`** (frontmatter, "Use
 when" trigger in the description, line budget). There is no automated
 doc-URL liveness check for this skill. Its lookup protocol handles upstream
 page moves at use time; the linter does not validate Prefect API behavior.
+
+[Behavior scenarios](../../tests/dlt-prefect-scenarios.md) cover masked custom
+headers, complete inventories, target selection, and version evidence. These
+are separate evaluations with synthetic data, not automated tests of a live instance.

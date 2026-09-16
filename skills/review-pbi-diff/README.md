@@ -81,4 +81,4 @@ Power BI work; it takes an optional git ref range (default `main...HEAD`).
 
 Repo CI runs `scripts/lint_skill.py` against this skill's `SKILL.md`
 (frontmatter, "Use when" trigger, line budget). See the
-[root README](../../README.md#maintenance--ci).
+[root README](../../README.md#maintenance-and-ci).

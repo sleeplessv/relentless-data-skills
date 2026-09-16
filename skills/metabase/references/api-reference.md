@@ -382,22 +382,7 @@ authoritative when completeness matters.
 
 ## Sources
 
-Fetch these when something here is missing or behaves unexpectedly. The same
-list lives in [docs-map.md](docs-map.md), where repo CI re-checks every URL
-weekly; if one has moved, fix it there.
-
-- API index (all endpoints, generated per version):
-  <https://www.metabase.com/docs/latest/api-documentation>
-- Card endpoints: <https://www.metabase.com/docs/latest/api/card>
-- Dataset / query endpoints: <https://www.metabase.com/docs/latest/api/dataset>
-- Dashboard endpoints: <https://www.metabase.com/docs/latest/api/dashboard>
-- Search endpoint: <https://www.metabase.com/docs/latest/api/search>
-- API keys & auth: <https://www.metabase.com/docs/latest/people-and-groups/api-keys>
-- SQL parameters / `{{tag}}` / `[[optional]]`:
-  <https://www.metabase.com/docs/latest/questions/native-editor/sql-parameters>
-- Working with the API (guide):
-  <https://www.metabase.com/learn/metabase-basics/administration/administration-and-operation/metabase-api>
-
-Version-pin a doc URL by replacing `latest` with the instance's tag (e.g.
-`/docs/v0.57/api/card`, verified 200); get the tag from
-`GET /api/session/properties` → `version.tag`.
+When an endpoint is missing here or behaves unexpectedly, consult the
+[docs map](docs-map.md) for maintained source URLs and release-selection guidance.
+For documentation matching the deployed instance, open `/api/docs` on that
+instance. Update moved public URLs in the docs map, where CI checks them weekly.

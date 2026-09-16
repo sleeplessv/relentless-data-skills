@@ -1,7 +1,7 @@
 {
   "name": "prefect",
   "version": "0.2.0",
-  "description": "Version-aware Prefect 3 guidance: a live docs-lookup protocol, CLI-first instance queries, and house standards. Prefect 2.x out of scope.",
+  "description": "Build, review, and debug Prefect 3 projects using documentation and live instance evidence.",
   "author": {
     "name": "sleeplessv"
   },

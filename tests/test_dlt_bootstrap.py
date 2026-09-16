@@ -91,7 +91,7 @@ class TestDocsMap(unittest.TestCase):
 
     def test_workbench_readme_is_the_command_source_of_truth(self) -> None:
         self.assertIn(
-            "https://raw.githubusercontent.com/dlt-hub/dlthub-ai-workbench/master/README.md",
+            "https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/README.md",
             self.text,
         )
 

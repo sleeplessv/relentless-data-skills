@@ -51,5 +51,5 @@ HTML writeup of a system, process, or set of findings.
 
 Repo CI lints this skill's `SKILL.md` (frontmatter, "Use when" trigger, line
 budget) via `scripts/lint_skill.py`. See the
-[root README](../../README.md#maintenance--ci). This skill ships no
+[root README](../../README.md#maintenance-and-ci). This skill ships no
 `references/docs-map.md`, so the doc-URL liveness check skips it.

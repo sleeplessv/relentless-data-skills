@@ -9,6 +9,30 @@ on:
   workflow_dispatch:
 
 jobs:
+  skill-version-check:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check skill versions and generated registry
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          case "$EVENT_NAME" in
+            pull_request) baseline=$(git rev-parse HEAD^1) ;;
+            push) baseline="$PUSH_BASE" ;;
+            *) baseline="$GITHUB_SHA" ;;
+          esac
+          python scripts/skill_versions.py --check --base "$baseline"
+          python scripts/sync_registry.py --check
+
   snowman-tests:
     runs-on: ubuntu-latest
     strategy:

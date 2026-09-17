@@ -180,12 +180,59 @@ for the schedule and Python versions.
   `skills/*/references/docs-map.md`. It fails when a marked URL no longer resolves.
 - `python3 scripts/sync_registry.py --check` checks that the marketplace entries
   and README skills table match each skill's `plugin.json`.
+- `python3 scripts/skill_versions.py --check --base origin/main` checks skill
+  versions against the fetched `main` branch. CI compares the proposed merge
+  with its base branch, or a push with its previous commit. Scheduled and manual
+  runs validate current metadata without requiring a historical bump.
 
 After editing a skill's `plugin.json`, run
 `python3 scripts/sync_registry.py --write` to regenerate the catalog.
 
 The root Python validation scripts use only the standard library and require
 no dependency installation. Individual skills can have additional dependencies.
+
+### Version skill changes
+
+Every pull request that changes a tracked file inside a skill folder requires
+one version bump for that skill. This includes README edits, assets, scripts,
+file deletions, and permission changes. Changes outside skill folders do not
+require skill bumps. The final diff determines which skills changed.
+
+Fetch `main` before preparing a bump:
+
+```bash
+git fetch origin main
+```
+
+Merge or rebase onto `origin/main` if it has advanced. Stage new skill files
+with `git add` so the command can include them. Then run:
+
+```bash
+python3 scripts/skill_versions.py --write
+```
+
+The command compares tracked working-tree files, including staged and committed
+changes, with `origin/main`. It bumps changed skills and regenerates the registry.
+Review and stage the resulting changes before committing. Re-running the command
+preserves versions already higher than the baseline. If another PR has consumed
+your version number, update your branch and run the command again.
+
+The default bump increments the patch number. Use `--bump minor` or `--bump major`
+for a deliberate larger bump. These options apply to changed skills that still
+need a bump. To choose a different bump for one skill, edit its `plugin.json`
+before running the command. Use `--base <commit-or-ref>` for an explicit baseline.
+
+Versions use three numeric components, such as `0.2.1`, without prerelease or
+build suffixes. New and renamed skills start at `0.1.0`. Removing an entire skill
+removes its registry entry. Reverting content still requires a newer version.
+The marketplace's own version and nested package versions remain independent.
+Skill folders, `SKILL.md`, and `plugin.json` must be regular tracked files and
+directories within this repo, rather than symlinks to content elsewhere.
+
+The `main` ruleset requires pull requests, the `skill-version-check` check, and
+an up-to-date branch. That check also validates the generated registry.
+See the [versioning decision](docs/adr/0001-skill-version-boundary.md) for the
+scope and rationale.
 
 ## License
 

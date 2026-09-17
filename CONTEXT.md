@@ -4,6 +4,9 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 
 ## Terms
 
+- **Skill**: an independently versioned bundle of agent instructions and supporting files. Its documentation belongs to the same bundle.
+- **Skill update**: a set of changes delivered together to one skill. Documentation corrections count as updates, even when the skill's behavior stays the same.
+- **Skill version**: the identifier of a skill revision, used to track changes and support updates to installed copies.
 - **Ticket** — the unit of implementable work. On GitHub or GitLab the ticket is stored as an issue; the skills' mechanics use GitHub (`gh`).
 - **Integration branch** — the branch created off the default branch (`main` in most repos) for a whole feature; all per-ticket work for that feature lands here before anything reaches the default branch.
 - **Ticket branch**: a branch for one ticket. Each feature dispatch starts from a pinned integration commit. Its temporary branch remains until verified integration preserves its commits and cleanup proves ownership.

@@ -53,7 +53,7 @@ def load_skills() -> tuple[list[dict], list[str]]:
     """Read every skills/*/plugin.json, sorted by directory name."""
     skills: list[dict] = []
     problems: list[str] = []
-    for skill_dir in sorted(d for d in SKILLS_DIR.iterdir() if (d / "SKILL.md").is_file()):
+    for skill_dir in sorted(path.parent for path in SKILLS_DIR.glob("*/SKILL.md") if path.is_file()):
         plugin_json = skill_dir / "plugin.json"
         if not plugin_json.is_file():
             problems.append(f"{skill_dir.name}: skills/{skill_dir.name}/plugin.json is missing")

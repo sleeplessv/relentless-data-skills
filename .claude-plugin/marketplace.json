@@ -10,7 +10,7 @@
       "name": "dbt-runner",
       "source": "./skills/dbt-runner",
       "description": "Run dbt commands and diagnose failures with project setup checks and captured output.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -31,7 +31,7 @@
       "name": "dlt-bootstrap",
       "source": "./skills/dlt-bootstrap",
       "description": "Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -53,7 +53,7 @@
       "name": "fabric-lineage-dag",
       "source": "./skills/fabric-lineage-dag",
       "description": "Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -77,7 +77,7 @@
       "name": "gh-weekly-report",
       "source": "./skills/gh-weekly-report",
       "description": "Create interactive weekly reports of a GitHub user's activity across repositories.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -121,7 +121,7 @@
       "name": "implement-ticket",
       "source": "./skills/implement-ticket",
       "description": "Implement a GitHub ticket, verify the result, and prepare a pull request for review.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -189,7 +189,7 @@
       "name": "prefect",
       "source": "./skills/prefect",
       "description": "Build, review, and debug Prefect 3 projects using documentation and live instance evidence.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -209,7 +209,7 @@
       "name": "review-pbi-diff",
       "source": "./skills/review-pbi-diff",
       "description": "Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -232,7 +232,7 @@
       "name": "ship",
       "source": "./skills/ship",
       "description": "Commit, publish, and merge working-tree changes through a pull request.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -253,7 +253,7 @@
       "name": "smart-git-commit",
       "source": "./skills/smart-git-commit",
       "description": "Group working-tree changes into conventional commits and push them to the remote.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -293,7 +293,7 @@
       "name": "visual-report",
       "source": "./skills/visual-report",
       "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },

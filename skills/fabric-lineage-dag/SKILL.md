@@ -84,6 +84,6 @@ Done when: the rebuilt page still passes `test.js`.
 
 ## Step 6: Publish
 
-Load `artifact-design`, then publish `lineage.html` with the Artifact tool: noun-phrase title, one-sentence description, a favicon that stays stable across redeploys, a version label. Relay the artifact URL, the validation totals, and the top gaps to the user.
+Load `artifact-design`, then publish `lineage.html` with the Artifact tool: noun-phrase title, one-sentence description, an `icon` on the first publish (omit it on redeploys so the artifact keeps it), a version label. Relay the artifact URL, the validation totals, and the top gaps to the user.
 
 Done when: the URL is returned and the message names the numbers the page shows (nodes, edges, live, forks, unresolved) and the gap headlines.

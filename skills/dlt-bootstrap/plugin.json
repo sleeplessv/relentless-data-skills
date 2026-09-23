@@ -1,6 +1,6 @@
 {
   "name": "dlt-bootstrap",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions.",
   "author": {
     "name": "sleeplessv"

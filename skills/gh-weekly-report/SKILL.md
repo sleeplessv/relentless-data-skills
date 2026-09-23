@@ -20,8 +20,7 @@ agent's job is judgment: bucketing the work, writing the narratives, and
 summarising the week. Report the week, nothing more. Problems the report
 surfaces go in the summary, never into follow-up work; do not open
 issues or change any repo. The whole run is two script calls around one
-pass over one JSON file, so run it inline; no subagents, and no fan-out
-per repo or bucket.
+pass over one JSON file, so run it inline in the main thread.
 
 ## Step 1: Resolve parameters
 

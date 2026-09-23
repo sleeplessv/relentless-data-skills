@@ -1,6 +1,6 @@
 {
   "name": "prefect",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Build, review, and debug Prefect 3 projects using documentation and live instance evidence.",
   "author": {
     "name": "sleeplessv"

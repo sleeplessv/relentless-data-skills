@@ -60,7 +60,7 @@ The visuals carry the weight. Prose is sparse and plain. Each major idea is one 
 - **Badge row** (optional). Status or category tags. Pick a small palette: emerald for "strong/done," amber for "watch/in-progress," slate for "neutral/speculative."
 - **The visual.** The centerpiece. Pick the pattern that fits (below). Before/after pairs sit side by side in two columns.
 - **One sentence of framing.** What the visual shows. Not a paragraph.
-- **Takeaways.** Bullets, at most 6 words each.
+- **Takeaways.** A few bullets, each a short phrase rather than a sentence, so the row reads as chips.
 - **ADR callout** (if applicable). One line in an amber-tinted box (_"follows ADR-0012"_).
 
 ## Diagram patterns
@@ -136,4 +136,4 @@ This is the house style. Apply it, don't reinvent per report.
 
 ## Tone
 
-Plain English, concise. No hedging, no "it's worth noting that...". If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `CONTEXT.md`, an ADR's terms), use that vocabulary exactly; don't drift into synonyms.
+Plain English, concise, and direct: state each point as a claim, not a hedge. If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `CONTEXT.md`, an ADR's terms), use that vocabulary exactly; don't drift into synonyms.

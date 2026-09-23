@@ -102,8 +102,9 @@ git push -u origin HEAD
 
 ## Safety rules
 
-- NEVER amend commits that have already been pushed
-- NEVER force push to `main` or `master`
-- NEVER skip hooks (`--no-verify`)
-- NEVER commit files that likely contain secrets (`.env`, credentials, tokens)
-- If `git push` is rejected (non-fast-forward), stop and tell the user. Do not force push
+These hold on every run; each one is either unrecoverable or moves a problem onto someone else:
+
+- Don't amend commits that have already been pushed; rewriting shared history breaks every other checkout of the branch.
+- Don't force-push to `main` or `master`, and don't skip hooks (`--no-verify`); the hooks are the repo's gate, not an obstacle.
+- Don't commit files that likely contain secrets (`.env`, credentials, tokens); a pushed secret is compromised even after it is removed.
+- If `git push` is rejected (non-fast-forward), stop and tell the user rather than force-pushing.

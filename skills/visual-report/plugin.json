@@ -1,6 +1,6 @@
 {
   "name": "visual-report",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",
   "author": {
     "name": "sleeplessv"

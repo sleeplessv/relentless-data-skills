@@ -1,6 +1,6 @@
 {
   "name": "implement-ticket",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Implement a GitHub ticket, verify the result, and prepare a pull request for review.",
   "author": {
     "name": "sleeplessv"

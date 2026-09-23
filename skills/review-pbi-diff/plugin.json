@@ -1,6 +1,6 @@
 {
   "name": "review-pbi-diff",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings.",
   "author": {
     "name": "sleeplessv"

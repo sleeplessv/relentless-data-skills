@@ -303,6 +303,58 @@ def resolve_group_offsets(visuals):
             v["abs_x"], v["abs_y"] = abs_pos(v, set())
 
 
+OVERLAP_MIN_FRACTION = 0.15
+
+
+def compute_overlaps(visuals, threshold=OVERLAP_MIN_FRACTION):
+    """[{a, b, pct_of_smaller}] for pairs of visuals on one page whose boxes
+    intersect by more than `threshold` of the smaller visual's area.
+
+    Uses abs_x/abs_y (call resolve_group_offsets first). Skips visual groups
+    (their box is a container), deleted and hidden visuals (not rendered at
+    head), and anything without a positive-size box. Shapes and textboxes
+    are included: whether one is a background layer is left to the reviewer,
+    who has `visual_type` on each visual."""
+
+    def box(v):
+        w, h = v.get("width"), v.get("height")
+        if not isinstance(w, (int, float)) or not isinstance(h, (int, float)):
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        # resolve_group_offsets maps a missing raw x/y to 0; a visual with no
+        # position is not placed, so skip it rather than pin it to the origin
+        if v.get("x") is None or v.get("y") is None:
+            return None
+        x, y = v.get("abs_x", v["x"]), v.get("abs_y", v["y"])
+        if not isinstance(x, (int, float)) or not isinstance(y, (int, float)):
+            return None
+        return x, y, x + w, y + h
+
+    boxes = []
+    for vid, v in sorted(visuals.items()):
+        if not v or v.get("hidden") or v.get("status") == "deleted":
+            continue
+        if v.get("visual_type") == "visualGroup":
+            continue
+        b = box(v)
+        if b:
+            boxes.append((vid, b))
+
+    out = []
+    for i, (a, (ax1, ay1, ax2, ay2)) in enumerate(boxes):
+        for b, (bx1, by1, bx2, by2) in boxes[i + 1:]:
+            iw = min(ax2, bx2) - max(ax1, bx1)
+            ih = min(ay2, by2) - max(ay1, by1)
+            if iw <= 0 or ih <= 0:
+                continue
+            smaller = min((ax2 - ax1) * (ay2 - ay1), (bx2 - bx1) * (by2 - by1))
+            pct = iw * ih / smaller
+            if pct > threshold:
+                out.append({"a": a, "b": b, "pct_of_smaller": round(pct, 3)})
+    return out
+
+
 # ------------------------------------------------------------- TMDL parsing
 
 
@@ -717,6 +769,7 @@ def main():
             counts[v["status"]] += 1
         p["visual_counts"] = dict(counts)
         p["visuals"] = visuals
+        p["overlaps"] = compute_overlaps(visuals)
         reports[report]["pages"][page] = p
 
     # ---- model layer

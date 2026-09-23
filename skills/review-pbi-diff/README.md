@@ -28,9 +28,8 @@ developer's branch.
   ✅ matches the documented definition, ⚠️ deviates (with exactly how), or
   ❓ no definition found. Verdicts are checked against logic (grain, filter
   context, exclusions), not just names.
-- **Eleven red-flag checks**, run as a surface-everything detection pass, then
-  filtered and ranked against evidence before they reach the artifact: bare
-  `/` division, missing format strings, deleted/renamed measures still
+- **Eleven red-flag checks**, each finding backed by evidence and ranked
+  before it reaches the artifact: bare `/` division, missing format strings, deleted/renamed measures still
   referenced, modified-measure ripple, `USERELATIONSHIP` targets, unrelated
   fact tables on one visual, untitled visuals, hidden filters that change
   data, overlapping data visuals, hardcoded literals / convention violations,

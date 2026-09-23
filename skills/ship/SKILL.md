@@ -99,7 +99,7 @@ Report "checks pending, auto-merge armed; it will land when green" and stop. The
 
 ## Safety rules
 
-- NEVER force-push, never skip hooks (`--no-verify`), never commit likely secrets (`.env`, credentials, tokens). Same rules as smart-git-commit.
-- NEVER delete a branch that is not confirmed merged.
-- NEVER merge without either the `clean` argument or an explicit yes.
-- If anything fails mid-flow (rejected push, conflict on `git pull`), stop and report. Do not improvise recovery.
+- The smart-git-commit rules apply: no force-push, no skipped hooks (`--no-verify`), no likely secrets (`.env`, credentials, tokens) in a commit.
+- Delete a branch only once it is confirmed merged by one of the Step 2 signals; an unmerged branch may hold the only copy of the work.
+- Merge only with the `clean` argument or an explicit yes; the squash-merge is the one irreversible step and the user owns it.
+- If anything fails mid-flow (rejected push, conflict on `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one.

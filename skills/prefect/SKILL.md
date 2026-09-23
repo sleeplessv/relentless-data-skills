@@ -35,7 +35,7 @@ for current/best practice:
 
 1. Fetch the index `https://docs.prefect.io/llms.txt` and find the page matching the topic.
 2. Fetch the exact page URL from the index; its links already include `.md`.
-3. If a URL 404s, **re-fetch `llms.txt` and re-resolve. Never invent a URL.**
+3. If a URL 404s, re-fetch `llms.txt` and re-resolve rather than guessing a URL.
 4. If the fetch tool rejects Markdown, try the equivalent HTML page by removing
    the trailing `.md`. Either format is valid evidence once fetched.
 5. Use web search as a fallback when direct lookup fails.
@@ -86,7 +86,7 @@ the needed evidence, including pagination. Use the CLI or SDK for authorized mut
 - **Useful queries:** `deployment ls` / `deployment inspect`, `work-pool ls` /
   `work-pool inspect`, `flow-run ls` / `flow-run inspect <id>`, `block type ls`,
   `variable ls`, `profile ls`. Verify flags via `--help` or the docs, not memory.
-- **Boundary:** run read-only queries freely and eagerly. Run state-changing
+- **Boundary:** read-only queries need no confirmation. Run state-changing
   commands only when they're the explicit task, and surface anything
   destructive or hard to reverse (pause, cancel, delete) before running it.
 

@@ -51,7 +51,7 @@ interruption, reconcile the prior attempt's missing stop comment before posting 
 
 ### 0. Resolve the ticket number
 
-If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs**, unassigned and free of stop-condition labels, with the query in [references/auto-pick.md](references/auto-pick.md) (read it first: it paginates before selection). If it returns a ticket, announce the pick (number + title) before proceeding; if the user declines it, exclude that number and take the next survivor. Never re-run the identical query expecting a different answer. If it returns `null` or nothing, stop and ask: do not guess, and do not implement a spec directly (specs get broken into tickets first, e.g. via a `to-tickets` skill).
+If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs**, unassigned and free of stop-condition labels, with the query in [references/auto-pick.md](references/auto-pick.md) (read it first: it paginates before selection). If it returns a ticket, announce the pick (number + title) before proceeding; if the user declines it, exclude that number and take the next survivor. If it returns `null` or nothing, stop and ask; do not implement a spec directly (specs get broken into tickets first, e.g. via a `to-tickets` skill).
 
 ### 1. Read the ticket and claim it
 
@@ -108,7 +108,7 @@ Throughout:
 
 ### 6. Feedback loop: types + tests (REQUIRED before marking ready)
 
-Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. Never add a type-checker or test framework to a project that has none; if either is absent, note it and rely on the step 7 smoke check.
+Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. If the project has no type-checker or test suite, note it and rely on the step 7 smoke check.
 
 ### 7. Runtime smoke check (REQUIRED before marking ready)
 

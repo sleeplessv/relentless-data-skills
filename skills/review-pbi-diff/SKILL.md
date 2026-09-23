@@ -42,7 +42,10 @@ Change-model shape: `reports.<name>.pages.<id>` has `display_name`, `status`
 (including unchanged ones, so wireframes are complete), with `visual_type`,
 `title`, `abs_x`/`abs_y`/`width`/`height`/`z`, `status`, `fields` (role to
 bound fields), `filters`, and for modified visuals `changed_sections` plus
-`*_before` values. `models.<name>` has per-table
+`*_before` values. Each page also carries `overlaps`: pairs
+`{a, b, pct_of_smaller}` of visual ids whose boxes intersect by more than
+15% of the smaller visual's area (hidden, deleted and group containers
+excluded). `models.<name>` has per-table
 `measures_added/modified/deleted` (with full DAX, `dax_before`/`dax_after`
 for modified), same for `columns` and `calculation_items`, plus
 `relationships` and `functions` diffs. `commits` and `authors` identify whose
@@ -81,10 +84,9 @@ concept). Verdicts, each rendered as a badge in the artifact:
   docs can catch up. If the repo has no metric-definition docs at all, say so
   once and mark every measure ❓ without repeating it per measure.
 
-Done when every added/modified measure carries a verdict. Spec-check inline:
-~15 measures is a ceiling, not a trigger. Past it, use as few parallel
-subagents as cover the measures in batches (each gets its batch + the
-definitions docs) and merge. Never spawn an agent to review the review.
+Done when every added/modified measure carries a verdict. For a large measure
+set, delegate batches to parallel subagents (each gets its batch plus the
+definitions docs) and merge their verdicts into one list.
 
 If the repo documents requirements (e.g. `docs/requirements/`), also map the
 overall work against them: which requirements does this branch address, and
@@ -92,18 +94,12 @@ what claimed scope is missing.
 
 ### Red-flag checks
 
-**Detection pass: surface everything.** Run every check below and record
-every candidate it raises; don't drop one for being minor, uncertain, or
-probably fine. Each check either yields candidates or comes back confirmed
-clean.
-
-**Filter pass: evidence, then rank.** Before building the artifact, revisit
-the candidates. Pull each one's evidence from the change model, reading the
-`objects/…before|.after` files whenever the model doesn't carry enough;
-discard only what the evidence disproves, and rank: 🔴 wrong results /
-broken, 🟡 should fix before merge, 🔵 minor/hygiene. Every finding in the
-artifact cites what you checked; one you can neither confirm nor disprove
-ships as 🔵 stating what you checked and what is still unknown.
+Run every check below. A candidate becomes a finding only with evidence from
+the change model or the `objects/…before|.after` files, and is discarded only
+when that evidence disproves it. Rank each finding 🔴 wrong results / broken,
+🟡 should fix before merge, 🔵 minor/hygiene, and cite what you checked. One
+you can neither confirm nor disprove ships as 🔵 stating what you checked and
+what is still unknown. A check with no findings is reported as confirmed clean.
 
 1. **Bare `/` division** in new/changed DAX where the denominator can be
    zero/blank (`DIVIDE` is the safe idiom).
@@ -124,9 +120,10 @@ ships as 🔵 stating what you checked and what is still unknown.
 7. **Placeholder names.** Visuals left untitled where siblings are titled.
 8. **Hidden filters that change data.** Visual/page filters with
    `hidden_in_view: true` (field emitted only when true).
-9. **Overlapping data visuals** on the same page: pairs covering >15% of the
-   smaller visual's area (use `abs_x/abs_y/width/height`; ignore
-   shapes/textboxes layered as backgrounds).
+9. **Overlapping data visuals** on the same page: review each pair in the
+   page's `overlaps` list (the extractor reports pairs covering more than 15%
+   of the smaller visual's area) and flag those where both are data visuals
+   rather than shapes/textboxes layered as backgrounds.
 10. **Hardcoded literals** in DAX (magic dates, hardcoded brand/region
     values) and, when the repo documents naming/DAX standards (e.g. under
     `docs/standards/`), convention violations against them.
@@ -141,7 +138,7 @@ structure and wireframe rules. Length follows substance: within that
 structure, prefer wireframes and tables over prose, skip filler padding, and
 never restate a table in prose beneath it. Load the `artifact-design` skill
 if available, write a single self-contained HTML file to the scratchpad, and
-publish it with the Artifact tool (favicon 📊, stable title
+publish it with the Artifact tool (icon `chart`, stable title
 `PBI Review: <branch or range>`). If the Artifact tool is unavailable, save
 the HTML and give the user its path. Close out with the outcome first
 (artifact URL or path, and 🔴/🟡/🔵 counts), then any detail.

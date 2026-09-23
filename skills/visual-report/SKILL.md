@@ -19,7 +19,7 @@ Report on the subject you were given, at the scope asked. If exploring surfaces 
 
 Find the subject and where its substance lives, then gather from there:
 
-- **About the codebase?** Use the Agent tool with `subagent_type=Explore` to walk it: one dispatch for the whole walk, not one per module, and none for the writing. Don't dump files into the report; extract the structure worth drawing.
+- **About the codebase?** Walk it with Explore subagents (`subagent_type=Explore`), one per independent area when the codebase has several; the writing stays with you. Don't dump files into the report; extract the structure worth drawing.
 - **Already in the conversation?** The analysis is done (a finished design discussion, a debugging session, a research summary). Organize what's there; don't re-investigate.
 - **Pointed at sources?** Read the named docs/URLs.
 

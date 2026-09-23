@@ -8,7 +8,7 @@ only with network access.
 
 ## What it does
 
-- **Explore.** Gathers the substance worth drawing: walks the codebase via a single `Explore` subagent dispatch, organizes what's already in the conversation, or reads the sources you point it at, instead of dumping files into the report.
+- **Explore.** Gathers the substance worth drawing: walks the codebase with `Explore` subagents, one per independent area, organizes what's already in the conversation, or reads the sources you point it at, instead of dumping files into the report.
 - **Visualize.** Writes one self-contained HTML file (Tailwind + Mermaid via CDN, plus hand-built CSS/SVG), verifies the diagrams actually render, and opens it. Every major idea earns a visual and the report runs as long as the subject has ideas, with no filler sections; if a section needs a paragraph to be understood, the visual gets redrawn.
 - **Grill loop.** Interviews you about what the report gets wrong or underweights, one question at a time with a recommended answer, iterating on the same file.
 

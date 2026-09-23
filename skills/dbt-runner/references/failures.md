@@ -29,7 +29,7 @@ Key-pair auth failed. In order:
 
 ## DNS / connection errors: `Could not connect`, `getaddrinfo`, `Failed to resolve`, TLS/certificate errors
 
-1. **Sandboxed shell.** See SKILL.md invocation rule 1 (sandbox-first).
+1. **Sandboxed shell.** See SKILL.md invocation rule 2 (run outside the sandbox).
    Suspect and rule this out before debugging credentials, proxies, or
    account URLs.
 2. Genuinely wrong account identifier/host, only after (1) is excluded.

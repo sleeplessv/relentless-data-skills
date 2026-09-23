@@ -60,7 +60,7 @@ Record the package versions used.
 ```bash
 uv init                          # only if no pyproject.toml
 uv add "dlt[hub]"
-uv add "dlthub[mcp]"             # MCP dependency choice; check installed-version requirements
+uv add "dlthub[mcp]"             # MCP extra; the install warning may name dlt[workspace] instead, so confirm the extra against installed package metadata
 uv run dlthub init               # workspace init; follow its instructions (uv sync)
 uv run dlthub ai init --agent claude
 uv run dlthub ai toolkit install <toolkit> --agent claude   # per source type
@@ -70,10 +70,6 @@ uv run dlthub ai status          # verify: agent detected, toolkits + entry skil
 If any command fails or a flag is rejected, suspect upstream drift before
 debugging: consult [references/docs-map.md](references/docs-map.md) (start at
 the workbench README) and re-derive the command. Never invent flags.
-
-The June 2026 bootstrap needed `dlthub[mcp]` despite a warning naming
-`dlt[workspace]`. For another version, resolve warnings against package metadata
-and current CLI guidance before applying or removing that workaround.
 
 ## Toolkit policy
 
@@ -129,8 +125,8 @@ matching the interview answer:
   skills. When the bootstrap surfaces adjacent problems, such as missing tests, an
   untidy `pyproject.toml`, or a stale dependency, report them and finish the
   bootstrap; don't fix them on the way through.
-- Bootstrap is a linear install sequence. Run every step inline, never fanned
-  out to subagents.
+- Bootstrap is a linear install sequence: each command depends on the files
+  the previous one wrote, so run it in one thread, in order.
 - Credential safety is enforced at runtime by the house rule's Secrets section;
   see [references/rule-template.md](references/rule-template.md).
 - Incremental re-runs must be idempotent: re-installing an existing toolkit or

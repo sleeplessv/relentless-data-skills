@@ -18,6 +18,7 @@ maintained by **Relentless Data**. Each skill lives in its own directory under
 | [`metabase`](skills/metabase/) | Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration. |
 | [`orchestrator-mode`](skills/orchestrator-mode/) | Coordinate work through subagents with scoped delegation, shared evidence, and verification. |
 | [`prefect`](skills/prefect/) | Build, review, and debug Prefect 3 projects using documentation and live instance evidence. |
+| [`qualify-delegation`](skills/qualify-delegation/) | Qualify assignments for human colleagues or contractors and produce clear handoffs with explicit outcomes, authority, and constraints. |
 | [`review-pbi-diff`](skills/review-pbi-diff/) | Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings. |
 | [`ship`](skills/ship/) | Commit, publish, and merge working-tree changes through a pull request. |
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes into conventional commits and push them to the remote. |

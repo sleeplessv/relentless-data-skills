@@ -206,6 +206,25 @@
       ]
     },
     {
+      "name": "qualify-delegation",
+      "source": "./skills/qualify-delegation",
+      "description": "Qualify assignments for human colleagues or contractors and produce clear handoffs with explicit outcomes, authority, and constraints.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/qualify-delegation",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "delegation",
+        "briefing",
+        "handoff",
+        "task-qualification",
+        "contractors"
+      ]
+    },
+    {
       "name": "review-pbi-diff",
       "source": "./skills/review-pbi-diff",
       "description": "Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings.",

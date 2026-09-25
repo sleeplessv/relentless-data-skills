@@ -1,0 +1,18 @@
+{
+  "name": "qualify-delegation",
+  "version": "0.1.0",
+  "description": "Qualify assignments for human colleagues or contractors and produce clear handoffs with explicit outcomes, authority, and constraints.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/qualify-delegation",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "delegation",
+    "briefing",
+    "handoff",
+    "task-qualification",
+    "contractors"
+  ]
+}

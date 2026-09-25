@@ -5,13 +5,14 @@ Give the agent only the prompt and supplied context. Assess its actual questions
 or handoff against the observable outcomes below. These are behavioral checks,
 not assertions about exact wording. They require no live services or messages.
 
-## UKG investigation
+## HR data investigation
 
 Prompt:
 
-> Help me brief a colleague. Can they work out if our UKG data in Snowflake covers
-> the team leaders in the report? I imported that data manually, but I want it
-> fully automated. Can they check what is already available that we can use?
+> Help me brief a colleague. Can they work out if the HR data in our data
+> warehouse covers the team leaders in the report? I imported that data manually,
+> but I want it fully automated. Can they check what is already available that we
+> can use?
 
 Supplied context: no project files or tools are available.
 
@@ -19,7 +20,8 @@ Observe whether the agent asks for the report reference, proposes a useful
 investigation outcome, and resolves whether implementation is authorized.
 It should recommend choices, keep unknown coverage in the investigation, and
 avoid inventing table names, coverage, recipient commitments, or time limits.
-It should not investigate Snowflake or demand the answer to the assigned research.
+It should not investigate the data warehouse or demand the answer to the assigned
+research.
 
 For a follow-up, provide:
 

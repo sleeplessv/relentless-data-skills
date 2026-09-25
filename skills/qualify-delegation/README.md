@@ -1,22 +1,24 @@
 # qualify-delegation
 
 Turn a rough assignment into a handoff for a human colleague or contractor.
-The agent uses available context, asks about material gaps, and offers constructive
-recommendations with choices. It produces a short message or a structured brief,
-depending on the task.
+The agent reads available context, asks about gaps that would change the work, and
+recommends an answer with alternatives for each decision. It produces a short
+message or a structured brief, depending on the task.
 
 ## Use
 
 Ask the agent to qualify a delegation and provide your rough request:
 
 > Use qualify-delegation to help me brief a colleague. Can they work out whether
-> our UKG data in Snowflake covers the team leaders in the report? I imported
-> that data manually, but I want it automated. Can they check what we already have?
+> the HR data in our data warehouse covers the team leaders in the report?
+> I imported that data manually, but I want it automated. Can they check what we
+> already have?
 
-The skill helps distinguish an investigation from permission to implement automation.
+For this request, the skill separates the investigation from any permission to build
+the automation.
 It clarifies which report matters, the evidence required, decision authority, and
 relevant limits. Unknown data coverage belongs in the recipient's investigation.
-The agent prepares the handoff; it does not send it or carry out the assignment.
+The agent prepares the handoff. It does not send it or carry out the assignment.
 
 ## Install
 

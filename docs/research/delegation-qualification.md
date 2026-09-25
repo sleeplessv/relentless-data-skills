@@ -1,12 +1,12 @@
 # Research: qualifying a delegation before handoff
 
-Dated 2026-09-25. This note checks the concepts in the supplied "Delegation Masking Best Practices" transcript. It supports the interview for a future agent skill. It does not specify that skill or establish that these frameworks improve every kind of delegation.
+Dated 2026-09-25. This note checks the concepts in the supplied "Delegation Masking Best Practices" transcript. It supports the interview for a future agent skill. It does not specify that skill or establish that these frameworks improve every kind of delegation. This note was written before [`skills/qualify-delegation/SKILL.md`](../../skills/qualify-delegation/SKILL.md), so it refers to the skill as proposed.
 
 ## Intent gives the recipient a basis for adaptation
 
 The US Army's ADP 6-0, dated 31 July 2019, describes commander's intent as a concise expression of purpose and the desired end state. Paragraphs 1-45 through 1-51 explain how it supports initiative when operations depart from the plan. Intent may include the broader purpose, key tasks, and desired future conditions. Key tasks are essential activities of the force as a whole. Intent also defines the boundaries for initiative. [ADP 6-0, chapter 1](https://rdl.train.army.mil/catalog-ws/view/100.ATSC/1FE33715-CFD1-4614-A489-B3E0480C3F80-1428688882108/adp6_0.pdf).
 
-The transcript's "task, purpose, and end state" is a useful simplification. The design implication is to capture why the work matters, what must be true afterward, and which constraints survive a change of plan. A procedural checklist alone cannot supply that context.
+The transcript's "task, purpose, and end state" is a useful simplification. A handoff therefore needs to capture why the work matters, what must be true afterward, and which constraints still apply if the plan changes. A procedural checklist alone cannot supply that context.
 
 Access limitation: the search tool retrieved the relevant paragraphs from the official Army source, but opening its PDF directly failed. The findings above concern this dated edition, not a claim that it is the latest doctrine.
 
@@ -24,7 +24,7 @@ Michael Hyatt's original article redirects to Full Focus. Its five levels distin
 
 The transcript's level-2-versus-level-4 example appears in Hyatt's article. His advice is a practitioner framework, rather than a demonstrated universal scale of delegation quality. [Michael Hyatt, The Five Levels of Delegation](https://fullfocus.co/the-five-levels-of-delegation/).
 
-The design implication is to state actual permissions alongside any level number. Prescribing a method and granting decision authority are separate choices. A level also needs a scope: authority to research options does not itself confer authority to spend money or commit other people. If the eventual skill adds exception reporting to level 5, it should identify that as an adaptation of Hyatt's model.
+A handoff should state actual permissions alongside any level number. Prescribing a method and granting decision authority are separate choices. A level also needs a scope: authority to research options does not itself confer authority to spend money or commit other people. If the eventual skill adds exception reporting to level 5, it should identify that as an adaptation of Hyatt's model.
 
 ## Completion, acceptance, and benefit answer different questions
 
@@ -42,7 +42,7 @@ Parkinson's text opens with an observation about work expanding to consume avail
 
 Access limitation: the [original Economist article dated 19 November 1955](https://www.economist.com/news/1955/11/19/parkinsons-law) returned a paywall error. The accessible reproduction is hosted by a third party. Its opening editorial note is separate from Parkinson's text.
 
-The design implication is to distinguish the calendar deadline from allowed effort and cost. An explicit rule is needed for what happens when the allowance runs out: deliver the best supported partial result, stop, seek more budget, or narrow the scope. Parkinson's observation does not determine which choice is appropriate or how much effort is sufficient.
+The skill should distinguish the calendar deadline from allowed effort and cost. An explicit rule is needed for what happens when the allowance runs out: deliver the best supported partial result, stop, seek more budget, or narrow the scope. Parkinson's observation does not determine which choice is appropriate or how much effort is sufficient.
 
 ## A handoff can include a check of understanding
 

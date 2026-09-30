@@ -99,7 +99,7 @@
       "name": "implement-feature",
       "source": "./skills/implement-feature",
       "description": "Implement a feature specification or selected tickets as one verified pull request.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "sleeplessv"
       },
@@ -121,7 +121,7 @@
       "name": "implement-ticket",
       "source": "./skills/implement-ticket",
       "description": "Implement a GitHub ticket, verify the result, and prepare a pull request for review.",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "author": {
         "name": "sleeplessv"
       },

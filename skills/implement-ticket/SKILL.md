@@ -6,15 +6,15 @@ description: 'Implement a ticket (GitHub issue) end-to-end on a ticket branch an
 
 # Implement ticket
 
-Implement a GitHub ticket with checks and a Verification plan. Use the supplied ticket number
+Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number
 and repository, defaulting to the current `gh` remote and step 0's selection when omitted.
+Solo runs complete [Setup](references/setup.md) before step 0.
 
 ## Orchestrated dispatch
 
 For a feature dispatch, read [references/orchestrated.md](references/orchestrated.md) first.
-It owns setup, baseline provenance, resume, lifecycle, and the result contract. Skip steps 0 through 3,
-use step 4 for local exploration, then follow steps 5 through 7 and the self-review in step 8. The
-coordinator owns PRs, issue actions, and independent review. Solo runs use the full workflow.
+Skip steps 0 through 3, use step 4 for local exploration, then follow steps 5 through 7 and
+self-review in step 8. The coordinator owns PRs, issue actions, and independent review.
 
 ## Workflow
 
@@ -22,7 +22,7 @@ coordinator owns PRs, issue actions, and independent review. Solo runs use the f
 
 **Make the smallest change that solves the ticket.** Prefer deletion over addition, keep the call hierarchy flat, and put each decision in one place; a diff a maintainer would find exhausting is the wrong solution. The `principle-laziness-protocol` skill, when installed, is the full protocol; follow it.
 
-**Before writing any prose published to git or GitHub (commit messages, PR titles and bodies, ticket comments, the Summary, Test plan, and Verification plan), invoke the `technical-writing` and `unslop` skills if installed, and write that prose to their standard.** This governs prose the skill authors, not the ticket body it reads; reuse guidance already loaded; explicit user and environment skill requirements still apply. Baked-in minimum either way: plain words, active voice, one thought per sentence, and no em dashes (use a comma, colon, or parentheses, or rewrite the sentence).
+Apply [Writing](references/setup.md#writing) to authored prose using `technical-writing` and `unslop`. Include the resolved writing references in worker briefs. Solo PR creation and updates follow [PR body](references/review-and-pr.md#pr-body), which uses `pr` for structure and preserves the repository template.
 
 **Use configured execution permissions.** Run commands normally. If a necessary command
 is blocked, use the available scoped escalation and report a denial accurately. The task's
@@ -55,7 +55,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 1. Read the ticket and claim it
 
-`gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). `awaiting-verification` is not a stop: a prior run's PR awaits human verification; say so when announcing, proceed, and let step 8's re-authored Verification plan supersede the old one. Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to
+`gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to
 self is advisory, not an exclusive lock. Complete the base and workspace preflight first;
 then claim within existing authorization and record whether this run added the assignment.
 Post the start comment after step 3 completes.
@@ -102,11 +102,14 @@ Before choosing a path: an acceptance criterion that is subjective or unverifiab
 
 Throughout:
 
-- In solo runs, open a **draft PR within the first 1–2 commits**: `git push -u origin HEAD` then `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body "Closes #<N>. <one-paragraph plan>"`. Use the repo's PR template (`.github/pull_request_template.md`) if one exists, keeping the `Closes #<N>` line. If `gh pr create` fails (permissions, branch protection), keep committing locally and surface the error at the end. Don't abort. If an open PR already exists for this branch (a prior attempt), update its body, stripping any stale stop-reason text, instead of creating a new one.
+- In solo runs, open a **draft PR within the first 1–2 commits**. Follow [PR body](references/review-and-pr.md#pr-body), including pending evidence and `Closes #<N>`. Push the branch, then use `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body-file <body-file>`. Reuse an existing branch PR on resume. If publication fails, preserve the body, keep implementing locally, and report the error.
+- Capture before/after observations with their commands, commits, and artifact paths as you work. Preserve red-test output or the prior artifact for the PR's Evidence section.
 - Keep the loop **tight** while building: type-check and run the single test file you're touching as you go; save the full suite for step 6.
 - Keep commits scoped and conventional (`feat:`, `fix:`, `test:`, …).
 
 ### 6. Feedback loop: types + tests (REQUIRED before marking ready)
+
+Commit intended changes before final checks. After fixes, commit again and record the checked SHA with each result so review and publication can identify the tested tree.
 
 Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. If the project has no type-checker or test suite, note it and rely on the step 7 smoke check.
 
@@ -116,21 +119,18 @@ Run the **type-checker/linter, then the test suite** from step 4, and loop until
 
 - **Long-running app (server/web):** start it in the background with the run command; wait for the ready signal (port listening, "compiled successfully", health 200); exercise the changed behavior through a relevant endpoint or UI; read the last ~50 log lines for tracebacks/warnings introduced by your change; stop it cleanly.
 - **CLI / library / script / pipeline (no port):** run the entrypoint once with a representative invocation: `<cli> --help` plus one real subcommand, import the package and call the changed API, or execute the flow once against safe inputs. Confirm exit code 0 and no new tracebacks.
-
 - **Docs or configuration with no runnable entrypoint:** run the relevant validator and inspect the rendered or consumed artifact. Record why runtime execution does not apply.
 
 Allocate separate ports and test resources for parallel workers, or serialize shared-state checks. Missing credentials or tools are blocked checks, not passes. Fix failures and retry proportionately; preserve a concrete blocker when further authorized progress is unavailable.
 
 ### 8. Review, then finalise the PR
 
-Read the full `git diff <base_sha>...HEAD` yourself and fix in-scope findings, including refactoring
-new code deferred from step 5. Rerun step 6 after fixes and step 7 for affected runtime paths.
-Feature workers return through their orchestrated contract without nested review. Solo runs continue:
+Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring
+deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers
+return through their orchestrated contract without nested review.
 
-- Use `code-review` only for a large diff or unexplored subsystems. Run one pass, fix in-scope findings, and rerun affected checks.
-- Push final commits; update the PR body with a short **Summary** and **Test plan** (what you ran in steps 6–7, what you observed). Size both to the change: no filler sections, no restating the diff.
-- Author the **Verification plan** (see `CONTEXT.md`) as its own PR-body section: at most **three scenarios**, each earning its place only because automated tests could not have covered it (UI, data shape, an integration). If more qualify, keep the three with the highest cost of being wrong; drop the rest silently: no traceability list, the Test plan already records what ran. Optionally one line up top, "Run against <env>, ~N min", omitted when obvious. Each scenario is numbered copy-paste-ready **Steps** (preconditions and cleanup fold in as steps) plus one **What you should see** line. Execute every step yourself before publishing: the observed output becomes the what-you-should-see text, orienting the human's judgement rather than asserting pass/fail; a step you cannot reach is authored anyway, flagged "not executed, requires <env>". If executing a step surfaces something evidently broken, that is a steps 6–7 failure: fix within the authorized scope, then re-author. Nothing qualifies (docs-only, config tweak, fully covered by tests) → a one-line waiver, "No human verification beyond code review: <reason>", never a silently missing section. On a resume, replace any prior plan section rather than appending. Then apply `awaiting-verification` to the ticket (`gh label create` it first if absent; skip when the plan is a waiver). Removing it is the human's, never yours.
-- `gh pr ready`, then post and record the stop comment with the PR URL and outcome. Close out leading with the PR URL and what landed, detail after. Do **not** merge; leave that to the human.
+Solo runs follow [Independent review](references/review-and-pr.md#independent-review) with the
+pinned base and ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization).
 
 ## Stop conditions
 

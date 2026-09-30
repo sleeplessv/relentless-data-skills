@@ -2,7 +2,8 @@
 
 A collection of [agent skills](https://code.claude.com/docs/en/skills)
 maintained by **Relentless Data**. Each skill lives in its own directory under
-`skills/` and installs independently. Pick the ones you want.
+`skills/`. Pick the ones you want, and install the implementation workflows as
+the [compatible pair described below](#implementation-workflow-updates).
 
 ## Skills
 
@@ -45,6 +46,17 @@ triage-label, and domain-doc conventions the rest assume, which is where this
 repo's `docs/agents/` files and the `## Agent skills` block in `CLAUDE.md` come
 from. `ask-matt` is the router if you forget which one to reach for.
 
+Our `implement-ticket` adds the GitHub ticket and PR lifecycle. `implement-feature`
+is our counterpart to upstream `implement-spec`: both schedule a task graph across
+isolated worktrees and review the integrated result. We retain one GitHub feature PR,
+pinned dispatch bases, verified merges, and recoverable WIP. Upstream `implement-spec`
+also supports trackers that close work without a PR.
+
+Install `code-review` and `pr` alongside these workflows. Nonempty solo changes receive
+independent review; the feature coordinator owns review for dispatched tickets.
+`pr` supplies Summary, Evidence, and Merge Danger.
+These companion skills remain upstream dependencies; we neither copy nor modify them here.
+
 The rest we keep installed, by job:
 
 - Planning and shaping: `grilling`, `grill-me`, `batch-grill-me`,
@@ -52,19 +64,18 @@ The rest we keep installed, by job:
   `prototype`, `handoff` and `claude-handoff` for moving a thread between
   sessions.
 - Code: `triage`, `diagnosing-bugs`, `codebase-design`,
-  `improve-codebase-architecture`, `domain-modeling`,
-  `resolving-merge-conflicts`.
+  `improve-codebase-architecture`, `domain-modeling`.
 - Everything else: `research`, `wizard`, `wait-what`, `writing-for-agents`,
   `writing-great-skills`.
 
 ```bash
 npx skills add mattpocock/skills -g -y \
   -s setup-matt-pocock-skills -s ask-matt \
-  -s grill-with-docs -s to-spec -s to-tickets -s implement -s tdd -s code-review \
+  -s grill-with-docs -s to-spec -s to-tickets -s implement -s tdd -s code-review -s pr \
   -s grilling -s grill-me -s batch-grill-me -s to-questionnaire -s wayfinder \
   -s prototype -s handoff -s claude-handoff \
   -s triage -s diagnosing-bugs -s codebase-design \
-  -s improve-codebase-architecture -s domain-modeling -s resolving-merge-conflicts \
+  -s improve-codebase-architecture -s domain-modeling \
   -s research -s wizard -s wait-what -s writing-for-agents -s writing-great-skills
 ```
 
@@ -81,8 +92,8 @@ without installing anything.
 `pstack` is the one worth having in every agent, and it has grown well past
 `unslop`:
 
-- `unslop` strips AI tells from anything you write. It is an always-on rule, not
-  something you invoke.
+- `unslop` strips AI tells from authored prose. The implementation workflows
+  load it as an editing reference.
 - `technical-writing` is the standard behind docs, RFCs, PR bodies and commit
   messages (Diataxis structure, Google developer style, STE instruction rules,
   Global English syntax).
@@ -164,7 +175,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 
 ## Repo layout
 
-- `skills/<skill>/`: each skill is self-contained, with `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`.
+- `skills/<skill>/`: each skill has `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`. Workflow skills can depend on companion skills.
 - `scripts/`: CI integrity checks. Repo tooling only; not installed with any skill.
 - `.claude-plugin/marketplace.json`: declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
@@ -191,6 +202,47 @@ After editing a skill's `plugin.json`, run
 
 The root Python validation scripts use only the standard library and require
 no dependency installation. Individual skills can have additional dependencies.
+
+### Implementation workflow updates
+
+Install and update `implement-feature` and `implement-ticket` together from the
+same repository revision. The feature workflow reads the shared
+[`references/review-and-pr.md`](skills/implement-ticket/references/review-and-pr.md)
+inside `implement-ticket`, so updating only one skill can leave the workflow
+with missing or incompatible instructions. Solo ticket use does not require `implement-feature`.
+
+The minimum compatible pair for this shared contract is `implement-feature`
+`0.2.1` with `implement-ticket` `0.2.2`. The skills keep independent version
+numbers. Matching source revisions are the preferred compatibility check.
+
+Select both skills in the same installation:
+
+```bash
+npx skills add sleeplessv/relentless-data-skills -s implement-ticket -s implement-feature
+```
+
+For other installers, use the [installation methods above](#install) for both skills.
+During workflow setup, record each installed skill's resolved path and version or source
+revision. Follow [workflow setup](skills/implement-ticket/references/setup.md) to check the
+required references before dispatching workers.
+
+When editing a shared contract, inspect both workflows' call sites and ship compatible
+changes in the same PR. Bump each changed skill using [Version skill changes](#version-skill-changes).
+
+`code-review` and `pr` remain separately installed upstream companions. Setup
+checks their availability early and reports missing dependencies without
+installing them automatically. A missing `pr` prevents PR creation and body updates until it
+is available. See the [companion installation command](#matt-pococks-engineering-skills).
+
+Install `technical-writing` and `unslop` with the [Cursor pstack command](#cursors-pstack).
+`pr` owns PR sections. `technical-writing` governs authored documentation, commit messages,
+issue text, and PR prose. `unslop` edits all authored prose, including worker handoffs,
+progress updates, and final reports.
+
+Setup resolves the installed writing references and passes their paths to workers.
+Both skills are read as references even when `disable-model-invocation` prevents automatic
+invocation. Missing references are reported, then work continues with the concise fallback
+in the [shared writing rule](skills/implement-ticket/references/setup.md#writing).
 
 ### Version skill changes
 

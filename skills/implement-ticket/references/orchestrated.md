@@ -8,6 +8,9 @@ SKILL.md's Ticket lifecycle comments. Worker silence on GitHub does not waive th
 
 ## Inputs and setup
 
+Apply [Writing](setup.md#writing) using the coordinator's resolved reference paths before
+authoring documentation, commits, findings, or handoff prose.
+
 Read the ticket snapshot and handoff files at the supplied absolute paths. The selected
 ticket's acceptance criteria define completion; the full spec informs design decisions.
 Inputs include `base_branch` as integration destination, immutable `base_sha`, original
@@ -23,11 +26,8 @@ snapshot, return that discrepancy rather than claiming or silently overriding tr
 The run record defines active implementer ownership. Assignment to the authenticated actor is
 advisory and does not establish an active implementer. Report another active attempt
 or another person's assignment before implementation so the coordinator can reconcile it.
-The snapshot also records any pre-existing `awaiting-verification` label, PR, and Verification
-plan. Treat these as historical state, not completion evidence or a stop. Preserve the label
-because only a human removes it. Report the prior state in `open_questions` with a `pre-existing:`
-prefix; the coordinator replaces the prior plan with the feature-level plan and owns all PR and
-issue lifecycle actions.
+Record any pre-existing ticket PR in the snapshot and report it in `open_questions` with a
+`pre-existing:` prefix. The coordinator owns PR and issue lifecycle actions.
 
 Confirm this is the assigned isolated checkout. Record its path, initial branch and HEAD,
 and which resources this run created. Cut the ticket branch from `base_sha`, verifying HEAD
@@ -75,6 +75,10 @@ reported as durable remote WIP. Write detailed evidence to an artifact and retur
 - `push_status`, `remote_sha`, `dirty_files`, and any saved prior WIP tip.
 - `files_changed`, compact `tests_run`, per-criterion evidence, relevant `decisions_made`,
   `open_questions`, `root_cause` on failure, and `artifact_path` for full details.
+
+Include before/after observations in the evidence artifact, with their commands, commits, and
+capture context. Preserve red-test output or prior artifacts when available. Mark an unavailable
+before observation explicitly. The coordinator uses this evidence to author the feature PR.
 
 `success` requires every criterion and applicable check to be satisfied on `head_sha` plus
 confirmed publication of that head to the ticket branch. `already_satisfied` makes no claim

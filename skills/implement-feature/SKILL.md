@@ -11,6 +11,9 @@ Deliver one reviewed feature PR into the default branch. Use `orchestrator-mode`
 coordinate and `implement-ticket` for each ticket. Communicate through spec, ticket,
 research, commit, and handoff pointers. Keep detailed evidence in durable artifacts.
 
+Apply [Writing](../implement-ticket/references/setup.md#writing) using `technical-writing` and
+`unslop` for coordinator and worker prose. Pass the resolved references in every worker brief.
+
 ## Scope and ownership
 
 - Spec-only input promises the whole spec. An explicit ticket list defines the work-set;
@@ -32,6 +35,11 @@ research, commit, and handoff pointers. Keep detailed evidence in durable artifa
 
 ### 0. Resolve scope and prepare
 
+Resolve `implement-ticket` through the skill catalog and locate its `references/setup.md`.
+Complete [Setup](../implement-ticket/references/setup.md) before dispatching setup workers.
+If the file is missing, report the paired update needed and continue scope discovery without ticket dispatch.
+Resolve cross-skill references from each installed skill's own root and pass absolute paths to workers.
+
 Dispatch setup using [Work-set resolution](references/reference.md#work-set-resolution).
 Announce the work-set, completion mode, and any missing spec coverage before continuing
 with [Tree preparation](references/reference.md#tree-preparation). Preserve unrelated dirty
@@ -47,8 +55,8 @@ When several tickets need the same investigation, use an optional exploration wo
 Save source-linked notes in the shared run directory and pass relevant paths to consumers.
 Ready tickets can proceed without exploration they do not need.
 
-Done when the dependency graph, scope, check commands, original baseline, integration
-checkout, and durable run record are available by path. Prepare the draft body now; follow
+Done when skill dependency results, the ticket graph, scope, check commands, original baseline,
+integration checkout, and durable run record are available by path. Prepare the draft body now; follow
 [Feature PR](references/reference.md#feature-pr) when the branch has a publishable diff.
 
 ### 1. Dispatch, integrate, and refresh the frontier
@@ -81,8 +89,8 @@ runtime or artifact check. Review runs in an isolated checkout at that SHA and r
 materialized `scope.md` as its one originating spec plus the fixed PR-base commit.
 
 On a four-slot runtime, finish Verify before a `code-review` worker that needs two children,
-or flatten its standards and criteria axes into root-owned workers. Use equivalent independent
-reviews if `code-review` is unavailable. Readers of a fixed SHA share no concurrent writer.
+or dispatch its Standards and Spec axes directly using the loaded skill's prompts and baseline.
+Readers of a fixed SHA share no concurrent writer.
 
 Send actionable in-scope findings to one fix worker, then rerun affected gates on the new SHA.
 Resolve whole-spec coverage gaps before final completion. Report requirements outside an
@@ -93,9 +101,8 @@ Done when both gates pass on the preserved head and the recorded completion obli
 
 ### 3. Finalize the feature PR
 
-One worker authors and executes the [Verification plan](references/reference.md#verification-plan),
-then finalizes the [Feature PR](references/reference.md#feature-pr). Pass the verified SHA,
-coverage evidence, run record, and reports. A newly discovered defect returns to the fix and
+One worker uses `pr` to author the body and finalizes the [Feature PR](references/reference.md#feature-pr).
+Pass the verified SHA, coverage evidence, run record, and reports. A newly discovered defect returns to the fix and
 verification loop. Refresh tracker coverage before claiming the entire spec is complete.
 
 Update the same draft with actual results and evidence-backed closing lines, then mark it

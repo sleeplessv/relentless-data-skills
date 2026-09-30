@@ -1,6 +1,6 @@
 {
   "name": "implement-feature",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Implement a feature specification or selected tickets as one verified pull request.",
   "author": {
     "name": "sleeplessv"

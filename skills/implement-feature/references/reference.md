@@ -28,9 +28,7 @@ someone else requires reconciliation. `needs-info`, `needs-triage`, or `wontfix`
 a WIP branch alone does not prove agent-authored triage. An explicit current user instruction can
 resolve a prior agent stop. Track which lifecycle changes this run actually owns.
 
-Treat a pre-existing `awaiting-verification` label, PR, or Verification plan as historical state.
-Record each one in the ticket snapshot and evaluate current criteria. The old plan does not satisfy
-the feature-level plan gate, and only a human removes the label.
+Record pre-existing PRs in the ticket snapshots and evaluate current acceptance criteria.
 
 Build the graph and detect cycles. An unresolved open blocker outside the selected set requires
 a dependency decision, not expansion of scope. Check that purportedly satisfied blockers are
@@ -192,29 +190,19 @@ satisfy the spec. For `selected_tickets`, the requirements section contains ever
 criterion. Put the parent spec and unselected requirements in the context-only section. A no-spec
 run still materializes the selected ticket criteria in `scope.md`.
 
-Run the upstream `code-review` skill in an isolated checkout whose `HEAD` is the tested integration
-SHA. Pass the recorded PR-base commit as its normal fixed-point argument and the absolute
-`scope.md` path as the one originating spec. Instruct this invocation to treat `scope.md` as the
-complete authoritative spec, skip spec discovery and issue-tracker setup, and pass that document
-to its Spec worker. Tell the Spec worker to enforce only the requirements section and use the
-context-only section for interpretation without reporting its contents as missing requirements.
-Schedule any review children within capacity, or use independent direct reviews of standards
-and acceptance criteria when the review skill is unavailable.
-
-## Verification plan
-
-Use at most three critical scenarios requiring human judgement beyond automated checks.
-Each has copy-paste-ready steps, preconditions and cleanup where needed, and one "What you
-should see" line grounded in observed results. Execute reachable steps with safe inputs;
-label inaccessible ones "not executed, requires <environment>". Preserve uncovered acceptance
-criteria in the evidence record rather than silently declaring them verified. If none qualify,
-write "No human verification beyond code review: <reason>". Replace a prior plan on resume.
+Follow implement-ticket's [Independent review](../../implement-ticket/references/review-and-pr.md#independent-review)
+contract in an isolated checkout at the tested integration SHA. Pass the recorded PR-base commit
+as `base_sha`, that integration SHA as `review_sha`, and `scope.md` as the authoritative source.
+Retain separate Standards and Spec reports in the run record. Ticket workers perform self-review;
+this gate owns independent review of the complete feature.
 
 ## Feature PR
 
 Prepare a draft body during setup with the intended scope and links to the spec and tickets.
+Every draft, update, and final body follows implement-ticket's shared
+[PR body](../../implement-ticket/references/review-and-pr.md#pr-body) contract and invokes `pr`.
 Create or reuse one draft PR as soon as the verified, preserved integration branch has a
-publishable diff. Use explicit `--base` and `--head` and the repo PR template. A branch with
+publishable diff. Use explicit `--base`, `--head`, and `--body-file`. A branch with
 no diff may not support PR creation; record that pending state and retry after verified work
 lands. Do not create empty commits or product changes solely to open a PR.
 
@@ -223,10 +211,9 @@ completed work, and update actual results as tickets integrate. Partial or block
 draft. On resume, inspect the existing PR and reconcile its head and readiness with current
 evidence; any incomplete or invalidated completion obligations require draft status.
 
-After all gates and the verification plan, refresh complete open-ticket coverage. Add closing
+After all gates pass, refresh complete open-ticket coverage. Add closing
 lines only for tickets with current satisfaction evidence in the integrated head. Add
 `Closes #<spec>` only when every open ticket is covered and every spec requirement has current
 completion evidence, including in a selected-ticket run that happens to cover the whole spec.
-Publish Summary, actual Test plan, and Verification plan, then mark the same PR ready for review.
-Apply `awaiting-verification` only within authorized lifecycle ownership and when the plan has
-human scenarios. Preserve the current body locally if publication is blocked. Never merge the PR.
+Publish the `pr` body, then mark the same PR ready for review. Preserve the current body locally
+if publication is blocked. Never merge the PR.

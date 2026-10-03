@@ -19,7 +19,7 @@ Run in parallel:
 - `git status`. If the tree is clean and there is nothing to commit, say so and stop.
 - `gh auth status` and `git remote get-url origin`. If `gh` is missing or unauthenticated, or there is no `origin` remote, stop with a clear message before touching anything.
 
-**Run all `gh` and `git fetch`/`pull`/`push` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
+**Run all `gh` and `git fetch`/`pull`/`push`/`ls-remote` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
 
 ## Step 1: Group the changes, detect unrelated work
 
@@ -75,31 +75,47 @@ EOF
 
 ## Step 5: Merge and clean up
 
-- Invoked with `clean` → proceed without asking.
-- Otherwise ask: "Merge and clean up (squash-merge the PR, delete the local and remote branch)?"
+`<number>` is the PR number from Step 4. Name it in every `gh pr` command, because the current branch may not be the PR's.
+
+Read each PR's checks first with `gh pr checks <number> --json name,bucket` and summarise them as one checks line, e.g. "checks: 4 pass, 1 pending" or "checks: none reported". Its exit code only encodes the checks (1 = a check failed, 8 = one is pending, non-zero when none are reported); the result is the JSON or the "no checks reported" message, and the flow continues.
+
+- Invoked with `clean` → proceed without asking; the checks line goes in the close-out.
+- Otherwise ask: "Merge and clean up (squash-merge the PR, delete the local and remote branch)?", followed by the checks line.
   - **No** → leave the PR open, print its URL, and stop. Delete nothing.
 
-On yes (or `clean`):
+On yes (or `clean`), merge, then, once the merge has returned, read the PR's end state whatever the merge's exit code. The state routes this step: a merge that landed exits 1 when local branch deletion fails, and a merge-queue enqueue exits 0 with the PR still open.
 
 ```bash
-gh pr merge --squash --delete-branch
+gh pr merge <number> --squash --delete-branch
+gh pr view <number> --json state,mergeCommit,autoMergeRequest,headRefName
 ```
 
-This squash-merges the PR, deletes the remote and local branch, and checks out `main`. Finish with `git pull` so the session ends on an up-to-date main.
+| End state | Action |
+|---|---|
+| `MERGED` | Finish on `main` (below) |
+| `OPEN`, `autoMergeRequest` set | Auto-merge armed; it lands once the PR's requirements are met. Stop |
+| `OPEN`, the plain merge refused as not mergeable (branch policy or required checks; `gh`'s error suggests `--auto`) | Retry with `gh pr merge <number> --squash --delete-branch --auto`, re-read the state, and route it again. A refused `--auto` falls to the last row |
+| `OPEN`, no `autoMergeRequest`, the merge command exited 0 | Queued (a merge queue). Stop; run no pull |
+| Anything else | Report the actual state and `gh`'s message. Stop |
 
-**If the merge is blocked** (required checks pending, branch protection):
+On every row that stops, nothing has been deleted: both branches still exist and the session stays on the PR's head branch (`headRefName`).
+
+**Finish on `main`** (`MERGED` only). `gh` may leave you on another branch (it does when local cleanup fails), so check out `main` and pull either way; this is part of the flow, not recovery. Then confirm, with `<branch>` from `headRefName`:
 
 ```bash
-gh pr merge --squash --delete-branch --auto
+git checkout main && git pull
+git merge-base --is-ancestor <mergeCommit.oid> main   # exit 0 = merge commit on local main
+git ls-remote --exit-code --heads origin <branch>      # exit 2 = remote branch gone
+git rev-parse --verify --quiet refs/heads/<branch>     # non-zero = local branch gone
 ```
 
-Report "checks pending, auto-merge armed; it will land when green" and stop. The local branch stays for now; the next `/ship` run's stale-branch detection cleans it up.
+All three confirm → **merged**. Any miss → **merged, but cleanup incomplete**; say which check missed.
 
-**Close-out:** lead with the outcome in one sentence (merged, PR left open, or auto-merge armed) with the PR URL. Anything worth flagging goes after it.
+**Close-out:** lead with the confirmed outcome in one sentence (merged; merged, but cleanup incomplete; auto-merge armed; queued; PR left open; or the actual state) with the PR URL and checks line. Name every branch that outlives the run. Anything worth flagging goes after it.
 
 ## Safety rules
 
 - The smart-git-commit rules apply: no force-push, no skipped hooks (`--no-verify`), no likely secrets (`.env`, credentials, tokens) in a commit.
-- Delete a branch only once it is confirmed merged by one of the Step 2 signals; an unmerged branch may hold the only copy of the work.
+- Delete branches only through `--delete-branch` in the Step 5 merge, which acts only once the PR has merged; an unmerged branch may hold the only copy of the work.
 - Merge only with the `clean` argument or an explicit yes; the squash-merge is the one irreversible step and the user owns it.
-- If anything fails mid-flow (rejected push, conflict on `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one.
+- If a step fails mid-flow (rejected push, conflict on `git checkout` or `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one. A non-zero exit from `gh pr checks` or `gh pr merge` is not such a failure: Step 5 routes by the state it reads.

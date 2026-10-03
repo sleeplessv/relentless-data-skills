@@ -123,6 +123,26 @@ Allowed, kept minimal and self-contained:
 
 If an interaction needs a library, it doesn't belong in this report.
 
+### Mermaid inside hidden containers
+
+Mermaid measures every label as it draws, so a diagram must be drawn while it is laid out. `<details>` and the `.collapse` max-height toggle keep their content laid out, so the scaffold's `startOnLoad: true` draws them correctly. Tabs and toggles that hide panels (`hidden`, Tailwind `hidden`, `display:none`) need the order reversed: panels start visible, Mermaid draws every diagram, and only then does the script hide the inactive panels. Replace the scaffold's module script with:
+
+```html
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict" });
+  await mermaid.run();   // draw every diagram while every panel is visible
+  showTab("before");     // then hide the inactive panels
+</script>
+<script>
+  function showTab(id) {
+    document.querySelectorAll("[data-tab]").forEach((p) => (p.hidden = p.dataset.tab !== id));
+  }
+</script>
+```
+
+Each panel is a `<div data-tab="before">`, with no `hidden` in the markup; buttons call `showTab(...)`. The render check opens hidden panels the way a reader would, so a diagram drawn while hidden fails it as an error diagram or a speck.
+
 ## Style guidance
 
 This is the house style. Apply it, don't reinvent per report.

@@ -228,7 +228,7 @@
       "name": "review-pbi-diff",
       "source": "./skills/review-pbi-diff",
       "description": "Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },
@@ -251,7 +251,7 @@
       "name": "ship",
       "source": "./skills/ship",
       "description": "Commit, publish, and merge working-tree changes through a pull request.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },
@@ -312,7 +312,7 @@
       "name": "visual-report",
       "source": "./skills/visual-report",
       "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },

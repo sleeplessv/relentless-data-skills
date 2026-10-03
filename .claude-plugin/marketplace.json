@@ -228,7 +228,7 @@
       "name": "review-pbi-diff",
       "source": "./skills/review-pbi-diff",
       "description": "Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },

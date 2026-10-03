@@ -38,6 +38,16 @@ developer's branch.
   color-coded to-scale layouts (added/modified/deleted/unchanged), DAX in
   collapsible before/after blocks, and findings ranked 🔴/🟡/🔵. It is
   published via the Artifact tool when available, saved to disk otherwise.
+- **Checked before publishing.** A second stdlib-only script
+  (`scripts/check_artifact.py`) compares the finished artifact with
+  `change_model.json` through marker attributes. It parses the page the way
+  a browser does, so hidden or script-built markup doesn't count. Every
+  added/modified measure needs exactly one verdict card that names it. Every
+  curated page needs a wireframe under its heading, drawing each of its
+  visuals with its status. Each stat chip must appear once and show the
+  change model's number, and each card's badge must match its attribute.
+  The close-out counts and the list of pages excluded as scratch come from
+  this check, not from a hand tally.
 
 ## Requirements
 
@@ -70,11 +80,14 @@ Power BI work; it takes an optional git ref range (default `main...HEAD`).
 
 - `SKILL.md`: core workflow, extract, analyze (spec check + red flags), build
   the artifact.
-- `references/artifact.md`: artifact structure and wireframe rules, loaded
-  only at build time.
+- `references/artifact.md`: artifact structure, wireframe rules, and check
+  markers, loaded only at build time.
 - `scripts/extract_changes.py`: the deterministic extractor (stdlib only).
   Takes a git range, produces `change_model.json` plus raw `objects/`
   before/after dumps.
+- `scripts/check_artifact.py`: the artifact check (stdlib only). Prints the
+  🔴/🟡/🔵 and verdict counts, each excluded page with its reason, and every
+  mismatch, then `PASS` or `FAIL`.
 
 ## Maintenance / CI
 

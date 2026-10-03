@@ -133,12 +133,18 @@ what is still unknown. A check with no findings is reported as confirmed clean.
 
 ## Step 3: build the artifact
 
-Follow [references/artifact.md](references/artifact.md) for the artifact
-structure and wireframe rules. Length follows substance: within that
-structure, prefer wireframes and tables over prose, skip filler padding, and
-never restate a table in prose beneath it. Load the `artifact-design` skill
-if available, write a single self-contained HTML file to the scratchpad, and
-publish it with the Artifact tool (icon `chart`, stable title
-`PBI Review: <branch or range>`). If the Artifact tool is unavailable, save
-the HTML and give the user its path. Close out with the outcome first
-(artifact URL or path, and 🔴/🟡/🔵 counts), then any detail.
+Follow [references/artifact.md](references/artifact.md) for the structure,
+wireframe rules, and check markers. Length follows substance: prefer
+wireframes and tables over prose, skip filler, and never restate a table in
+prose beneath it. Load the `artifact-design` skill if available, write one
+self-contained HTML file to the scratchpad, then prove it against the change
+model, passing only user-named scratch pages (`REPORT/PAGE` if ambiguous):
+
+```bash
+python3 <skill-dir>/scripts/check_artifact.py <out>/change_model.json <file.html> [--scratch <page>]...
+```
+
+Fix every problem it lists and rerun until it prints `PASS`. Then publish
+with the Artifact tool (icon `chart`, stable title `PBI Review: <branch or
+range>`), or else give the user the HTML path. Close out with the outcome
+(URL or path, the check's 🔴/🟡/🔵 counts and excluded pages), then detail.

@@ -312,7 +312,7 @@
       "name": "visual-report",
       "source": "./skills/visual-report",
       "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },

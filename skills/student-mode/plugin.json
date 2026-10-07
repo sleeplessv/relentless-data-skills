@@ -1,0 +1,24 @@
+{
+  "name": "student-mode",
+  "version": "0.1.0",
+  "description": "Write tutorial-grade Python, SQL, and Java for learners instead of production-grade code, for the rest of the session.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/student-mode",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "students",
+    "learning",
+    "teaching",
+    "tutorial",
+    "beginner",
+    "simple-code",
+    "python",
+    "sql",
+    "java",
+    "education",
+    "course"
+  ]
+}

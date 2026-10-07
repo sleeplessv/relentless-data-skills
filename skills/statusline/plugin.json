@@ -1,6 +1,6 @@
 {
   "name": "statusline",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Show the current model, reasoning effort, context window usage, directory, git branch, and open pull requests in the Claude Code status line.",
   "author": {
     "name": "sleeplessv"

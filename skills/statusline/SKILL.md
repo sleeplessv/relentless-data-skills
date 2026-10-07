@@ -11,7 +11,7 @@ Installs `scripts/statusline.sh` as the Claude Code status line. The rendered li
 Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 ```
 
-The bar shows tokens used out of 200k, whatever the context window size, and stays full above 200k. The context segment's colour is a gradient by tokens used: green at 0, amber at 100k, and red from 175k. The gradient needs a truecolor terminal (iTerm2, Ghostty, Warp, VS Code); older macOS Terminal.app versions do not render it.
+The bar shows tokens used out of 200k, whatever the context window size, and stays full above 200k. The context segment's colour depends on tokens used: green up to 90k, then a gradient through amber at 130k to red from 170k. The gradient needs a truecolor terminal (iTerm2, Ghostty, Warp, VS Code); older macOS Terminal.app versions do not render it.
 
 ## Workflow
 

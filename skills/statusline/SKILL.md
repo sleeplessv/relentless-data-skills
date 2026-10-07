@@ -1,6 +1,6 @@
 ---
 name: statusline
-description: Installs a Claude Code status line that shows the current model, context window usage, directory, git branch, and open pull requests. Use when the user asks to show the model or context usage under the prompt, or to set up or customise the Claude Code status line.
+description: Installs a Claude Code status line that shows the current model, reasoning effort, context window usage, directory, git branch, and open pull requests. Use when the user asks to show the model or context usage under the prompt, or to set up or customise the Claude Code status line.
 ---
 
 # Status line
@@ -8,7 +8,7 @@ description: Installs a Claude Code status line that shows the current model, co
 Installs `scripts/statusline.sh` as the Claude Code status line. The rendered line looks like:
 
 ```text
-Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from green through amber to red as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
@@ -38,8 +38,10 @@ Use `~/.claude/settings.json` by default, so it applies to every project. Use th
 If the file does not exist, create it with only the `statusLine` key below. Otherwise, read the file first. If a `statusLine` key already exists and does not point to `~/.claude/statusline.sh`, show it and ask before replacing it. Otherwise set:
 
 ```json
-"statusLine": { "type": "command", "command": "~/.claude/statusline.sh" }
+"statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 30 }
 ```
+
+`refreshInterval` reruns the script every 30 seconds, so the PR segment catches up while the session is idle. Without it, Claude Code reruns the script only on conversation events.
 
 Change only that key and keep every other setting. Run `jq empty <file>` to confirm that the file is still valid JSON.
 
@@ -48,10 +50,10 @@ Change only that key and keep every other setting. Run `jq empty <file>` to conf
 Pipe sample input through the installed script from inside a git repo:
 
 ```bash
-echo '{"model":{"display_name":"Opus 5.5"},"context_window":{"total_input_tokens":42000,"context_window_size":200000,"used_percentage":21.4},"workspace":{"current_dir":"'"$PWD"'"}}' | ~/.claude/statusline.sh
+echo '{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"total_input_tokens":42000,"context_window_size":200000,"used_percentage":21.4},"workspace":{"current_dir":"'"$PWD"'"}}' | ~/.claude/statusline.sh
 ```
 
-Done when the output shows the model, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
+Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
 
 The first run starts a background fetch of the PR counts, so the PR segment can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the segment stays hidden.
 

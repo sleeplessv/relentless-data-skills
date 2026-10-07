@@ -8,12 +8,12 @@ description: Installs a Claude Code status line that shows the current model, co
 Installs `scripts/statusline.sh` as the Claude Code status line. The rendered line looks like:
 
 ```text
-Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | PR ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #42 PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from green through amber to red as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
-The `PR` segment counts the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves the segment out.
+The PR segment links the current branch's open PR by number, such as `#42`, then counts the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves the segment out.
 
 The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
 
@@ -22,7 +22,7 @@ The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp,
 ### Step 1: Check prerequisites
 
 - Run `command -v jq`. If `jq` is missing, tell the user to install it and stop. On macOS, the command is `brew install jq`. On Linux, use the distribution's package.
-- Run `gh auth status`. If `gh` is missing or signed out, tell the user that the `PR` segment stays hidden until they install `gh` or run `gh auth login`. Then continue.
+- Run `gh auth status`. If `gh` is missing or signed out, tell the user that the PR segment stays hidden until they install `gh` or run `gh auth login`. Then continue.
 - Resolve the absolute path of this skill's `scripts/statusline.sh`.
 
 ### Step 2: Copy the script
@@ -53,6 +53,6 @@ echo '{"model":{"display_name":"Opus 5.5"},"context_window":{"total_input_tokens
 
 Done when the output shows the model, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
 
-The first run starts a background fetch of the PR counts, so the `PR` segment can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the segment stays hidden.
+The first run starts a background fetch of the PR counts, so the PR segment can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the segment stays hidden.
 
 Tell the user that the status line appears from their next message. If it does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.

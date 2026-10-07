@@ -5,7 +5,7 @@ line shows the current model, context window usage, directory, git branch, and
 open pull requests under the prompt.
 
 ```text
-Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | PR ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #42 PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 ## What it does
@@ -19,8 +19,11 @@ Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
   the script.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
-- **Open pull requests.** Counts every open PR in the repo, by any author.
-  Each count shows only when it is above zero. A ready PR is one that is not a
+- **Current branch's PR.** Shows the number of the open PR for the current
+  branch, such as `#42`, coloured by its state. The number is a link: click it
+  to open the PR in the browser, in terminals that support OSC 8 hyperlinks.
+- **Open pull requests.** After `PRs`, counts every open PR in the repo, by
+  any author. Each count shows only when it is above zero. A ready PR is one that is not a
   draft. A failed check outranks a running one.
 
   | Symbol | Colour | Meaning |
@@ -81,4 +84,4 @@ to `~/.claude/settings.json`:
 - `git`, for the branch name. Outside a git repo, the script leaves the branch
   out.
 - `gh`, for the PR counts. It must be signed in to an account that can read
-  the repo. Otherwise, the script leaves the `PR` segment out.
+  the repo. Otherwise, the script leaves the PR segment out.

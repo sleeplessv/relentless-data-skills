@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code status line: model | bar used/size (pct) | dir (branch) | PR counts.
+# Claude Code status line: model | bar used/size (pct) | dir (branch) | branch PR and PR counts.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
@@ -50,6 +50,7 @@ bar=$(awk -v u="$used" -v cell="$CELL" 'BEGIN{
 printf '\033[36m%s\033[0m | \033[%sm%s %s/%s (%s%%)\033[0m' \
   "$model" "$colour" "$bar" "$(fmt_tokens "$used")" "$(fmt_tokens "$size")" "$pct"
 
+branch=
 if [ -n "$cwd" ]; then
   printf ' | %s' "$(basename "$cwd")"
   branch=$(git --no-optional-locks -C "$cwd" symbolic-ref --short HEAD 2>/dev/null \
@@ -58,7 +59,8 @@ if [ -n "$cwd" ]; then
 fi
 
 # Open PRs in the repo, by state: ready with checks passed (or no checks),
-# ready with checks running, ready with a failed check, and draft.
+# ready with checks running, ready with a failed check, and draft. The current
+# branch's PR shows first as a clickable #number, coloured by its state.
 top=$([ -n "$cwd" ] && git --no-optional-locks -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
@@ -75,14 +77,15 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   if [ -z "$(find "$cache" -mmin -"$PR_REFRESH_MIN" 2>/dev/null)" ] && mkdir "$lock" 2>/dev/null; then
     (
       cd "$top" \
-        && gh pr list --state open --limit 200 --json isDraft,statusCheckRollup >"$cache.tmp" \
+        && gh pr list --state open --limit 200 \
+          --json number,url,headRefName,isDraft,statusCheckRollup >"$cache.tmp" \
         && mv "$cache.tmp" "$cache" \
         || { rm -f "$cache.tmp"; touch "$cache"; }
       rmdir "$lock"
     ) </dev/null >/dev/null 2>&1 &
   fi
 
-  prs=$(jq -r '
+  prs=$(jq -r --arg branch "$branch" '
     def state:
       if .isDraft then "draft"
       else
@@ -98,14 +101,22 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
           elif any(. == "running") then "running"
           else "passed" end
       end;
-    map(state) as $states
-    | [["passed", "✓", "38;2;46;204;64"], ["running", "⧗", "38;2;255;191;0"],
-       ["failed", "✗", "38;2;231;76;60"], ["draft", "✎", "38;5;245"]]
-    | map(. as [$name, $symbol, $colour]
-        | ($states | map(select(. == $name)) | length) as $n
-        | select($n > 0)
-        | "\u001b[\($colour)m\($symbol)\($n)\u001b[0m")
-    | join(" ")
-  ' "$cache" 2>/dev/null)
-  if [ -n "$prs" ]; then printf ' | PR %s' "$prs"; fi
+    def colour: {passed: "38;2;46;204;64", running: "38;2;255;191;0",
+                 failed: "38;2;231;76;60", draft: "38;5;245"}[.];
+    # OSC 8 hyperlink, so the terminal opens the PR on click.
+    def link($url; $text): "\u001b]8;;\($url)\u001b\\\($text)\u001b]8;;\u001b\\";
+    (map(select(.number and .headRefName == $branch)) | first
+      | select(.)
+      | "\u001b[\(state | colour)m\(link(.url; "#\(.number)"))\u001b[0m"),
+    (map(state) as $states
+      | [["passed", "✓"], ["running", "⧗"], ["failed", "✗"], ["draft", "✎"]]
+      | map(. as [$name, $symbol]
+          | ($states | map(select(. == $name)) | length) as $n
+          | select($n > 0)
+          | "\u001b[\($name | colour)m\($symbol)\($n)\u001b[0m")
+      | join(" ")
+      | select(. != "")
+      | "PRs \(.)")
+  ' "$cache" 2>/dev/null | paste -sd' ' -)
+  if [ -n "$prs" ]; then printf ' | %s' "$prs"; fi
 fi

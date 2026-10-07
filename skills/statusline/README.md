@@ -11,20 +11,20 @@ Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 ## What it does
 
 - **Model.** Shows the display name of the model in use.
-- **Context usage.** Shows a ten-cell bar for tokens used out of 200k (full
-  above 200k, whatever the window size), then tokens used against the context
-  window size. The colour depends on tokens used: green up to 90k,
-  then a gradient through amber at 130k to red from 170k.
+- **Context usage.** Shows a ten-cell bar, then tokens used against the size
+  of the context window. Each cell is 20k tokens, so the bar is full from
+  190k. The text is green up to 90k tokens. Above 90k, it shades to amber at
+  130k and to red at 170k.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
-- **Safe install.** Copies the script to `~/.claude/statusline.sh`, sets only
+- **Settings.** Copies the script to `~/.claude/statusline.sh`, sets only
   the `statusLine` key in `~/.claude/settings.json`, and asks before replacing
   an existing status line or script.
 
 ## Install
 
 See the [repo root README](../../README.md) for the general install patterns
-(`npx skills`, Claude Code plugin, manual clone). For this skill specifically:
+(`npx skills`, Claude Code plugin, manual clone). To install this skill:
 
 ```bash
 npx skills add sleeplessv/relentless-data-skills/skills/statusline
@@ -35,12 +35,12 @@ npx skills add sleeplessv/relentless-data-skills/skills/statusline
 /plugin install statusline@relentless-data-skills
 ```
 
-It activates when you ask to show the model or context usage under the prompt,
-or to set up the status line.
+The skill runs when you ask to show the model or context usage under the
+prompt, or to set up the status line.
 
-To install without the skill, copy `scripts/statusline.sh` to
-`~/.claude/statusline.sh`, run `chmod +x` on it, and add this to
-`~/.claude/settings.json`:
+To install the status line without the skill, copy `scripts/statusline.sh` to
+`~/.claude/statusline.sh` and run `chmod +x` on it. Then add the following key
+to `~/.claude/settings.json`:
 
 ```json
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh" }
@@ -57,6 +57,8 @@ To install without the skill, copy `scripts/statusline.sh` to
 
 - Claude Code.
 - `jq` and a POSIX shell.
-- A truecolor terminal for the gradient (iTerm2, Ghostty, Warp, VS Code).
-  Older macOS Terminal.app versions do not render it.
-- `git`, for the branch segment. It is omitted outside a repo.
+- A terminal with 24-bit colour for the gradient, such as iTerm2, Ghostty,
+  Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not
+  show it.
+- `git`, for the branch name. Outside a git repo, the script leaves the branch
+  out.

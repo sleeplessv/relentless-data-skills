@@ -11,13 +11,15 @@ Installs `scripts/statusline.sh` as the Claude Code status line. The rendered li
 Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 ```
 
-The bar shows tokens used out of 200k, whatever the context window size, and stays full above 200k. The context segment's colour depends on tokens used: green up to 90k, then a gradient through amber at 130k to red from 170k. The gradient needs a truecolor terminal (iTerm2, Ghostty, Warp, VS Code); older macOS Terminal.app versions do not render it.
+Each bar cell is 20k tokens, rounded to the nearest cell, so the bar is full from 190k whatever the size of the context window. The context usage is green up to 90k tokens. Above 90k, it shades to amber at 130k and to red at 170k.
+
+The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
 
 ## Workflow
 
 ### Step 1: Check prerequisites
 
-- Run `command -v jq`. If it is missing, tell the user to install it (`brew install jq` on macOS, the distro package elsewhere) and stop.
+- Run `command -v jq`. If `jq` is missing, tell the user to install it and stop. On macOS, the command is `brew install jq`. On Linux, use the distribution's package.
 - Resolve the absolute path of this skill's `scripts/statusline.sh`.
 
 ### Step 2: Copy the script
@@ -36,7 +38,7 @@ Read the file first. If a `statusLine` key already exists and does not point to 
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh" }
 ```
 
-Change only that key. Keep every other setting and keep the file valid JSON (check with `jq empty <file>`).
+Change only that key and keep every other setting. Run `jq empty <file>` to confirm that the file is still valid JSON.
 
 ### Step 4: Prove it works
 
@@ -48,4 +50,4 @@ echo '{"model":{"display_name":"Opus 5.5"},"context_window":{"total_input_tokens
 
 Done when the output shows the model, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
 
-Tell the user the line appears from their next message, and to restart Claude Code if it does not. Before the first message of a session it shows `0/0 (0%)`, because no usage exists yet.
+Tell the user that the status line appears from their next message. If it does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.

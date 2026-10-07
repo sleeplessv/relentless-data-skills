@@ -22,7 +22,7 @@ colour=$(awk -v u="$used" 'BEGIN{
   printf "38;2;%d;%d;%d", r, g, b
 }')
 
-# Ten-cell bar for tokens used out of 200k, whatever the window size.
+# Ten-cell bar, one cell per 20k tokens used, whatever the window size.
 bar=$(awk -v u="$used" 'BEGIN{
   n = int(u / 20000 + 0.5); if (n < 0) n = 0; if (n > 10) n = 10
   for (i = 0; i < 10; i++) printf (i < n ? "▰" : "▱")

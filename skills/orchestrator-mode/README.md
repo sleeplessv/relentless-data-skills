@@ -2,14 +2,14 @@
 
 Coordinate requested work through subagents while keeping detailed findings in worker
 artifacts. Scoped delegation applies to the named tasks; explicit orchestrator mode continues
-until the user changes it. The main thread loads relevant skills, dispatches work, handles
-decisions, and reports outcomes.
+until the user changes it. In that mode the main thread only dispatches, plans, loads skills,
+and talks to the user, and it passes worker artifacts on by path.
 
-The workflow uses active tool schemas, bounded parallel dispatches, compact handoffs, and evidence
-from the actual artifact. Parallel writers use isolated worktrees with pinned base commits.
-Cleanup requires recorded ownership and preservation evidence. Detailed rules live in
-[SKILL.md](SKILL.md), with conditional nesting and worktree procedures in
-[references/reference.md](references/reference.md).
+Every workflow step ends on a completion criterion. Handoffs assume the worker starts with no
+conversation context, quote prior findings, and name one shared run directory. Parallel writers
+use isolated worktrees with pinned base commits, and cleanup requires recorded ownership and
+preservation evidence. Core rules live in [SKILL.md](SKILL.md); nesting, parallel writes, and
+harness limits live in [references/reference.md](references/reference.md).
 
 ## Install
 

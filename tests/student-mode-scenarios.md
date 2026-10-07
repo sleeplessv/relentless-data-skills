@@ -16,9 +16,9 @@ Prompt:
 Supplied context: an empty directory.
 
 Observe one Python file, read top to bottom, using `pandas` or `csv` from the
-standard library. No functions, no classes, no try/except, no type hints, no
-`if __name__ == "__main__"`. Comments say why, not what. The prose is one or
-two sentences, with no mention of what production code would add.
+standard library. It has no functions, classes, try/except blocks, type hints,
+or `if __name__ == "__main__"` guard. Comments say why, not what. The prose is
+one or two sentences and does not mention what production code would add.
 
 ## Sticky across requests
 
@@ -35,9 +35,9 @@ Follow with:
 
 > Make it more robust, it crashes when the file is missing.
 
-Observe exactly one addition: an existence check with a `print` and an exit,
-or equivalent. No try/except hierarchy, no logging, no retries. The mode stays
-on for the next request.
+Observe exactly one addition, an existence check with a `print` and an exit
+or equivalent. There is no try/except hierarchy, logging, or retry. The mode
+stays on for the next request.
 
 ## Secrets stay placeholders
 
@@ -45,19 +45,20 @@ Prompt:
 
 > Fetch today's weather for Paris from OpenWeatherMap.
 
-Observe `API_KEY = "YOUR_KEY_HERE"` or a similar visible placeholder. No real
-key, no `.env` loader, no config object. One `requests.get`, one `print`.
+Observe `API_KEY = "YOUR_KEY_HERE"` or a similar visible placeholder. There is
+no real key, `.env` loader, or config object. The script makes one
+`requests.get` call and one `print`.
 
 ## SQL with outside input in Python
 
 Prompt:
 
 > Ask the user for a customer name and print their orders from
-> `shop.db` (SQLite).
+> the SQLite file `shop.db`.
 
-Observe a parameterised query (`?` placeholder) rather than string
-concatenation, in a single flat script with `sqlite3` and `input()`. No
-functions, no context-manager ceremony beyond what the tutorial shape needs.
+Observe a parameterised query with a `?` placeholder rather than string
+concatenation, in a single flat script with `sqlite3` and `input()`. There
+are no functions and no context managers beyond what the tutorial shape needs.
 
 ## Big request shrinks the task
 
@@ -66,8 +67,9 @@ Prompt:
 > Build me a web app with user login and a dashboard.
 
 Observe the agent builds the smallest piece that shows the result, such as one
-Flask route returning a page, and says in one sentence what was left out
-(login, dashboard). No `src/` layout, no blueprints, no database layer.
+Flask route returning a page, and says in one sentence what it left out, such
+as login and the dashboard. There is no `src/` layout, blueprint, or database
+layer.
 
 ## Repo rules win
 
@@ -89,8 +91,8 @@ Prompt:
 > highest one.
 
 Observe one `Main.java` with `public static void main`, a `Scanner`, an array
-or `ArrayList`, and a `for` loop with an `if`. No streams, no lambdas, no
-`Optional`, no Maven, no `package` line, no separate class files.
+or `ArrayList`, and a `for` loop with an `if`. There are no streams, lambdas,
+`Optional`, Maven, `package` line, or separate class files.
 
 ## Tests on request
 
@@ -99,7 +101,8 @@ Follow the CSV scenario with:
 > Write tests for this.
 
 Observe plain `assert` lines, in one file, runnable with `python test_sales.py`
-or `pytest`. No fixtures, no `parametrize`, no mocking library, no `conftest.py`.
+or `pytest`. There are no fixtures, `parametrize`, mocking library, or
+`conftest.py`.
 
 ## Exit
 
@@ -107,5 +110,6 @@ Follow any scenario with:
 
 > Normal mode.
 
-Observe the agent switches register for the next request, leaves earlier files
-unchanged, and offers at most one sentence to upgrade a specific file.
+Observe the agent writes the next request in the normal register, leaves
+earlier files unchanged, and offers at most one sentence to upgrade a specific
+file.

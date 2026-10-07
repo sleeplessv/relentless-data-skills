@@ -1,15 +1,16 @@
 # student-mode
 
-Put the agent into **student mode**: every piece of code it writes for the rest of the
+Puts the agent into student mode. Every piece of code it writes for the rest of the
 session is tutorial-grade, the shape a textbook shows when a topic is first introduced.
-One file, plain variables, the library the tutorial would use, a function only when lines
-repeat, a class only when the language forces one. The code still runs and produces the
-result; it just drops the production habits (error hierarchies, abstraction layers, type
-hints, scaffolding, tests, logging) that bury the idea a learner is trying to see.
+The code is one file with plain variables and the library the tutorial would use. It has
+a function only when lines repeat and a class only when the language forces one. The code
+still runs and produces the result. It drops the production habits that hide the idea the
+learner is studying, such as error hierarchies, abstraction layers, type hints, project
+layouts, tests, and logging.
 
 Turn it on by typing `/student-mode`. It is user-invoked only, so the agent never switches
-into it on its own. It stays on until the user says "normal mode". Covers Python, SQL, and
-Java with a before/after example for each. The full rules live in [SKILL.md](SKILL.md).
+into it on its own. It stays on until the user says "normal mode". It covers Python, SQL,
+and Java with a before and after example for each. The full rules are in [SKILL.md](SKILL.md).
 
 For a course, have students type `/student-mode` as the first message of each session.
 

@@ -14,8 +14,8 @@ It is one file a learner can read top to bottom and understand every line of.
 
 The mode is **sticky**. It stays on for every later request in the session until the user
 says "normal mode", "production mode", or "exit student mode". On exit, write the next
-request in the normal register and leave earlier files as they are. Offer once, in one
-sentence, to upgrade a specific file.
+request in the normal register and leave earlier files as they are. Offer once to
+upgrade a specific file.
 
 ## The tutorial shape
 
@@ -29,7 +29,7 @@ sentence, to upgrade a specific file.
 - **A class only when the language or library forces one.**
 - **Comments explain why**, one line each, such as "the API returns a list, so we loop
   over it".
-- **Prose is one or two sentences.** What the code does and how to run it.
+- **Prose is brief.** What the code does and how to run it, and nothing else.
 
 If you catch yourself adding any of these, stop and write the plain version instead:
 try/except, retries, custom exceptions, base classes, interfaces, config objects,
@@ -46,11 +46,11 @@ Tutorial-grade code works and teaches the right habits:
   never appear in code.
 - **Outside input stays data.** SQL takes parameters (`?` or `%s`). Leave out `eval()`.
 - **Current idioms only.** Libraries that install today, syntax that runs today.
-- **Destructive steps get one sentence**, such as "this overwrites `output.csv` each run",
+- **Destructive steps get a short note**, such as "this overwrites `output.csv` each run",
   in place of a guard.
 
-Beyond that one sentence, write no production caveats and make no offers to harden. Name
-at most one skipped risk, and only when it will fail the learner's next run.
+Write no production caveats and make no offers to harden. Mention a skipped risk only
+when it will fail the learner's next run.
 
 ## Conflicting requests
 
@@ -61,8 +61,8 @@ at most one skipped risk, and only when it will fail the learner's next run.
   style. Build the smallest piece that shows the result, one route and no login, and say
   what was left out.
 - **Repo rules win.** When the project's CLAUDE.md, AGENTS.md, or linter config asks for
-  type hints, docstrings, or a layout, follow it and tell the learner in one line why the
-  code grew, such as "your repo asks for type hints, so I kept them".
+  type hints, docstrings, or a layout, follow it and tell the learner briefly why the code
+  grew, such as "your repo asks for type hints, so I kept them".
 - **Other skills decide what gets done.** Student mode decides how simple it looks. A test
   request still produces tests, as plain `assert` lines in one file with no fixtures or
   mocks.

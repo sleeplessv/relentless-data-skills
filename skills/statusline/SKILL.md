@@ -8,12 +8,12 @@ description: Installs a Claude Code status line that shows the current model, co
 Installs `scripts/statusline.sh` as the Claude Code status line. The rendered line looks like:
 
 ```text
-Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #42 PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from green through amber to red as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
-The PR segment links the current branch's open PR by number, such as `#42`, then counts the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves the segment out.
+The PR segment lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state, then counts the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves the segment out.
 
 The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
 

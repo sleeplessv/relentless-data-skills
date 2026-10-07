@@ -5,7 +5,7 @@ line shows the current model, context window usage, directory, git branch, and
 open pull requests under the prompt.
 
 ```text
-Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #42 PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 ## What it does
@@ -19,9 +19,11 @@ Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
   the script.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
-- **Current branch's PR.** Shows the number of the open PR for the current
-  branch, such as `#42`, coloured by its state. The number is a link: click it
-  to open the PR in the browser, in terminals that support OSC 8 hyperlinks.
+- **Open PR numbers.** Lists every open PR in the repo by number, newest
+  first, each coloured by its state. Each number is a link: click it to open
+  the PR in the browser, in terminals that support OSC 8 hyperlinks. The list
+  stops at five numbers and shows the rest as `+N`. To change the limit, edit
+  `PR_LIST_MAX` at the top of the script.
 - **Open pull requests.** After `PRs`, counts every open PR in the repo, by
   any author. Each count shows only when it is above zero. A ready PR is one that is not a
   draft. A failed check outranks a running one.

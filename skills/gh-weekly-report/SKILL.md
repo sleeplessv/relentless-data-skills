@@ -1,6 +1,6 @@
 ---
 name: gh-weekly-report
-description: Generate a weekly GitHub activity report covering everything the authenticated user did on GitHub (issues, PRs, reviews, commits, discussions), optionally narrowed to one owner's repos, bucketed into canonical work types with per-repo narratives, rendered as an interactive HTML file (data embedded; styling and charts load from CDNs, so full rendering needs network). Use when the user asks what they did this week, for a weekly report or activity summary, or to report on their GitHub work.
+description: Generate a weekly GitHub activity report covering everything the authenticated user did on GitHub (issues, PRs, reviews, commits, discussions), optionally narrowed to one owner's repos, bucketed into canonical work types with per-repo narratives, rendered as an interactive HTML file (data embedded; styling and charts load from CDNs, so full rendering needs network).
 metadata:
   author: sleeplessv
 disable-model-invocation: true

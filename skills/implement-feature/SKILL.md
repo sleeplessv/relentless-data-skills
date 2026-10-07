@@ -2,7 +2,7 @@
 name: implement-feature
 argument-hint: "[spec#] [ticket#...]"
 disable-model-invocation: true
-description: "Implement a feature as one PR by dispatching ready tickets and integrating completed work. Use when implementing a spec and its tickets, or an explicit ticket set, end-to-end."
+description: "Implement a feature as one PR by dispatching ready tickets and integrating completed work."
 ---
 
 # Implement feature

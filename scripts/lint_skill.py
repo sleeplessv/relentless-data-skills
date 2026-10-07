@@ -2,8 +2,9 @@
 """SKILL.md linter.
 
 Lints every ``skills/*/SKILL.md`` for its own integrity: required frontmatter
-keys, a "Use when" trigger clause in the description, the 1024-char description
-cap, the SKILL.md line budget, and YAML-safe frontmatter values (an unquoted
+keys, a "Use when" trigger clause in the description (skipped for skills with
+``disable-model-invocation: true``, whose descriptions should not carry trigger
+wording the model would never act on), the 1024-char description cap, the SKILL.md line budget, and YAML-safe frontmatter values (an unquoted
 ``: `` or `` #`` makes the YAML block unparseable, and ``npx skills`` then
 drops the skill silently). Standard library only.
 
@@ -52,7 +53,13 @@ def lint(skill_md: Path) -> list[str]:
             )
 
     desc = fm.get("description", "")
-    if "use when" not in desc.lower():
+    user_only = fm.get("disable-model-invocation", "").lower() == "true"
+    if user_only and "use when" in desc.lower():
+        errors.append(
+            "description has a 'Use when ...' trigger clause but the skill sets "
+            "disable-model-invocation: true — drop the trigger wording"
+        )
+    if not user_only and "use when" not in desc.lower():
         errors.append("description must contain a 'Use when ...' trigger clause")
     if len(desc) > DESC_MAX:
         errors.append(f"description is {len(desc)} chars (max {DESC_MAX})")

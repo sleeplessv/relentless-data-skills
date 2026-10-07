@@ -1,6 +1,6 @@
 ---
 name: review-pbi-diff
-description: Turn a Power BI (PBIP) git diff into a manager-ready review artifact with page wireframes, spec-checked DAX, and ranked red flags. Use when asked to review a Power BI branch, diff, or PR, or to summarize Power BI work in a PBIP-format repo (*.Report / *.SemanticModel folders). Takes an optional git ref range.
+description: Turn a Power BI (PBIP) git diff into a manager-ready review artifact with page wireframes, spec-checked DAX, and ranked red flags. Works in a PBIP-format repo (*.Report / *.SemanticModel folders) and takes an optional git ref range.
 disable-model-invocation: true
 ---
 

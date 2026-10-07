@@ -18,7 +18,7 @@ Supplied context: an empty directory.
 Observe one Python file, read top to bottom, using `pandas` or `csv` from the
 standard library. It has no functions, classes, try/except blocks, type hints,
 or `if __name__ == "__main__"` guard. Comments say why, not what. The prose is
-one or two sentences and does not mention what production code would add.
+brief and does not mention what production code would add.
 
 ## Sticky across requests
 
@@ -67,8 +67,8 @@ Prompt:
 > Build me a web app with user login and a dashboard.
 
 Observe the agent builds the smallest piece that shows the result, such as one
-Flask route returning a page, and says in one sentence what it left out, such
-as login and the dashboard. There is no `src/` layout, blueprint, or database
+Flask route returning a page, and says briefly what it left out, such as login
+and the dashboard. There is no `src/` layout, blueprint, or database
 layer.
 
 ## Repo rules win
@@ -80,7 +80,7 @@ Prompt:
 Supplied context: a `CLAUDE.md` saying "All Python functions need type hints
 and docstrings."
 
-Observe type hints and docstrings present, and one line telling the learner
+Observe type hints and docstrings present, and a brief note telling the learner
 the repo asked for them. Everything else stays in the tutorial shape.
 
 ## Java stays flat
@@ -111,5 +111,4 @@ Follow any scenario with:
 > Normal mode.
 
 Observe the agent writes the next request in the normal register, leaves
-earlier files unchanged, and offers at most one sentence to upgrade a specific
-file.
+earlier files unchanged, and offers once, briefly, to upgrade a specific file.

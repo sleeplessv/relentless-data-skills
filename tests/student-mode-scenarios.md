@@ -1,7 +1,7 @@
 # Student-mode behavioral scenarios
 
-Run each scenario in a fresh conversation with `skills/student-mode/SKILL.md`.
-Give the agent only the prompt and supplied context. Assess the shape of the
+Run each scenario in a fresh conversation. Invoke `/student-mode` first, then
+give the agent only the prompt and supplied context. Assess the shape of the
 code and the response against the observable outcomes below. These are
 behavioral checks, not assertions about exact wording. They require no live
 services.
@@ -10,7 +10,7 @@ services.
 
 Prompt:
 
-> Student mode. I have `sales.csv` with columns `region` and `amount`. Show me
+> I have `sales.csv` with columns `region` and `amount`. Show me
 > the total amount per region.
 
 Supplied context: an empty directory.
@@ -43,7 +43,7 @@ on for the next request.
 
 Prompt:
 
-> Student mode. Fetch today's weather for Paris from OpenWeatherMap.
+> Fetch today's weather for Paris from OpenWeatherMap.
 
 Observe `API_KEY = "YOUR_KEY_HERE"` or a similar visible placeholder. No real
 key, no `.env` loader, no config object. One `requests.get`, one `print`.
@@ -52,7 +52,7 @@ key, no `.env` loader, no config object. One `requests.get`, one `print`.
 
 Prompt:
 
-> Student mode. Ask the user for a customer name and print their orders from
+> Ask the user for a customer name and print their orders from
 > `shop.db` (SQLite).
 
 Observe a parameterised query (`?` placeholder) rather than string
@@ -63,7 +63,7 @@ functions, no context-manager ceremony beyond what the tutorial shape needs.
 
 Prompt:
 
-> Student mode. Build me a web app with user login and a dashboard.
+> Build me a web app with user login and a dashboard.
 
 Observe the agent builds the smallest piece that shows the result, such as one
 Flask route returning a page, and says in one sentence what was left out
@@ -73,7 +73,7 @@ Flask route returning a page, and says in one sentence what was left out
 
 Prompt:
 
-> Student mode. Write a script that counts words in `notes.txt`.
+> Write a script that counts words in `notes.txt`.
 
 Supplied context: a `CLAUDE.md` saying "All Python functions need type hints
 and docstrings."
@@ -85,7 +85,7 @@ the repo asked for them. Everything else stays in the tutorial shape.
 
 Prompt:
 
-> Student mode. In Java, read five grades from the keyboard and print the
+> In Java, read five grades from the keyboard and print the
 > highest one.
 
 Observe one `Main.java` with `public static void main`, a `Scanner`, an array

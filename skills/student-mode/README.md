@@ -7,15 +7,11 @@ repeat, a class only when the language forces one. The code still runs and produ
 result; it just drops the production habits (error hierarchies, abstraction layers, type
 hints, scaffolding, tests, logging) that bury the idea a learner is trying to see.
 
-Turn it on with "student mode", "keep it simple", "tutorial style", or "no production
-code". It stays on until the user says "normal mode". Covers Python, SQL, and Java with a
-before/after example for each. The full rules live in [SKILL.md](SKILL.md).
+Turn it on by typing `/student-mode`. It is user-invoked only, so the agent never switches
+into it on its own. It stays on until the user says "normal mode". Covers Python, SQL, and
+Java with a before/after example for each. The full rules live in [SKILL.md](SKILL.md).
 
-For a course, add one line to the course repo's `CLAUDE.md` so every session starts in it:
-
-```text
-Start every session in student mode (see the student-mode skill).
-```
+For a course, have students type `/student-mode` as the first message of each session.
 
 ## Install
 

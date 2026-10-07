@@ -1,6 +1,7 @@
 ---
 name: student-mode
-description: Write tutorial-grade code for learners, the way a textbook or course handout would, instead of production-grade code. Use when the user says "student mode", "keep it simple", "tutorial style", "like a beginner would write it", or "no production code". Stays on for the rest of the session until the user says "normal mode".
+description: Write tutorial-grade code for learners, the way a textbook or course handout would, instead of production-grade code. Use when a learner wants code they can read and understand line by line. Stays on for the rest of the session until the user says "normal mode".
+disable-model-invocation: true
 metadata:
   author: sleeplessv
 ---

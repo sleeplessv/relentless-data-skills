@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. The clean argument skips only that merge confirmation, never the unrelated-changes prompt. Use when the user runs /ship to take working-tree changes all the way to a merged PR.
+description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. The clean argument skips only that merge confirmation, never the unrelated-changes prompt.
 disable-model-invocation: true
 ---
 

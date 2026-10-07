@@ -5,15 +5,15 @@ the current model, context window usage, directory, and git branch under the
 prompt.
 
 ```text
-Opus 5.5 | 42k/200k (21%) | data-fabric-dwh (dwh)
+Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 ```
 
 ## What it does
 
 - **Model.** Shows the display name of the model in use.
-- **Context usage.** Shows input tokens used against the context window size,
-  colored by tokens used: green below 100k, amber from 100k, and red
-  from 175k.
+- **Context usage.** Shows a ten-cell bar and input tokens used against the
+  context window size. The colour is a gradient by tokens used: green at 0,
+  amber at 100k, and red from 175k.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
 - **Safe install.** Copies the script to `~/.claude/statusline.sh`, sets only
@@ -56,4 +56,6 @@ To install without the skill, copy `scripts/statusline.sh` to
 
 - Claude Code.
 - `jq` and a POSIX shell.
+- A truecolor terminal for the gradient (iTerm2, Ghostty, Warp, VS Code).
+  Older macOS Terminal.app versions do not render it.
 - `git`, for the branch segment. It is omitted outside a repo.

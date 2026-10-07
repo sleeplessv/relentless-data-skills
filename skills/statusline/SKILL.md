@@ -8,10 +8,10 @@ description: Installs a Claude Code status line that shows the current model, co
 Installs `scripts/statusline.sh` as the Claude Code status line. The rendered line looks like:
 
 ```text
-Opus 5.5 | 42k/200k (21%) | data-fabric-dwh (dwh)
+Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 ```
 
-The context segment is green below 100k tokens used, amber from 100k, and red from 175k.
+The bar shows the share of the context window used. The context segment's colour is a gradient by tokens used: green at 0, amber at 100k, and red from 175k. The gradient needs a truecolor terminal (iTerm2, Ghostty, Warp, VS Code); older macOS Terminal.app versions do not render it.
 
 ## Workflow
 
@@ -46,6 +46,6 @@ Pipe sample input through the installed script from inside a git repo:
 echo '{"model":{"display_name":"Opus 5.5"},"context_window":{"total_input_tokens":42000,"context_window_size":200000,"used_percentage":21.4},"workspace":{"current_dir":"'"$PWD"'"}}' | ~/.claude/statusline.sh
 ```
 
-Done when the output shows the model, `42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
+Done when the output shows the model, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
 
 Tell the user the line appears from their next message, and to restart Claude Code if it does not. Before the first message of a session it shows `0/0 (0%)`, because no usage exists yet.

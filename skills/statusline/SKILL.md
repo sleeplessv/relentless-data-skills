@@ -1,6 +1,6 @@
 ---
 name: statusline
-description: Installs a Claude Code status line that shows the current model, context window usage, directory, and git branch. Use when the user asks to show the model or context usage under the prompt, or to set up the Relentless Data status line.
+description: Installs a Claude Code status line that shows the current model, context window usage, directory, and git branch. Use when the user asks to show the model or context usage under the prompt, or to set up or customise the Claude Code status line.
 ---
 
 # Status line
@@ -11,7 +11,7 @@ Installs `scripts/statusline.sh` as the Claude Code status line. The rendered li
 Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 ```
 
-Each bar cell is 20k tokens, rounded to the nearest cell, so the bar is full from 190k whatever the size of the context window. The context usage is green up to 90k tokens. Above 90k, it shades to amber at 130k and to red at 170k.
+The bar fills by tokens used, whatever the size of the context window, and the text shades from green through amber to red as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
 The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
 
@@ -32,7 +32,7 @@ If `~/.claude/statusline.sh` already exists and differs, show the diff and ask b
 
 Use `~/.claude/settings.json` by default, so it applies to every project. Use the project's `.claude/settings.json` only when the user asks for a project-level status line.
 
-Read the file first. If a `statusLine` key already exists and does not point to `~/.claude/statusline.sh`, show it and ask before replacing it. Otherwise set:
+If the file does not exist, create it with only the `statusLine` key below. Otherwise, read the file first. If a `statusLine` key already exists and does not point to `~/.claude/statusline.sh`, show it and ask before replacing it. Otherwise set:
 
 ```json
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh" }

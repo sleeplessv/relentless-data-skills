@@ -1,8 +1,8 @@
 # statusline
 
-The **`statusline`** agent skill: install a Claude Code status line that shows
-the current model, context window usage, directory, and git branch under the
-prompt.
+The **`statusline`** agent skill installs a Claude Code status line. The status
+line shows the current model, context window usage, directory, and git branch
+under the prompt.
 
 ```text
 Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
@@ -12,9 +12,11 @@ Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
 
 - **Model.** Shows the display name of the model in use.
 - **Context usage.** Shows a ten-cell bar, then tokens used against the size
-  of the context window. Each cell is 20k tokens, so the bar is full from
-  190k. The text is green up to 90k tokens. Above 90k, it shades to amber at
-  130k and to red at 170k.
+  of the context window. The count rounds to the nearest 1k, and each cell is
+  20k tokens rounded to the nearest cell, so the bar is full from 190k. The
+  text is green up to 90k tokens. Above 90k, it shades to amber at 130k and to
+  red at 170k. To change these thresholds, edit the variables at the top of
+  the script.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
 - **Settings.** Copies the script to `~/.claude/statusline.sh`, sets only
@@ -56,7 +58,8 @@ to `~/.claude/settings.json`:
 ## Requirements
 
 - Claude Code.
-- `jq` and a POSIX shell.
+- `jq` and a POSIX shell. Without `jq`, the status line shows
+  `statusline: install jq`.
 - A terminal with 24-bit colour for the gradient, such as iTerm2, Ghostty,
   Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not
   show it.

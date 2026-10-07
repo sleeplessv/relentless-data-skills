@@ -1,6 +1,7 @@
 ---
 name: statusline
 description: Installs a Claude Code status line that shows the current model, reasoning effort, context window usage, directory, git branch, and open pull requests. Use when the user asks to show the model or context usage under the prompt, or to set up or customise the Claude Code status line.
+disable-model-invocation: true
 ---
 
 # Status line

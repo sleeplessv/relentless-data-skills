@@ -309,6 +309,25 @@
       ]
     },
     {
+      "name": "statusline",
+      "source": "./skills/statusline",
+      "description": "Show the current model, context window usage, directory, and git branch in the Claude Code status line.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/statusline",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "claude-code",
+        "statusline",
+        "context-window",
+        "model",
+        "developer-experience"
+      ]
+    },
+    {
       "name": "visual-report",
       "source": "./skills/visual-report",
       "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",

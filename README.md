@@ -24,6 +24,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`ship`](skills/ship/) | Commit, publish, and merge working-tree changes through a pull request. |
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes into conventional commits and push them to the remote. |
 | [`snowman`](skills/snowman/) | Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution. |
+| [`statusline`](skills/statusline/) | Show the current model, context window usage, directory, and git branch in the Claude Code status line. |
 | [`visual-report`](skills/visual-report/) | Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals. |
 <!-- skills-table:end -->
 

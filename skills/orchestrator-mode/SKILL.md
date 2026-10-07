@@ -1,82 +1,128 @@
 ---
 name: orchestrator-mode
-description: Coordinate work through subagents while keeping bulk findings out of the main context. Use when the user requests orchestrator mode, delegation of named tasks, or coordination rather than direct execution.
+description: Coordinate work through subagents so bulk output stays out of the main context. Use when the user asks for orchestrator mode or asks to hand specific tasks to subagents.
 ---
 
 # Orchestrator mode
 
-Delegate repository exploration, research, edits, commands, and verification. The main
-thread loads relevant skills, plans, dispatches, handles user decisions, and synthesizes
-compact reports. System and developer instructions and the user's scope still govern.
+The main thread coordinates; workers read, search, edit, run commands, and verify. Every
+file, search result, and command output that enters the main thread stays there for the
+rest of the session, so bulk material lives in worker contexts and the coordinator holds
+plans, decisions, and compact reports.
 
-## Scope and tools
+## Activation
 
-A request such as "use subagents to check X and Y" delegates those tasks. Explicit
-"orchestrator mode" or "delegate everything" applies until the user changes that
-instruction. Honor a request to work directly without requiring an exact exit phrase.
+- **Scoped.** "Use subagents to check X and Y" dispatches X and Y. Outside those tasks the
+  main thread works normally.
+- **Standing.** "Orchestrator mode" or "delegate everything" covers every request until the
+  user ends it, in any words. A direct request to do one thing in the main thread is a
+  one-off; the mode resumes after it.
 
-Use the active tool schemas to identify spawn, message, resume, wait, stop, and optional
-planning capabilities. Omit unsupported fields and use a general worker when no
-specialist is exposed. Loading a skill or its relevant reference through a file or
-shell read is allowed; delegate ordinary repository reads. If delegation is unavailable,
-report that limitation and follow any already-authorized direct-work fallback.
+Each dispatch pays for a fresh start and returns only a summary. When a request is too
+small to repay that, say so and offer to answer directly.
 
-Leave model and reasoning effort unset by default. Override only when the user or an
-applicable instruction calls for it and the active schema supports the combination.
-Check context inheritance before dispatch. For a self-contained task, use a clean or
-bounded context when supported; use a full fork only when it needs conversation history.
-Model overrides may require a non-full fork. Runtime schemas decide this, not vendor names.
+## What the coordinator does itself
+
+In standing mode, and for the named tasks in scoped mode, the coordinator calls only:
+
+- spawn, message, resume, wait, and stop tools for workers;
+- the plan or todo tool;
+- skill loading, including a file read of a skill's SKILL.md or a reference it points to;
+- tools that ask the user a question or report to them.
+
+Every other action is a dispatch, including a quick look at one file. A returned artifact
+path goes to the next worker that needs it; the coordinator acts on the returned summary
+and, when the summary falls short, resumes that worker with the specific gap. Environment
+hints that steer toward shell or file tools ("use Bash wherever it can do the job")
+describe how workers act; pass them on in handoffs. If no spawn tool exists, report that
+and follow any direct-work fallback the user already authorized.
+
+## Choosing workers
+
+- **Locate** files or code, answer "where is X", or skim many files: the read-only search
+  agent. It finds code; reviews and audits go to a general worker.
+- **Change or run** anything (edits, commands, tests, queries, web research): the general
+  worker, or a specialist the roster lists for that domain, such as SQL or CI.
+- **Verify** another worker's output: a different worker from the writer, read-only where
+  the harness supports it.
+- **Fork** (a worker that inherits this conversation) only when the task needs that
+  history. It still gets a task, owned paths, and a return contract.
+
+Leave model and reasoning effort unset unless the user or a consumer skill sets them.
+When a scripted multi-agent workflow tool is exposed and its own opt-in rules are met, use
+it for a wide, uniform fan-out such as one check across many files; dispatch directly when
+each step depends on the last.
+
+## Sizing
+
+- A lookup is one dispatch.
+- A comparison, or a change across two areas, is two to four parallel dispatches.
+- Feature-sized work runs in waves, one per dependency level.
+
+Give one worker several related tasks in the same area; run different areas in parallel.
+Start with a wide search, then narrow. Keep at most four workers running, nested ones
+included, unless [Harness notes](references/reference.md#harness-notes) gives this
+environment a higher limit. A spawn past the limit fails rather than queues: wait for a
+completion, then dispatch it. Keep dispatches flat; before giving a subtree its own
+coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 
 ## Workflow
 
-1. **Plan by area.** Batch related work into a bounded dispatch with a checkable outcome.
-   Keep a short plan in the available plan tool or conversation. Report changes to the
-   plan rather than repeating the whole list. Report adjacent problems without expanding
-   the user's scope.
-2. **Dispatch independent work.** Assign each worker its task, owned files or resources,
-   inputs, constraints, and return contract. Parallelize only within available capacity.
-   Count the root, siblings, and descendants; keep a slot for executable leaf work.
-   Prefer flat dispatches. For a subtree that earns separate coordination, read
-   [Nesting](references/reference.md#nesting-sub-orchestrators) first.
-3. **Collect and continue.** Use completion notifications and available wait tools according
-   to their actual semantics. Keep the turn active while required work remains. Resume an
-   existing worker with the specific gap rather than restarting its investigation. An
-   unchanged failure calls for diagnosis or another approach, not repeated identical retries.
-   Continue independent work while a blocked dependency waits for user or external input.
-4. **Integrate.** Serialize writers sharing a checkout or external resource. Parallel code
-   writers use separate worktrees and branches with an immutable base SHA and a dedicated
-   integration worker. Small edits can simply use one writer. Before creating worktrees,
-   read [Parallel writes](references/reference.md#parallel-writes-worktrees).
-5. **Verify.** Every implementer inspects its actual diff and runs proportionate checks.
-   Add a separate verification dispatch for merged parallel work, schema or data changes,
-   architectural changes, or multi-file changes requiring different decisions per site.
-   A small edit may not need an independent reviewer; it still needs artifact evidence.
-   Verify the integrated seams, reusing child evidence for unchanged internals. A verifier
-   that fixes code sends those fixes to another worker for verification.
-6. **Report.** Lead with the outcome and returned artifact paths or IDs. Include relevant
-   verification results and unresolved limitations. Finish only when the requested work
-   is complete or a concrete blocker prevents further useful authorized progress.
+1. **Plan.** Split the request into dispatches by area, scoped to what the user asked.
+   Report problems found outside that scope to the user and leave them out of the plan.
+   Choose one run directory at an absolute path every worker can write, outside the
+   repository (the session scratchpad when one exists). Keep the plan in the plan tool or
+   as a numbered list in the reply, and report changes rather than repeating it. Done when
+   every dispatch has a task, owned paths, and a done-when, and the run directory is named.
+2. **Dispatch.** Launch independent dispatches together in one message, each with a full
+   [handoff](#handoffs). Done when every dispatch in the current wave is running.
+3. **Collect.** Wait through completion notifications or the wait tool. Resume a worker
+   with the specific gap instead of restarting its investigation. When a retry fails the
+   same way, diagnose or change approach; after three failed attempts on one dispatch,
+   report it as blocked. Keep independent work moving while a dependency waits on the
+   user. Done when every worker in the wave has returned or is reported blocked.
+4. **Integrate.** One writer handles small edits. Writers that share a checkout or an
+   external resource run one after another. Parallel code writers each get a worktree and
+   branch from a pinned base SHA, and one integration worker merges them; read
+   [Parallel writes](references/reference.md#parallel-writes-worktrees) before creating
+   worktrees. Done when all accepted work sits in one tree and, for parallel writers, each
+   branch and head SHA is recorded.
+5. **Verify.** Each writer reviews its own diff and runs the checks that cover its change.
+   Dispatch a separate verifier for merged parallel work, schema or data changes,
+   architectural changes, or multi-file changes that need a different decision at each
+   site. The verifier reports problems, the writer fixes them, and a verifier checks again.
+   In a nested run, verify the seams between children and reuse their evidence for the
+   parts they own. Done when every change has evidence: a verifier's pass or, for a small
+   edit, the writer's diff and check output.
+6. **Report.** Lead with the outcome, then returned artifact paths or IDs, verification
+   results, and open limitations, in one to three sentences. When the request was a
+   question, the answer is the deliverable, at the length it needs. Done when the
+   requested work is complete or a concrete blocker stops further authorized progress.
 
 ## Handoffs
 
-Give a worker only the context it needs:
+A worker sees its dispatch prompt and the project instructions its harness loads, such as
+CLAUDE.md or AGENTS.md. It cannot see this conversation, earlier reports, or files other
+workers read, and it cannot ask the user. Write each handoff as its complete briefing:
 
-- Task and completion criterion, scope, owned paths, and permissions already established.
-- Relevant decisions and rationale, unresolved questions, and applicable skill paths.
-- Input artifact paths with section names or line locations. Quote exact text when wording
-  is binding; otherwise use a faithful concise summary with source locations.
-- Return fields appropriate to the work, such as `status`, `files_changed`, `tests_run`,
+- **Task** with its done-when, owned paths or resources, and permissions already granted.
+- **Goal**: why the work matters, for implementation and verification tasks.
+- **Decisions** so far with their reasons, and open questions to flag rather than guess.
+- **Prior findings**, quoted word for word from the returned summaries. Paste the parts
+  this task needs and name what was left out; for a long artifact, give its path and the
+  lines or section to read. Redact secrets and personal data.
+- **Run directory** path, to create if missing, and the skills to load, by path.
+- **Return contract**: fields such as `status`, `files_changed`, `tests_run`,
   `verification_evidence`, `decisions_made`, `open_questions`, and `artifact_path`.
 
-Workers put large findings and command output in artifacts and return a compact summary
-plus an index. The main thread forwards those paths to consumers. Keep cumulative decisions
-in one handoff artifact and pass only relevant updates, including on inherited forks.
-Workers surface decisions requiring the user to the coordinator and continue independent
-work. Reuse guidance already loaded; explicit skill requirements remain in force.
+Workers write large findings and command output to an artifact in the run directory and
+return a short summary with one index line per artifact entry. Carry a running list of
+decisions into every handoff after the first, trimmed to what that task touches. Workers
+put questions for the user in `open_questions` and continue independent work.
 
 ## Composition
 
-A consumer skill may refine this workflow for its task, for example requiring isolation
-for a single ticket or using an integration worker as the independent verifier when it
-wrote none of the changes. Resolve actual conflicts against scope, permission, ownership,
-and verification evidence. Tool availability and higher-priority instructions still apply.
+A consumer skill may tighten these rules for its task, such as isolating even a single
+ticket in a worktree, or replace one where it says so, such as letting an integration
+worker that wrote none of the changes act as the verifier. Where it says nothing, this
+skill applies.

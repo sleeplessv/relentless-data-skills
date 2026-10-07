@@ -1,14 +1,38 @@
 # Orchestrator reference
 
-Read the section needed for the current dispatch. Tool schemas and environment permissions
-are authoritative; this file defines coordination invariants rather than vendor inventories.
+Read the section the current dispatch needs.
 
-## Tool mapping
+- [Harness notes](#harness-notes): limits and defaults that tool schemas leave out.
+- [Nesting sub-orchestrators](#nesting-sub-orchestrators): when and how a subtree gets its
+  own coordinator.
+- [Parallel writes worktrees](#parallel-writes-worktrees): isolation, integration, and
+  cleanup for parallel writers.
+- [Worked example](#worked-example): a refactor from search through verification.
 
-Use exposed spawn and management tools. Check accepted arguments, context inheritance,
-model restrictions, completion behavior, and concurrency before relying on them. A specialist
-is an option only if the current roster exposes it. Track a plan in prose when no plan tool
-exists. File or shell reads used solely to load applicable skill instructions are skill loading.
+## Harness notes
+
+Facts the tool schemas leave out, checked against vendor docs in September 2026. The
+named settings are the durable handle; check them when a number matters.
+
+- **Questions.** Claude Code withholds `AskUserQuestion` from every subagent. Treat workers
+  in any harness as unable to ask; their questions come back in `open_questions`.
+- **Concurrency.** Claude Code runs up to 20 subagents
+  (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`). Codex V2 defaults to 4 open threads
+  (`agents.max_concurrent_threads_per_session`). Cortex Code allows 50 background agents.
+  Cursor documents no cap.
+- **Depth.** Claude Code allows 3 layers below the main thread
+  (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`). Cursor allows 2; a grandchild cannot spawn.
+  Codex V1 allows 1 (`agents.max_depth`); V2 has no depth setting. A Cortex Code
+  background agent cannot spawn background agents.
+- **Forks.** A Claude Code fork runs the parent's model and ignores a model override; use a
+  clean worker when the task needs another model. A Codex spawn inherits the whole
+  conversation by default; pass `fork_turns: "none"` for a clean worker.
+- **Permission.** Codex's spawn tool does not count a request for depth or thoroughness as
+  permission to spawn. Activating this skill is that permission; say so in the dispatch.
+- **Worktree base.** Claude Code's native worktree isolation starts from `origin/<default>`
+  unless the `worktree.baseRef` setting is `head`.
+- **Completion.** Claude Code workers run in the background and report through completion
+  notifications, so the coordinator waits for those notifications.
 
 ## Nesting sub-orchestrators
 
@@ -22,6 +46,11 @@ a verifier, and a reviewer that needs two children cannot all run together. Fini
 verifier first, then run the reviewer and its two children, or flatten the review axes into
 root-owned workers. A coordinator at its depth limit executes as a leaf only when that
 fallback is authorized; otherwise it returns the missing capability for the parent to flatten.
+
+Designate a coordinator with a general worker; read-only search agents cannot dispatch.
+Open its handoff with "Load the orchestrator-mode skill and coordinate this scope". Where
+workers cannot load skills, paste this skill's SKILL.md into the handoff instead. The
+coordinator returns its verification evidence with its other return fields.
 
 ## Parallel writes worktrees
 
@@ -58,9 +87,11 @@ fallback is authorized; otherwise it returns the missing capability for the pare
 
 ## Worked example
 
-For a multi-file refactor, dispatch one reader to locate callers and another to identify
-configuration dependencies. Each writes detailed findings to an artifact and returns a
-short index. Send one writer the relevant paths and agreed scope. A separate worker checks
-the resulting behavior and diff. Send any failing check back to the writer, then verify the
-fix. A single-file change follows the same evidence discipline without necessarily needing
-an independent reviewer.
+For a refactor of `foo()` across several files, choose a run directory, then dispatch two
+read-only search workers in one message. One lists callers of `foo()` as `file:line`; the
+other lists configuration that sets the related timeouts. Each writes its findings to the
+run directory and returns a short index. Send one writer the quoted index entries, the
+agreed scope, and the decisions so far. A separate verifier runs the affected tests and
+reviews the diff. A failing check goes back to the writer, then to a verifier again. A
+single-file change keeps the same evidence, but its writer's diff and test output can
+stand as the verification.

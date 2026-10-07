@@ -11,7 +11,7 @@ Installs `scripts/statusline.sh` as the Claude Code status line. The rendered li
 Opus 5.5 | 42k/200k (21%) | data-fabric-dwh (dwh)
 ```
 
-The context percentage is green below 50%, yellow from 50%, and red from 80%.
+The context segment is green below 100k tokens used, amber from 100k, and red from 175k.
 
 ## Workflow
 

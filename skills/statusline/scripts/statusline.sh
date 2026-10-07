@@ -12,8 +12,8 @@ fmt() {
   awk -v n="$1" 'BEGIN{ if (n>=1000000) printf "%.1fM", n/1000000; else if (n>=1000) printf "%.0fk", n/1000; else printf "%d", n }'
 }
 
-# Context percentage colour: green < 50, yellow < 80, red otherwise.
-if [ "$pct" -ge 80 ]; then c=31; elif [ "$pct" -ge 50 ]; then c=33; else c=32; fi
+# Context colour by tokens used: green < 100k, amber < 175k, red otherwise.
+if [ "$used" -ge 175000 ]; then c=31; elif [ "$used" -ge 100000 ]; then c='38;5;214'; else c=32; fi
 
 printf '\033[36m%s\033[0m | \033[%sm%s/%s (%s%%)\033[0m' \
   "$model" "$c" "$(fmt "$used")" "$(fmt "$size")" "$pct"

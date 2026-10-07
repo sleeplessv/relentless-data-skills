@@ -12,8 +12,8 @@ Opus 5.5 | 42k/200k (21%) | data-fabric-dwh (dwh)
 
 - **Model.** Shows the display name of the model in use.
 - **Context usage.** Shows input tokens used against the context window size,
-  with the percentage colored green below 50%, yellow from 50%, and red
-  from 80%.
+  colored by tokens used: green below 100k, amber from 100k, and red
+  from 175k.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
 - **Safe install.** Copies the script to `~/.claude/statusline.sh`, sets only

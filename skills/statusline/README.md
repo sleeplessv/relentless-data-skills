@@ -1,16 +1,19 @@
 # statusline
 
 The **`statusline`** agent skill installs a Claude Code status line. The status
-line shows the current model, context window usage, directory, git branch, and
-open pull requests under the prompt.
+line shows the current model, reasoning effort, context window usage,
+directory, git branch, and open pull requests under the prompt.
 
 ```text
-Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 ## What it does
 
-- **Model.** Shows the display name of the model in use.
+- **Model and effort.** Shows the display name of the model in use, then
+  the reasoning effort, such as `Opus 5.5 · high`. The effort follows
+  `/effort` changes mid-session. Models without an effort setting show the
+  name only.
 - **Context usage.** Shows a ten-cell bar, then tokens used against the size
   of the context window. The count rounds to the nearest 1k, and each cell is
   20k tokens rounded to the nearest cell, so the bar is full from 190k. The
@@ -39,6 +42,10 @@ Opus 5.5 | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
   status line. The script caches the counts in
   `~/.cache/claude-statusline/` and refreshes them every minute. To change the
   interval, edit `PR_REFRESH_MIN` at the top of the script.
+  Claude Code also reruns the script every 30 seconds, through
+  `refreshInterval` in the settings, so a merged or closed PR drops off
+  while the session is idle. Without it, the list updates only when the
+  conversation changes.
 - **Settings.** Copies the script to `~/.claude/statusline.sh`, sets only
   the `statusLine` key in `~/.claude/settings.json`, and asks before replacing
   an existing status line or script.
@@ -65,7 +72,7 @@ To install the status line without the skill, copy `scripts/statusline.sh` to
 to `~/.claude/settings.json`:
 
 ```json
-"statusLine": { "type": "command", "command": "~/.claude/statusline.sh" }
+"statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 30 }
 ```
 
 ## Files

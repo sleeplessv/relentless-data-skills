@@ -1,5 +1,5 @@
 #!/bin/sh
-# Claude Code status line: model | bar used/size (pct) | dir (branch) | open PRs and PR counts.
+# Claude Code status line: model and effort | bar used/size (pct) | dir (branch) | open PRs and PR counts.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
@@ -22,6 +22,7 @@ fi
 input=$(cat)
 eval "$(printf '%s' "$input" | jq -r '@sh "
   model=\(.model.display_name // "?")
+  effort=\(.effort.level // "")
   used=\(.context_window.total_input_tokens // 0)
   size=\(.context_window.context_window_size // 0)
   pct=\((.context_window.used_percentage // 0) | floor)
@@ -48,6 +49,9 @@ bar=$(awk -v u="$used" -v cell="$CELL" 'BEGIN{
   n = int(u / cell + 0.5); if (n < 0) n = 0; if (n > 10) n = 10
   for (i = 0; i < 10; i++) printf (i < n ? "▰" : "▱")
 }')
+
+# Claude Code leaves out effort when the model does not support it.
+[ -n "$effort" ] && model="$model · $effort"
 
 printf '\033[36m%s\033[0m | \033[%sm%s %s/%s (%s%%)\033[0m' \
   "$model" "$colour" "$bar" "$(fmt_tokens "$used")" "$(fmt_tokens "$size")" "$pct"

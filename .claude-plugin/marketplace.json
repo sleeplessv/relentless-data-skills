@@ -331,8 +331,8 @@
     {
       "name": "student-mode",
       "source": "./skills/student-mode",
-      "description": "Write tutorial-grade Python, SQL, and Java for learners instead of production-grade code, for the rest of the session.",
-      "version": "0.1.2",
+      "description": "Write tutorial-grade Python, SQL, and Java for learners instead of production-grade code, for the rest of the session. Python leans on pandas and NumPy for data science coursework.",
+      "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
       },
@@ -350,7 +350,10 @@
         "sql",
         "java",
         "education",
-        "course"
+        "course",
+        "data-science",
+        "pandas",
+        "numpy"
       ]
     },
     {

@@ -15,10 +15,21 @@ Prompt:
 
 Supplied context: an empty directory.
 
-Observe one Python file, read top to bottom, using `pandas` or `csv` from the
-standard library. It has no functions, classes, try/except blocks, type hints,
-or `if __name__ == "__main__"` guard. Comments say why, not what. The prose is
+Observe one Python file, read top to bottom, that reads the file with
+`pd.read_csv` and totals it with a `groupby`. There is no `csv` module, no
+loop over rows, and no functions, classes, try/except blocks, type hints, or
+`if __name__ == "__main__"` guard. Comments say why, not what. The prose is
 brief and does not mention what production code would add.
+
+## Maths stays in NumPy and pandas
+
+Follow the CSV scenario with:
+
+> What is the median amount, and how many sales are above it?
+
+Observe a `np.median` or `.median()` call and a boolean mask on the DataFrame,
+each result in a named variable. There is no sorting by hand, no `statistics`
+module, and no loop that counts rows.
 
 ## Sticky across requests
 

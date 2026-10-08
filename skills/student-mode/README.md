@@ -10,7 +10,10 @@ layouts, tests, and logging.
 
 Turn it on by typing `/student-mode`. It is user-invoked only, so the agent never switches
 into it on its own. It stays on until the user says "normal mode". It covers Python, SQL,
-and Java with a before and after example for each. The full rules are in [SKILL.md](SKILL.md).
+and Java with a before and after example for each. Python is written for a data science
+course, so datasets are read and analysed with pandas and NumPy rather than by hand. Java
+is written for an object-oriented programming course and stays plain JDK. The full rules
+are in [SKILL.md](SKILL.md).
 
 For a course, have students type `/student-mode` as the first message of each session.
 

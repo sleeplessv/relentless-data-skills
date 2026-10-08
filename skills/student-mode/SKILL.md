@@ -23,8 +23,8 @@ upgrade a specific file.
   level unless the language forces otherwise.
 - **Plain variables** with full-word names. Intermediate values go into variables the
   learner can print.
-- **The library the tutorial would use.** The standard library first, otherwise the single
-  best-known library for the job, such as `requests`, `pandas`, or `sqlite3`.
+- **The library the course uses.** pandas and NumPy for a dataset (see Python below),
+  otherwise the standard library, then the single best-known library such as `requests`.
 - **A function only when the same lines appear twice.** Until then, inline.
 - **A class only when the language or library forces one.**
 - **Comments explain why**, one line each, such as "the API returns a list, so we loop
@@ -69,32 +69,36 @@ when it will fail the learner's next run.
 
 ## Python
 
-The shape to avoid:
+The course is data science, so the library it uses is **pandas** for tables and **NumPy**
+for numbers. Reading a file is one `pd.read_csv` or `pd.read_excel` call. Filtering,
+grouping, sorting, and summarising are DataFrame operations, one per line, each result in
+a named variable the learner can print. Maths on a column goes through NumPy, such as
+`np.median`. A chart is `matplotlib.pyplot` calls ending in `plt.show()`. Tasks without
+a dataset, such as an API call, keep the standard library and `requests`.
+
+The shape to avoid, a hand-written loop over the rows:
 
 ```python
-class WeatherClient:
-    def __init__(self, api_key: str, session: requests.Session | None = None) -> None: ...
-    def fetch(self, city: str) -> WeatherReading:
-        try: ...
-        except requests.RequestException as exc:
-            logger.error("fetch failed", exc_info=exc); raise WeatherError from exc
+totals = defaultdict(float)
+with open("sales.csv", newline="") as handle:
+    for row in csv.DictReader(handle):
+        totals[row["region"]] += float(row["amount"])
 ```
 
 The tutorial shape:
 
 ```python
-import requests
+import numpy as np
+import pandas as pd
 
-API_KEY = "YOUR_KEY_HERE"
-city = "London"
+sales = pd.read_csv("sales.csv")
 
-url = "https://api.openweathermap.org/data/2.5/weather"
-response = requests.get(url, params={"q": city, "appid": API_KEY, "units": "metric"})
-data = response.json()
+# one row per region, with that region's amounts added up
+total_per_region = sales.groupby("region")["amount"].sum()
+print(total_per_region)
 
-# the temperature is inside the "main" section of the response
-temperature = data["main"]["temp"]
-print(city, "is", temperature, "degrees")
+# NumPy does the maths on a column
+print("median sale:", np.median(sales["amount"]))
 ```
 
 ## SQL

@@ -145,7 +145,7 @@ def check_private_key(context: dict) -> tuple:
     return OK, f"private key file exists and is readable ({key_path})"
 
 
-def check_packages(project_root: Path) -> tuple:
+def check_packages(project_root: Path, runner: str = "") -> tuple:
     has_manifest = (project_root / "packages.yml").is_file() or (
         project_root / "package-lock.yml"
     ).is_file()
@@ -154,8 +154,8 @@ def check_packages(project_root: Path) -> tuple:
     if not (project_root / "dbt_packages").is_dir():
         return FAIL, (
             "dbt_packages/ is missing but the project declares packages."
-            " Remedy: run `<runner> deps` (every dbt_utils.* call fails"
-            " until then)."
+            f" Remedy: run `{runner or '<runner>'} deps` (every dbt_utils.*"
+            " call fails until then)."
         )
     if (project_root / "package-lock.yml").is_file():
         try:
@@ -280,7 +280,13 @@ def resolve_runner(context: dict) -> tuple:
 
 def run_connect(context: dict, project_root: Path) -> int:
     target = context.get("target", "")
-    runner, note = resolve_runner(context)
+    try:
+        runner, note = resolve_runner(context)
+    except ValueError as exc:
+        print(f"{FAIL} connect: cannot parse runner"
+              f" `{context.get('runner', '')}` ({exc}). Remedy: fix the"
+              f" quoting of `runner` in {CONTEXT_RELPATH}.")
+        return 1
     cmd = runner + ["debug"]
     if target:
         cmd += ["--target", target]
@@ -330,7 +336,7 @@ def main(argv=None) -> int:
     checks = [
         ("env", check_env_vars(context)),
         ("key", check_private_key(context)),
-        ("packages", check_packages(project_root)),
+        ("packages", check_packages(project_root, context.get("runner", ""))),
         ("profile", check_profile(context)),
     ]
     failed = 0

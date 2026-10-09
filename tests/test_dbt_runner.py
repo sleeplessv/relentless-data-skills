@@ -182,6 +182,13 @@ class PackagesCheckTests(unittest.TestCase):
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("<runner> deps", msg)
 
+    def test_missing_dbt_packages_names_context_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "packages.yml").write_text("packages: []")
+            status, msg = preflight.check_packages(Path(tmp), "uv run dbt")
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("`uv run dbt deps`", msg)
+
     def test_clean_lockfile_ok(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -335,6 +342,15 @@ class ConnectTests(unittest.TestCase):
         code, out, _ = self._run(return_value=bad)
         self.assertEqual(code, 1)
         self.assertIn("failures.md", out)
+
+    def test_unbalanced_quote_in_runner_fails_cleanly(self):
+        code, out, run = self._run(
+            ctx={"target": "local", "runner": 'uv run "dbt'},
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL connect: cannot parse runner", out)
+        self.assertIn("quoting", out)
+        run.assert_not_called()
 
     def test_missing_runner_binary(self):
         code, out, _ = self._run(side_effect=FileNotFoundError())

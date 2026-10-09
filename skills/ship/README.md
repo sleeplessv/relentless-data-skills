@@ -25,16 +25,21 @@ merge confirmation.
   skill: grouped, conventional, pushed.
 - The PR gets a conventional-commit title (it becomes the squash commit on `main`)
   and a short bulleted Summary body.
+- Before merging it waits for the PR's CI checks (`gh pr checks --watch
+  --fail-fast`), even under `clean`. Any failing or cancelled check stops the
+  run with the PR left open; a repo with no checks proceeds and the close-out
+  says none were reported.
 - Merge and cleanup run as `gh pr merge <number> --squash --delete-branch`; it
-  asks first unless invoked with `clean`, showing the PR's check results with
-  the question. Declining leaves the PR open and deletes nothing.
+  asks first unless invoked with `clean`, showing the checks line with the
+  question. Declining leaves the PR open and deletes nothing.
 - After the merge it routes by the PR's state on GitHub, never by `gh`'s exit
   code. A merged PR finishes with a checkout and pull of `main`, then checks that
   the squash commit is on local `main` and both branches are gone. A merge
   refused by branch policy or required checks falls back to `--auto`; a
   merge-queue enqueue is reported as queued.
 - The close-out leads with the confirmed outcome (merged; merged, but cleanup
-  incomplete; auto-merge armed; queued; or PR left open) and names any branch
+  incomplete; auto-merge armed; queued; stopped on failing checks; or PR left
+  open) and names any branch
   that outlives the run.
 
 ## Install

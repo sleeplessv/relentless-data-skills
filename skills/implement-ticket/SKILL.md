@@ -1,14 +1,14 @@
 ---
 name: implement-ticket
 argument-hint: "[ticket-number]"
-description: 'Implement a ticket (GitHub issue) end-to-end on a ticket branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done. Use when the user says "implement ticket #N", "implement issue #N", "implement the next ready ticket", or otherwise asks to take a ticket from open to PR.'
+disable-model-invocation: true
+description: "Implement a ticket (GitHub issue) end-to-end on a ticket branch and open a PR, with tests and a runtime smoke check that the app still works before declaring done."
 ---
 
 # Implement ticket
 
-Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number
-and repository, defaulting to the current `gh` remote and step 0's selection when omitted.
-Solo runs complete [Setup](references/setup.md) before step 0.
+Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number and repository,
+defaulting to the current `gh` remote and step 0's selection. Solo runs complete [Setup](references/setup.md) first.
 
 ## Orchestrated dispatch
 

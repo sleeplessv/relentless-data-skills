@@ -53,7 +53,11 @@ Fresh-branch mechanics: `git checkout main && git pull && git checkout -b <branc
 
 ## Step 3: Commit
 
-Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group, then push. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group, pushed with `git push -u origin HEAD`.
+Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group. Either way, ship pushes the branch itself, whether or not smart-git-commit pushed:
+
+```bash
+git push -u origin HEAD
+```
 
 Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), stop and report. Do not open the PR.
 
@@ -84,12 +88,23 @@ gh pr checks <number> --watch --fail-fast   # blocks until every check finishes 
 gh pr checks <number> --json name,bucket
 ```
 
+The watch runs as long as CI does, so give it a long command timeout (e.g. 10 minutes) rather than the shell default.
+
 Route by the JSON (or the "no checks reported" message), never by either command's exit code (1 = a check failed, 8 = pending, non-zero when none are reported):
 
 - Any check in bucket `fail` or `cancel` → stop. Report the failing check names and the PR URL; leave the PR open and delete nothing. Never merge a red PR: a repo without branch protection would take it.
 - Any check still `pending` (the watch was cut short, e.g. by a command timeout) → rerun the watch; merge never runs on a pending check.
 - Every check `pass` or `skipping` → summarise them as one checks line, e.g. "checks: 4 pass, 1 skipping", and continue.
-- No checks reported → continue with the checks line "checks: none reported", which the close-out carries so the user knows nothing gated the merge.
+- No checks reported → CI may not have registered yet. Check whether the PR's head tree defines PR-triggered GitHub Actions workflows:
+
+  ```bash
+  sha=$(gh pr view <number> --json headRefOid -q .headRefOid)
+  git grep -lwE 'pull_request(_target)?' "$sha" -- .github/workflows   # any hit = PR-triggered CI exists
+  gh run list --commit "$sha" --json name,status                      # runs queued or started for that commit
+  ```
+
+  - No hit → the repo has no PR CI. Continue with the checks line "checks: none reported", which the close-out carries so the user knows nothing gated the merge.
+  - A hit → re-read `gh run list` and `gh pr checks <number> --json name,bucket` up to 5 times; as soon as a run or check appears, rerun the watch and route again. Still none after 5 reads → stop and ask the user whether to merge without CI, even under `clean`.
 
 Then, with the gate green:
 

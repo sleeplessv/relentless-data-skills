@@ -22,7 +22,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`qualify-delegation`](skills/qualify-delegation/) | Qualify assignments for human colleagues or contractors and produce clear handoffs with explicit outcomes, authority, and constraints. |
 | [`review-pbi-diff`](skills/review-pbi-diff/) | Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings. |
 | [`ship`](skills/ship/) | Commit, publish, and merge working-tree changes through a pull request. |
-| [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes into conventional commits and push them to the remote. |
+| [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes into conventional commits and push them to the remote when asked. |
 | [`snowman`](skills/snowman/) | Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution. |
 | [`statusline`](skills/statusline/) | Show the current model, reasoning effort, context window usage, directory, git branch, and open pull requests in the Claude Code status line. |
 | [`student-mode`](skills/student-mode/) | Write tutorial-grade Python, SQL, and Java for learners instead of production-grade code, for the rest of the session. Python leans on pandas and NumPy for data science coursework. |
@@ -214,7 +214,9 @@ inside `implement-ticket`, so updating only one skill can leave the workflow
 with missing or incompatible instructions. Solo ticket use does not require `implement-feature`.
 
 The minimum compatible pair for this shared contract is `implement-feature`
-`0.2.1` with `implement-ticket` `0.2.2`. The skills keep independent version
+`0.2.3` with `implement-ticket` `0.2.3`. From `0.2.3`, `implement-ticket` is
+user-only and absent from the skill catalog, and `implement-feature` locates it
+by path. The skills keep independent version
 numbers. Matching source revisions are the preferred compatibility check.
 
 Select both skills in the same installation:

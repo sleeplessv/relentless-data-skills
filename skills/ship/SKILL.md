@@ -1,6 +1,6 @@
 ---
 name: ship
-description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. The clean argument skips only that merge confirmation, never the unrelated-changes prompt.
+description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. Waits for CI and never merges a PR with a failing check. The clean argument skips only that merge confirmation, never the CI gate or the unrelated-changes prompt.
 disable-model-invocation: true
 ---
 
@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Take the current working-tree changes from branch to merged PR in one pass: branch off `main`, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
 
-**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt still fires.
+**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply.
 
 **Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit.
 
@@ -53,7 +53,11 @@ Fresh-branch mechanics: `git checkout main && git pull && git checkout -b <branc
 
 ## Step 3: Commit
 
-Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group, then push. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group, pushed with `git push -u origin HEAD`.
+Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group. Either way, ship pushes the branch itself, whether or not smart-git-commit pushed:
+
+```bash
+git push -u origin HEAD
+```
 
 Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), stop and report. Do not open the PR.
 
@@ -77,7 +81,32 @@ EOF
 
 `<number>` is the PR number from Step 4. Name it in every `gh pr` command, because the current branch may not be the PR's.
 
-Read each PR's checks first with `gh pr checks <number> --json name,bucket` and summarise them as one checks line, e.g. "checks: 4 pass, 1 pending" or "checks: none reported". Its exit code only encodes the checks (1 = a check failed, 8 = one is pending, non-zero when none are reported); the result is the JSON or the "no checks reported" message, and the flow continues.
+**CI gate, under `clean` too.** Before any merge question, wait for each PR's checks to settle, then read them:
+
+```bash
+gh pr checks <number> --watch --fail-fast   # blocks until every check finishes or one fails
+gh pr checks <number> --json name,bucket
+```
+
+The watch runs as long as CI does, so give it a long command timeout (e.g. 10 minutes) rather than the shell default.
+
+Route by the JSON (or the "no checks reported" message), never by either command's exit code (1 = a check failed, 8 = pending, non-zero when none are reported):
+
+- Any check in bucket `fail` or `cancel` → stop. Report the failing check names and the PR URL; leave the PR open and delete nothing. Never merge a red PR: a repo without branch protection would take it.
+- Any check still `pending` (the watch was cut short, e.g. by a command timeout) → rerun the watch; merge never runs on a pending check.
+- Every check `pass` or `skipping` → summarise them as one checks line, e.g. "checks: 4 pass, 1 skipping", and continue.
+- No checks reported → CI may not have registered yet. Check whether the PR's head tree defines PR-triggered GitHub Actions workflows:
+
+  ```bash
+  sha=$(gh pr view <number> --json headRefOid -q .headRefOid)
+  git grep -lwE 'pull_request(_target)?' "$sha" -- .github/workflows   # any hit = PR-triggered CI exists
+  gh run list --commit "$sha" --json name,status                      # runs queued or started for that commit
+  ```
+
+  - No `git grep` hit **and** an empty `gh run list` → the repo has no PR CI. Continue with the checks line "checks: none reported", which the close-out carries so the user knows nothing gated the merge.
+  - A hit, or any run listed (push-triggered CI also checks the PR head) → re-read `gh pr checks <number> --json name,bucket` and `gh run list` up to 5 times; as soon as a check appears, rerun the watch and route again. Still no check after 5 reads → stop and ask the user whether to merge without CI, even under `clean`.
+
+Then, with the gate green:
 
 - Invoked with `clean` → proceed without asking; the checks line goes in the close-out.
 - Otherwise ask: "Merge and clean up (squash-merge the PR, delete the local and remote branch)?", followed by the checks line.
@@ -111,11 +140,11 @@ git rev-parse --verify --quiet refs/heads/<branch>     # non-zero = local branch
 
 All three confirm → **merged**. Any miss → **merged, but cleanup incomplete**; say which check missed.
 
-**Close-out:** lead with the confirmed outcome in one sentence (merged; merged, but cleanup incomplete; auto-merge armed; queued; PR left open; or the actual state) with the PR URL and checks line. Name every branch that outlives the run. Anything worth flagging goes after it.
+**Close-out:** lead with the confirmed outcome in one sentence (merged; merged, but cleanup incomplete; auto-merge armed; queued; stopped on failing checks; PR left open; or the actual state) with the PR URL and checks line. Name every branch that outlives the run. Anything worth flagging goes after it.
 
 ## Safety rules
 
 - The smart-git-commit rules apply: no force-push, no skipped hooks (`--no-verify`), no likely secrets (`.env`, credentials, tokens) in a commit.
 - Delete branches only through `--delete-branch` in the Step 5 merge, which acts only once the PR has merged; an unmerged branch may hold the only copy of the work.
-- Merge only with the `clean` argument or an explicit yes; the squash-merge is the one irreversible step and the user owns it.
-- If a step fails mid-flow (rejected push, conflict on `git checkout` or `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one. A non-zero exit from `gh pr checks` or `gh pr merge` is not such a failure: Step 5 routes by the state it reads.
+- Merge only once the Step 5 CI gate is green, and only with the `clean` argument or an explicit yes; the squash-merge is the one irreversible step and the user owns it.
+- If a step fails mid-flow (rejected push, conflict on `git checkout` or `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one. A non-zero exit from `gh pr checks` or `gh pr merge` is not such a failure: Step 5 routes by the state it reads, and a failing check stops the flow through the CI gate.

@@ -1,6 +1,6 @@
 # Merge + validate
 
-One dispatch after all five extracts exist. `scripts/merge_graph.py --out <scratch> --config lineage.config.json --coverage coverage.txt [--alias old=new]` writes `graph.json`, `graph-compact.json`, `validation-report.md`. Pass the same `--config` the extractors used: merge reads its fork rules from it (`forkNamePattern`, `forkDirPattern`, `notebooks.forkDirs`, `notebooks.forkNamePrefixes`), with `--fork-pattern` / `--fork-dirs` as overrides. The dispatched agent runs it, reads the report, and fixes extractor bugs it reveals before the render step sees the data.
+One dispatch after all five extracts exist. `python3 <scratch>/scripts/merge_graph.py --out <scratch> --config <scratch>/lineage.config.json --coverage <scratch>/coverage.txt [--alias old=new]` writes `graph.json`, `graph-compact.json`, `validation-report.md`. Pass the same `--config` the extractors used: merge reads its fork rules from it (`forkNamePattern`, `forkDirPattern`, `notebooks.forkDirs`, `notebooks.forkNamePrefixes`), with `--fork-pattern` / `--fork-dirs` as overrides. The dispatched agent runs it, reads the report, and fixes extractor bugs it reveals before the render step sees the data. It runs and patches only the run's copy in `<scratch>/scripts/`, never `<skill-dir>/scripts/`.
 
 ## Merge rules
 
@@ -38,4 +38,4 @@ The same lists ride along in `graph-compact.json` `meta.gaps`, which is what the
 
 ## Reading the report
 
-Treat each non-zero gap as either a real finding (say so in the Gaps panel: "22 pipelines have no schedule and no invoker") or an extractor miss (fix the extractor and rerun). Typical extractor misses: a stub from an id convention slip (`gold.fact_x` vs `gold.x`), a Silver table with no Bronze input because `perCountryBronzeDatabases` is incomplete, a Gold table with no upstream because its loader's function name differs from the config's `additionalProcedure`.
+Treat each non-zero gap as either a real finding (say so in the Gaps panel: "22 pipelines have no schedule and no invoker") or an extractor miss (fix the extractor in `<scratch>/scripts/`, rerun it and merge, and add the diff to `<scratch>/patches.md`). Typical extractor misses: a stub from an id convention slip (`gold.fact_x` vs `gold.x`), a Silver table with no Bronze input because `perCountryBronzeDatabases` is incomplete, a Gold table with no upstream because its loader's function name differs from the config's `additionalProcedure`.

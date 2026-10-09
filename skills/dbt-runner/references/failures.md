@@ -2,7 +2,8 @@
 
 Keyed by the **verbatim string to grep for in the logfile**. Within each
 entry, causes are ordered by how often they're the real culprit. Check
-them in order and stop at the first hit. Engine-agnostic; for
+them in order and stop at the first hit. `<runner>` is the context file's
+`runner` (SKILL.md invocation rule 1). Engine-agnostic; for
 `engine: fusion` projects also see [fusion.md](fusion.md).
 
 ## `Env var required but not provided`
@@ -33,7 +34,7 @@ Key-pair auth failed. In order:
    Suspect and rule this out before debugging credentials, proxies, or
    account URLs.
 2. Genuinely wrong account identifier/host, only after (1) is excluded.
-   Discriminate with `--connect` (live `dbt debug`) outside the sandbox.
+   Discriminate with `--connect` (live `<runner> debug`) outside the sandbox.
 
 ## `Object does not exist or not authorized`
 
@@ -41,7 +42,7 @@ Snowflake deliberately doesn't say which. In order:
 
 1. **Upstream not built in your dev schema.** The ref'd model/source was
    never materialized in this target's schema. Fix: build upstream first
-   (`dbt build --select +<model>`), or seed/stage before facts.
+   (`<runner> build --select +<model>`), or seed/stage before facts.
 2. **Role lacks grants.** Expired or insufficient on the source schema.
    Discriminate: can you `select 1 from <object>` via your SQL tool with
    the same role? Fix: grants, not dbt.
@@ -58,23 +59,23 @@ Snowflake deliberately doesn't say which. In order:
 
 ## `dbt_utils` undefined · `is undefined` on a packaged macro · `generate_surrogate_key` not found
 
-1. **`dbt deps` never ran** in this checkout: `dbt_packages/` missing.
-   The preflight `packages` check catches this; run `dbt deps`.
+1. **`<runner> deps` never ran** in this checkout: `dbt_packages/` missing.
+   The preflight `packages` check catches this; run `<runner> deps`.
 2. **Stale/dirtied `package-lock.yml`.** Versions drifted (subagents
-   running `dbt deps` are a known offender). `git diff package-lock.yml`;
-   revert unless intentional, then `dbt deps`.
+   running `<runner> deps` are a known offender). `git diff package-lock.yml`;
+   revert unless intentional, then `<runner> deps`.
 
 ## `No models available` · `Nothing to do`
 
 **This exits 0 and looks like success while doing nothing.**
 
 1. Typo'd `--select`: model name, selector syntax, or path. Fix: verify
-   with `dbt ls --select <sel>` before re-running the build.
+   with `<runner> ls --select <sel>` before re-running the build.
 2. Selector excluded everything (tags/state filters). Same verification.
 
 ## Blank output from a piped dbt command
 
-1. Pipe buffering. `dbt build | tail` can return nothing in a background
+1. Pipe buffering. `<runner> build | tail` can return nothing in a background
    shell. Never pipe; redirect: `> /tmp/dbt_run.log 2>&1`, then grep/tail
    the file. The command may have *run fine*. Check the logfile and exit
    code before assuming failure.

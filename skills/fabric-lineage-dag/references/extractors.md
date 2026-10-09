@@ -1,8 +1,8 @@
 # Extractors: per-source parsing rules and gotchas
 
-Five read-only extractors, one per evidence source, each writing `extract-<name>.json` in the schema from `SKILL.md` and returning a coverage line (`found / parsed / partial + reasons`). Dispatch per SKILL.md Step 2.
+Five extractors, one per evidence source, each writing `extract-<name>.json` in the schema from `SKILL.md` and returning a coverage line (`found / parsed / partial + reasons`). Dispatch per SKILL.md Step 2.
 
-Shared: `scripts/lineage_common.py` builds the **GUID map** from every `.platform` file (displayName, type, path, logicalId) keyed by logicalId, folder GUID, the byte-swapped form, and the segment-reversal form. Resolve every item reference through it; emit `unresolved.*` when it misses.
+Shared: `lineage_common.py` (in `<scratch>/scripts/`; an extractor proposes changes to it rather than editing it, per SKILL.md Step 2) builds the **GUID map** from every `.platform` file (displayName, type, path, logicalId) keyed by logicalId, folder GUID, the byte-swapped form, and the segment-reversal form. Resolve every item reference through it; emit `unresolved.*` when it misses.
 
 ## GUID forms (the gotcha that breaks everything)
 

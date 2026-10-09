@@ -5,9 +5,9 @@ Standard library only, like the script itself. Run from the repo root:
     python3 -m unittest discover -s tests -v
 
 Nothing here ever talks to a warehouse: the git call in the packages check
-and the `dbt debug` call behind --connect are mocked/stubbed. The preflight's
-stdout format is asserted deliberately — agents parse it, so it is an
-interface, not an implementation detail.
+and the `<runner> debug` call behind --connect are mocked/stubbed. The
+preflight's stdout format is asserted deliberately — agents parse it, so it
+is an interface, not an implementation detail.
 """
 from __future__ import annotations
 
@@ -180,7 +180,14 @@ class PackagesCheckTests(unittest.TestCase):
             (Path(tmp) / "packages.yml").write_text("packages: []")
             status, msg = preflight.check_packages(Path(tmp))
         self.assertEqual(status, preflight.FAIL)
-        self.assertIn("dbt deps", msg)
+        self.assertIn("<runner> deps", msg)
+
+    def test_missing_dbt_packages_names_context_runner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "packages.yml").write_text("packages: []")
+            status, msg = preflight.check_packages(Path(tmp), "uv run dbt")
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("`uv run dbt deps`", msg)
 
     def test_clean_lockfile_ok(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -296,22 +303,39 @@ class MainOutputTests(unittest.TestCase):
 
 
 class ConnectTests(unittest.TestCase):
-    CTX = {"target": "local"}
+    CTX = {"target": "local", "runner": "uv run dbt"}
 
-    def _run(self, **kwargs):
+    def _run(self, ctx=None, **kwargs):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
             with mock.patch.object(subprocess, "run", **kwargs) as run:
-                code = preflight.run_connect(self.CTX, Path("."))
+                code = preflight.run_connect(ctx or self.CTX, Path("."))
         return code, buf.getvalue(), run
 
-    def test_success(self):
+    def test_success_uses_context_runner(self):
         ok = types.SimpleNamespace(returncode=0)
         code, out, run = self._run(return_value=ok)
         self.assertEqual(code, 0)
         self.assertIn("OK connect", out)
         self.assertEqual(run.call_args[0][0],
+                         ["uv", "run", "dbt", "debug", "--target", "local"])
+
+    def test_path_runner(self):
+        ok = types.SimpleNamespace(returncode=0)
+        _, _, run = self._run(
+            ctx={"target": "local", "runner": ".venv/bin/dbt"},
+            return_value=ok,
+        )
+        self.assertEqual(run.call_args[0][0],
+                         [".venv/bin/dbt", "debug", "--target", "local"])
+
+    def test_missing_runner_falls_back_to_bare_dbt_and_says_so(self):
+        ok = types.SimpleNamespace(returncode=0)
+        code, out, run = self._run(ctx={"target": "local"}, return_value=ok)
+        self.assertEqual(code, 0)
+        self.assertEqual(run.call_args[0][0],
                          ["dbt", "debug", "--target", "local"])
+        self.assertIn("no `runner` in context", out)
 
     def test_dbt_debug_failure(self):
         bad = types.SimpleNamespace(returncode=2)
@@ -319,10 +343,20 @@ class ConnectTests(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("failures.md", out)
 
-    def test_missing_dbt_binary(self):
+    def test_unbalanced_quote_in_runner_fails_cleanly(self):
+        code, out, run = self._run(
+            ctx={"target": "local", "runner": 'uv run "dbt'},
+        )
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL connect: cannot parse runner", out)
+        self.assertIn("quoting", out)
+        run.assert_not_called()
+
+    def test_missing_runner_binary(self):
         code, out, _ = self._run(side_effect=FileNotFoundError())
         self.assertEqual(code, 1)
-        self.assertIn("not found", out)
+        self.assertIn("`uv` not found", out)
+        self.assertIn("runner", out)
 
 
 if __name__ == "__main__":

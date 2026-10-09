@@ -1,6 +1,6 @@
 {
   "name": "smart-git-commit",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Group working-tree changes into conventional commits and push them to the remote when asked.",
   "author": {
     "name": "sleeplessv"

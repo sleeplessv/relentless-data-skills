@@ -50,7 +50,8 @@ ticket, and tick each item when its evidence is recorded. On resume, reconcile i
 
 ### 0. Resolve scope and prepare
 
-Resolve `implement-ticket` through the skill catalog and locate its `references/setup.md`.
+Locate `implement-ticket`'s installed root by path (it sets `disable-model-invocation`, so it
+is absent from the invocable list) and read its `references/setup.md`.
 Complete [Setup](../implement-ticket/references/setup.md) before dispatching setup workers.
 If the file is missing, report the paired update needed and continue scope discovery without ticket dispatch.
 Resolve cross-skill references from each installed skill's own root and pass absolute paths to workers.
@@ -62,7 +63,8 @@ work through isolation. Resolve cycles, outside blockers, ambiguous ownership, a
 questions while continuing independent authorized work where possible.
 
 Only a fresh tickets-only run with one selected ticket and no whole-spec promise uses a
-solo `implement-ticket` dispatch. A spec invocation or resumed integration branch keeps
+solo `implement-ticket` dispatch; its brief gives the absolute path to implement-ticket's
+`SKILL.md` and tells the worker to read it. A spec invocation or resumed integration branch keeps
 this workflow. An empty work-set still needs scope reconciliation or existing-branch gates
 before claiming completion.
 
@@ -81,7 +83,8 @@ Follow [Frontier scheduling](references/reference.md#frontier-scheduling) throug
 1. Pin each ready ticket's dispatch SHA and record its worktree, branch, and prerequisite
    evidence. Have the tracker worker claim it and post its start comment before dispatch.
 2. Run ticket workers in the background within capacity. Pass snapshot and handoff paths,
-   dispatch metadata, and the [Orchestrated ticket contract](../implement-ticket/references/orchestrated.md).
+   dispatch metadata, the absolute path to implement-ticket's `SKILL.md` to read, and the
+   [Orchestrated ticket contract](../implement-ticket/references/orchestrated.md).
 3. On each return or interruption, record the result and have the tracker post the stop
    comment. Send completed results to one integration worker using
    [Ticket integration](references/reference.md#ticket-integration) and its exact

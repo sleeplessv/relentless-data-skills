@@ -130,9 +130,10 @@ create another attempt only if that evidence fails and implementation is needed.
 
 ## Ticket integration
 
-Read worker artifacts using implement-ticket's orchestrated result contract. Before each merge,
-record the actual integration HEAD and last preserved remote SHA. Match the result's `base_sha`
-to its recorded dispatch and confirm its tested, pushed head equals the expected branch tip.
+Read worker artifacts using implement-ticket's orchestrated result contract. Match the result's
+`base_sha` to its recorded dispatch. Every merge, push, and deletion runs the exact sequences in
+[Integration commands](#integration-commands) and [Cleanup](#cleanup), whose guards record the
+integration HEAD and remote SHA and prove the tested, pushed head equals the expected branch tip.
 A failed push, dirty worktree, or missing criterion evidence is not success.
 
 When a worker returns `already_satisfied`, record `state: completed` until the coordinator
@@ -149,9 +150,8 @@ SHA for the worker's immutable base or reuse stale evidence for `already_satisfi
 Merge completed eligible results in completion order. Ticket number may break a tie among
 completed results; a lower-numbered running ticket does not delay them. Keep both writers'
 intent available for conflicts. Escalate semantic decisions to a resolver; even apparently
-mechanical changes require tests. On failure, abort only an active merge and report actual HEAD
-and earlier successful merges. Retain WIP and recovery evidence. Do not use an unconditional
-hard reset to make a report true.
+mechanical changes require tests. On failure, report actual HEAD and earlier successful merges,
+and retain WIP and recovery evidence.
 
 Run affected tests and relevant checks on the merged tree. An unchanged original baseline
 failure is reported separately; newly introduced failures require a fix. If anyone resolved
@@ -162,17 +162,88 @@ preserved tip satisfies dependencies for new dispatches. An integrator that auth
 can supply independent integration verification. Final gates still check the whole feature.
 Comment integration progress only with messaging authorization, including the commit SHA when posting.
 
-Cleanup follows orchestrator-mode's ownership and preservation rules. Use exact recorded
-resources only. Before removing any checkout, check uncommitted and untracked work and prove
-all needed commits are preserved. Failed or unpushed WIP remains. Before deleting a branch,
-prove its current local and remote tips are ancestors of the verified preserved integration
-head and it belongs to this run. Use an expected-tip lease for remote deletion where available;
-a changed remote tip is retained. `already_satisfied` never authorizes deleting unique WIP.
-
 Return `status` as merged, satisfied, escalated, or blocked. Use `satisfied` when every processed
 ticket was validated without a merge. Include integrated ticket IDs and commits, satisfied ticket
 IDs and evidence, actual HEAD, verified and pushed SHAs, checks, conflicts, remaining merge state,
 dirty paths, and retained or cleaned resources. Keep detailed logs in the run artifact.
+
+### Integration commands
+
+Run these exactly from the integration checkout, substituting recorded values: `REMOTE`,
+`INT` (integration branch), `TB` (ticket branch), `TICKET_SHA` (the result's tested, pushed head),
+`BASE_SHA` (its dispatch base), and `VERIFIED_TIP` (the last verified, preserved integration tip).
+Each guard must pass before the next command; a failed guard stops the sequence and its
+output goes to the run record.
+
+Before the merge, record the starting state and prove the result is the one dispatched:
+
+```sh
+git status --porcelain --untracked-files=all        # must print nothing
+git rev-parse HEAD                                   # record as PRE_MERGE_HEAD
+git ls-remote --exit-code "$REMOTE" "refs/heads/$INT"   # record as last preserved remote SHA
+git ls-remote --exit-code "$REMOTE" "refs/heads/$TB"    # SHA must equal TICKET_SHA
+git fetch "$REMOTE" "refs/heads/$TB"
+git merge-base --is-ancestor "$BASE_SHA" HEAD        # exit 0, else resolve divergence first
+```
+
+Merge the pinned SHA, never the moving branch name, so a later push to `TB` cannot slip in:
+
+```sh
+git merge --no-ff -m "Merge ticket #<N> ($TB) into $INT" "$TICKET_SHA"
+```
+
+If the merge stops and is escalated rather than resolved, abort only an active merge, then
+record the actual state. Never run `git reset --hard` to make a report true.
+
+```sh
+git rev-parse -q --verify MERGE_HEAD >/dev/null && git merge --abort
+git rev-parse HEAD
+git status --porcelain --untracked-files=all
+```
+
+After checks and any Post-resolution tests pass on the merged tree, push without force and
+confirm the remote. A rejected push means the remote moved: fetch, reconcile, and re-verify.
+
+```sh
+git rev-parse HEAD                                   # record as the tested SHA
+git push --porcelain "$REMOTE" "HEAD:refs/heads/$INT"
+git ls-remote --exit-code "$REMOTE" "refs/heads/$INT"   # must equal the tested SHA
+```
+
+That SHA becomes `VERIFIED_TIP`.
+
+### Cleanup
+
+Cleanup follows orchestrator-mode's ownership and preservation rules. Use exact recorded
+resources this run created only. Failed or unpushed WIP remains, and `already_satisfied`
+never authorizes deleting unique WIP. Any non-zero guard below, including a merge-base error
+for a commit missing locally, means retain the resource and record why.
+
+Remove a ticket worktree only when it is clean and its HEAD is preserved:
+
+```sh
+git -C "$WT" status --porcelain --untracked-files=all      # must print nothing
+git merge-base --is-ancestor "$(git -C "$WT" rev-parse HEAD)" "$VERIFIED_TIP"
+git worktree remove "$WT"                                   # never --force
+```
+
+Delete the local ticket branch with its tip as the expected old value:
+
+```sh
+LOCAL_TIP=$(git rev-parse "refs/heads/$TB")
+git merge-base --is-ancestor "$LOCAL_TIP" "$VERIFIED_TIP"
+git update-ref -d "refs/heads/$TB" "$LOCAL_TIP"
+```
+
+Delete the remote ticket branch under a lease on the tip you just verified. An empty
+`REMOTE_TIP` means the branch is already gone; stop there. A `rejected ... (stale info)` push means the remote
+tip changed after verification: retain the branch and record the new tip.
+
+```sh
+REMOTE_TIP=$(git ls-remote "$REMOTE" "refs/heads/$TB" | cut -f1)
+git merge-base --is-ancestor "$REMOTE_TIP" "$VERIFIED_TIP"
+git push --force-with-lease="refs/heads/$TB:$REMOTE_TIP" --delete "$REMOTE" "refs/heads/$TB"
+```
 
 ## Post-resolution tests
 

@@ -33,6 +33,21 @@ Apply [Writing](../implement-ticket/references/setup.md#writing) using `technica
 
 ## Workflow
 
+Copy this checklist into `handoff.md` at step 0, with the per-ticket lines once per work-set
+ticket, and tick each item when its evidence is recorded. On resume, reconcile it against the run record and continue from the first open item.
+
+```text
+- [ ] 0. Work-set, completion mode, and coverage gaps announced
+- [ ] 0. Original baseline recorded; integration branch and run record paths saved
+- [ ] 1. Per ticket: dispatch base pinned, claimed, start comment URL recorded
+- [ ] 1. Per ticket: result integrated or satisfied, VERIFIED_TIP pushed, stop comment URL recorded
+- [ ] 1. Owned worktrees and branches cleaned or retained with a reason
+- [ ] 2. Verify passed on the fixed integration SHA
+- [ ] 2. Integration review passed (Standards and Spec) on the same SHA
+- [ ] 3. Tracker coverage refreshed; closing lines backed by current evidence
+- [ ] 3. Feature PR body published and marked ready; every started attempt has a stop comment
+```
+
 ### 0. Resolve scope and prepare
 
 Resolve `implement-ticket` through the skill catalog and locate its `references/setup.md`.
@@ -69,12 +84,14 @@ Follow [Frontier scheduling](references/reference.md#frontier-scheduling) throug
    dispatch metadata, and the [Orchestrated ticket contract](../implement-ticket/references/orchestrated.md).
 3. On each return or interruption, record the result and have the tracker post the stop
    comment. Send completed results to one integration worker using
-   [Ticket integration](references/reference.md#ticket-integration), without waiting for
+   [Ticket integration](references/reference.md#ticket-integration) and its exact
+   [Integration commands](references/reference.md#integration-commands), without waiting for
    unrelated running tickets. Conflict resolutions and fixes require
    [Post-resolution tests](references/reference.md#post-resolution-tests).
 4. After the merged tree passes checks and is preserved, update the frontier and dispatch
    newly ready tickets. Create or update the feature draft PR as verified work accumulates.
-   Retain failed WIP and continue independent tickets. Clean up only preserved, owned resources.
+   Retain failed WIP and continue independent tickets. Clean up only preserved, owned resources
+   with the exact [Cleanup](references/reference.md#cleanup) commands.
 
 Report verified integrations, newly ready work, and concrete blockers without repeating
 worker logs. Done when all work-set tickets have evidence on the integration tip or are

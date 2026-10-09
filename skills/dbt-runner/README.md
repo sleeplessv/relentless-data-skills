@@ -27,7 +27,7 @@ a `severity: warn` test reported as a failure).
   `package-lock.yml`, and the profile/target resolve in `profiles.yml`.
   These are the failures that are cheapest to detect statically and most
   expensive to diagnose from a `JWT token is invalid` error. A `--connect`
-  flag escalates to a live `dbt debug` when diagnosing.
+  flag escalates to a live `<runner> debug` when diagnosing.
 - **Invocation rules.** Run outside the sandbox (egress-blocked shells
   produce connection errors that masquerade as auth failures), redirect
   output to a logfile instead of piping, background long builds, and
@@ -51,7 +51,7 @@ dbt-runner/
 │   ├── failures.md           # error-signature catalogue
 │   └── fusion.md             # dbt-fusion-specific quirks
 └── scripts/
-    └── preflight.py          # static env checks; --connect for dbt debug
+    └── preflight.py          # static env checks; --connect for <runner> debug
 ```
 
 ## Install
@@ -72,4 +72,4 @@ python3 -m unittest discover -s tests -v
 ```
 
 Stdlib only. The preflight never talks to a warehouse in tests; the
-`--connect` path is exercised with the `dbt` binary stubbed.
+`--connect` path is exercised with the runner binary stubbed.

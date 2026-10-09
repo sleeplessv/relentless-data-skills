@@ -6,7 +6,7 @@ later invocation (and the preflight script) has a per-project source of
 truth.
 
 **Style: discovery-first.** Everything below is readable from files and
-`dbt --version`. Don't interrogate the user for things the repo can tell
+`<runner> --version`. Don't interrogate the user for things the repo can tell
 you. Ask only the genuine decisions, one at a time, with a recommended
 answer.
 

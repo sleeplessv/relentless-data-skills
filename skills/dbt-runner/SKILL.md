@@ -100,7 +100,8 @@ Escalation ladder, in order, no skipping:
 2. If the signature looks like connection/auth and the static preflight
    passes, run the live check:
    `python3 <skill-dir>/scripts/preflight.py --connect` (outside the
-   sandbox).
+   sandbox). It runs `<runner> debug`; if its output says it fell back to
+   bare `dbt`, record `runner` first (rule 1).
 3. If the context file says `engine: fusion`, also check
    [references/fusion.md](references/fusion.md). Fusion has failure modes
    with misleading error messages (unit-test fixture inference, blocked

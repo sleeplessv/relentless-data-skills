@@ -28,17 +28,17 @@ env var, the private key, or a passphrase during discovery.
      is `private_key_path_var` (key-pair auth).
 3. **Runner, then engine.** Resolve *how* to invoke dbt before asking *what*
    dbt is. Bare `dbt` on PATH is often a different install from the one the
-   project pins: dbt v2 (formerly dbt Fusion) ships as `dbt` too, so PATH
-   commonly yields v2 for a v1 project. Check for a project-managed
-   environment: `uv.lock` / `[tool.uv]` in `pyproject.toml` → `uv run dbt`;
-   `poetry.lock` → `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt`.
-   Record it as `runner`. Fall back to `dbt` only when none exists. Then run
+   project pins: dbt v2 ships as `dbt` too, so PATH commonly yields v2 for
+   a v1 project. Check for a project-managed environment: `uv.lock` /
+   `[tool.uv]` in `pyproject.toml` → `uv run dbt`; `poetry.lock` →
+   `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt`. Record it as
+   `runner`. Fall back to `dbt` only when none exists. Then run
    `<runner> --version` (sandbox-safe, no network) and classify by the
    **major version**, not the brand string, which varies between releases.
    If a `Core:` block is present, its `installed:` version decides
    (1.x → `engine: v1`); ignore its `latest:` and `Plugins:` lines, since a
    v1 install can report `latest: 2.0.x`. Otherwise the first version
-   number decides (2.x → `engine: v2`, for both the dbt and dbt OSS
+   number decides (2.x → `engine: v2`, for both the `dbt` and `dbt-oss`
    distributions). Record the deciding version as `engine_version`. If the
    output matches neither, show it to the user and record only the engine
    they confirm. If bare `dbt --version` disagrees with
@@ -103,7 +103,9 @@ known-slow models, schema quirks. One or two lines each. Newest last._
 
 **Re-bootstrapping a legacy file.** A context file written before the
 rename says `engine: fusion` or `engine: core`; write `v2` or `v1` in its
-place (SKILL.md "First action" maps the old values when reading).
+place, deciding `core` by the major version as in Step 1.3 (a dbt Core v2
+beta install also wrote `core`). SKILL.md "First action" maps the old
+values when reading.
 
 ## Done
 

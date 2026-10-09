@@ -1,9 +1,9 @@
 # dbt v2 quirks
 
 Only relevant when the context file says `engine: v2` (legacy: `fusion`).
-These are dbt v2 (formerly dbt Fusion) behaviors whose error messages
-point *away* from the real cause. Generic triage (and dbt v1 experience)
-will mislead you here.
+These are dbt v2 (the engine formerly called dbt Fusion) behaviors whose
+error messages point *away* from the real cause. Generic triage (and dbt
+v1 experience) will mislead you here.
 They were observed on the former Fusion distribution and are not verified
 on dbt OSS.
 
@@ -46,7 +46,7 @@ model are simply absent from the output:
 ## Behavior changed between sessions · `New version available` nag
 
 1. **Version drift.** dbt v2 ships patch releases on its release channels,
-   and a `<runner> system update` (curl and PowerShell installs) or package
+   and a `<runner> system update` (curl installs) or package
    upgrade may have happened since the context file was written. Compare
    `<runner> --version` against `engine_version` in the context file; if
    they differ, update the context file and re-verify any quirk you were

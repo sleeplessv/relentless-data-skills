@@ -10,7 +10,7 @@
       "name": "dbt-runner",
       "source": "./skills/dbt-runner",
       "description": "Run dbt commands and diagnose failures with project setup checks and captured output.",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "author": {
         "name": "sleeplessv"
       },
@@ -21,6 +21,7 @@
         "dbt",
         "dbt-v2",
         "dbt-fusion",
+        "dbt-oss",
         "snowflake",
         "data-engineering",
         "troubleshooting",

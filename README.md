@@ -214,7 +214,9 @@ inside `implement-ticket`, so updating only one skill can leave the workflow
 with missing or incompatible instructions. Solo ticket use does not require `implement-feature`.
 
 The minimum compatible pair for this shared contract is `implement-feature`
-`0.2.1` with `implement-ticket` `0.2.2`. The skills keep independent version
+`0.2.3` with `implement-ticket` `0.2.3`. From `0.2.3`, `implement-ticket` is
+user-only and absent from the skill catalog, and `implement-feature` locates it
+by path. The skills keep independent version
 numbers. Matching source revisions are the preferred compatibility check.
 
 Select both skills in the same installation:

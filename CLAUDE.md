@@ -5,6 +5,8 @@
 When editing a skill, follow [Version skill changes](README.md#version-skill-changes)
 before committing.
 
+When reviewing a change, apply the judgement-call rules in `CODING_STANDARDS.md`.
+
 ### Issue tracker
 
 Issues (and specs) are tracked as GitHub Issues on `sleeplessv/relentless-data-skills` via the `gh` CLI; external PRs are not a triage surface. See `docs/agents/issue-tracker.md`.

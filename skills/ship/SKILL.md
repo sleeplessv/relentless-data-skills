@@ -103,8 +103,8 @@ Route by the JSON (or the "no checks reported" message), never by either command
   gh run list --commit "$sha" --json name,status                      # runs queued or started for that commit
   ```
 
-  - No hit → the repo has no PR CI. Continue with the checks line "checks: none reported", which the close-out carries so the user knows nothing gated the merge.
-  - A hit → re-read `gh run list` and `gh pr checks <number> --json name,bucket` up to 5 times; as soon as a run or check appears, rerun the watch and route again. Still none after 5 reads → stop and ask the user whether to merge without CI, even under `clean`.
+  - No `git grep` hit **and** an empty `gh run list` → the repo has no PR CI. Continue with the checks line "checks: none reported", which the close-out carries so the user knows nothing gated the merge.
+  - A hit, or any run listed (push-triggered CI also checks the PR head) → re-read `gh pr checks <number> --json name,bucket` and `gh run list` up to 5 times; as soon as a check appears, rerun the watch and route again. Still no check after 5 reads → stop and ask the user whether to merge without CI, even under `clean`.
 
 Then, with the gate green:
 

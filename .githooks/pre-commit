@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Opt-in pre-commit hook. Enable with: git config core.hooksPath .githooks
+# Runs scripts/check.sh --fast: every check except the unit test suite.
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/check.sh" --fast

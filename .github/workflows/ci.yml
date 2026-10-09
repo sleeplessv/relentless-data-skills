@@ -33,19 +33,19 @@ jobs:
           python scripts/skill_versions.py --check --base "$baseline"
           python scripts/sync_registry.py --check
 
-  snowman-tests:
+  tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         # 3.9 = oldest interpreter likely on a user machine (macOS system
-        # python); 3.13 = current. The script is stdlib-only, so no installs.
+        # python); 3.13 = current. The tests are stdlib-only, so no installs.
         python-version: ["3.9", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - name: Run snowman tests
+      - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
   skill-lint:
@@ -58,15 +58,22 @@ jobs:
       - name: Lint SKILL.md files
         run: python scripts/lint_skill.py
 
-  registry-check:
+  # The generated-registry check runs in skill-version-check, the check the
+  # main ruleset requires, so it is not duplicated in a separate job.
+
+  plugin-validate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-node@v4
         with:
-          python-version: "3.12"
-      - name: Check README/marketplace registry is generated from plugin.json
-        run: python scripts/sync_registry.py --check
+          node-version: "22"
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate marketplace and plugin manifests
+        run: claude plugin validate .
 
   doc-url-liveness:
     runs-on: ubuntu-latest

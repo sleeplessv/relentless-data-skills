@@ -187,6 +187,11 @@ GitHub Actions runs validation on pushes to `main`, pull requests, a weekly
 schedule, and manual dispatch. See [the CI workflow](.github/workflows/ci.yml)
 for the schedule and Python versions.
 
+Run `scripts/check.sh` before committing. It runs the checks below except the
+doc URL check (add `--network`), plus `claude plugin validate .` when the
+`claude` CLI is installed. To run its fast subset on every commit, enable the
+opt-in hook once per clone with `git config core.hooksPath .githooks`.
+
 - `python3 -m unittest discover -s tests -v` runs the repository's Python tests.
 - `python3 scripts/lint_skill.py` checks skill frontmatter, invocation triggers,
   description lengths, line budgets, and YAML-safe values.

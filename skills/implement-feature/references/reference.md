@@ -170,8 +170,9 @@ dirty paths, and retained or cleaned resources. Keep detailed logs in the run ar
 ### Integration commands
 
 Run these exactly from the integration checkout, substituting recorded values: `REMOTE`,
-`INT` (integration branch), `TB` (ticket branch), `TICKET_SHA` (the result's tested, pushed head),
-`BASE_SHA` (its dispatch base), and `VERIFIED_TIP` (the last verified, preserved integration tip).
+`INT` (integration branch), `TB` (ticket branch), `N` (ticket number), `WT` (ticket worktree path),
+`TICKET_SHA` (the result's tested, pushed head), `BASE_SHA` (its dispatch base), and
+`VERIFIED_TIP` (the last verified, preserved integration tip).
 Each guard must pass before the next command; a failed guard stops the sequence and its
 output goes to the run record.
 
@@ -180,23 +181,27 @@ Before the merge, record the starting state and prove the result is the one disp
 ```sh
 git status --porcelain --untracked-files=all        # must print nothing
 git rev-parse HEAD                                   # record as PRE_MERGE_HEAD
-git ls-remote --exit-code "$REMOTE" "refs/heads/$INT"   # record as last preserved remote SHA
+git ls-remote --exit-code "$REMOTE" "refs/heads/$INT"   # record as last preserved remote SHA; see below
 git ls-remote --exit-code "$REMOTE" "refs/heads/$TB"    # SHA must equal TICKET_SHA
 git fetch "$REMOTE" "refs/heads/$TB"
 git merge-base --is-ancestor "$BASE_SHA" HEAD        # exit 0, else resolve divergence first
 ```
 
+The `INT` guard passes on exit 0. Exit 2 (remote branch absent) also passes while the run record
+has no successful `INT` push, and the guard records `none`. The first push below then creates the
+branch. Once the record holds an `INT` push, exit 2 means the branch was deleted remotely: stop.
+
 Merge the pinned SHA, never the moving branch name, so a later push to `TB` cannot slip in:
 
 ```sh
-git merge --no-ff -m "Merge ticket #<N> ($TB) into $INT" "$TICKET_SHA"
+git merge --no-ff -m "Merge ticket #$N ($TB) into $INT" "$TICKET_SHA"
 ```
 
 If the merge stops and is escalated rather than resolved, abort only an active merge, then
 record the actual state. Never run `git reset --hard` to make a report true.
 
 ```sh
-git rev-parse -q --verify MERGE_HEAD >/dev/null && git merge --abort
+if git rev-parse -q --verify MERGE_HEAD >/dev/null; then git merge --abort; fi   # exit 0 with no merge
 git rev-parse HEAD
 git status --porcelain --untracked-files=all
 ```
@@ -227,9 +232,12 @@ git merge-base --is-ancestor "$(git -C "$WT" rev-parse HEAD)" "$VERIFIED_TIP"
 git worktree remove "$WT"                                   # never --force
 ```
 
-Delete the local ticket branch with its tip as the expected old value:
+Delete the local ticket branch only after its worktree is removed; a retained worktree keeps its
+branch too. The first guard proves no worktree has `TB` checked out, and the tip is the expected
+old value:
 
 ```sh
+! git worktree list --porcelain | grep -qFx "branch refs/heads/$TB"   # exit 0 = not checked out
 LOCAL_TIP=$(git rev-parse "refs/heads/$TB")
 git merge-base --is-ancestor "$LOCAL_TIP" "$VERIFIED_TIP"
 git update-ref -d "refs/heads/$TB" "$LOCAL_TIP"
@@ -240,7 +248,7 @@ Delete the remote ticket branch under a lease on the tip you just verified. An e
 tip changed after verification: retain the branch and record the new tip.
 
 ```sh
-REMOTE_TIP=$(git ls-remote "$REMOTE" "refs/heads/$TB" | cut -f1)
+REMOTE_TIP=$(git ls-remote "$REMOTE" "refs/heads/$TB" | awk -v r="refs/heads/$TB" '$2 == r {print $1}')
 git merge-base --is-ancestor "$REMOTE_TIP" "$VERIFIED_TIP"
 git push --force-with-lease="refs/heads/$TB:$REMOTE_TIP" --delete "$REMOTE" "refs/heads/$TB"
 ```

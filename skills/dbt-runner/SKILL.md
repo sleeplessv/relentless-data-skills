@@ -1,6 +1,6 @@
 ---
 name: dbt-runner
-description: Use when running any dbt command (build, run, test, compile, seed, deps) or debugging a dbt failure, including connection and auth errors, parse errors, hanging or silently-empty runs, and dbt v2 (formerly Fusion) quirks. Enforces preflight checks and output-capture discipline before the first dbt invocation of a session, and maps error signatures to causes and fixes. Bootstraps a per-project .dbt-runner/context.md on first use.
+description: Use when running any dbt command (build, run, test, compile, seed, deps) or debugging a dbt failure, including connection and auth errors, parse errors, hanging or silently-empty runs, and dbt v2 (formerly dbt Fusion) quirks. Enforces preflight checks and output-capture discipline before the first dbt invocation of a session, and maps error signatures to causes and fixes. Bootstraps a per-project .dbt-runner/context.md on first use.
 ---
 
 # dbt-runner
@@ -105,7 +105,7 @@ Escalation ladder, in order, no skipping:
    `python3 <skill-dir>/scripts/preflight.py --connect` (outside the
    sandbox). It runs `<runner> debug`; if its output says it fell back to
    bare `dbt`, record `runner` first (rule 1).
-3. If the context file says `engine: v2`, also check
+3. If the context file says `engine: v2` (legacy: `fusion`), also check
    [references/dbt-v2.md](references/dbt-v2.md). dbt v2 has failure modes
    with misleading error messages (unit-test fixture inference, blocked
    sibling tests).

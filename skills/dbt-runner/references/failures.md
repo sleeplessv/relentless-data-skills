@@ -4,7 +4,7 @@ Keyed by the **verbatim string to grep for in the logfile**. Within each
 entry, causes are ordered by how often they're the real culprit. Check
 them in order and stop at the first hit. `<runner>` is the context file's
 `runner` (SKILL.md invocation rule 1). Engine-agnostic; for
-`engine: v2` projects also see [dbt-v2.md](dbt-v2.md).
+`engine: v2` (legacy: `fusion`) projects also see [dbt-v2.md](dbt-v2.md).
 
 ## `Env var required but not provided`
 

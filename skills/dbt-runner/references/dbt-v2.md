@@ -1,8 +1,9 @@
 # dbt v2 quirks
 
-Only relevant when the context file says `engine: v2`. These are dbt v2
-(formerly dbt Fusion) behaviors whose error messages point *away* from the
-real cause. Generic triage (and dbt v1 experience) will mislead you here.
+Only relevant when the context file says `engine: v2` (legacy: `fusion`).
+These are dbt v2 (formerly dbt Fusion) behaviors whose error messages
+point *away* from the real cause. Generic triage (and dbt v1 experience)
+will mislead you here.
 They were observed on the former Fusion distribution and are not verified
 on dbt OSS.
 

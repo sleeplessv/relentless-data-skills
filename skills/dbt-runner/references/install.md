@@ -34,10 +34,14 @@ env var, the private key, or a passphrase during discovery.
    `poetry.lock` → `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt`.
    Record it as `runner`. Fall back to `dbt` only when none exists. Then run
    `<runner> --version` (sandbox-safe, no network) and classify by the
-   **major version**, not the brand string, which varies between releases:
-   a `Core:` block with `installed: 1.x` → `engine: v1`; a version starting
-   `2.` → `engine: v2` (both the dbt and dbt OSS distributions). Record
-   engine and version. If bare `dbt --version` disagrees with
+   **major version**, not the brand string, which varies between releases.
+   If a `Core:` block is present, its `installed:` version decides
+   (1.x → `engine: v1`); ignore its `latest:` and `Plugins:` lines, since a
+   v1 install can report `latest: 2.0.x`. Otherwise the first version
+   number decides (2.x → `engine: v2`, for both the dbt and dbt OSS
+   distributions). Record the deciding version as `engine_version`. If the
+   output matches neither, show it to the user and record only the engine
+   they confirm. If bare `dbt --version` disagrees with
    `<runner> --version`, note the mismatch in Project lore. Otherwise it
    will be rediscovered as a fake "the project is broken" failure.
    **Pinning gotcha:** an unpinned `pip install dbt-core` now installs dbt

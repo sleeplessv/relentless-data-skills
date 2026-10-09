@@ -5,8 +5,9 @@ command of a session.
 Standard library only, Python 3.9+. The default run is fully static (no
 network, sandbox-safe): it verifies the things that make dbt fail before any
 model runs — env vars, the private key file, package state, and the
-profile/target. `--connect` additionally shells out to `dbt debug` for a live
-connection test (needs network — run with sandboxing disabled).
+profile/target. `--connect` additionally runs `<runner> debug` (the context
+file's `runner`) for a live connection test (needs network — run with
+sandboxing disabled).
 
 Reads required env-var names (names only, never values) from the per-project
 `.dbt-runner/context.md`. Output is one line per check — `OK` / `FAIL` /
@@ -20,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import subprocess
 import sys
 from pathlib import Path
@@ -152,8 +154,8 @@ def check_packages(project_root: Path) -> tuple:
     if not (project_root / "dbt_packages").is_dir():
         return FAIL, (
             "dbt_packages/ is missing but the project declares packages."
-            " Remedy: run `dbt deps` (every dbt_utils.* call fails until"
-            " then)."
+            " Remedy: run `<runner> deps` (every dbt_utils.* call fails"
+            " until then)."
         )
     if (project_root / "package-lock.yml").is_file():
         try:
@@ -262,28 +264,46 @@ def check_profile(context: dict) -> tuple:
 # Live connection test (--connect)
 # --------------------------------------------------------------------------
 
+def resolve_runner(context: dict) -> tuple:
+    """Return (argv prefix, note) for invoking dbt the way SKILL.md rule 1
+    does: the context file's `runner`, falling back to bare `dbt` only when
+    the context records none (the note then says so)."""
+    runner = context.get("runner", "")
+    if runner:
+        return shlex.split(runner), f"runner `{runner}` from context"
+    return ["dbt"], (
+        "no `runner` in context, falling back to bare `dbt` (may be a"
+        " different engine; derive and record `runner` per SKILL.md"
+        " invocation rule 1)"
+    )
+
+
 def run_connect(context: dict, project_root: Path) -> int:
     target = context.get("target", "")
-    cmd = ["dbt", "debug"]
+    runner, note = resolve_runner(context)
+    cmd = runner + ["debug"]
     if target:
         cmd += ["--target", target]
-    print(f"connect: running `{' '.join(cmd)}` (needs network — if this"
+    shown = shlex.join(cmd)
+    print(f"connect: running `{shown}` ({note}; needs network — if this"
           " fails with a DNS/connection error, suspect a sandboxed shell"
           " before debugging auth)")
     try:
         result = subprocess.run(cmd, cwd=str(project_root), timeout=300)
     except FileNotFoundError:
-        print(f"{FAIL} connect: `dbt` binary not found on PATH.")
+        print(f"{FAIL} connect: `{runner[0]}` not found (runner"
+              f" `{shlex.join(runner)}`). Remedy: fix `runner` in the"
+              " context file or install the project's environment.")
         return 1
     except subprocess.TimeoutExpired:
-        print(f"{FAIL} connect: `dbt debug` timed out after 300s —"
+        print(f"{FAIL} connect: `{shown}` timed out after 300s —"
               " suspended warehouse or blocked network egress.")
         return 1
     if result.returncode != 0:
-        print(f"{FAIL} connect: `dbt debug` exited {result.returncode} —"
+        print(f"{FAIL} connect: `{shown}` exited {result.returncode} —"
               " see its output above and references/failures.md.")
         return 1
-    print(f"{OK} connect: `dbt debug` succeeded")
+    print(f"{OK} connect: `{shown}` succeeded")
     return 0
 
 
@@ -299,7 +319,8 @@ def main(argv=None) -> int:
     )
     parser.add_argument(
         "--connect", action="store_true",
-        help="also run `dbt debug` for a live connection test (needs network)",
+        help="also run `<runner> debug` (the context file's runner) for a"
+        " live connection test (needs network)",
     )
     args = parser.parse_args(argv)
     project_root = Path(args.project_root).resolve()

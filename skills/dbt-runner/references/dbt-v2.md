@@ -1,8 +1,11 @@
-# dbt-fusion quirks
+# dbt v2 quirks
 
-Only relevant when the context file says `engine: fusion`. These are
-fusion-specific behaviors whose error messages point *away* from the real
-cause. Generic triage (and dbt-core experience) will mislead you here.
+Only relevant when the context file says `engine: v2` (legacy: `fusion`).
+These are dbt v2 (formerly dbt Fusion) behaviors whose error messages
+point *away* from the real cause. Generic triage (and dbt v1 experience)
+will mislead you here.
+They were observed on the former Fusion distribution and are not verified
+on dbt OSS.
 
 ## `invalid identifier '<COLUMN>'` inside a **unit test**
 
@@ -11,7 +14,7 @@ looks like a model bug. It usually isn't:
 
 1. **Fixture schema inference failed.** When a unit test's `given:` input
    has `rows: []` (or its rows omit some columns) *and* that upstream
-   model is **not in the build selection**, fusion cannot infer the input's
+   model is **not in the build selection**, dbt v2 cannot infer the input's
    schema and throws `invalid identifier` on any column the model selects
    from it. Discriminate: does the same test pass when the upstream is
    included in the selection (`<runner> build --select <upstream>+<model>`)?
@@ -29,7 +32,7 @@ After a build, expected `relationships`/`unique`/`not_null` results for a
 model are simply absent from the output:
 
 1. **A failing/erroring unit test blocks the model's sibling tests.**
-   Fusion skips a model's other tests when one of its unit tests errors.
+   dbt v2 skips a model's other tests when one of its unit tests errors.
    The skipped tests don't appear as failures, they just don't run, so a
    "green-ish" log can hide an unverified model. Workaround to run them
    anyway:
@@ -42,9 +45,9 @@ model are simply absent from the output:
 
 ## Behavior changed between sessions · `New version available` nag
 
-1. **Version drift.** Fusion is preview software; `<runner> system update`
-   changes behavior between previews, and an auto/explicit update may have
-   happened since the context file was written. Compare `<runner> --version`
-   against `engine_version` in the context file; if they differ, update
-   the context file and re-verify any quirk you were relying on, including
-   the two above, since they may be fixed or changed.
+1. **Version drift.** dbt v2 ships patch releases on its release channels,
+   and a `<runner> system update` (curl and PowerShell installs) or package
+   upgrade may have happened since the context file was written. Compare
+   `<runner> --version` against `engine_version` in the context file; if
+   they differ, update the context file and re-verify any quirk you were
+   relying on, including the two above, since they may be fixed or changed.

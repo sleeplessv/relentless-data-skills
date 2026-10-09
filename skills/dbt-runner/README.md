@@ -13,7 +13,7 @@ a `severity: warn` test reported as a failure).
   in a project there is no `.dbt-runner/context.md`, so the skill runs a
   discovery-first bootstrap: it reads `dbt_project.yml` and `profiles.yml`
   for the profile, target, and the `env_var()` *names* the connection
-  needs, runs `dbt --version` to record the engine (fusion vs core), asks
+  needs, runs `<runner> --version` to record the engine (dbt v1 vs v2), asks
   only the genuine decisions, and writes a committed context file. The
   instructions live in `references/install.md` and only load on that first
   run.
@@ -35,11 +35,11 @@ a `severity: warn` test reported as a failure).
 - **Signature-indexed failure catalogue.** `references/failures.md` is
   keyed by the verbatim string in the log, with causes ranked by prior:
   a DNS error means *suspect the sandbox first*, not the credentials.
-- **dbt-fusion quirks.** `references/fusion.md` (loaded only when the
-  context says `engine: fusion`) covers the failure modes whose error
-  messages point away from the cause: unit-test fixture schema inference
-  throwing `invalid identifier`, and a failing unit test silently blocking
-  its model's other tests.
+- **dbt v2 (formerly dbt Fusion) quirks.** `references/dbt-v2.md` (loaded
+  only when the context says `engine: v2`, or legacy `fusion`) covers the
+  failure modes whose error messages point away from the cause: unit-test
+  fixture schema inference throwing `invalid identifier`, and a failing
+  unit test silently blocking its model's other tests.
 
 ## Layout
 
@@ -49,7 +49,7 @@ dbt-runner/
 ├── references/
 │   ├── install.md            # first-run bootstrap → .dbt-runner/context.md
 │   ├── failures.md           # error-signature catalogue
-│   └── fusion.md             # dbt-fusion-specific quirks
+│   └── dbt-v2.md             # dbt v2 (formerly dbt Fusion) quirks
 └── scripts/
     └── preflight.py          # static env checks; --connect for <runner> debug
 ```

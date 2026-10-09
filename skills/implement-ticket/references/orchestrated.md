@@ -11,7 +11,8 @@ SKILL.md's Ticket lifecycle comments. Worker silence on GitHub does not waive th
 Apply [Writing](setup.md#writing) using the coordinator's resolved reference paths before
 authoring documentation, commits, findings, or handoff prose.
 
-Read the ticket snapshot and handoff files at the supplied absolute paths. The selected
+Read the ticket skill's `SKILL.md`, the ticket snapshot, and handoff files at the supplied
+absolute paths; the skill is user-only, so the file path is how a worker loads it. The selected
 ticket's acceptance criteria define completion; the full spec informs design decisions.
 Inputs include `base_branch` as integration destination, immutable `base_sha`, original
 baseline SHA and failures, `worktree_path`, resource allocation, and optional `resume_branch`.

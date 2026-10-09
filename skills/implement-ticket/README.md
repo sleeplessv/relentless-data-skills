@@ -5,6 +5,10 @@ The workflow can select the lowest-numbered eligible ready ticket, or use an exp
 It preserves unrelated work, checks ownership before claiming, and records the base and PR
 target explicitly. Failed work remains recoverable, including when a push fails.
 
+The skill is user-only (`disable-model-invocation: true`) because it claims issues, posts
+comments, pushes, and opens PRs. Start it with `/implement-ticket [N]`; `implement-feature`
+reads its files by path during [Setup](references/setup.md).
+
 Tests and runtime or artifact checks provide completion evidence. Every nonempty solo change
 receives independent review against its ticket before the PR becomes ready. Trivial changes
 that preserve behavior can use one reviewer with the loaded `code-review` prompts and separate

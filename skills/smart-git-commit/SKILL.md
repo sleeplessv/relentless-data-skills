@@ -1,6 +1,6 @@
 ---
 name: smart-git-commit
-description: Groups changed files by affected area, creates one conventional commit per group, then pushes to remote. Use when the user asks to commit changes or commit and push.
+description: Groups changed files by affected area and creates one conventional commit per group, pushing to remote only when asked. Use when the user asks to commit changes or commit and push.
 ---
 
 # Smart git commit
@@ -80,11 +80,13 @@ test: cover empty-cart checkout path
 chore: update CI workflow schedule
 ```
 
-### Step 5: Push to remote
+### Step 5: Push when asked
 
-Before pushing, confirm `git status` is clean, so no changed file was silently dropped from a commit.
+After all commits are created, confirm `git status` is clean, so no changed file was silently dropped from a commit.
 
-After all commits are created:
+Push only when the request asked for it: the user said "push" ("commit and push", "push it"), or a calling skill's workflow includes the push. A plain "commit" ends here, with the commits local.
+
+To push:
 
 ```bash
 git push
@@ -98,7 +100,7 @@ git push -u origin HEAD
 
 **Run the push outside the sandbox.** `git push` needs network access to reach the remote; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. If the push fails with a connection error, suspect the sandbox first.
 
-**Close out** with the outcome first: the commit subjects and whether the push landed, in a line or two. No per-commit writeup.
+**Close out** with the outcome first: the commit subjects and whether the push landed, or that nothing was pushed, in a line or two. No per-commit writeup.
 
 ## Safety rules
 

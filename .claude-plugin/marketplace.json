@@ -271,7 +271,7 @@
     {
       "name": "smart-git-commit",
       "source": "./skills/smart-git-commit",
-      "description": "Group working-tree changes into conventional commits and push them to the remote.",
+      "description": "Group working-tree changes into conventional commits and push them to the remote when asked.",
       "version": "0.1.1",
       "author": {
         "name": "sleeplessv"

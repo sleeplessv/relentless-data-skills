@@ -35,7 +35,7 @@ a `severity: warn` test reported as a failure).
 - **Signature-indexed failure catalogue.** `references/failures.md` is
   keyed by the verbatim string in the log, with causes ranked by prior:
   a DNS error means *suspect the sandbox first*, not the credentials.
-- **dbt v2 (formerly dbt Fusion) quirks.** `references/dbt-v2.md` (loaded
+- **dbt v2 quirks.** `references/dbt-v2.md` (loaded
   only when the context says `engine: v2`, or legacy `fusion`) covers the
   failure modes whose error messages point away from the cause: unit-test
   fixture schema inference throwing `invalid identifier`, and a failing
@@ -49,7 +49,7 @@ dbt-runner/
 ├── references/
 │   ├── install.md            # first-run bootstrap → .dbt-runner/context.md
 │   ├── failures.md           # error-signature catalogue
-│   └── dbt-v2.md             # dbt v2 (formerly dbt Fusion) quirks
+│   └── dbt-v2.md             # dbt v2 quirks
 └── scripts/
     └── preflight.py          # static env checks; --connect for <runner> debug
 ```

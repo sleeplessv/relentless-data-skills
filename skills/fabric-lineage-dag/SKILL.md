@@ -7,7 +7,7 @@ metadata:
 
 # Fabric lineage DAG
 
-The main thread **coordinates only**: it fixes the contract, fans out five extractors in parallel, then dispatches merge, render, copy pass, and publishes. Every dispatched agent gets the scratchpad path, `--repo`, the id contract below, and the reference file for its step. Scripts run from the run's own copy in `<scratch>/scripts/` (made in Step 1) with `python3` (stdlib) and the render step with Node. `<skill-dir>` is the installed skill: agents read it and never edit it; every script patch lands in `<scratch>/scripts/` and is logged in `<scratch>/patches.md` for the user to upstream.
+The main thread **coordinates**: it fixes the contract, fans out five extractors in parallel, applies their shared `lineage_common.py` patches, then dispatches merge, render, copy pass, and publishes. Every dispatched agent gets the scratchpad path, `--repo`, the id contract below, and the reference file for its step. Scripts run from the run's own copy in `<scratch>/scripts/` (made in Step 1) with `python3` (stdlib) and the render step with Node. `<skill-dir>` is the installed skill: agents read it and never edit it; every script patch lands in `<scratch>/scripts/` and is logged in `<scratch>/patches.md` for the user to upstream.
 
 **Input:** a Fabric workspace exported to Git (`*.DataPipeline`, `*.Notebook`, `*.Lakehouse`, `*.SemanticModel`, `*.Report` folders with `.platform` files). **Output:** `lineage.html` published as an artifact, plus `validation-report.md` in the scratchpad.
 

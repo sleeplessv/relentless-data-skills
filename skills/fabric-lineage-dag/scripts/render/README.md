@@ -3,7 +3,7 @@
 Builds the single-file lineage page from `graph.json` + `graph-compact.json` (output of `merge_graph.py`).
 
 ```bash
-cd <skill-dir>/scripts/render
+cd <scratch>/scripts/render   # the run's copy; <skill-dir> stays untouched
 npm i @dagrejs/dagre d3-selection d3-zoom d3-transition esbuild playwright   # once; or `npm install` from package.json
 npx playwright install chromium                                     # once
 npm run bundle                                                      # d3-entry.js -> d3.min.js (~50 KB)

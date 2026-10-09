@@ -52,7 +52,7 @@ def context_md(**overrides) -> str:
     fm = {
         "profile": "corp_dt",
         "target": "local",
-        "engine": "fusion   # fusion | core",
+        "engine": "v2   # v1 | v2",
         "engine_version": "2.0.0",
         "private_key_path_var": "SNOWFLAKE_PRIVATE_KEY_PATH",
     }
@@ -106,7 +106,7 @@ class FrontmatterTests(unittest.TestCase):
     def test_scalars_lists_and_inline_comments(self):
         data = preflight.parse_frontmatter(context_md(), "ctx")
         self.assertEqual(data["profile"], "corp_dt")
-        self.assertEqual(data["engine"], "fusion")  # inline comment stripped
+        self.assertEqual(data["engine"], "v2")  # inline comment stripped
         self.assertEqual(
             data["required_env_vars"], ["SNOWFLAKE_ACCOUNT", "SNOWFLAKE_USER"]
         )

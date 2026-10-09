@@ -1,6 +1,6 @@
 ---
 name: dbt-runner
-description: Use when running any dbt command (build, run, test, compile, seed, deps) or debugging a dbt failure, including connection and auth errors, parse errors, hanging or silently-empty runs, and dbt-fusion quirks. Enforces preflight checks and output-capture discipline before the first dbt invocation of a session, and maps error signatures to causes and fixes. Bootstraps a per-project .dbt-runner/context.md on first use.
+description: Use when running any dbt command (build, run, test, compile, seed, deps) or debugging a dbt failure, including connection and auth errors, parse errors, hanging or silently-empty runs, and dbt v2 (formerly Fusion) quirks. Enforces preflight checks and output-capture discipline before the first dbt invocation of a session, and maps error signatures to causes and fixes. Bootstraps a per-project .dbt-runner/context.md on first use.
 ---
 
 # dbt-runner
@@ -19,6 +19,8 @@ Check for **`.dbt-runner/context.md`** in the dbt project root.
   vars → writes the context file). Then continue.
 - **Present** → load it; it is the source of truth for this project's dbt
   setup (profile, target, engine, required env-var *names*, project lore).
+  Legacy engine values: read `engine: fusion` as `v2` and `engine: core`
+  as `v1`.
 
 The context file holds **names only, never secrets**: no env-var values,
 no passphrases. It is committed to the project repo.
@@ -39,14 +41,15 @@ environment change (new shell, edited `.env`, switched target).
 
 ## Invocation rules, every dbt command
 
-1. **Invoke via the context file's `runner`, never bare `dbt`.** dbt-fusion
-   ships as `dbt`, so PATH often resolves to a different engine than the one
-   the project pins: a fusion binary on a core project hard-errors on
-   deprecations and never reaches SQL compilation, which reads as "the project
-   is broken". If the context file has no `runner`, derive it (`uv.lock` →
-   `uv run dbt`, `poetry.lock` → `poetry run dbt`, `.venv/` →
-   `.venv/bin/dbt`) and record it. Before trusting a parse-stage failure,
-   confirm the engine with `<runner> --version`.
+1. **Invoke via the context file's `runner`, never bare `dbt`.** dbt v1 and
+   dbt v2 (formerly dbt Fusion) both ship as `dbt`, so PATH often resolves
+   to a different engine than the one the project pins: a v2 binary on a v1
+   project hard-errors on deprecations and never reaches SQL compilation,
+   which reads as "the project is broken". If the context file has no
+   `runner`, derive it (`uv.lock` → `uv run dbt`, `poetry.lock` →
+   `poetry run dbt`, `.venv/` → `.venv/bin/dbt`) and record it. Before
+   trusting a parse-stage failure, confirm the engine with
+   `<runner> --version` (major version 1 or 2).
 2. **Run outside the sandbox.** dbt needs network access to the warehouse.
    In a sandboxed shell it fails with DNS/connection errors that masquerade
    as auth problems. If you see a connection error, suspect the sandbox
@@ -102,8 +105,8 @@ Escalation ladder, in order, no skipping:
    `python3 <skill-dir>/scripts/preflight.py --connect` (outside the
    sandbox). It runs `<runner> debug`; if its output says it fell back to
    bare `dbt`, record `runner` first (rule 1).
-3. If the context file says `engine: fusion`, also check
-   [references/fusion.md](references/fusion.md). Fusion has failure modes
+3. If the context file says `engine: v2`, also check
+   [references/dbt-v2.md](references/dbt-v2.md). dbt v2 has failure modes
    with misleading error messages (unit-test fixture inference, blocked
    sibling tests).
 

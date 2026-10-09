@@ -28,16 +28,22 @@ env var, the private key, or a passphrase during discovery.
      is `private_key_path_var` (key-pair auth).
 3. **Runner, then engine.** Resolve *how* to invoke dbt before asking *what*
    dbt is. Bare `dbt` on PATH is often a different install from the one the
-   project pins, and dbt-fusion ships as `dbt`, so PATH commonly yields fusion
-   for a core project. Check for a project-managed environment: `uv.lock` /
-   `[tool.uv]` in `pyproject.toml` → `uv run dbt`; `poetry.lock` →
-   `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt`. Record it as
-   `runner`. Fall back to `dbt` only when none exists. Then run
-   `<runner> --version` (sandbox-safe, no network): dbt-fusion identifies
-   itself as `dbt-fusion <x.y.z>`, otherwise it's dbt-core. Record engine and
-   version. If bare `dbt --version` disagrees with `<runner> --version`, note
-   the mismatch in Project lore. Otherwise it will be rediscovered as a fake
-   "the project is broken" failure.
+   project pins: dbt v2 (formerly dbt Fusion) ships as `dbt` too, so PATH
+   commonly yields v2 for a v1 project. Check for a project-managed
+   environment: `uv.lock` / `[tool.uv]` in `pyproject.toml` → `uv run dbt`;
+   `poetry.lock` → `poetry run dbt`; a bare `.venv/` → `.venv/bin/dbt`.
+   Record it as `runner`. Fall back to `dbt` only when none exists. Then run
+   `<runner> --version` (sandbox-safe, no network) and classify by the
+   **major version**, not the brand string, which varies between releases:
+   a `Core:` block with `installed: 1.x` → `engine: v1`; a version starting
+   `2.` → `engine: v2` (both the dbt and dbt OSS distributions). Record
+   engine and version. If bare `dbt --version` disagrees with
+   `<runner> --version`, note the mismatch in Project lore. Otherwise it
+   will be rediscovered as a fake "the project is broken" failure.
+   **Pinning gotcha:** an unpinned `pip install dbt-core` now installs dbt
+   OSS v2. A v1 project should pin `dbt-core<2`; if its lockfile resolved
+   2.x, that is the mismatch, not a project bug. dbt Core 1.12+ can check a
+   project against v2 with `--use-v2-parser` before an upgrade.
 4. **Packages.** Note whether `packages.yml` / `package-lock.yml` exist
    and whether `dbt_packages/` is populated (preflight checks this every
    session; just note the state).
@@ -63,7 +69,7 @@ commit; suggest the user commit it.
 profile: <profile-name>
 target: <working-target>
 runner: <uv run dbt | poetry run dbt | .venv/bin/dbt | dbt>
-engine: fusion              # fusion | core
+engine: v2                  # v1 | v2
 engine_version: <x.y.z>
 required_env_vars:
   - <VAR_NAME>
@@ -90,6 +96,10 @@ known-slow models, schema quirks. One or two lines each. Newest last._
 - <e.g. adding a region means a seed row in region_config AND an
   accepted_values entry, or the seed/int tests fail.>
 ```
+
+**Re-bootstrapping a legacy file.** A context file written before the
+rename says `engine: fusion` or `engine: core`; write `v2` or `v1` in its
+place (SKILL.md "First action" maps the old values when reading).
 
 ## Done
 

@@ -22,19 +22,25 @@ merge confirmation.
   unrelated work is exactly what `clean` must not do).
 - Branch names follow a fixed format: `<type>/<short-slug>`, e.g. `feat/ship-skill`.
 - Commits go through the [`smart-git-commit`](../smart-git-commit)
-  skill: grouped, conventional, pushed.
+  skill (grouped, conventional); ship then pushes the branch itself.
 - The PR gets a conventional-commit title (it becomes the squash commit on `main`)
   and a short bulleted Summary body.
+- Before merging it waits for the PR's CI checks (`gh pr checks --watch
+  --fail-fast`), even under `clean`. Any failing or cancelled check stops the
+  run with the PR left open. If no checks are reported but the repo has
+  PR-triggered workflows, it re-reads a few times and then asks rather than
+  merging; only a repo with no PR CI proceeds, and the close-out says so.
 - Merge and cleanup run as `gh pr merge <number> --squash --delete-branch`; it
-  asks first unless invoked with `clean`, showing the PR's check results with
-  the question. Declining leaves the PR open and deletes nothing.
+  asks first unless invoked with `clean`, showing the checks line with the
+  question. Declining leaves the PR open and deletes nothing.
 - After the merge it routes by the PR's state on GitHub, never by `gh`'s exit
   code. A merged PR finishes with a checkout and pull of `main`, then checks that
   the squash commit is on local `main` and both branches are gone. A merge
   refused by branch policy or required checks falls back to `--auto`; a
   merge-queue enqueue is reported as queued.
 - The close-out leads with the confirmed outcome (merged; merged, but cleanup
-  incomplete; auto-merge armed; queued; or PR left open) and names any branch
+  incomplete; auto-merge armed; queued; stopped on failing checks; or PR left
+  open) and names any branch
   that outlives the run.
 
 ## Install

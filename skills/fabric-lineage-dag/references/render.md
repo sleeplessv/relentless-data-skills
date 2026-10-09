@@ -1,6 +1,6 @@
 # Render: UX spec, performance rules, design tokens, verification
 
-One dispatch after validation passes. The agent works in `scripts/render/` (see its README for the commands), builds `lineage.html`, runs `test.js`, and returns the test JSON plus screenshot paths. Load the `dataviz` skill before touching colours and `artifact-design` before publishing.
+One dispatch after validation passes. The agent works in `<scratch>/scripts/render/` (see its README for the commands), builds `lineage.html`, runs `test.js`, and returns the test JSON plus screenshot paths. Load the `dataviz` skill before touching colours and `artifact-design` before publishing.
 
 ## Performance rules
 

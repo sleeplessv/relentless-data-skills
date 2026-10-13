@@ -216,7 +216,8 @@ Install and update `implement-feature` and `implement-ticket` together from the
 same repository revision. The feature workflow reads the shared
 [`references/review-and-pr.md`](skills/implement-ticket/references/review-and-pr.md)
 inside `implement-ticket`, so updating only one skill can leave the workflow
-with missing or incompatible instructions. Solo ticket use does not require `implement-feature`.
+with missing or incompatible instructions. Solo ticket use does not require `implement-feature`,
+but both solo and feature runs require `orchestrator-mode`.
 
 The minimum compatible pair for this shared contract is `implement-feature`
 `0.2.3` with `implement-ticket` `0.2.3`. From `0.2.3`, `implement-ticket` is

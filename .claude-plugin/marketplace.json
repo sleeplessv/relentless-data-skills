@@ -123,7 +123,7 @@
       "name": "implement-ticket",
       "source": "./skills/implement-ticket",
       "description": "Implement a GitHub ticket, verify the result, and prepare a pull request for review.",
-      "version": "0.2.3",
+      "version": "0.2.4",
       "author": {
         "name": "sleeplessv"
       },

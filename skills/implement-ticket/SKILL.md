@@ -8,13 +8,17 @@ description: "Implement a ticket (GitHub issue) end-to-end on a ticket branch an
 # Implement ticket
 
 Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number and repository,
-defaulting to the current `gh` remote and step 0's selection. Solo runs complete [Setup](references/setup.md) first.
+defaulting to the current `gh` remote and step 0's selection. Solo runs load `orchestrator-mode` in standing
+mode first: the main thread coordinates, and workers complete [Setup](references/setup.md), then steps 0
+through 8. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
+steps the worker owns. A worker reports an auto-pick, a stop condition, or a question through
+`open_questions`; the coordinator puts it to the user and dispatches the answer.
 
 ## Orchestrated dispatch
 
-For a feature dispatch, read [references/orchestrated.md](references/orchestrated.md) first.
-Skip steps 0 through 3, use step 4 for local exploration, then follow steps 5 through 7 and
-self-review in step 8. The coordinator owns PRs, issue actions, and independent review.
+For a feature dispatch, read [references/orchestrated.md](references/orchestrated.md) first. Skip steps 0
+through 3, use step 4 for local exploration, then follow steps 5 through 7 and self-review in step 8. The
+coordinator owns PRs, issue actions, and independent review.
 
 ## Workflow
 
@@ -24,17 +28,16 @@ self-review in step 8. The coordinator owns PRs, issue actions, and independent 
 
 Apply [Writing](references/setup.md#writing) to authored prose using `technical-writing` and `unslop`. Include the resolved writing references in worker briefs. Solo PR creation and updates follow [PR body](references/review-and-pr.md#pr-body), which uses `pr` for structure and preserves the repository template.
 
-**Use configured execution permissions.** Run commands normally. If a necessary command
-is blocked, use the available scoped escalation and report a denial accurately. The task's
-existing authorization governs external mutations. Reuse the user's authorization for lifecycle
-comments without asking again. Record which assignments and labels this run changes and alter
-only those on a stop path.
+**Use configured execution permissions.** Run commands normally. If a necessary command is blocked, use the
+available scoped escalation and report a denial accurately. The task's existing authorization governs external
+mutations. Reuse the user's authorization for lifecycle comments without asking again. Record which
+assignments and labels this run changes and alter only those on a stop path.
 
 ### Ticket lifecycle comments
 
-Post a comment on the ticket when starting work and when stopping work on each attempt,
-including resumes. In solo runs, the implementing agent posts both comments. In feature runs,
-the coordinator posts them through its tracker worker on behalf of the implementing worker.
+Post a comment on the ticket when starting work and when stopping work on each attempt, including resumes. In
+solo runs, the implementing agent posts both comments. In feature runs, the coordinator posts them through its
+tracker worker on behalf of the implementing worker.
 
 - **Start:** after eligibility and workspace preflight, before implementation, post "Started
   work on #<N> on branch `<branch>`." Identify a resume and the integration branch when relevant.
@@ -43,11 +46,11 @@ the coordinator posts them through its tracker worker on behalf of the implement
   HEAD, what remains, and any failed checks or required decision. A successful worker return
   says "implementation complete, awaiting integration" until integration is verified.
 
-Use `gh issue comment <N> --repo <owner/repo> --body-file <comment-file>`. Record the returned
-comment URL in the findings or run record. A local draft or chat update does not satisfy this
-step. If posting is prohibited or fails, retain the body and report the missing comment and
-reason. Check ticket comments before retrying an uncertain post. On recovery from an abrupt
-interruption, reconcile the prior attempt's missing stop comment before posting a new start.
+Use `gh issue comment <N> --repo <owner/repo> --body-file <comment-file>`. Record the returned comment URL in
+the findings or run record. A local draft or chat update does not satisfy this step. If posting is prohibited
+or fails, retain the body and report the missing comment and reason. Check ticket comments before retrying an
+uncertain post. On recovery from an abrupt interruption, reconcile the prior attempt's missing stop comment
+before posting a new start.
 
 ### 0. Resolve the ticket number
 
@@ -55,10 +58,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 1. Read the ticket and claim it
 
-`gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to
-self is advisory, not an exclusive lock. Complete the base and workspace preflight first;
-then claim within existing authorization and record whether this run added the assignment.
-Post the start comment after step 3 completes.
+`gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
 
 ### 2. Pick a base branch
 
@@ -69,19 +69,18 @@ Post the start comment after step 3 completes.
 
 ### 3. Create the ticket branch
 
-Check applicable branch conventions and `git status --porcelain`. Preserve unrelated dirty
-work in place and use an isolated checkout if needed. Ask only about required uncommitted
-inputs or overlapping edits whose ownership is unclear; do not automatically stash or reset.
-Fetch the intended base and pin `base_sha`. Use the environment's branch prefix, keeping
-`ticket-<N>-<slug>` in the name. Recognize older `feat/ticket-<N>-*` and `feat/issue-<N>-*`
-branches when investigating resumes. Create the branch from the SHA, not a moving branch ref.
+Check applicable branch conventions and `git status --porcelain`. Preserve unrelated dirty work in place and
+use an isolated checkout if needed. Ask only about required uncommitted inputs or overlapping edits whose
+ownership is unclear; do not automatically stash or reset. Fetch the intended base and pin `base_sha`. Use the
+environment's branch prefix, keeping `ticket-<N>-<slug>` in the name. Recognize older `feat/ticket-<N>-*` and
+`feat/issue-<N>-*` branches when investigating resumes. Create the branch from the SHA, not a moving branch
+ref.
 
-For a prior attempt, read its findings and compare local and remote tips before choosing it.
-Multiple candidates require evidence of which attempt belongs to this task. Preserve the
-existing WIP tip; work on a fresh attempt branch before rebasing onto `base_sha` when rewriting
-a pushed branch is not already authorized. Abort an unsuccessful rebase explicitly. Keep
-its saved tip and findings available if rebuilding from the base is necessary. Report the
-actual branch and preservation state, including any push failure.
+For a prior attempt, read its findings and compare local and remote tips before choosing it. Multiple
+candidates require evidence of which attempt belongs to this task. Preserve the existing WIP tip; work on a
+fresh attempt branch before rebasing onto `base_sha` when rewriting a pushed branch is not already authorized.
+Abort an unsuccessful rebase explicitly. Keep its saved tip and findings available if rebuilding from the base
+is necessary. Report the actual branch and preservation state, including any push failure.
 
 Post and record the start comment before proceeding to step 4.
 
@@ -125,12 +124,12 @@ Allocate separate ports and test resources for parallel workers, or serialize sh
 
 ### 8. Review, then finalise the PR
 
-Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring
-deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers
-return through their orchestrated contract without nested review.
+Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring deferred from
+step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their
+orchestrated contract without nested review.
 
-Solo runs follow [Independent review](references/review-and-pr.md#independent-review) with the
-pinned base and ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization).
+Solo runs follow [Independent review](references/review-and-pr.md#independent-review) with the pinned base and
+ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization).
 
 ## Stop conditions
 
@@ -142,9 +141,9 @@ Stop and surface to the user (do not improvise) if:
 - Required uncommitted inputs or overlapping work cannot be used safely without a user decision.
 - A required check is blocked and diagnosis or a different authorized approach cannot make further useful progress. Repeated identical failures call for a changed approach, not an arbitrary claim of completion.
 
-When stopping, preserve work and report the actual branch, HEAD, worktree path, dirty files,
-and push outcome. Push WIP when authorized; a failed push leaves local work that must remain.
-Record the failure, attempts, and pending decisions in a local findings artifact. Post and record
-the stop comment with these findings. Leave any draft PR open and report its state accurately.
-In solo runs, release only a claim this run added; label changes require lifecycle ownership
-and existing authorization. In orchestrated runs, the feature coordinator owns the lifecycle.
+When stopping, preserve work and report the actual branch, HEAD, worktree path, dirty files, and push outcome.
+Push WIP when authorized; a failed push leaves local work that must remain. Record the failure, attempts, and
+pending decisions in a local findings artifact. Post and record the stop comment with these findings. Leave
+any draft PR open and report its state accurately. In solo runs, release only a claim this run added; label
+changes require lifecycle ownership and existing authorization. In orchestrated runs, the feature coordinator
+owns the lifecycle.

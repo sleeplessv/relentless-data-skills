@@ -7,7 +7,8 @@ target explicitly. Failed work remains recoverable, including when a push fails.
 
 The skill is user-only (`disable-model-invocation: true`) because it claims issues, posts
 comments, pushes, and opens PRs. Start it with `/implement-ticket [N]`; `implement-feature`
-reads its files by path during [Setup](references/setup.md).
+reads its files by path during [Setup](references/setup.md). A solo run loads `orchestrator-mode`
+in standing mode: the main thread coordinates, and workers set up, implement, check, and review.
 
 Tests and runtime or artifact checks provide completion evidence. Every nonempty solo change
 receives independent review against its ticket before the PR becomes ready. Trivial changes
@@ -32,7 +33,7 @@ the current environment's naming convention.
 ## Install
 
 For feature runs, install and update this skill with `implement-feature` from the same repository
-revision. Solo ticket use needs only this skill and its companions. Follow the
+revision. Solo ticket use needs this skill, `orchestrator-mode`, and the companions below. Follow the
 [implementation workflow update guidance](../../README.md#implementation-workflow-updates)
 for the compatible pair and the [installation methods](../../README.md#install).
 

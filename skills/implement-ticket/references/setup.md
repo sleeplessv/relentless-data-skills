@@ -9,7 +9,8 @@ as described under [Writing](#writing). Load review and PR guidance when those p
 Record absolute paths and package versions or source revisions in the findings or run record
 when available. Record unknown provenance as unknown.
 
-Feature runs also resolve `orchestrator-mode` and `implement-ticket`. `implement-ticket` sets
+Solo and feature runs also resolve `orchestrator-mode`; feature runs resolve `implement-ticket`
+too. `implement-ticket` sets
 `disable-model-invocation`, so it is absent from the invocable list: locate its installed root by
 path and read its `SKILL.md` and references as files. Confirm the ticket skill's
 `references/orchestrated.md` and `references/review-and-pr.md` are readable. The feature and ticket

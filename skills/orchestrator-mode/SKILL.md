@@ -60,9 +60,9 @@ each step depends on the last.
 - Feature-sized work runs in waves, one per dependency level.
 
 Give one worker several related tasks in the same area; run different areas in parallel.
-Start with a wide search, then narrow. Keep at most four workers running, nested ones
-included, unless [Harness notes](references/reference.md#harness-notes) gives this
-environment a higher limit. A spawn past the limit fails rather than queues: wait for a
+Keep at most four workers running, nested ones included, unless
+[Harness notes](references/reference.md#harness-notes) gives this environment a higher
+limit. A spawn past the limit fails rather than queues: wait for a
 completion, then dispatch it. Keep dispatches flat; before giving a subtree its own
 coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 
@@ -95,8 +95,8 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    parts they own. Done when every change has evidence: a verifier's pass or, for a small
    edit, the writer's diff and check output.
 6. **Report.** Lead with the outcome, then returned artifact paths or IDs, verification
-   results, and open limitations, in one to three sentences. When the request was a
-   question, the answer is the deliverable, at the length it needs. The run directory
+   results, and open limitations, at the length the user needs to act on them. When the
+   request was a question, the answer is the deliverable. The run directory
    dies with the session, so when a run produced research worth reusing, have a worker
    save it to the repo's `docs/research/` (or the project's equivalent) and report that
    path. Once the run's PRs merge, offer to remove its worktrees and branches, following

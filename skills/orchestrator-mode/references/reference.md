@@ -14,8 +14,9 @@ Read the section the current dispatch needs.
 Facts the tool schemas leave out, checked against vendor docs in September 2026. The
 named settings are the durable handle; check them when a number matters.
 
-- **Questions.** Claude Code withholds `AskUserQuestion` from every subagent. Treat workers
-  in any harness as unable to ask; their questions come back in `open_questions`.
+- **Questions.** Claude Code withholds `AskUserQuestion` from subagents; only a fork keeps
+  the main conversation's tools. Treat workers in any harness as unable to ask; their
+  questions come back in `open_questions`.
 - **Concurrency.** Claude Code runs up to 20 subagents
   (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`). Codex V2 defaults to 4 open threads
   (`agents.max_concurrent_threads_per_session`). Cortex Code allows 50 background agents.

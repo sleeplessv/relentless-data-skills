@@ -10,6 +10,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 <!-- skills-table:begin -->
 | Skill | What it does |
 | --- | --- |
+| [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
@@ -52,7 +53,10 @@ Our `implement-ticket` adds the GitHub ticket and PR lifecycle. `implement-featu
 is our counterpart to upstream `implement-spec`: both schedule a task graph across
 isolated worktrees and review the integrated result. We retain one GitHub feature PR,
 pinned dispatch bases, verified merges, and recoverable WIP. Upstream `implement-spec`
-also supports trackers that close work without a PR.
+also supports trackers that close work without a PR. `candidate-to-spec` sits between
+upstream `improve-codebase-architecture` and `implement-feature`. It takes the report's
+deepening candidates, has agents answer the design questions the report would otherwise
+grill the human on, and publishes approved specs with `ready-for-agent` tickets.
 
 Install `code-review` and `pr` alongside these workflows. Nonempty solo changes receive
 independent review; the feature coordinator owns review for dispatched tickets.
@@ -141,6 +145,7 @@ reach for outside Cursor too, so it is worth symlinking into `~/.claude/skills`.
 | `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) | `npx skills add vercel-labs/skills -g -y -s find-skills` |
 | `frontend-design` | [anthropics/claude-code](https://github.com/anthropics/claude-code) | `npx skills add anthropics/claude-code -g -y -s frontend-design` |
 | `terraform-skill` | [antonbabenko/terraform-skill](https://github.com/antonbabenko/terraform-skill) | `npx skills add antonbabenko/terraform-skill -g -y` |
+| `ponytail-review` (and the other `ponytail-*` skills) | [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `npx skills add DietrichGebert/ponytail -g -y` |
 | `llm-council` | based on [karpathy/llm-council](https://github.com/karpathy/llm-council) (methodology) | local SKILL.md adaptation, no upstream package |
 
 ## Install

@@ -145,6 +145,7 @@ reach for outside Cursor too, so it is worth symlinking into `~/.claude/skills`.
 | `find-skills` | [vercel-labs/skills](https://github.com/vercel-labs/skills) | `npx skills add vercel-labs/skills -g -y -s find-skills` |
 | `frontend-design` | [anthropics/claude-code](https://github.com/anthropics/claude-code) | `npx skills add anthropics/claude-code -g -y -s frontend-design` |
 | `terraform-skill` | [antonbabenko/terraform-skill](https://github.com/antonbabenko/terraform-skill) | `npx skills add antonbabenko/terraform-skill -g -y` |
+| `ponytail-review` (and the other `ponytail-*` skills) | [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail) | `npx skills add DietrichGebert/ponytail -g -y` |
 | `llm-council` | based on [karpathy/llm-council](https://github.com/karpathy/llm-council) (methodology) | local SKILL.md adaptation, no upstream package |
 
 ## Install

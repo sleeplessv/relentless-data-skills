@@ -13,6 +13,8 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Feature PR** — the single pull request from the integration branch into the default branch; the only PR a feature produces.
 - **Spec**: a specification stored as an issue, labelled `spec` or the older `prd`. Tickets divide its implementation. A spec-only feature run promises its full requirements; an explicit ticket set uses it as context.
 - **Work-set**: the resolved list of tickets a feature run will implement, announced before branch creation. An explicit ticket list controls this scope.
+- **Deepening candidate**: a proposed refactor, produced by an architecture review, that turns a shallow module into a deep one. It carries the files involved, the problem, the proposed solution, and a recommendation strength.
+- **Decision log**: the answered design tree for one deepening candidate, each decision paired with its evidence. The spec for that candidate is written from it.
 - **Frontier**: tickets with no active implementer whose blockers are satisfied in the verified, preserved integration tip. Assignment to the authenticated actor is advisory and does not make that actor an active implementer.
 - **Dispatch base**: the immutable integration commit assigned to a ticket attempt. Concurrent attempts can have different bases as integration advances.
 - **Completion mode**: the obligations a feature run must satisfy. A whole-spec run covers every spec requirement; a selected-ticket run covers its explicit work-set.

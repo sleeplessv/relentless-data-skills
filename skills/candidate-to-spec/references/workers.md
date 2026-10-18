@@ -42,17 +42,17 @@ constraints, where the seam goes, what sits behind it, the interface (signature,
 ordering, error modes, configuration, performance), the adapters and their dependency category,
 what each caller changes, which tests survive, which move to the new interface and which are new,
 the migration order, glossary terms the deepened module needs, and decisions that meet the ADR test.
-Work it frontier by frontier, the way `grilling` would with a human: settle every node whose
-prerequisites are settled, then recompute. The tree is done when no node is silently assumed.
+The tree is done when no node is silently assumed.
 
 **Evidence.** Each decision carries one of:
 
 - a code citation (`path:line`) that shows the constraint or the current behaviour;
 - a design-it-twice comparison, run per `DESIGN-IT-TWICE.md` with at most three alternatives,
   only when the interface shape is genuinely open;
-- a prototype, following `prototype`'s rules except location: it lives in
-  `<run>/<slug>/prototype/`, is small enough to build and run inside the designer's own dispatch,
-  and is never committed.
+- a prototype, following `prototype`'s rules for shape and marking but not its location or
+  capture rules: it lives in `<run>/<slug>/prototype/`, is small enough to build and run inside
+  the designer's own dispatch, is never committed or pushed to any branch, and the question it
+  settled is recorded as the decision's evidence.
 
 A node with no evidence is an open question, not a decision.
 

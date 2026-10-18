@@ -30,8 +30,8 @@ inlined, trimmed to the decision.
    the evidence.
 10. **Open questions** (added): escalations the user has not answered, each with its recommended
     answer.
-11. **Proposed glossary and ADR changes** (added): terms and decisions that will land through a
-    docs ticket.
+11. **Proposed glossary and ADR changes** (added): terms and decisions that a docs ticket will
+    add.
 12. **Out of Scope**: other candidates, behaviour changes, files outside the candidate's Files.
 13. **Further Notes**: policy defaults used, prototypes built and discarded, the run date.
 
@@ -79,7 +79,7 @@ One worker, with the approved spec, the decision log, `<run>/<slug>/`, the track
 1. Follow `to-tickets` steps 1 to 3 as written: tracer-bullet vertical slices, blocking edges, and
    expand–contract sequencing when the deepening is a wide refactor.
 2. Add one docs ticket for the spec's proposed glossary and ADR changes, blocked by the ticket that
-   lands the deepened module, so the terms describe code that exists.
+   delivers the deepened module, so the terms describe code that exists.
 3. For `to-tickets` step 4, send the numbered breakdown to the reviewer worker (resumed) with the
    three quiz questions: granularity, blocking edges, merge or split. Apply its answers once and
    record question and answer in `<run>/<slug>/tickets.md`.

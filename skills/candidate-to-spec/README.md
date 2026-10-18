@@ -9,14 +9,14 @@ Per candidate, a designer worker walks the design tree and answers every node wi
 code citation, a design-it-twice comparison, or a throwaway prototype), reading a per-project
 `docs/architecture-policy.md` for taste questions and escalating only behaviour changes, ADR
 conflicts, dependency changes, and scope widening. A separate reviewer worker, briefed as the
-maintainer and carrying `ponytail-review`'s lean checklist, attacks the log once. The designer
+maintainer and carrying `ponytail-review`'s lean checklist, reviews the log once. The designer
 revises or rejects with evidence; rejections become "Contested decisions" in the spec. The spec is
 published at `needs-triage`, the user approves it, and the reviewer answers `to-tickets`' quiz
 before the tickets publish as sub-issues.
 
-Several candidates are ordered by dependency by a planning worker. Only candidates whose
-predecessors have merged get specs in one run; re-running from the same report path after a
-merge re-validates the rest against the current tree.
+A planning worker orders several candidates by dependency. Only candidates whose predecessors
+have merged get specs in one run; re-running from the same report path after a merge re-validates
+the rest against the current tree.
 
 [SKILL.md](SKILL.md) holds the workflow; [references/workers.md](references/workers.md) the planning,
 designer, reviewer, and revision contracts; [references/spec-and-tickets.md](references/spec-and-tickets.md)

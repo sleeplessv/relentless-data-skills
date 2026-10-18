@@ -20,8 +20,8 @@ policy file, and the repository.
    absent from the picks. Everything else is deferred, each naming the spec or candidate that
    blocks it.
 4. **Re-validate on a re-run.** For every remaining candidate, confirm its Files still exist and
-   its Problem still holds on the current tree. A candidate an earlier refactor dissolved is marked
-   `dissolved` with the commit or PR that did it, and leaves the sets.
+   its Problem still holds on the current tree. Mark a candidate that an earlier refactor
+   dissolved as `dissolved`, cite the commit or PR that did it, and drop it from the sets.
 
 Write `<run>/plan.md`: an ordered table of slug, strength, blockers, and status (`this-run`,
 `deferred`, `dissolved`, `done`, `in-flight`), followed by one line per edge with its reason.
@@ -50,7 +50,7 @@ The tree is done when no node is silently assumed.
 - a design-it-twice comparison, run per `DESIGN-IT-TWICE.md` with at most three alternatives,
   only when the interface shape is genuinely open;
 - a prototype, following `prototype`'s rules for shape and marking but not its location or
-  capture rules: it lives in `<run>/<slug>/prototype/`, is small enough to build and run inside
+  capture rules: it goes in `<run>/<slug>/prototype/`, is small enough to build and run inside
   the designer's own dispatch, is never committed or pushed to any branch, and the question it
   settled is recorded as the decision's evidence.
 
@@ -72,18 +72,18 @@ Proposed ADRs, Test plan, Open questions. Return `status`, `decision_log_path`, 
 
 ### Reviewer
 
-A fresh worker that did not write the log, briefed as the maintainer who will live with the
-result. Inputs: `CONTEXT.md` or `GLOSSARY.md`, the ADRs, the policy file, the test layout (test
-directories and one representative test file), the candidate file, and the decision log.
+A fresh worker that did not write the log, briefed as the future maintainer of the result. Inputs:
+`CONTEXT.md` or `GLOSSARY.md`, the ADRs, the policy file, the test layout (test directories and
+one representative test file), the candidate file, and the decision log.
 
 Add the **lean checklist** when `ponytail-review` is installed, quoted from its "Lean" item:
 delete, reuse, stdlib or native, yagni, merge, split. Map it onto deep-module rules: one adapter is
 a hypothetical seam, so a seam with a single implementation needs a named second adapter, and a test
 fake counts only when the test plan uses it; an interface wider than its callers use is shallow.
 
-One pass. Each finding names the node, a concrete case ("with this caller or input, this decision
-leads to this result"), and the evidence that would resolve it. A finding without a case is not
-reported. Return `status` and `findings`; an empty list is a valid return.
+The reviewer makes one pass. Each finding names the node, a concrete case ("with this caller or
+input, this decision leads to this result"), and the evidence that would resolve it. The reviewer
+drops a finding without a case. Return `status` and `findings`; an empty list is a valid return.
 
 ### Revision
 

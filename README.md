@@ -54,7 +54,7 @@ is our counterpart to upstream `implement-spec`: both schedule a task graph acro
 isolated worktrees and review the integrated result. We retain one GitHub feature PR,
 pinned dispatch bases, verified merges, and recoverable WIP. Upstream `implement-spec`
 also supports trackers that close work without a PR. `candidate-to-spec` sits between
-upstream `improve-codebase-architecture` and `implement-feature`: it takes the report's
+upstream `improve-codebase-architecture` and `implement-feature`. It takes the report's
 deepening candidates, has agents answer the design questions the report would otherwise
 grill the human on, and publishes approved specs with `ready-for-agent` tickets.
 

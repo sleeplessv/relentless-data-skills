@@ -76,9 +76,9 @@ question.
 
 ### 3. Publish the spec and take the user's decision
 
-One worker writes and publishes the spec per [Spec](references/spec-and-tickets.md#spec): labels
-`spec` and `needs-triage`, decision log as a comment. Show the user the "What changes for you"
-section, the contested decisions, and the open questions, then wait. Apply
+One worker writes and publishes the spec per [Spec](references/spec-and-tickets.md#spec), with
+the labels `spec` and `needs-triage` and the decision log as a comment. Show the user the "What
+changes for you" section, the contested decisions, and the open questions, then wait. Apply
 [User decision](references/spec-and-tickets.md#user-decision). Done when the spec carries
 `ready-for-agent`, or the candidate is recorded as rejected with its reason.
 
@@ -92,16 +92,16 @@ posts the breakdown as a spec comment. Done when every ticket URL and its blocke
 
 ### 5. Report
 
-Lead with the specs published and their ticket counts. Then the deferred candidates and what blocks
-each, unanswered open questions, and the next steps: run `implement-feature <spec#>` per spec in
-plan order, run `ponytail-review` on each feature PR, and re-run this skill from the same report
-path once a blocking spec has merged. Done when the user can act from the report alone.
+Lead with the specs published and their ticket counts. Then list the deferred candidates and what
+blocks each, unanswered open questions, and the next steps: run `implement-feature <spec#>` per
+spec in plan order, run `ponytail-review` on each feature PR, and re-run this skill from the same
+report path once a blocking spec has merged. Done when the user can act from the report alone.
 
 ## Capacity and writes
 
 Stages run one after another, so one worker is live at a time; a designer running design-it-twice
 may spawn up to three alternatives beneath it, which keeps the tree within `orchestrator-mode`'s
-four-worker cap. Workers write only under the run directory and to the tracker. Nothing lands in
-the target repo before the spec is approved: glossary and ADR changes travel as a docs ticket, and
-prototypes live in `<run>/<slug>/prototype/` and die with the run. The policy file is the one
-exception, because the user authors it in the bootstrap interview.
+four-worker cap. Workers write only under the run directory and to the tracker. No worker writes
+to the target repo before the spec is approved. Glossary and ADR changes go in a docs ticket, and
+prototypes stay in `<run>/<slug>/prototype/` and are discarded with the run. The policy file is
+the one exception, because the user authors it in the bootstrap interview.

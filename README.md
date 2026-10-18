@@ -10,6 +10,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 <!-- skills-table:begin -->
 | Skill | What it does |
 | --- | --- |
+| [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
@@ -52,7 +53,10 @@ Our `implement-ticket` adds the GitHub ticket and PR lifecycle. `implement-featu
 is our counterpart to upstream `implement-spec`: both schedule a task graph across
 isolated worktrees and review the integrated result. We retain one GitHub feature PR,
 pinned dispatch bases, verified merges, and recoverable WIP. Upstream `implement-spec`
-also supports trackers that close work without a PR.
+also supports trackers that close work without a PR. `candidate-to-spec` sits between
+upstream `improve-codebase-architecture` and `implement-feature`: it takes the report's
+deepening candidates, has agents answer the design questions the report would otherwise
+grill the human on, and publishes approved specs with `ready-for-agent` tickets.
 
 Install `code-review` and `pr` alongside these workflows. Nonempty solo changes receive
 independent review; the feature coordinator owns review for dispatched tickets.

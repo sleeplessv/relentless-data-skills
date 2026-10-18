@@ -1,0 +1,21 @@
+{
+  "name": "candidate-to-spec",
+  "version": "0.1.0",
+  "description": "Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/candidate-to-spec",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "architecture",
+    "refactoring",
+    "deep-modules",
+    "spec",
+    "tickets",
+    "orchestration",
+    "subagents",
+    "workflow"
+  ]
+}

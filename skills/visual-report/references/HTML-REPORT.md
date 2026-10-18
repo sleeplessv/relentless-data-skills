@@ -156,4 +156,4 @@ This is the house style. Apply it, don't reinvent per report.
 
 ## Tone
 
-Plain English, concise, and direct: state each point as a claim, not a hedge. If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `CONTEXT.md`, an ADR's terms), use that vocabulary exactly; don't drift into synonyms.
+Plain English, concise, and direct: state each point as a claim, not a hedge. If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `GLOSSARY.md` or older `CONTEXT.md`, an ADR's terms), use that vocabulary exactly; don't drift into synonyms.

@@ -86,7 +86,7 @@ Post and record the start comment before proceeding to step 4.
 
 ### 4. Explore before editing
 
-Grep/search for the modules the ticket touches. Read `AGENTS.md`, `CONTEXT.md`, and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the ticket asks for it.
+Grep/search for the modules the ticket touches. Read `AGENTS.md`, `GLOSSARY.md` (or the older `CONTEXT.md`), and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the ticket asks for it.
 
 For solo runs, identify the **feedback-loop commands**: the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`), plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the configured type-check/lint and test commands on the pinned clean `base_sha` before editing, or reuse an original baseline with that proven SHA. On resume, use a separate checkout for this base check; failures on the WIP branch remain separate and cannot become baseline exemptions. Record commands, checked SHA, and original failures.
 

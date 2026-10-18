@@ -1,4 +1,4 @@
-# Context
+# Glossary
 
 Ubiquitous language for this repo's skills. Glossary only — no implementation details.
 

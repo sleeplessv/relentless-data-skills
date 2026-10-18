@@ -145,7 +145,7 @@
       "name": "implement-ticket",
       "source": "./skills/implement-ticket",
       "description": "Implement a GitHub ticket, verify the result, and prepare a pull request for review.",
-      "version": "0.2.4",
+      "version": "0.2.5",
       "author": {
         "name": "sleeplessv"
       },
@@ -384,7 +384,7 @@
       "name": "visual-report",
       "source": "./skills/visual-report",
       "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "author": {
         "name": "sleeplessv"
       },

@@ -127,6 +127,12 @@ class FrontmatterTests(unittest.TestCase):
         status, _ = preflight.check_env_vars(data)
         self.assertEqual(status, preflight.SKIP)
 
+    def test_inline_list_items(self):
+        data = preflight.parse_frontmatter(
+            "---\nrequired_env_vars: [A_VAR, 'B_VAR']  # two\n---\n", "ctx"
+        )
+        self.assertEqual(data["required_env_vars"], ["A_VAR", "B_VAR"])
+
     def test_missing_frontmatter_rejected(self):
         with self.assertRaises(SystemExit):
             preflight.parse_frontmatter("# no frontmatter here", "ctx")

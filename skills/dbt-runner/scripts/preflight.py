@@ -67,8 +67,9 @@ def parse_frontmatter(text: str, where: str) -> dict:
     """Parse the YAML frontmatter of the context file.
 
     Supports the two shapes the context file uses: top-level scalars
-    (`key: value`) and one-level lists of scalars (`key:` followed by
-    `- item` lines). Anything fancier is out of scope on purpose.
+    (`key: value`) and one-level lists of scalars, written as a block
+    (`key:` followed by `- item` lines) or inline (`key: [a, b]`, `[]`).
+    Anything fancier is out of scope on purpose.
     """
     if not text.startswith("---"):
         raise SystemExit(
@@ -90,10 +91,18 @@ def parse_frontmatter(text: str, where: str) -> dict:
             data[current_list].append(strip_inline_comment(stripped[2:]))
             continue
         if ":" in stripped and not raw.startswith((" ", "\t")):
-            key, _, value = stripped.partition(":")
+            key, _, raw_value = stripped.partition(":")
             key = key.strip()
-            value = strip_inline_comment(value)
-            if value:
+            value = strip_inline_comment(raw_value)
+            if raw_value.strip().startswith("[") and value.endswith("]"):
+                items = value[1:-1].split(",")
+                data[key] = [
+                    strip_inline_comment(item)
+                    for item in items
+                    if item.strip()
+                ]
+                current_list = None
+            elif value:
                 data[key] = value
                 current_list = None
             else:

@@ -4,10 +4,12 @@ command of a session.
 
 Standard library only, Python 3.9+. The default run is fully static (no
 network, sandbox-safe): it verifies the things that make dbt fail before any
-model runs — env vars, the private key file, package state, and the
-profile/target. `--connect` additionally runs `<runner> debug` (the context
-file's `runner`) for a live connection test (needs network — run with
-sandboxing disabled).
+model runs — env vars, the private key file, package state, the
+profile/target, and that `<runner> --version` (the context file's `runner`)
+reports the recorded `engine` and `engine_version`. Exception: a `uv run`
+runner may sync an out-of-date environment first, which needs network.
+`--connect` additionally runs `<runner> debug` for a live connection test
+(needs network — run with sandboxing disabled).
 
 Reads required env-var names (names only, never values) from the per-project
 `.dbt-runner/context.md`. Output is one line per check — `OK` / `FAIL` /
@@ -21,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -31,6 +34,14 @@ CONTEXT_RELPATH = Path(".dbt-runner") / "context.md"
 OK = "OK"
 FAIL = "FAIL"
 SKIP = "SKIP"
+
+RUNNER_TIMEOUT = 60  # seconds for `<runner> --version`
+
+# Engines each recorded `engine:` value accepts. Legacy values per SKILL.md
+# "First action": `fusion` is v2; `core` is v1, or v2 for a dbt Core v2 beta.
+RECORDED_ENGINES = {
+    "v1": ("v1",), "v2": ("v2",), "fusion": ("v2",), "core": ("v1", "v2"),
+}
 
 
 # --------------------------------------------------------------------------
@@ -269,6 +280,89 @@ def check_profile(context: dict) -> tuple:
     )
 
 
+def reported_version(output: str) -> str:
+    """The deciding version in `<runner> --version` output, per
+    references/install.md Step 1.3: a `Core:` block's `installed:` version,
+    else the first version number. Empty when none is found."""
+    prefix = r"installed:\s*v?" if "Core:" in output else ""
+    match = re.search(prefix + r"(\d+\.\d+(?:\.\d+)?\S*)", output)
+    return match.group(1) if match else ""
+
+
+def major_minor(version: str) -> list:
+    return version.split("-")[0].split(".")[:2]
+
+
+def check_runner(context: dict, project_root: Path) -> tuple:
+    """Run `<runner> --version` (no network) and compare the engine it
+    reports with the context's `engine` and `engine_version`."""
+    runner = context.get("runner", "")
+    if not runner:
+        return FAIL, (
+            "no `runner` in context. Remedy: derive and record it per"
+            " SKILL.md invocation rule 1 (bare `dbt` on PATH is often a"
+            " different engine than the project pins)."
+        )
+    recorded = context.get("engine", "")
+    recorded_version = context.get("engine_version", "")
+    if recorded not in RECORDED_ENGINES or not recorded_version:
+        return FAIL, (
+            "context file lacks a valid engine/engine_version (engine must"
+            " be v1 or v2). Remedy: re-run the bootstrap"
+            " (references/install.md)."
+        )
+    try:
+        argv = shlex.split(runner) + ["--version"]
+    except ValueError as exc:
+        return FAIL, (
+            f"cannot parse runner `{runner}` ({exc}). Remedy: fix the"
+            f" quoting of `runner` in {CONTEXT_RELPATH}."
+        )
+    shown = shlex.join(argv)
+    try:
+        result = subprocess.run(
+            argv, cwd=str(project_root), capture_output=True, text=True,
+            timeout=RUNNER_TIMEOUT,
+        )
+    except FileNotFoundError:
+        return FAIL, (
+            f"`{argv[0]}` not found (runner `{runner}`). Remedy: fix"
+            " `runner` in the context file or install the project's"
+            " environment."
+        )
+    except subprocess.TimeoutExpired:
+        return FAIL, (
+            f"`{shown}` timed out after {RUNNER_TIMEOUT}s. Remedy: run it"
+            " by hand; an unsynced environment may be downloading packages."
+        )
+    output = (result.stdout or "") + (result.stderr or "")
+    excerpt = " ".join(output.split())[:300]  # keep one line per check
+    if result.returncode != 0:
+        return FAIL, f"`{shown}` exited {result.returncode}: {excerpt}"
+    version = reported_version(output)
+    if not version:
+        return FAIL, f"`{shown}` printed no recognisable version: {excerpt}"
+    engine = f"v{version.split('.')[0]}"
+    if engine not in RECORDED_ENGINES[recorded]:
+        return FAIL, (
+            f"`{shown}` reports {engine} {version}, but the context says"
+            f" `engine: {recorded}`. Remedy: point `runner` at the install"
+            " the project pins (SKILL.md invocation rule 1), or re-run the"
+            " bootstrap if the project moved engines."
+        )
+    if major_minor(version) != major_minor(recorded_version):
+        return FAIL, (
+            f"`{shown}` reports {engine} {version}, but the context says"
+            f" `engine_version: {recorded_version}` (major.minor differs)."
+            " Remedy: sync the project environment, or re-run the bootstrap"
+            " if the upgrade was intentional."
+        )
+    return OK, (
+        f"`{shown}` reports {engine} {version}, matching the context"
+        f" (engine {recorded}, engine_version {recorded_version})"
+    )
+
+
 # --------------------------------------------------------------------------
 # Live connection test (--connect)
 # --------------------------------------------------------------------------
@@ -347,6 +441,7 @@ def main(argv=None) -> int:
         ("key", check_private_key(context)),
         ("packages", check_packages(project_root, context.get("runner", ""))),
         ("profile", check_profile(context)),
+        ("runner", check_runner(context, project_root)),
     ]
     failed = 0
     for name, (status, message) in checks:

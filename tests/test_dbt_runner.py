@@ -52,6 +52,7 @@ def context_md(**overrides) -> str:
     fm = {
         "profile": "corp_dt",
         "target": "local",
+        "runner": "uv run dbt",
         "engine": "v2   # v1 | v2",
         "engine_version": "2.0.0",
         "private_key_path_var": "SNOWFLAKE_PRIVATE_KEY_PATH",
@@ -273,6 +274,126 @@ class ProfileCheckTests(unittest.TestCase):
         self.assertIn("profiles.yml", msg)
 
 
+CORE_1_8_VERSION = """\
+Core:
+  - installed: 1.8.7
+  - latest:    2.0.1 - Update available!
+
+Plugins:
+  - snowflake: 1.8.4 - Up to date!
+"""
+
+FUSION_VERSION = "dbt-fusion 2.0.0-preview.205\n"
+
+
+class RunnerCheckTests(unittest.TestCase):
+    """`<runner> --version` is stubbed: the check must never run dbt."""
+
+    CTX = {"runner": "uv run dbt", "engine": "v1", "engine_version": "1.8.7"}
+
+    def _check(self, ctx=None, stdout="", **kwargs):
+        if not kwargs:
+            kwargs["return_value"] = types.SimpleNamespace(
+                returncode=0, stdout=stdout, stderr=""
+            )
+        with mock.patch.object(subprocess, "run", **kwargs) as run:
+            status, msg = preflight.check_runner(
+                self.CTX if ctx is None else ctx, Path(".")
+            )
+        return status, msg, run
+
+    def test_missing_runner_fails_without_running_dbt(self):
+        status, msg, run = self._check(ctx={"engine": "v1"})
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("no `runner`", msg)
+        self.assertIn("invocation rule 1", msg)
+        run.assert_not_called()
+
+    def test_unresolvable_runner_fails(self):
+        status, msg, run = self._check(side_effect=FileNotFoundError())
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("`uv` not found", msg)
+        self.assertEqual(run.call_args[0][0], ["uv", "run", "dbt", "--version"])
+        self.assertIn("timeout", run.call_args[1])
+
+    def test_matching_v1_install_ok(self):
+        status, msg, _ = self._check(stdout=CORE_1_8_VERSION)
+        self.assertEqual(status, preflight.OK)
+        self.assertIn("v1 1.8.7", msg)
+
+    def test_engine_mismatch_fails(self):
+        # The #46 incident: bare `dbt` was dbt-fusion on a pinned v1 project.
+        status, msg, _ = self._check(
+            ctx=dict(self.CTX, runner="dbt"), stdout=FUSION_VERSION
+        )
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("v2 2.0.0-preview.205", msg)
+        self.assertIn("engine: v1", msg)
+
+    def test_minor_version_mismatch_fails(self):
+        status, msg, _ = self._check(
+            ctx=dict(self.CTX, engine_version="1.9.0"), stdout=CORE_1_8_VERSION
+        )
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("1.8.7", msg)
+        self.assertIn("engine_version: 1.9.0", msg)
+
+    def test_patch_and_prerelease_differences_ok(self):
+        status, _, _ = self._check(
+            ctx={"runner": "dbt", "engine": "v2", "engine_version": "2.0.0"},
+            stdout=FUSION_VERSION,
+        )
+        self.assertEqual(status, preflight.OK)
+
+    def test_nonzero_exit_fails(self):
+        bad = types.SimpleNamespace(returncode=2, stdout="",
+                                    stderr="boom\nsecond line\n")
+        status, msg, _ = self._check(return_value=bad)
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("exited 2", msg)
+        self.assertIn("boom second line", msg)
+        self.assertNotIn("\n", msg)  # one output line per check
+
+    def test_timeout_fails(self):
+        status, msg, _ = self._check(
+            side_effect=subprocess.TimeoutExpired("uv", preflight.RUNNER_TIMEOUT)
+        )
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("timed out", msg)
+
+    def test_unrecognised_output_fails_and_shows_it(self):
+        status, msg, _ = self._check(stdout="something else entirely\n")
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("something else entirely", msg)
+
+    def test_unbalanced_quote_fails_without_running_dbt(self):
+        status, msg, run = self._check(ctx=dict(self.CTX, runner='uv run "dbt'))
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("quoting", msg)
+        run.assert_not_called()
+
+    def test_missing_engine_keys_fail(self):
+        status, msg, _ = self._check(
+            ctx={"runner": "uv run dbt"}, stdout=CORE_1_8_VERSION
+        )
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn("engine", msg)
+        self.assertIn("install.md", msg)
+
+    def test_legacy_engine_values(self):
+        cases = [
+            ("fusion", "2.0.0", FUSION_VERSION, preflight.OK),
+            ("fusion", "1.8.7", CORE_1_8_VERSION, preflight.FAIL),
+            ("core", "1.8.7", CORE_1_8_VERSION, preflight.OK),
+            ("core", "2.0.0", FUSION_VERSION, preflight.OK),  # Core v2 beta
+        ]
+        for engine, version, stdout, expected in cases:
+            with self.subTest(engine=engine, stdout=stdout):
+                ctx = dict(self.CTX, engine=engine, engine_version=version)
+                status, _, _ = self._check(ctx=ctx, stdout=stdout)
+                self.assertEqual(status, expected)
+
+
 class MainOutputTests(unittest.TestCase):
     """The stdout format and exit codes are the agent-facing interface."""
 
@@ -280,6 +401,14 @@ class MainOutputTests(unittest.TestCase):
         "SNOWFLAKE_ACCOUNT": "acct",
         "SNOWFLAKE_USER": "user",
     }
+
+    def setUp(self):
+        version = types.SimpleNamespace(
+            returncode=0, stdout=FUSION_VERSION, stderr=""
+        )
+        patcher = mock.patch.object(subprocess, "run", return_value=version)
+        self.run = patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_all_green(self):
         with contextlib.ExitStack() as stack:
@@ -290,8 +419,23 @@ class MainOutputTests(unittest.TestCase):
             code, out = run_main(project.root)
         self.assertEqual(code, 0)
         self.assertIn("PREFLIGHT OK", out)
-        for check in ("env:", "key:", "packages:", "profile:"):
+        for check in ("env:", "key:", "packages:", "profile:", "runner:"):
             self.assertIn(check, out)
+        self.assertIn("OK   runner: `uv run dbt --version` reports v2", out)
+
+    def test_runner_mismatch_fails_preflight(self):
+        self.run.return_value = types.SimpleNamespace(
+            returncode=0, stdout=CORE_1_8_VERSION, stderr=""
+        )
+        with contextlib.ExitStack() as stack:
+            project = TempProject(stack)
+            key = stack.enter_context(tempfile.NamedTemporaryFile(suffix=".p8"))
+            env = dict(self.ENV, SNOWFLAKE_PRIVATE_KEY_PATH=key.name)
+            stack.enter_context(mock.patch.dict(os.environ, env))
+            code, out = run_main(project.root)
+        self.assertEqual(code, 1)
+        self.assertIn("FAIL runner:", out)
+        self.assertIn("PREFLIGHT FAILED (1 of 5 checks)", out)
 
     def test_failure_is_nonzero_and_named(self):
         with contextlib.ExitStack() as stack:

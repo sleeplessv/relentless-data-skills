@@ -36,8 +36,8 @@ Static checks only (sandbox-safe, no network): required env vars set, the
 private key file exists, `dbt_packages/` present with a clean
 `package-lock.yml`, the profile/target resolve in `profiles.yml`, and
 `<runner> --version` reports the context file's `engine` and the major.minor
-of its `engine_version`. Exception: a `uv run` or `poetry run` runner may
-sync an out-of-date environment first, which needs network. One line per
+of its `engine_version`. Exception: a `uv run` runner may sync an
+out-of-date environment first, which needs network. One line per
 check (`OK`/`FAIL`/`SKIP`), non-zero exit on any `FAIL`. Fix every `FAIL`
 before running dbt; each line says how. Don't re-run it before every
 command; once per session is the contract, plus once more after any

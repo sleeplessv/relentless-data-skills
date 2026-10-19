@@ -7,10 +7,9 @@ network, sandbox-safe): it verifies the things that make dbt fail before any
 model runs — env vars, the private key file, package state, the
 profile/target, and that `<runner> --version` (the context file's `runner`)
 reports the recorded `engine` and `engine_version`. Exception: a `uv run`
-or `poetry run` runner may sync an out-of-date environment first, which
-needs network. `--connect`
-additionally runs `<runner> debug` for a live connection test (needs
-network — run with sandboxing disabled).
+runner may sync an out-of-date environment first, which needs network.
+`--connect` additionally runs `<runner> debug` for a live connection test
+(needs network — run with sandboxing disabled).
 
 Reads required env-var names (names only, never values) from the per-project
 `.dbt-runner/context.md`. Output is one line per check — `OK` / `FAIL` /

@@ -22,8 +22,8 @@ a `severity: warn` test reported as a failure).
   free-form *Project lore* section that accumulates hard-won knowledge
   (seed/test couplings, known-slow models) across sessions.
 - **Static preflight, once per session.** `scripts/preflight.py` (stdlib
-  Python, sandbox-safe, no network unless a `uv run` or `poetry run`
-  runner must sync its environment) verifies required env vars are set,
+  Python, sandbox-safe, no network unless a `uv run` runner must
+  sync its environment) verifies required env vars are set,
   the private key file exists, `dbt_packages/` is present with a clean
   `package-lock.yml`, the profile/target resolve in `profiles.yml`, and
   the context file's `runner` reports the recorded engine and version

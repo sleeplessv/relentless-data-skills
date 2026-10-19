@@ -10,8 +10,10 @@ comments, pushes, and opens PRs. Start it with `/implement-ticket [N]`; `impleme
 reads its files by path during [Setup](references/setup.md). A solo run loads `orchestrator-mode`
 in standing mode: the main thread coordinates, and workers set up, implement, check, and review.
 
-Tests and runtime or artifact checks provide completion evidence. Every nonempty solo change
-receives independent review against its ticket before the PR becomes ready. Trivial changes
+Tests and runtime or artifact checks provide completion evidence, recorded as commands a
+verifier can rerun. In solo runs a worker that wrote none of the change reruns them on the tested
+head before review. Every nonempty solo change then receives independent review against its
+ticket before the PR becomes ready. Trivial changes
 that preserve behavior can use one reviewer with the loaded `code-review` prompts and separate
 Standards and Spec reports. Behavioral changes or uncertainty require both parallel reviewers.
 Follow-up review covers fixes, their consequences, and new evidence. Optional preferences can

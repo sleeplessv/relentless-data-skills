@@ -6,7 +6,9 @@ Standard library only, Python 3.9+. The default run is fully static (no
 network, sandbox-safe): it verifies the things that make dbt fail before any
 model runs — env vars, the private key file, package state, the
 profile/target, and that `<runner> --version` (the context file's `runner`)
-reports the recorded `engine` and `engine_version`. `--connect`
+reports the recorded `engine` and `engine_version`. Exception: a `uv run`
+or `poetry run` runner may sync an out-of-date environment first, which
+needs network. `--connect`
 additionally runs `<runner> debug` for a live connection test (needs
 network — run with sandboxing disabled).
 

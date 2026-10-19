@@ -3,8 +3,10 @@
 Solo ticket owners and feature coordinators run this check before claims, lifecycle comments,
 branch creation, or implementation. Orchestrated ticket workers reuse the coordinator's record.
 
-Resolve `code-review`, `pr`, `technical-writing`, and `unslop` through the active skill catalog.
-Confirm their `SKILL.md` files are readable. Load the writing references before authoring prose,
+Resolve `code-review`, `pr`, `technical-writing`, and `unslop` by locating their installed `SKILL.md`
+on disk. User-only skills are absent from the invocable catalog, and installed entries are often
+symlinks, so follow links (`find -L`, `readlink -f`) rather than matching directory names.
+Confirm the files are readable. Load the writing references before authoring prose,
 as described under [Writing](#writing). Load review and PR guidance when those phases start.
 Record absolute paths and package versions or source revisions in the findings or run record
 when available. Record unknown provenance as unknown.

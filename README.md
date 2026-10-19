@@ -109,11 +109,12 @@ without installing anything.
   result plainly.
 - `blast-radius` looks for what a change breaks outside its own diff, then runs
   code to prove the one fact that makes it safe.
-- Seven `principle-*` rules load per situation rather than on request:
-  `fix-root-causes`, `prove-it-works`, `laziness-protocol`,
-  `guard-the-context-window`, `make-operations-idempotent`,
+- Seven `principle-*` rules: `fix-root-causes`, `prove-it-works`,
+  `laziness-protocol`, `guard-the-context-window`, `make-operations-idempotent`,
   `sequence-verifiable-units`, `encode-lessons-in-structure`. Together they
-  are most of what stops an agent declaring done on a proxy.
+  are most of what stops an agent declaring done on a proxy. They set
+  `disable-model-invocation`, so the agent cannot fire them on its own: invoke
+  one by name, or have a skill read it by path.
 - `bro` is the tone knob.
 
 From the same repo, `thermos`, `thermo-nuclear-review` and the `cursor-team-kit`

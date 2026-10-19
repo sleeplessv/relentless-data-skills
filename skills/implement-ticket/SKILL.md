@@ -10,7 +10,7 @@ description: "Implement a ticket (GitHub issue) end-to-end on a ticket branch an
 Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number and repository,
 defaulting to the current `gh` remote and step 0's selection. Solo runs load `orchestrator-mode` in standing
 mode first: the main thread coordinates, and workers complete [Setup](references/setup.md), then steps 0
-through 8. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
+through 8; the coordinator dispatches step 8's verification and review. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
 steps the worker owns. A worker reports an auto-pick, a stop condition, or a question through
 `open_questions`; the coordinator puts it to the user and dispatches the answer.
 
@@ -29,15 +29,16 @@ coordinator owns PRs, issue actions, and independent review.
 Apply [Writing](references/setup.md#writing) to authored prose using `technical-writing` and `unslop`. Include the resolved writing references in worker briefs. Solo PR creation and updates follow [PR body](references/review-and-pr.md#pr-body), which uses `pr` for structure and preserves the repository template.
 
 **Use configured execution permissions.** Run commands normally. If a necessary command is blocked, use the
-available scoped escalation and report a denial accurately. The task's existing authorization governs external
+available scoped escalation and report a denial accurately. A denied command with no escalation available is a
+blocked step: finish every step that does not depend on it, then take the stop path naming the exact command. The task's existing authorization governs external
 mutations. Reuse the user's authorization for lifecycle comments without asking again. Record which
 assignments and labels this run changes and alter only those on a stop path.
 
 ### Ticket lifecycle comments
 
 Post a comment on the ticket when starting work and when stopping work on each attempt, including resumes. In
-solo runs, the implementing agent posts both comments. In feature runs, the coordinator posts them through its
-tracker worker on behalf of the implementing worker.
+solo runs, the worker that completes step 3 posts the start comment and the worker that completes finalization or
+the stop path posts the stop comment. In feature runs, the coordinator posts them through its tracker worker on behalf of the implementing worker.
 
 - **Start:** after eligibility and workspace preflight, before implementation, post "Started
   work on #<N> on branch `<branch>`." Identify a resume and the integration branch when relevant.
@@ -58,7 +59,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 1. Read the ticket and claim it
 
-`gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
+`gh issue view <N> --comments`: read the body AND comments. Save the body, relevant comments, and acceptance criteria as the `## Requirements` section of `ticket-snapshot.md` in the run directory before implementation starts; reviewers enforce that section ([Independent review](references/review-and-pr.md#independent-review)). Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
 
 ### 2. Pick a base branch
 
@@ -90,14 +91,14 @@ Grep/search for the modules the ticket touches. Read `AGENTS.md`, `GLOSSARY.md` 
 
 For solo runs, identify the **feedback-loop commands**: the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`), plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the configured type-check/lint and test commands on the pinned clean `base_sha` before editing, or reuse an original baseline with that proven SHA. On resume, use a separate checkout for this base check; failures on the WIP branch remain separate and cannot become baseline exemptions. Record commands, checked SHA, and original failures.
 
-Done when you have: (a) the type-check and test commands, (b) the run command, and (c) recorded baseline results for all configured checks. Mark absent commands as absent, not passing.
+Done when you have: (a) the type-check and test commands, (b) the run command, and (c) recorded baseline results for all configured checks. Mark absent commands as absent, not passing. If every acceptance criterion already holds on `base_sha`, take the [No-change outcome](references/review-and-pr.md#no-change-outcome) instead of step 5.
 
 ### 5. Implement
 
 Before choosing a path: an acceptance criterion that is subjective or unverifiable ("looks right", "feels fast") is the **ambiguous-acceptance-criteria stop condition, whichever kind of work the ticket is**. Untestable is not the same as unspecified. A criterion tied to a concrete reference artifact (design mockup, screenshot, spec doc) is untestable but specified: take the "everything else" path and record the manual comparison against the artifact in the PR body. The stop is per criterion: name the ambiguous ones in your question rather than declaring the whole ticket ambiguous. Then **recognise what kind of work the ticket is**; it decides how you build:
 
 - **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets**: the **red → green** loop, one test at a time. One failing test (**red**), then the minimal code to pass it (**green**). Don't write all the tests up front; each test responds to what the last one taught you. Refactoring is not part of the loop. It belongs to the step 8 review pass. Follow the `tdd` skill for the full loop. The `tdd` skill expects tests at **pre-agreed seams**: with no user in the loop, the ticket is that agreement: place tests at the seams its acceptance criteria and the existing test layout imply. If no sensible seam exists for a criterion, treat it as ambiguous acceptance criteria (a stop condition), not a licence to test implementation details.
-- **Everything else**: frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Mixed tickets split by part: tracer bullets for the testable seams, direct implementation for the rest. Say which path you took.
+- **Everything else**: frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Mixed tickets split by part: tracer bullets for the testable seams, direct implementation for the rest. Say which path you took, and record each design choice in `## Author decisions` of `ticket-snapshot.md`, tied to the criterion it resolves.
 
 Throughout:
 
@@ -110,7 +111,7 @@ Throughout:
 
 Commit intended changes before final checks. After fixes, commit again and record the checked SHA with each result so review and publication can identify the tested tree.
 
-Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. If the project has no type-checker or test suite, note it and rely on the step 7 smoke check.
+Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. If the project has no type-checker or test suite, note it and rely on the step 7 smoke check. A failing check first gets its measurement checked: the checkout, SHA, command, and environment it ran against. Then fix the code.
 
 ### 7. Runtime smoke check (REQUIRED before marking ready)
 
@@ -120,16 +121,13 @@ Run the **type-checker/linter, then the test suite** from step 4, and loop until
 - **CLI / library / script / pipeline (no port):** run the entrypoint once with a representative invocation: `<cli> --help` plus one real subcommand, import the package and call the changed API, or execute the flow once against safe inputs. Confirm exit code 0 and no new tracebacks.
 - **Docs or configuration with no runnable entrypoint:** run the relevant validator and inspect the rendered or consumed artifact. Record why runtime execution does not apply.
 
-Allocate separate ports and test resources for parallel workers, or serialize shared-state checks. Missing credentials or tools are blocked checks, not passes. Fix failures and retry proportionately; preserve a concrete blocker when further authorized progress is unavailable.
+Record each smoke check as the exact command, or a short script saved in the findings artifact, with its observed output and checked SHA, so a verifier can rerun it unchanged. Allocate separate ports and test resources for parallel workers, or serialize shared-state checks. Missing credentials or tools are blocked checks, not passes. Fix failures and retry proportionately; preserve a concrete blocker when further authorized progress is unavailable.
 
 ### 8. Review, then finalise the PR
 
-Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring deferred from
-step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their
-orchestrated contract without nested review.
+The implementing worker reads the committed `git diff <base_sha>...HEAD` and fixes in-scope findings, including refactoring deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their orchestrated contract without nested review.
 
-Solo runs follow [Independent review](references/review-and-pr.md#independent-review) with the pinned base and
-ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization).
+Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where a worker that wrote none of the change reruns the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review) with the pinned base and ticket snapshot; the coordinator dispatches both. Then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
 
 ## Stop conditions
 
@@ -140,10 +138,13 @@ Stop and surface to the user (do not improvise) if:
 - The ticket is blocked by a ticket/PR that has no branch yet.
 - Required uncommitted inputs or overlapping work cannot be used safely without a user decision.
 - A required check is blocked and diagnosis or a different authorized approach cannot make further useful progress. Repeated identical failures call for a changed approach, not an arbitrary claim of completion.
+- A required publication command, such as `gh pr ready`, is denied and no escalation is available.
+- Every acceptance criterion already holds on `base_sha`: follow [No-change outcome](references/review-and-pr.md#no-change-outcome).
 
 When stopping, preserve work and report the actual branch, HEAD, worktree path, dirty files, and push outcome.
 Push WIP when authorized; a failed push leaves local work that must remain. Record the failure, attempts, and
 pending decisions in a local findings artifact. Post and record the stop comment with these findings. Leave
-any draft PR open and report its state accurately. In solo runs, release only a claim this run added; label
+any draft PR open and report its state accurately. In solo runs, a claim this run added is released when the
+work is incomplete and kept when implementation is complete and verified and only publication is blocked, so the PR and ticket show one owner. Label
 changes require lifecycle ownership and existing authorization. In orchestrated runs, the feature coordinator
 owns the lifecycle.

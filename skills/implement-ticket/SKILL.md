@@ -59,7 +59,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 1. Read the ticket and claim it
 
-`gh issue view <N> --comments`: read the body AND comments. Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
+`gh issue view <N> --comments`: read the body AND comments. Save the body, relevant comments, and acceptance criteria as the `## Requirements` section of `ticket-snapshot.md` in the run directory before implementation starts; reviewers enforce that section ([Independent review](references/review-and-pr.md#independent-review)). Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
 
 ### 2. Pick a base branch
 
@@ -125,9 +125,9 @@ Record each smoke check as the exact command, or a short script saved in the fin
 
 ### 8. Review, then finalise the PR
 
-Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their orchestrated contract without nested review.
+The implementing worker reads the committed `git diff <base_sha>...HEAD` and fixes in-scope findings, including refactoring deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their orchestrated contract without nested review.
 
-Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where a worker that wrote none of the change reruns the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review) with the pinned base and ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
+Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where the coordinator dispatches a worker that wrote none of the change to rerun the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review), which the coordinator dispatches with the pinned base and ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
 
 ## Stop conditions
 

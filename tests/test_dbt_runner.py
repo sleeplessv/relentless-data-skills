@@ -133,6 +133,12 @@ class FrontmatterTests(unittest.TestCase):
         )
         self.assertEqual(data["required_env_vars"], ["A_VAR", "B_VAR"])
 
+    def test_quoted_brackets_stay_a_string(self):
+        data = preflight.parse_frontmatter(
+            "---\ntarget: \"[x]\"\n---\n", "ctx"
+        )
+        self.assertEqual(data["target"], "[x]")
+
     def test_missing_frontmatter_rejected(self):
         with self.assertRaises(SystemExit):
             preflight.parse_frontmatter("# no frontmatter here", "ctx")

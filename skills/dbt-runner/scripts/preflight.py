@@ -80,13 +80,15 @@ def parse_frontmatter(text: str, where: str) -> dict:
             data[current_list].append(strip_inline_comment(stripped[2:]))
             continue
         if ":" in stripped and not raw.startswith((" ", "\t")):
-            key, _, value = stripped.partition(":")
+            key, _, raw_value = stripped.partition(":")
             key = key.strip()
-            value = strip_inline_comment(value)
-            if value.startswith("[") and value.endswith("]"):
+            value = strip_inline_comment(raw_value)
+            if raw_value.strip().startswith("[") and value.endswith("]"):
                 items = value[1:-1].split(",")
                 data[key] = [
-                    strip_inline_comment(i) for i in items if i.strip()
+                    strip_inline_comment(item)
+                    for item in items
+                    if item.strip()
                 ]
                 current_list = None
             elif value:

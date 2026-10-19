@@ -110,7 +110,7 @@ Throughout:
 
 Commit intended changes before final checks. After fixes, commit again and record the checked SHA with each result so review and publication can identify the tested tree.
 
-Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. If the project has no type-checker or test suite, note it and rely on the step 7 smoke check.
+Run the **type-checker/linter, then the test suite** from step 4, and loop until both are clean: type-check → fix → test → fix. Everything green at baseline must still be green; new failures and new type errors are yours to fix. If acceptance criteria describe verifiable behaviour and the project has a test suite, add tests covering it, matching existing style. If the project has no type-checker or test suite, note it and rely on the step 7 smoke check. A failing check first gets its measurement checked: the checkout, SHA, command, and environment it ran against. Then fix the code.
 
 ### 7. Runtime smoke check (REQUIRED before marking ready)
 
@@ -120,16 +120,13 @@ Run the **type-checker/linter, then the test suite** from step 4, and loop until
 - **CLI / library / script / pipeline (no port):** run the entrypoint once with a representative invocation: `<cli> --help` plus one real subcommand, import the package and call the changed API, or execute the flow once against safe inputs. Confirm exit code 0 and no new tracebacks.
 - **Docs or configuration with no runnable entrypoint:** run the relevant validator and inspect the rendered or consumed artifact. Record why runtime execution does not apply.
 
-Allocate separate ports and test resources for parallel workers, or serialize shared-state checks. Missing credentials or tools are blocked checks, not passes. Fix failures and retry proportionately; preserve a concrete blocker when further authorized progress is unavailable.
+Record each smoke check as the exact command, or a short script saved in the findings artifact, with its observed output and checked SHA, so a verifier can rerun it unchanged. Allocate separate ports and test resources for parallel workers, or serialize shared-state checks. Missing credentials or tools are blocked checks, not passes. Fix failures and retry proportionately; preserve a concrete blocker when further authorized progress is unavailable.
 
 ### 8. Review, then finalise the PR
 
-Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring deferred from
-step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their
-orchestrated contract without nested review.
+Read the committed `git diff <base_sha>...HEAD` and fix in-scope findings, including refactoring deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their orchestrated contract without nested review.
 
-Solo runs follow [Independent review](references/review-and-pr.md#independent-review) with the pinned base and
-ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization).
+Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where a worker that wrote none of the change reruns the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review) with the pinned base and ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization).
 
 ## Stop conditions
 

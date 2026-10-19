@@ -3,6 +3,22 @@
 Solo ticket owners and feature coordinators use these contracts. Orchestrated ticket workers
 return implementation evidence through their dispatch contract.
 
+## Independent verification
+
+Solo runs rerun the writer's evidence before independent review. Dispatch a worker that wrote
+none of the change. Pass the tested `head_sha`, the findings artifact path, the check commands from
+step 6, the smoke commands or script from step 7, and the writer's resource allocation.
+
+The verifier uses a clean checkout at `head_sha`, confirms `HEAD` matches, reruns every recorded
+command unchanged, and returns its own exit codes, output excerpts, and checked SHA. A command it
+cannot run is a blocked check reported with its reason. Reuse the writer's ports and resources, or
+serialize with any still in use.
+
+Divergence from the writer's report goes back to the writer with the verifier's output. A fix
+commits, reruns steps 6 and 7, and gets a fresh verification on the new head. Readiness requires
+the verifier's evidence to cover the final committed tree. Feature runs use the coordinator's
+Verify gate instead.
+
 ## Independent review
 
 Independently review every nonempty solo change and the complete feature integration.
@@ -48,7 +64,7 @@ unaffected findings and dispositions. Reopen a settled preference only when new 
 the reasoning. A newly affected requirement or code path still needs review.
 
 Reassess review depth if fixes expand the change. Record the final head, fixes reviewed, and why
-prior outcomes still cover unchanged work. Readiness requires both axes and check evidence to
+prior outcomes still cover unchanged work. Readiness requires both axes and verified check evidence to
 cover the final committed tree, with in-scope correctness, requirement, and documented-standard defects
 resolved. New defects require fixes; optional preferences do not extend the completion loop.
 

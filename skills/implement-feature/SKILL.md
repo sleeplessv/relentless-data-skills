@@ -105,8 +105,9 @@ posting failure. Partial work stays draft and retains its remaining obligations.
 
 Use fresh workers for Verify and [Integration review](references/reference.md#integration-review)
 on a fixed integration SHA. Verify runs configured lint, type checks, tests, and the applicable
-runtime or artifact check. Review runs in an isolated checkout at that SHA and receives the
-materialized `scope.md` as its one originating spec plus the fixed PR-base commit.
+runtime or artifact check, rerunning the smoke commands recorded in each ticket's evidence
+artifact. Review runs in an isolated checkout at that SHA and receives the materialized
+`scope.md` as its one originating spec plus the fixed PR-base commit.
 
 On a four-slot runtime, finish Verify before a `code-review` worker that needs two children,
 or dispatch its Standards and Spec axes directly using the loaded skill's prompts and baseline.

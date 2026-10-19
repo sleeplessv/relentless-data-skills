@@ -10,7 +10,8 @@ none of the change. Pass the tested `head_sha`, the findings artifact path, the 
 step 6, the smoke commands or script from step 7, and the writer's resource allocation.
 
 The verifier uses a clean checkout at `head_sha`, confirms `HEAD` matches, reruns every recorded
-command unchanged, and returns its own exit codes, output excerpts, and checked SHA. A command it
+command changed only where a checkout path must point at its own checkout, records each such
+substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
 cannot run is a blocked check reported with its reason. Reuse the writer's ports and resources, or
 serialize with any still in use.
 
@@ -18,6 +19,19 @@ Divergence from the writer's report goes back to the writer with the verifier's 
 commits, reruns steps 6 and 7, and gets a fresh verification on the new head. Readiness requires
 the verifier's evidence to cover the final committed tree. Feature runs use the coordinator's
 Verify gate instead.
+
+## No-change outcome
+
+A ticket whose every acceptance criterion already holds on `base_sha` gets no implementation,
+no empty PR, and no claim that a review ran. The outcome is still a claim, so it needs evidence:
+per-criterion evidence on `base_sha`, including runtime or artifact criteria, with the commits
+that satisfied them when history shows them. Independent verification applies: a worker that
+gathered none of the evidence reruns the recorded checks and smoke commands on `base_sha`.
+
+Post the stop comment with that evidence. Leave the issue open unless closure is already
+authorized, and release a claim this run added. Report in `open_questions` whether to close the
+ticket and whether to remove `ready-for-agent`, since auto-pick will keep selecting it while the
+label stays. Orchestrated workers return `already_satisfied` under their dispatch contract instead.
 
 ## Independent review
 
@@ -28,10 +42,7 @@ Commit all intended changes and use a clean review checkout at the tested `revie
 Resolve the immutable base and review commits, record `git diff <base_sha>...<review_sha>` and
 `git log <base_sha>..<review_sha> --oneline`, and confirm the diff includes the intended work.
 Set the review checkout's `HEAD` to `review_sha` so the skill's `...HEAD` command sees that tree.
-An empty diff requires evidence for every acceptance criterion before reporting already satisfied.
-Post the required stop comment and report that no-change outcome without creating an empty PR
-or claiming a review ran. For solo runs, release only a claim this run added and leave the issue
-open unless closure is already authorized.
+An empty diff means the [No-change outcome](#no-change-outcome) applies; review does not run.
 
 Pass `base_sha` as the fixed point and an absolute path to the authoritative review scope.
 For a solo ticket, save its current body, relevant comments, acceptance criteria, and scope
@@ -99,9 +110,11 @@ Merge Danger using the actual change. Replace stale draft claims on resume.
 
 ## Solo finalization
 
-After independent review, push the checked head and confirm the remote tip. Author the PR body.
+The implementing worker owns this section. After independent review, push the checked head and
+confirm the remote tip. Author the PR body.
 A new defect returns to implementation, checks, and review.
 Update or reuse the ticket's draft PR with `Closes #<N>` and the observed results.
 Mark it ready only when required checks, review outcomes, and the remote tip cover the same head.
 Post and record the stop comment with the PR URL and outcome, then report them to the user.
-Leave merging to the human. A blocked publication preserves the branch and body.
+Leave merging to the human. A blocked or denied publication step preserves the branch and body,
+keeps the PR a draft, and takes the stop path with a stop comment that states what remains.

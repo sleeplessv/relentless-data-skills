@@ -10,7 +10,7 @@ description: "Implement a ticket (GitHub issue) end-to-end on a ticket branch an
 Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number and repository,
 defaulting to the current `gh` remote and step 0's selection. Solo runs load `orchestrator-mode` in standing
 mode first: the main thread coordinates, and workers complete [Setup](references/setup.md), then steps 0
-through 8. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
+through 8; the coordinator dispatches step 8's verification and review. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
 steps the worker owns. A worker reports an auto-pick, a stop condition, or a question through
 `open_questions`; the coordinator puts it to the user and dispatches the answer.
 
@@ -98,7 +98,7 @@ Done when you have: (a) the type-check and test commands, (b) the run command, a
 Before choosing a path: an acceptance criterion that is subjective or unverifiable ("looks right", "feels fast") is the **ambiguous-acceptance-criteria stop condition, whichever kind of work the ticket is**. Untestable is not the same as unspecified. A criterion tied to a concrete reference artifact (design mockup, screenshot, spec doc) is untestable but specified: take the "everything else" path and record the manual comparison against the artifact in the PR body. The stop is per criterion: name the ambiguous ones in your question rather than declaring the whole ticket ambiguous. Then **recognise what kind of work the ticket is**; it decides how you build:
 
 - **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets**: the **red → green** loop, one test at a time. One failing test (**red**), then the minimal code to pass it (**green**). Don't write all the tests up front; each test responds to what the last one taught you. Refactoring is not part of the loop. It belongs to the step 8 review pass. Follow the `tdd` skill for the full loop. The `tdd` skill expects tests at **pre-agreed seams**: with no user in the loop, the ticket is that agreement: place tests at the seams its acceptance criteria and the existing test layout imply. If no sensible seam exists for a criterion, treat it as ambiguous acceptance criteria (a stop condition), not a licence to test implementation details.
-- **Everything else**: frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Mixed tickets split by part: tracer bullets for the testable seams, direct implementation for the rest. Say which path you took.
+- **Everything else**: frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Mixed tickets split by part: tracer bullets for the testable seams, direct implementation for the rest. Say which path you took, and record each design choice in `## Author decisions` of `ticket-snapshot.md`, tied to the criterion it resolves.
 
 Throughout:
 
@@ -127,7 +127,7 @@ Record each smoke check as the exact command, or a short script saved in the fin
 
 The implementing worker reads the committed `git diff <base_sha>...HEAD` and fixes in-scope findings, including refactoring deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their orchestrated contract without nested review.
 
-Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where the coordinator dispatches a worker that wrote none of the change to rerun the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review), which the coordinator dispatches with the pinned base and ticket snapshot, then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
+Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where a worker that wrote none of the change reruns the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review) with the pinned base and ticket snapshot; the coordinator dispatches both. Then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
 
 ## Stop conditions
 

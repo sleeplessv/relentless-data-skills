@@ -7,23 +7,23 @@ return implementation evidence through their dispatch contract.
 
 The coordinator (the solo run's main thread) dispatches the verifier and the reviewers; a
 dispatch from the implementing worker would nest, spending capacity and weakening independence.
-Solo runs rerun the writer's evidence before independent review. The verifier is a worker that
-wrote none of the change. Pass it the tested `head_sha`, the findings artifact path, the check
-commands from step 6, the smoke commands or script from step 7, and the writer's resource
-allocation.
+Solo runs rerun the implementing worker's evidence before independent review. The verifier is
+a worker that wrote none of the change. Pass it the tested `head_sha`, the findings artifact
+path, the check commands from step 6, the smoke commands or script from step 7, and the
+implementing worker's resource allocation.
 
 The verifier uses a clean checkout at `head_sha`, confirms `HEAD` matches, reruns every recorded
 command changed only where a checkout path must point at its own checkout, records each such
 substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
-cannot run is a blocked check reported with its reason. Reuse the writer's ports and resources, or
-serialize with any still in use.
+cannot run is a blocked check reported with its reason. Reuse the implementing worker's ports and
+resources, or serialize with any still in use.
 
-Divergence from the writer's report goes back to the writer with the verifier's output. A fix
-commits, reruns steps 6 and 7, and gets a fresh verification on the new head; a prose-only fix
-takes the lighter loop defined in [Independent review](#independent-review). Readiness requires
-verification evidence covering the final committed tree; the prose-only loop defines when the
-last verified head's evidence extends to later commits. Feature runs use the coordinator's
-Verify gate instead.
+Divergence from the implementing worker's report goes back to it with the verifier's output.
+A code-touching fix commits, reruns steps 6 and 7, and gets a fresh verification on the new head;
+a prose-only fix takes the lighter loop defined in [Independent review](#independent-review).
+Readiness requires verification evidence covering the final committed tree; the prose-only loop
+defines when the last verified head's evidence extends to later commits. Feature runs use the
+coordinator's Verify gate instead.
 
 ## No-change outcome
 
@@ -88,11 +88,11 @@ only when new evidence changes the reasoning. A newly affected requirement or co
 needs review.
 
 A **prose-only fix** touches no code, test, configuration, dependency, CI, or agent-instruction
-semantics. Its lighter loop: the writer reruns the validators and lint that cover the changed
-files and records the diff; follow-up review runs only on the axis that raised the finding; the
-recorded checks on the last verified head still cover the unchanged code, so that verification
-extends to the new head and no fresh verification runs. The next code-touching fix returns to
-the full loop.
+semantics. Its lighter loop: the implementing worker reruns the validators and lint that cover
+the changed files and records the diff in the findings artifact; follow-up review runs only on
+the axis that raised the finding; the recorded checks on the last verified head still cover the
+unchanged code, so that verification extends to the new head and no fresh verification runs. The
+next code-touching fix returns to the full loop.
 
 Reassess review depth if fixes expand the change. Record the final head, fixes reviewed, and why
 prior outcomes still cover unchanged work. Readiness requires both axes and verified check evidence to

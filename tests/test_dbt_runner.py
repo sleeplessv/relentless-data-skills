@@ -117,6 +117,16 @@ class FrontmatterTests(unittest.TestCase):
             "value # not comment",
         )
 
+    def test_inline_empty_list_is_a_list(self):
+        # Regression for #47: `[]` was stored as the string "[]", and the
+        # env check then demanded variables named `[` and `]`.
+        data = preflight.parse_frontmatter(
+            "---\nprofile: p\nrequired_env_vars: []\n---\nbody", "ctx"
+        )
+        self.assertEqual(data["required_env_vars"], [])
+        status, _ = preflight.check_env_vars(data)
+        self.assertEqual(status, preflight.SKIP)
+
     def test_missing_frontmatter_rejected(self):
         with self.assertRaises(SystemExit):
             preflight.parse_frontmatter("# no frontmatter here", "ctx")

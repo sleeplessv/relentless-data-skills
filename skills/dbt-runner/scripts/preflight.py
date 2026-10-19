@@ -82,7 +82,10 @@ def parse_frontmatter(text: str, where: str) -> dict:
             key, _, value = stripped.partition(":")
             key = key.strip()
             value = strip_inline_comment(value)
-            if value:
+            if value == "[]":
+                data[key] = []
+                current_list = None
+            elif value:
                 data[key] = value
                 current_list = None
             else:

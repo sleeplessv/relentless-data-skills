@@ -24,8 +24,9 @@ a `severity: warn` test reported as a failure).
 - **Static preflight, once per session.** `scripts/preflight.py` (stdlib
   Python, sandbox-safe, no network) verifies required env vars are set,
   the private key file exists, `dbt_packages/` is present with a clean
-  `package-lock.yml`, and the profile/target resolve in `profiles.yml`.
-  These are the failures that are cheapest to detect statically and most
+  `package-lock.yml`, the profile/target resolve in `profiles.yml`, and
+  the context file's `runner` reports the recorded engine and version
+  (`<runner> --version`). These are the failures that are cheapest to detect statically and most
   expensive to diagnose from a `JWT token is invalid` error. A `--connect`
   flag escalates to a live `<runner> debug` when diagnosing.
 - **Invocation rules.** Run outside the sandbox (egress-blocked shells
@@ -72,4 +73,5 @@ python3 -m unittest discover -s tests -v
 ```
 
 Stdlib only. The preflight never talks to a warehouse in tests; the
-`--connect` path is exercised with the runner binary stubbed.
+`<runner> --version` call and the `--connect` path are exercised with the
+runner binary stubbed.

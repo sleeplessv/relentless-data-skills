@@ -324,11 +324,13 @@ class RunnerCheckTests(unittest.TestCase):
         self.assertEqual(status, preflight.OK)
 
     def test_nonzero_exit_fails(self):
-        bad = types.SimpleNamespace(returncode=2, stdout="", stderr="boom")
+        bad = types.SimpleNamespace(returncode=2, stdout="",
+                                    stderr="boom\nsecond line\n")
         status, msg, _ = self._check(return_value=bad)
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("exited 2", msg)
-        self.assertIn("boom", msg)
+        self.assertIn("boom second line", msg)
+        self.assertNotIn("\n", msg)  # one output line per check
 
     def test_timeout_fails(self):
         status, msg, _ = self._check(

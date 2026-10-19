@@ -38,9 +38,9 @@ private key file exists, `dbt_packages/` present with a clean
 `<runner> --version` reports the context file's `engine` and the major.minor
 of its `engine_version`. One line per check (`OK`/`FAIL`/`SKIP`), non-zero
 exit on any `FAIL`. Fix every `FAIL` before running dbt; each line says how.
-Don't re-run it before every
-command; once per session is the contract, plus once more after any
-environment change (new shell, edited `.env`, switched target).
+Don't re-run it before every command; once per session is the contract,
+plus once more after any environment change (new shell, edited `.env`,
+switched target).
 
 ## Invocation rules, every dbt command
 

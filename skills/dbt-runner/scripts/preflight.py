@@ -326,16 +326,12 @@ def check_runner(context: dict, project_root: Path) -> tuple:
             " by hand; an unsynced environment may be downloading packages."
         )
     output = (result.stdout or "") + (result.stderr or "")
+    excerpt = " ".join(output.split())[:300]  # keep one line per check
     if result.returncode != 0:
-        return FAIL, (
-            f"`{shown}` exited {result.returncode}: {output.strip()[:300]}"
-        )
+        return FAIL, f"`{shown}` exited {result.returncode}: {excerpt}"
     version = reported_version(output)
     if not version:
-        return FAIL, (
-            f"`{shown}` printed no recognisable version:"
-            f" {output.strip()[:300]}"
-        )
+        return FAIL, f"`{shown}` printed no recognisable version: {excerpt}"
     engine = f"v{version.split('.')[0]}"
     if engine not in RECORDED_ENGINES[recorded]:
         return FAIL, (

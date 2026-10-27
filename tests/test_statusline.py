@@ -155,6 +155,25 @@ class StatuslineTest(unittest.TestCase):
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "a.txt\nb.txt\n")
         self.assertEqual(self.git("ls-files", "--others", "--exclude-standard"), ".gitignore\nlogo.png\nnew/c.txt\n")
 
+    def test_branch_diff_creates_its_temp_index_in_tmpdir(self):
+        self.feature_repo()
+        (self.repo / "new.txt").write_text("1\n")
+        scratch = self.tmp / "scratch"
+        scratch.mkdir()
+        self.env["TMPDIR"] = str(scratch)
+        # A git that records the temp index it was given for the diff.
+        seen = self.tmp / "index-path"
+        git = self.tmp / "bin" / "git"
+        git.write_text(
+            f'#!/bin/sh\ncase " $* " in *" diff --shortstat "*) printf %s "$GIT_INDEX_FILE" >"{seen}" ;; esac\n'
+            f'exec {shutil.which("git")} "$@"\n'
+        )
+        git.chmod(0o755)
+        line = ANSI.sub("", self.first_line())
+        self.assertTrue(line.endswith("(feature +1 −0)"), line)
+        self.assertEqual(Path(seen.read_text()).parent, scratch)
+        self.assertEqual(list(scratch.iterdir()), [])
+
     def test_branch_diff_counts_untracked_files_named_like_pathspec_magic(self):
         self.feature_repo()
         (self.repo / "b.txt").write_text("tracked\n")
@@ -168,8 +187,7 @@ class StatuslineTest(unittest.TestCase):
         self.feature_repo()
         (self.repo / "new.txt").write_text("1\n")
         # A git that stalls on the diff and records the temp index it was given,
-        # so the render is killed mid-count. macOS mktemp ignores TMPDIR, so the
-        # test finds the index through git rather than in a scratch directory.
+        # so the render is killed mid-count.
         seen = self.tmp / "index-path"
         git = self.tmp / "bin" / "git"
         git.write_text(

@@ -103,7 +103,7 @@ if [ -n "$cwd" ]; then
   base_branch=${base#refs/remotes/origin/}
   mb=$([ -n "$head_branch" ] && [ "$head_branch" != "${base_branch#refs/heads/}" ] \
     && git --no-optional-locks -C "$cwd" merge-base HEAD "$base" 2>/dev/null)
-  if [ -n "$mb" ] && [ -n "$top" ] && idx=$(mktemp); then
+  if [ -n "$mb" ] && [ -n "$top" ] && idx=$(mktemp "${TMPDIR:-/tmp}/claude-statusline-index.XXXXXX"); then
     # Remove the throwaway index even when Claude Code kills the script midway.
     trap 'rm -f "$idx" "$idx.lock"' EXIT
     trap 'exit 1' INT TERM HUP

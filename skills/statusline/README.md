@@ -25,8 +25,13 @@ After the branch, `+120 −34` is the branch diff: the lines the branch adds and
 removes, counted from where it split from the default branch to your working
 tree. It includes uncommitted changes and new files that git does not ignore, so
 it matches what the branch's PR would show if you committed everything now.
-Large counts shorten, such as `+1.2k` or `+58k`. The diff is hidden on the
-default branch, on a detached HEAD, and when the branch changes nothing.
+Binary files count as zero lines. Added lines are sage and removed lines coral.
+Large counts shorten, such as `+1.2k`, `+58k`, or `+1.3M`. The default branch is
+`origin/HEAD`, or local `main` or `master` without one. The diff is hidden on
+the default branch, on a detached HEAD, outside a git repo, when no default
+branch is found, and when the branch changes nothing. The script recounts it
+each time the status line redraws. Counting new files needs git 2.26 or later;
+older git leaves them out.
 
 The second line lists the five newest open PRs. Each `#number` is a link,
 coloured by the PR's state. The numbers on orange chips after a PR are the

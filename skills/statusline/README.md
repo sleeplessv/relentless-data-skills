@@ -5,8 +5,8 @@ line shows the current model, reasoning effort, context window usage,
 directory, git branch, and open pull requests under the prompt.
 
 ```text
-Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
-#48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (ticket-46-preflight)
+#48 ∅ [#47 46] #45 39 41 #44 ∅ #42 37 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 ## What it does
@@ -27,7 +27,25 @@ Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-d
   number, newest first, each coloured by its state. Each number is a link: click it to open
   the PR in the browser, in terminals that support OSC 8 hyperlinks. The list
   stops at five numbers and shows the rest as `+N`. To change the limit, edit
-  `PR_LIST_MAX` at the top of the script.
+  `PR_LIST_MAX` at the top of the script. The PR for the current branch
+  always shows, in brackets, even when it is older than the newest five. A
+  fork PR never counts as the current branch's PR, even when its branch has
+  the same name.
+- **Issues each PR closes.** After each PR number come the issues that
+  GitHub closes when the PR merges. GitHub links these through `Closes #N`
+  in the PR body or through the PR's **Development** sidebar. Each issue is
+  a white number on a blue chip, without `#`, so it stands apart from PR
+  numbers. Each chip links to its issue. In the plain-text example above,
+  `46`, `39 41`, and `37` are chips. A PR that closes no issue shows an
+  amber `∅`.
+- **Issue for a branch without a PR.** On a branch with no PR yet, the line
+  starts with the issue that the branch name points to, such as
+  `on 51 (no PR)`. The name must start with the issue number, optionally
+  after `ticket-` or `issue-`: `ticket-51-x`, `issue-51-x`, or `51-x`. After
+  a prefix such as `me/`, the name needs `ticket-` or `issue-`, as in
+  `me/ticket-51-x`. Names such as `release-2026`, `fix-2fa`, and
+  `release/2026` do not count. The chip links to the issue only when the
+  repo has an open PR, because the script builds the issue URL from a PR URL.
 - **Open pull requests.** After `PRs`, counts every open PR in the repo, by
   any author. Each count shows only when it is above zero. A ready PR is one that is not a
   draft. A failed check outranks a running one.

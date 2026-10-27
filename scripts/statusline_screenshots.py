@@ -154,7 +154,6 @@ html,body {{ margin:0; background:transparent; }}
 .bar i {{ width:11px; height:11px; border-radius:50%; background:{frame}; }}
 .body {{ padding:14px 20px 16px; display:grid; gap:4px; }}
 .row {{ display:flex; align-items:baseline; gap:14px; }}
-.side {{ font:12px -apple-system, system-ui, sans-serif; color:{label}; width:62px; text-align:right; flex:none; }}
 .line {{ font:15px/1.6 "SF Mono", Menlo, monospace; white-space:pre; position:relative; }}
 .notes {{ position:relative; font:12px/1.3 -apple-system, system-ui, sans-serif; color:{label}; }}
 .notes .rule {{ position:absolute; top:0; height:6px; border:1px solid {rule}; border-top:0; border-radius:0 0 3px 3px; }}
@@ -192,16 +191,14 @@ document.title = Math.ceil(r.width) + "x" + Math.ceil(r.height);
 </script>"""
 
 
-def render(name: str, rows: list[tuple[str | None, str, list]]):
-    """rows: (side label, ANSI line, [(start, end, note)]) per status line."""
+def render(name: str, rows: list[tuple[str, list]]):
+    """rows: (ANSI line, [(start, end, note)]) per status line."""
     for theme_name, theme in THEMES.items():
         parts = []
-        for side, line, notes in rows:
-            side_html = f'<div class="side">{side}</div>' if side is not None else ""
-            parts.append(f'<div class="row">{side_html}<div class="line">{to_html(line, theme)}</div></div>')
+        for line, notes in rows:
+            parts.append(f'<div class="row"><div class="line">{to_html(line, theme)}</div></div>')
             if notes:
-                pad = '<div class="side"></div>' if side is not None else ""
-                parts.append(f'<div class="row">{pad}<div class="notes" style="flex:1" '
+                parts.append(f'<div class="row"><div class="notes" style="flex:1" '
                              f"data-spans='{html.escape(json.dumps(notes))}'></div></div>")
                 parts.append('<div class="gap"></div>')
         page = PAGE.format(rows="".join(parts), bg=theme["bg"], frame=theme["frame"],
@@ -226,10 +223,10 @@ def main():
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d).resolve()
         l1, l2 = run("ticket-46-preflight", 42000, PRS, tmp / "overview")[:2]
-        render("overview", [(None, l1, []), (None, l2, [])])
+        render("overview", [(l1, []), (l2, [])])
 
         render("anatomy", [
-            (None, l1, [
+            (l1, [
                 (*span(l1, "Opus 5.5"), "model"),
                 (*span(l1, "· high"), "effort"),
                 (*span(l1, "▰▰▱▱▱▱▱▱▱▱"), "context bar"),
@@ -237,7 +234,7 @@ def main():
                 (*span(l1, "my-project"), "directory"),
                 (*span(l1, "(ticket-46-preflight)"), "git branch"),
             ]),
-            (None, l2, [
+            (l2, [
                 (*span(l2, "#48 ∅"), "PR, no issue"),
                 (*span(l2, "[#47  46 ]"), "your branch's PR"),
                 (*span(l2, " 39 "), "issue it closes"),
@@ -246,12 +243,6 @@ def main():
                 (*span(l2, "PRs ✓3 ⧗1 ✗1 ✎2"), "open PRs by state"),
             ]),
         ])
-
-        levels = [(f"{u // 1000}k", run("main", u, [], tmp / f"ctx{u}")[0]) for u in (42000, 110000, 130000, 150000, 176000)]
-        render("context", [(side, line, []) for side, line in levels])
-
-        l2 = run("ticket-51-retry", 42000, [p for p in PRS if p["number"] != 47], tmp / "nopr")[1]
-        render("no-pr", [(None, l2, [(*span(l2, "on  51  (no PR)"), "issue from the branch name, no PR yet")])])
 
 
 if __name__ == "__main__":

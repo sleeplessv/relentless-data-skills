@@ -1,6 +1,7 @@
 #!/bin/sh
-# Claude Code status line: model and effort | bar used/size (pct) | dir (branch),
-# then open PRs, the issues each closes, and PR counts on a second line.
+# Claude Code status line: model and effort | bar used/size (pct) | dir (branch
+# +added −removed), then open PRs, the issues each closes, and PR counts on a
+# second line. The branch diff needs git 2.26 or later.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
@@ -69,19 +70,56 @@ printf '\033[1;38;2;215;119;87m%s\033[0m' "$model"
 printf '%b\033[%sm%s %s/%s (%s%%)\033[0m' \
   "$sep" "$colour" "$bar" "$(fmt_tokens "$used")" "$(fmt_tokens "$size")" "$pct"
 
+top=$([ -n "$cwd" ] && git --no-optional-locks -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$cwd" ]; then
   printf '%b%s' "$sep" "$(basename "$cwd")"
   # On a detached HEAD, head_branch is empty and branch is the short commit hash.
   head_branch=$(git --no-optional-locks -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
   branch=${head_branch:-$(git --no-optional-locks -C "$cwd" rev-parse --short HEAD 2>/dev/null)}
-  [ -n "$branch" ] && printf ' \033[38;2;215;119;87m(%s)\033[0m' "$branch"
+  # The branch diff: lines added and removed from where the branch split from
+  # the default branch to the working tree. Untracked files count as added,
+  # through a throwaway copy of the index, so the real index never changes.
+  diff=
+  # The base is the default branch on origin, or local main or master without
+  # one. With no base, on the base branch itself, or on a detached HEAD, mb
+  # stays empty and the diff is hidden.
+  base=$(git --no-optional-locks -C "$cwd" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+  for b in main master; do
+    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" && base=$b
+  done
+  mb=$([ -n "$head_branch" ] && [ "$head_branch" != "${base#origin/}" ] \
+    && git --no-optional-locks -C "$cwd" merge-base HEAD "$base" 2>/dev/null)
+  if [ -n "$mb" ] && [ -n "$top" ] && idx=$(mktemp); then
+    real=$(git --no-optional-locks -C "$top" rev-parse --git-path index)
+    case $real in /*) ;; *) real="$top/$real" ;; esac
+    # With no real index to copy, git creates the throwaway index from scratch.
+    cp "$real" "$idx" 2>/dev/null || rm -f "$idx"
+    git --no-optional-locks -C "$top" ls-files -z --others --exclude-standard \
+      | GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" add -N --pathspec-from-file=- --pathspec-file-nul >/dev/null 2>&1
+    # Counts shorten like 980, 1.2k, 58k, 1.3M. An empty diff shows nothing.
+    # The diff ends in the branch orange, for the closing parenthesis.
+    diff=$(GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" diff --shortstat "$mb" 2>/dev/null | awk '
+      function short(n, s) {
+        if (n >= 999500) s = sprintf("%.1fM", n / 1000000)
+        else if (n >= 9950) s = sprintf("%.0fk", n / 1000)
+        else if (n >= 1000) s = sprintf("%.1fk", n / 1000)
+        else s = n
+        sub(/\.0/, "", s); return s
+      }
+      {
+        a = 0; d = 0
+        for (i = 1; i < NF; i++) { if ($(i+1) ~ /^insertion/) a = $i; if ($(i+1) ~ /^deletion/) d = $i }
+        if (a + d > 0) printf " \033[38;2;127;183;126m+%s\033[0m \033[38;2;224;108;117m\342\210\222%s\033[38;2;215;119;87m", short(a), short(d)
+      }')
+    rm -f "$idx" "$idx.lock"
+  fi
+  [ -n "$branch" ] && printf ' \033[38;2;215;119;87m(%s%s)\033[0m' "$branch" "$diff"
 fi
 
 # Open PRs in the repo, on a second line, by state: ready with checks passed
 # (or no checks), ready with checks running, ready with a failed check, and
 # draft. Before the counts, each open PR shows as a clickable #number, coloured
 # by its state, then the issues it closes as chips.
-top=$([ -n "$cwd" ] && git --no-optional-locks -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
   key=$(printf '%s' "$top" | cksum | cut -d' ' -f1)

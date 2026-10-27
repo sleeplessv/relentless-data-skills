@@ -1,5 +1,6 @@
 #!/bin/sh
-# Claude Code status line: model and effort | bar used/size (pct) | dir (branch) | open PRs and PR counts.
+# Claude Code status line: model and effort | bar used/size (pct) | dir (branch),
+# then open PRs and PR counts on a second line.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
@@ -63,9 +64,10 @@ if [ -n "$cwd" ]; then
   [ -n "$branch" ] && printf ' \033[35m(%s)\033[0m' "$branch"
 fi
 
-# Open PRs in the repo, by state: ready with checks passed (or no checks),
-# ready with checks running, ready with a failed check, and draft. Before the
-# counts, each open PR shows as a clickable #number, coloured by its state.
+# Open PRs in the repo, on a second line, by state: ready with checks passed
+# (or no checks), ready with checks running, ready with a failed check, and
+# draft. Before the counts, each open PR shows as a clickable #number, coloured
+# by its state.
 top=$([ -n "$cwd" ] && git --no-optional-locks -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
@@ -126,5 +128,5 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
       | select(. != "")
       | "PRs \(.)")
   ' "$cache" 2>/dev/null | paste -sd' ' -)
-  if [ -n "$prs" ]; then printf ' | %s' "$prs"; fi
+  if [ -n "$prs" ]; then printf '\n%s' "$prs"; fi
 fi

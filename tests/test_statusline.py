@@ -199,6 +199,13 @@ class StatuslineTest(unittest.TestCase):
         line = ANSI.sub("", self.first_line())
         self.assertTrue(line.endswith("(feature +2 \u22120)"), line)
 
+    def test_branch_diff_counts_files_over_10m_as_binary(self):
+        self.feature_repo()
+        (self.repo / "new.txt").write_text("1\n2\n")
+        (self.repo / "data.csv").write_text("x\n" * 5_500_000)
+        line = ANSI.sub("", self.first_line())
+        self.assertTrue(line.endswith("(feature +2 \u22120)"), line)
+
     def test_branch_diff_removes_its_temp_index_when_killed(self):
         self.feature_repo()
         (self.repo / "new.txt").write_text("1\n")

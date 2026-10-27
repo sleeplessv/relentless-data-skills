@@ -25,7 +25,9 @@ After the branch, `+120 −34` is the branch diff: the lines the branch adds and
 removes, counted from where it split from the default branch to your working
 tree. It includes uncommitted changes and new files that git does not ignore, so
 it matches what the branch's PR would show if you committed everything now.
-Binary files count as zero lines. Added lines are sage and removed lines coral.
+Binary files and files over 10 MB count as zero lines, so a big data file can
+make the count differ from the PR's. Untracked nested repos count as zero lines
+too. Added lines are sage and removed lines coral.
 Large counts shorten, such as `+1.2k`, `+58k`, or `+1.3M`. The default branch is
 `origin/HEAD`, or local `main` or `master` when `origin/HEAD` is missing or
 points at a deleted branch. The diff is hidden on the default branch, on a
@@ -71,7 +73,8 @@ repo. Without `gh`, the script leaves the PR line out.
 
 ## Change the status line
 
-The thresholds, the number of PRs listed, and the refresh timing are variables
-at the top of `scripts/statusline.sh`. After you change the colours, run
+The thresholds, the number of PRs listed, the refresh timing, and the file size
+above which the branch diff counts a file as binary are variables at the top of
+`scripts/statusline.sh`. After you change the colours, run
 `python3 scripts/statusline_screenshots.py` from the repo root to regenerate
 the screenshots in `assets/`. The screenshot script needs Google Chrome.

@@ -22,6 +22,9 @@ PR_STALE_SEC=120
 # Most open PR numbers to list, newest first. The rest show as +N, except the
 # PR for the current branch, which always shows.
 PR_LIST_MAX=5
+# Files over this size count as binary in the branch diff, so 0 lines, and a
+# big data file is not read on every render. In git's size units, like 10m.
+DIFF_BIG_FILE=10m
 
 if ! command -v jq >/dev/null 2>&1; then
   printf 'statusline: install jq'
@@ -119,7 +122,7 @@ if [ -n "$cwd" ]; then
       | GIT_INDEX_FILE="$idx" git --literal-pathspecs --no-optional-locks -C "$top" add -N --pathspec-from-file=- --pathspec-file-nul >/dev/null 2>&1
     # The lines added and removed, as "added removed". An empty diff gives
     # nothing, and shows nothing.
-    counts=$(GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" diff --shortstat "$mb" 2>/dev/null | awk '{
+    counts=$(GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" -c core.bigFileThreshold="$DIFF_BIG_FILE" diff --shortstat "$mb" 2>/dev/null | awk '{
       a = 0; d = 0
       for (i = 1; i < NF; i++) { if ($(i+1) ~ /^insertion/) a = $i; if ($(i+1) ~ /^deletion/) d = $i }
       if (a + d > 0) print a, d

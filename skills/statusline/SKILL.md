@@ -9,11 +9,11 @@ disable-model-invocation: true
 Installs `scripts/statusline.sh` as the Claude Code status line. The rendered status line looks like:
 
 ```text
-Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (ticket-46-preflight)
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | my-project (ticket-46-preflight)
 #48 ∅ [#47 46] #45 39 41 #44 ∅ #42 37 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
-The bar fills by tokens used, whatever the size of the context window, and the text shades from green through amber to red as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
+The bar fills by tokens used, whatever the size of the context window, and the text shades from sage green through sand to coral as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
 The PR segment sits on a second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state. After each PR come the issues it closes, as numbers on an orange chip. The line ends with counts of the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves that line out.
 

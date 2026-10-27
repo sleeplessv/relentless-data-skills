@@ -6,15 +6,16 @@ disable-model-invocation: true
 
 # Status line
 
-Installs `scripts/statusline.sh` as the Claude Code status line. The rendered line looks like:
+Installs `scripts/statusline.sh` as the Claude Code status line. The rendered status line looks like:
 
 ```text
-Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
+#48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from green through amber to red as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
-The PR segment lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state, then counts the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves the segment out.
+The PR segment sits on a second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state, then counts the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves that line out.
 
 The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
 
@@ -54,8 +55,8 @@ Pipe sample input through the installed script from inside a git repo:
 echo '{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"total_input_tokens":42000,"context_window_size":200000,"used_percentage":21.4},"workspace":{"current_dir":"'"$PWD"'"}}' | ~/.claude/statusline.sh
 ```
 
-Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered line to the user.
+Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered lines to the user.
 
-The first run starts a background fetch of the PR counts, so the PR segment can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the segment stays hidden.
+The first run starts a background fetch of the PR counts, so the PR line can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the line stays hidden.
 
 Tell the user that the status line appears from their next message. If it does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.

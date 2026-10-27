@@ -5,7 +5,8 @@ line shows the current model, reasoning effort, context window usage,
 directory, git branch, and open pull requests under the prompt.
 
 ```text
-Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh) | #48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-dwh (dwh)
+#48 #47 #45 #44 #42 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 ## What it does
@@ -22,8 +23,8 @@ Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-d
   the script.
 - **Location.** Shows the current directory name and git branch, or the short
   commit hash on a detached HEAD.
-- **Open PR numbers.** Lists every open PR in the repo by number, newest
-  first, each coloured by its state. Each number is a link: click it to open
+- **Open PR numbers.** On a second line, lists every open PR in the repo by
+  number, newest first, each coloured by its state. Each number is a link: click it to open
   the PR in the browser, in terminals that support OSC 8 hyperlinks. The list
   stops at five numbers and shows the rest as `+N`. To change the limit, edit
   `PR_LIST_MAX` at the top of the script.

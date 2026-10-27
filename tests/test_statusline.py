@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import shutil
+import signal
 import subprocess
 import tempfile
 import time
@@ -108,9 +110,12 @@ class StatuslineTest(unittest.TestCase):
         self.git("add", "-A")
         self.git("commit", "-q", "-m", message)
 
-    def first_line(self, cwd=None):
-        """Run the script with `cwd` (default: the test repo) as the workspace. Return line 1."""
-        stdin = json.dumps({"model": {"display_name": "M"}, "workspace": {"current_dir": str(cwd or self.repo)}})
+    def first_line(self, cwd=None, **fields):
+        """Run the script with `cwd` (default: the test repo) as the workspace,
+        plus any other top-level status line `fields`. Return line 1."""
+        stdin = json.dumps(
+            {"model": {"display_name": "M"}, "workspace": {"current_dir": str(cwd or self.repo)}, **fields}
+        )
         out = subprocess.run(
             ["sh", str(SCRIPT)], input=stdin, capture_output=True, text=True, env=self.env, check=True
         ).stdout
@@ -150,6 +155,49 @@ class StatuslineTest(unittest.TestCase):
         self.assertEqual(self.git("diff", "--cached", "--name-only"), "a.txt\nb.txt\n")
         self.assertEqual(self.git("ls-files", "--others", "--exclude-standard"), ".gitignore\nlogo.png\nnew/c.txt\n")
 
+    def test_branch_diff_counts_untracked_files_named_like_pathspec_magic(self):
+        self.feature_repo()
+        (self.repo / "b.txt").write_text("tracked\n")
+        self.commit_all()
+        for name in (":(exclude)a", "[ab].txt", "ok.txt"):
+            (self.repo / name).write_text("x\n")
+        line = ANSI.sub("", self.first_line())
+        self.assertTrue(line.endswith("(feature +4 \u22120)"), line)
+
+    def test_branch_diff_removes_its_temp_index_when_killed(self):
+        self.feature_repo()
+        (self.repo / "new.txt").write_text("1\n")
+        # A git that stalls on the diff and records the temp index it was given,
+        # so the render is killed mid-count. macOS mktemp ignores TMPDIR, so the
+        # test finds the index through git rather than in a scratch directory.
+        seen = self.tmp / "index-path"
+        git = self.tmp / "bin" / "git"
+        git.write_text(
+            f'#!/bin/sh\ncase " $* " in *" diff --shortstat "*)\n'
+            f'  printf %s "$GIT_INDEX_FILE" >"{seen}.tmp"; mv "{seen}.tmp" "{seen}"; sleep 10 ;;\nesac\n'
+            f'exec {shutil.which("git")} "$@"\n'
+        )
+        git.chmod(0o755)
+        stdin = json.dumps({"model": {"display_name": "M"}, "workspace": {"current_dir": str(self.repo)}})
+        proc = subprocess.Popen(
+            ["sh", str(SCRIPT)], stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+            env=self.env, start_new_session=True,
+        )
+        self.addCleanup(proc.wait)
+        proc.stdin.write(stdin.encode())
+        proc.stdin.close()
+        for _ in range(50):
+            if seen.exists():
+                break
+            time.sleep(0.1)
+        index = Path(seen.read_text())
+        self.addCleanup(index.unlink, missing_ok=True)
+        self.assertTrue(index.exists(), index)
+        os.killpg(proc.pid, signal.SIGTERM)
+        proc.wait(timeout=5)
+        self.assertFalse(index.exists(), index)
+        self.assertFalse(Path(f"{index}.lock").exists())
+
     def test_branch_diff_is_hidden_on_the_default_branch(self):
         for remote in (True, False):
             with self.subTest(remote=remote):
@@ -158,6 +206,14 @@ class StatuslineTest(unittest.TestCase):
                 self.git("checkout", "-q", "main")
                 (self.repo / "a.txt").write_text("changed\n")
                 self.assertTrue(self.first_line().endswith(" repo \x1b[38;2;215;119;87m(main)\x1b[0m"))
+
+    def test_branch_diff_is_hidden_on_the_default_branch_beside_a_local_origin_main(self):
+        self.feature_repo()
+        self.git("branch", "origin/main", "main")
+        self.git("checkout", "-q", "main")
+        (self.repo / "a.txt").write_text("one\ntwo\nthree\nfour\n")
+        line = ANSI.sub("", self.first_line())
+        self.assertTrue(line.endswith(" | repo (main)"), line)
 
     def test_branch_diff_is_hidden_on_a_detached_head(self):
         self.feature_repo()
@@ -187,6 +243,14 @@ class StatuslineTest(unittest.TestCase):
                 (self.repo / "a.txt").write_text("one\n")
                 self.assertTrue(ANSI.sub("", self.first_line()).endswith(" | repo (feature +0 \u22122)"))
 
+    def test_branch_diff_falls_back_to_local_main_when_origin_head_is_stale(self):
+        self.feature_repo()
+        self.git("update-ref", "-d", "refs/remotes/origin/main")
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/gone")
+        (self.repo / "a.txt").write_text("one\n")
+        line = ANSI.sub("", self.first_line())
+        self.assertTrue(line.endswith(" | repo (feature +0 \u22122)"), line)
+
     def test_branch_diff_shortens_large_counts(self):
         self.feature_repo()
         (self.repo / "big.txt").write_text("x\n" * 1234)
@@ -197,6 +261,30 @@ class StatuslineTest(unittest.TestCase):
         self.git("add", "-A")
         self.git("reset", "-q", "--hard")
         self.assertTrue(ANSI.sub("", self.first_line()).endswith("(feature +1.2k \u22120)"))
+
+    def test_branch_diff_shortens_at_each_boundary(self):
+        self.feature_repo()
+        (self.repo / "a.txt").write_text("")
+        cases = [(999, "+999"), (1000, "+1k"), (9949, "+9.9k"), (9950, "+10k"), (1_300_000, "+1.3M")]
+        for lines, label in cases:
+            with self.subTest(lines=lines):
+                (self.repo / "new.txt").write_text("x\n" * lines)
+                line = ANSI.sub("", self.first_line())
+                self.assertTrue(line.endswith(f"(feature {label} \u22123)"), line)
+
+    def test_token_label_shortens_used_and_window_size(self):
+        cases = [
+            ((42000, 200000), "42k/200k"),
+            ((1500, 1500), "2k/2k"),
+            ((999400, 1000000), "999k/1.0M"),
+            ((999500, 2000000), "1.0M/2.0M"),
+            ((400, 0), "0/0"),
+        ]
+        for (used, size), label in cases:
+            with self.subTest(used=used, size=size):
+                window = {"total_input_tokens": used, "context_window_size": size}
+                line = ANSI.sub("", self.first_line(context_window=window))
+                self.assertIn(f" {label} (0%) | ", line)
 
     def test_branch_diff_counts_untracked_files_in_a_linked_worktree(self):
         self.feature_repo()

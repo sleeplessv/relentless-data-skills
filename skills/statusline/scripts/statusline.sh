@@ -45,8 +45,18 @@ eval "$(printf '%s' "$input" | jq -r '@sh "
 # Round to the nearest 1k first, so the label, bar, and colour agree.
 used=$(awk -v n="$used" 'BEGIN{ printf "%d", int(n / 1000 + 0.5) * 1000 }')
 
-fmt_tokens() {
-  awk -v n="$1" 'BEGIN{ if (n>=999500) printf "%.1fM", n/1000000; else if (n>=1000) printf "%.0fk", n/1000; else printf "%d", n }'
+# Shorten a count like 980, 1.2k, 58k, 1.3M, dropping a trailing .0. With
+# whole as the second argument, as for the token labels, thousands are always
+# whole and millions keep their .0, like 2k and 1.0M.
+fmt_count() {
+  awk -v n="$1" -v whole="$2" 'BEGIN{
+    if (n >= 999500) s = sprintf("%.1fM", n / 1000000)
+    else if (n >= 9950 || (whole && n >= 1000)) s = sprintf("%.0fk", n / 1000)
+    else if (n >= 1000) s = sprintf("%.1fk", n / 1000)
+    else s = sprintf("%d", n)
+    if (!whole) sub(/\.0/, "", s)
+    print s
+  }'
 }
 
 colour=$(awk -v u="$used" -v start="$GREEN_UNTIL" -v span="$FADE_SPAN" 'BEGIN{
@@ -68,7 +78,7 @@ printf '\033[1;38;2;215;119;87m%s\033[0m' "$model"
 # Claude Code leaves out effort when the model does not support it.
 [ -n "$effort" ] && printf ' \033[2m· %s\033[0m' "$effort"
 printf '%b\033[%sm%s %s/%s (%s%%)\033[0m' \
-  "$sep" "$colour" "$bar" "$(fmt_tokens "$used")" "$(fmt_tokens "$size")" "$pct"
+  "$sep" "$colour" "$bar" "$(fmt_count "$used" whole)" "$(fmt_count "$size" whole)" "$pct"
 
 top=$([ -n "$cwd" ] && git --no-optional-locks -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$cwd" ]; then
@@ -80,38 +90,42 @@ if [ -n "$cwd" ]; then
   # the default branch to the working tree. Untracked files count as added,
   # through a throwaway copy of the index, so the real index never changes.
   diff=
-  # The base is the default branch on origin, or local main or master without
-  # one. With no base, on the base branch itself, or on a detached HEAD, mb
-  # stays empty and the diff is hidden.
-  base=$(git --no-optional-locks -C "$cwd" symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null)
+  # The base is the default branch on origin, or local main or master when
+  # origin/HEAD is missing or points at a branch that no longer exists. With no
+  # base, on the base branch itself, or on a detached HEAD, mb stays empty and
+  # the diff is hidden. base is a full ref, as --short can be ambiguous, such as
+  # beside a local branch named origin/main.
+  base=$(git --no-optional-locks -C "$cwd" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)
+  git --no-optional-locks -C "$cwd" rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 || base=
   for b in main master; do
-    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" && base=$b
+    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" && base=refs/heads/$b
   done
-  mb=$([ -n "$head_branch" ] && [ "$head_branch" != "${base#origin/}" ] \
+  base_branch=${base#refs/remotes/origin/}
+  mb=$([ -n "$head_branch" ] && [ "$head_branch" != "${base_branch#refs/heads/}" ] \
     && git --no-optional-locks -C "$cwd" merge-base HEAD "$base" 2>/dev/null)
   if [ -n "$mb" ] && [ -n "$top" ] && idx=$(mktemp); then
+    # Remove the throwaway index even when Claude Code kills the script midway.
+    trap 'rm -f "$idx" "$idx.lock"' EXIT
+    trap 'exit 1' INT TERM HUP
     real=$(git --no-optional-locks -C "$top" rev-parse --git-path index)
     case $real in /*) ;; *) real="$top/$real" ;; esac
     # With no real index to copy, git creates the throwaway index from scratch.
     cp "$real" "$idx" 2>/dev/null || rm -f "$idx"
+    # Literal pathspecs, so a file named like :(exclude)a or *.txt is one path.
     git --no-optional-locks -C "$top" ls-files -z --others --exclude-standard \
-      | GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" add -N --pathspec-from-file=- --pathspec-file-nul >/dev/null 2>&1
-    # Counts shorten like 980, 1.2k, 58k, 1.3M. An empty diff shows nothing.
+      | GIT_INDEX_FILE="$idx" git --literal-pathspecs --no-optional-locks -C "$top" add -N --pathspec-from-file=- --pathspec-file-nul >/dev/null 2>&1
+    # The lines added and removed, as "added removed". An empty diff gives
+    # nothing, and shows nothing.
+    counts=$(GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" diff --shortstat "$mb" 2>/dev/null | awk '{
+      a = 0; d = 0
+      for (i = 1; i < NF; i++) { if ($(i+1) ~ /^insertion/) a = $i; if ($(i+1) ~ /^deletion/) d = $i }
+      if (a + d > 0) print a, d
+    }')
     # The diff ends in the branch orange, for the closing parenthesis.
-    diff=$(GIT_INDEX_FILE="$idx" git --no-optional-locks -C "$top" diff --shortstat "$mb" 2>/dev/null | awk '
-      function short(n, s) {
-        if (n >= 999500) s = sprintf("%.1fM", n / 1000000)
-        else if (n >= 9950) s = sprintf("%.0fk", n / 1000)
-        else if (n >= 1000) s = sprintf("%.1fk", n / 1000)
-        else s = n
-        sub(/\.0/, "", s); return s
-      }
-      {
-        a = 0; d = 0
-        for (i = 1; i < NF; i++) { if ($(i+1) ~ /^insertion/) a = $i; if ($(i+1) ~ /^deletion/) d = $i }
-        if (a + d > 0) printf " \033[38;2;127;183;126m+%s\033[0m \033[38;2;224;108;117m\342\210\222%s\033[38;2;215;119;87m", short(a), short(d)
-      }')
+    [ -n "$counts" ] && diff=$(printf ' \033[38;2;127;183;126m+%s\033[0m \033[38;2;224;108;117m\342\210\222%s\033[38;2;215;119;87m' \
+      "$(fmt_count "${counts% *}")" "$(fmt_count "${counts#* }")")
     rm -f "$idx" "$idx.lock"
+    trap - EXIT INT TERM HUP
   fi
   [ -n "$branch" ] && printf ' \033[38;2;215;119;87m(%s%s)\033[0m' "$branch" "$diff"
 fi

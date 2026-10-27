@@ -15,7 +15,7 @@ Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | my-project (t
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from sage green through sand to coral as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
-After the branch comes the branch diff: the lines the branch adds and removes, from where it split from the default branch to the working tree, untracked files included. The default branch is `origin/HEAD`, or local `main` or `master` without one. The diff is hidden on the default branch, on a detached HEAD, and when the branch changes nothing. It needs git 2.26 or later.
+After the branch comes the branch diff: the lines the branch adds and removes, from where it split from the default branch to the working tree, untracked files included. The default branch is `origin/HEAD`, or local `main` or `master` when `origin/HEAD` is missing or points at a deleted branch. The diff is hidden on the default branch, on a detached HEAD, and when the branch changes nothing. It needs git 2.26 or later.
 
 The PR line is the second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state. After each PR come the issues it closes, as numbers on an orange chip. The line ends with counts of the repo's open pull requests by state. The README lists the symbols and colours. The PR line needs `gh`, signed in to an account that can read the repo. Without `gh`, the status line leaves the PR line out.
 

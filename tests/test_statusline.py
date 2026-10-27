@@ -20,7 +20,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "skills" / "statusline" / "scripts" / "statusline.sh"
 REPO_URL = "https://github.com/acme/widgets"
-CHIP = "\x1b[48;2;31;79;143;38;2;255;255;255m"
+CHIP = "\x1b[48;2;215;119;87;38;2;255;255;255m"
 ANSI = re.compile(r"\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\")
 
 

@@ -34,7 +34,7 @@ Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | data-fabric-d
 - **Issues each PR closes.** After each PR number come the issues that
   GitHub closes when the PR merges. GitHub links these through `Closes #N`
   in the PR body or through the PR's **Development** sidebar. Each issue is
-  a white number on a blue chip, without `#`, so it stands apart from PR
+  a white number on an orange chip, without `#`, so it stands apart from PR
   numbers. Each chip links to its issue. In the plain-text example above,
   `46`, `39 41`, and `37` are chips. A PR that closes no issue shows an
   amber `∅`.

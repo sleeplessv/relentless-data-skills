@@ -116,9 +116,9 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
                  failed: "38;2;231;76;60", draft: "38;5;245"}[.];
     # OSC 8 hyperlink, so the terminal opens the PR on click.
     def link($url; $text): "\u001b]8;;\($url)\u001b\\\($text)\u001b]8;;\u001b\\";
-    # An issue, as a white number on a blue chip. The chip links to the issue
+    # An issue, as a white number on an orange chip. The chip links to the issue
     # when the URL is known.
-    def chip: "\u001b[48;2;31;79;143;38;2;255;255;255m\(
+    def chip: "\u001b[48;2;215;119;87;38;2;255;255;255m\(
       if .url then link(.url; " \(.number) ") else " \(.number) " end)\u001b[0m";
     # A PR, then the issues it closes, or an amber ∅ when it closes none.
     def entry: "\u001b[\(state | colour)m\(link(.url; "#\(.number)"))\u001b[0m"

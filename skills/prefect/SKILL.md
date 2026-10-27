@@ -33,9 +33,11 @@ Also on every Prefect answer:
 Follow this whenever unsure, the task is version-sensitive, or the user asks
 for current/best practice:
 
-1. Fetch the index `https://docs.prefect.io/llms.txt` and find the page matching the topic.
-2. Fetch the exact page URL from the index; its links already include `.md`.
-3. If a URL 404s, re-fetch `llms.txt` and re-resolve rather than guessing a URL.
+1. Fetch the index `https://www.prefect.io/docs/llms.txt` and find the page matching the topic.
+   Integrations and the API reference sit in nested `/_llms/*.txt` indexes; follow them recursively.
+2. Fetch the exact page URL from the index (links include `.md`). If its host is
+   `*.mintlify.dev`, swap the host for `www.prefect.io` and keep the path.
+3. If a URL 404s, re-fetch the index that listed it and re-resolve rather than guessing.
 4. If the fetch tool rejects Markdown, try the equivalent HTML page by removing
    the trailing `.md`. Either format is valid evidence once fetched.
 5. Use web search as a fallback when direct lookup fails.
@@ -44,11 +46,11 @@ for current/best practice:
 
 Anchors for the guardrails below:
 
-- states => https://docs.prefect.io/v3/concepts/states.md
-- deployments => https://docs.prefect.io/v3/concepts/deployments.md
-- prefect.yaml => https://docs.prefect.io/v3/how-to-guides/deployments/prefect-yaml.md
-- caching => https://docs.prefect.io/v3/concepts/caching.md
-- results => https://docs.prefect.io/v3/advanced/results.md
+- states => https://www.prefect.io/docs/v3/concepts/states.md
+- deployments => https://www.prefect.io/docs/v3/concepts/deployments.md
+- prefect.yaml => https://www.prefect.io/docs/v3/how-to-guides/deployments/prefect-yaml.md
+- caching => https://www.prefect.io/docs/v3/concepts/caching.md
+- results => https://www.prefect.io/docs/v3/advanced/results.md
 
 Fetch relevant anchors and apply the verify gate before advising.
 
@@ -104,10 +106,12 @@ in scope only when that change is the task (see Boundary, above).
   classifying the cause. `Crashed` can include broken imports or syntax errors
   during startup; the state alone does not establish an infrastructure cause.
   For worker-backed pools, check worker health, pool/queue polling, concurrency,
-  and infrastructure logs. Push and Managed pools need no worker; inspect
-  submission and infrastructure errors instead. For `serve()`, check the
-  serving process and its subprocess logs. For zombie runs, confirm whether
-  the execution process still exists before concluding it is dead.
+  and infrastructure logs. Process workers (3.8.3+) may launch runs via `uv run`;
+  confirm the run's environment rather than assuming the inspected one. Push and
+  Managed pools need no worker; inspect submission and infrastructure errors
+  instead. For `serve()`, check the serving process and its subprocess logs.
+  For zombie runs, confirm whether the execution process still exists before
+  concluding it is dead.
 
 For implementation tasks, verify the changed flow imports and exercise the changed
 behavior with suitable local inputs. Validate deployment configuration against the

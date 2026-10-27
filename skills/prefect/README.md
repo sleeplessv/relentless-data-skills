@@ -8,8 +8,9 @@ or local API and CLI evidence for the project's installed version.
 ## What it does
 
 - **Doc-lookup protocol.** Fetches the exact Markdown URL in
-  `docs.prefect.io/llms.txt`, with an HTML fallback when the fetch tool rejects
-  Markdown. Re-resolves missing pages through the index and uses web search
+  `www.prefect.io/docs/llms.txt`, with an HTML fallback when the fetch tool
+  rejects Markdown. Follows nested `/_llms/` indexes and cites pages under the
+  public docs host. Re-resolves missing pages through the index and uses web search
   when direct lookup fails. Advice cites docs or local evidence and states
   what remains unverified.
 - **CLI-first protocol.** Queries the live instance through the project's
@@ -35,8 +36,8 @@ Targets the **Prefect 3.x** generation (no patch pin). Prefect 2.x is out of sco
 ## How it works
 
 The whole skill is a single `SKILL.md`, with no `references/` directory.
-The lookup protocol uses exact URLs from `llms.txt` and accepts fetched
-Markdown or HTML. Five guardrail anchors point to common topics; the skill
+The lookup protocol uses exact paths from `llms.txt` on the public docs host
+and accepts fetched Markdown or HTML. Five guardrail anchors point to common topics; the skill
 re-resolves them through the index if they move.
 
 ## Install

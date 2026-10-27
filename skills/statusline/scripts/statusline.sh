@@ -4,8 +4,11 @@
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
-# Context thresholds, in tokens: green up to GREEN_UNTIL, then a gradient
-# through amber (midway) to red at GREEN_UNTIL + FADE_SPAN and above. The
+# Colours: Claude Code orange marks identity (model, branch, issue chips).
+# Softened sage, sand, and coral mark status, and dim text marks the rest.
+#
+# Context thresholds, in tokens: sage up to GREEN_UNTIL, then a gradient
+# through sand (midway) to coral at GREEN_UNTIL + FADE_SPAN and above. The
 # ten-cell bar fills one cell per CELL tokens, rounded to the nearest cell.
 GREEN_UNTIL=90000
 FADE_SPAN=80000
@@ -42,8 +45,8 @@ fmt_tokens() {
 colour=$(awk -v u="$used" -v start="$GREEN_UNTIL" -v span="$FADE_SPAN" 'BEGIN{
   t = (u - start) / span; if (t < 0) t = 0; if (t > 1) t = 1
   amber_at = 0.5
-  if (t < amber_at) { s = t / amber_at;                r = 46 + 209*s;  g = 204 - 13*s;  b = 64 - 64*s }
-  else              { s = (t - amber_at) / (1 - amber_at); r = 255 - 24*s; g = 191 - 115*s; b = 60*s }
+  if (t < amber_at) { s = t / amber_at;                r = 127 + 90*s; g = 183 - 3*s;  b = 126 - 52*s }
+  else              { s = (t - amber_at) / (1 - amber_at); r = 217 + 7*s;  g = 180 - 72*s; b = 74 + 43*s }
   printf "38;2;%d;%d;%d", r, g, b
 }')
 
@@ -52,18 +55,20 @@ bar=$(awk -v u="$used" -v cell="$CELL" 'BEGIN{
   for (i = 0; i < 10; i++) printf (i < n ? "▰" : "▱")
 }')
 
-# Claude Code leaves out effort when the model does not support it.
-[ -n "$effort" ] && model="$model · $effort"
+sep=' \033[2m|\033[0m '
 
-printf '\033[36m%s\033[0m | \033[%sm%s %s/%s (%s%%)\033[0m' \
-  "$model" "$colour" "$bar" "$(fmt_tokens "$used")" "$(fmt_tokens "$size")" "$pct"
+printf '\033[1;38;2;215;119;87m%s\033[0m' "$model"
+# Claude Code leaves out effort when the model does not support it.
+[ -n "$effort" ] && printf ' \033[2m· %s\033[0m' "$effort"
+printf '%b\033[%sm%s %s/%s (%s%%)\033[0m' \
+  "$sep" "$colour" "$bar" "$(fmt_tokens "$used")" "$(fmt_tokens "$size")" "$pct"
 
 if [ -n "$cwd" ]; then
-  printf ' | %s' "$(basename "$cwd")"
+  printf '%b%s' "$sep" "$(basename "$cwd")"
   # On a detached HEAD, head_branch is empty and branch is the short commit hash.
   head_branch=$(git --no-optional-locks -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
   branch=${head_branch:-$(git --no-optional-locks -C "$cwd" rev-parse --short HEAD 2>/dev/null)}
-  [ -n "$branch" ] && printf ' \033[35m(%s)\033[0m' "$branch"
+  [ -n "$branch" ] && printf ' \033[38;2;215;119;87m(%s)\033[0m' "$branch"
 fi
 
 # Open PRs in the repo, on a second line, by state: ready with checks passed
@@ -112,18 +117,18 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
           elif any(. == "running") then "running"
           else "passed" end
       end;
-    def colour: {passed: "38;2;46;204;64", running: "38;2;255;191;0",
-                 failed: "38;2;231;76;60", draft: "38;5;245"}[.];
+    def colour: {passed: "38;2;127;183;126", running: "38;2;217;180;74",
+                 failed: "38;2;224;108;117", draft: "2"}[.];
     # OSC 8 hyperlink, so the terminal opens the PR on click.
     def link($url; $text): "\u001b]8;;\($url)\u001b\\\($text)\u001b]8;;\u001b\\";
-    # An issue, as a white number on an orange chip. The chip links to the issue
+    # An issue, as a dark number on an orange chip. The chip links to the issue
     # when the URL is known.
-    def chip: "\u001b[48;2;215;119;87;38;2;255;255;255m\(
+    def chip: "\u001b[48;2;215;119;87;38;2;26;26;26m\(
       if .url then link(.url; " \(.number) ") else " \(.number) " end)\u001b[0m";
-    # A PR, then the issues it closes, or an amber ∅ when it closes none.
+    # A PR, then the issues it closes, or a dim ∅ when it closes none.
     def entry: "\u001b[\(state | colour)m\(link(.url; "#\(.number)"))\u001b[0m"
       + ([.closingIssuesReferences[]? | " \(chip)"] | join("")
-        | if . == "" then " \u001b[38;2;255;191;0m∅\u001b[0m" else . end);
+        | if . == "" then " \u001b[2m∅\u001b[0m" else . end);
     def bold($s): "\u001b[1m\($s)\u001b[0m";
     # True for the PR from the current branch. False for a fork PR, even from a
     # branch of the same name.
@@ -135,7 +140,7 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
       | select($prs | all(current | not))
       | {number: $n, url: ($prs[0].url // null
           | if . then sub("/pull/[0-9]+$"; "/issues/\($n)") else . end)}
-      | "on \(chip) \u001b[38;5;245m(no PR)\u001b[0m |"),
+      | "on \(chip) \u001b[2m(no PR)\u001b[0m |"),
     (map(select(.number))
       # The newest PRs, and also the PR for the current branch when it is older.
       | (.[:$max] + (.[$max:] | map(select(current)))) as $shown
@@ -157,5 +162,7 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   ' "$cache" 2>/dev/null | paste -sd' ' -)
   # Drop the trailing separator when no PR follows the issue from the branch name.
   prs=${prs% |}
+  # Dim the separators. No other text on the line contains " | ".
+  prs=$(printf '%s' "$prs" | sed "s/ | / $(printf '\033')[2m|$(printf '\033')[0m /g")
   if [ -n "$prs" ]; then printf '\n%s' "$prs"; fi
 fi

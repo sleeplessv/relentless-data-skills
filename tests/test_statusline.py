@@ -20,7 +20,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPT = REPO_ROOT / "skills" / "statusline" / "scripts" / "statusline.sh"
 REPO_URL = "https://github.com/acme/widgets"
-CHIP = "\x1b[48;2;215;119;87;38;2;255;255;255m"
+CHIP = "\x1b[48;2;215;119;87;38;2;26;26;26m"
 ANSI = re.compile(r"\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\")
 
 
@@ -80,9 +80,9 @@ class StatuslineTest(unittest.TestCase):
         self.assertIn(f"{CHIP}\x1b]8;;{REPO_URL}/issues/48\x1b\\ 48 ", line)
         self.assertEqual(ANSI.sub("", line), "#96  48  | PRs ✓1")
 
-    def test_pr_that_closes_nothing_shows_an_amber_empty_set(self):
+    def test_pr_that_closes_nothing_shows_a_dim_empty_set(self):
         line = self.render("main", [pr(97), pr(96, closes=[46, 49])])
-        self.assertIn("\x1b[38;2;255;191;0m∅\x1b[0m", line)
+        self.assertIn("\x1b[2m∅\x1b[0m", line)
         self.assertEqual(ANSI.sub("", line), "#97 ∅ #96  46   49  | PRs ✓2")
 
     def test_current_branch_pr_is_bracketed(self):

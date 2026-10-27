@@ -2,41 +2,25 @@
 
 Runs the script as Claude Code does: status line JSON on stdin, output on
 stdout. Each test builds a throwaway git repo on a chosen branch and a fresh
-PR cache, so the script never refreshes it, and puts a stub gh on PATH, so
-nothing reaches the network. Run from the repo root:
+PR cache through tests/statusline_fixture.py. Run from the repo root:
 
     python3 -m unittest tests.test_statusline -v
 """
 from __future__ import annotations
 
-import json
-import os
 import re
-import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "skills" / "statusline" / "scripts" / "statusline.sh"
-REPO_URL = "https://github.com/acme/widgets"
+# CI runs discover -s tests, which puts tests/ on the path; the module form
+# above does not.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from statusline_fixture import REPO_URL, pr, run_statusline  # noqa: E402
+
 CHIP = "\x1b[48;2;215;119;87;38;2;26;26;26m"
 ANSI = re.compile(r"\x1b\[[0-9;]*m|\x1b\]8;;[^\x1b]*\x1b\\")
-
-
-def pr(number, closes=(), branch=None, draft=False, fork=False):
-    """One entry of the cache, shaped like gh pr list --json output."""
-    return {
-        "number": number,
-        "url": f"{REPO_URL}/pull/{number}",
-        "isDraft": draft,
-        "isCrossRepository": fork,
-        "headRefName": branch or f"branch-{number}",
-        "statusCheckRollup": [],
-        "closingIssuesReferences": [
-            {"number": n, "url": f"{REPO_URL}/issues/{n}"} for n in closes
-        ],
-    }
 
 
 class StatuslineTest(unittest.TestCase):
@@ -44,35 +28,10 @@ class StatuslineTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.tmp = Path(tmp.name).resolve()
-        self.repo = self.tmp / "repo"
-        self.repo.mkdir()
-        bin_dir = self.tmp / "bin"
-        bin_dir.mkdir()
-        gh = bin_dir / "gh"
-        gh.write_text("#!/bin/sh\nexit 1\n")
-        gh.chmod(0o755)
-        self.env = {
-            **os.environ,
-            "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
-            "XDG_CACHE_HOME": str(self.tmp / "cache"),
-        }
 
     def render(self, branch, prs):
         """Run the script on `branch` with `prs` cached. Return the second line."""
-        git = ["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t"]
-        subprocess.run([*git, "init", "-q", "-b", branch], check=True)
-        subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
-        key = subprocess.run(
-            ["cksum"], input=str(self.repo), capture_output=True, text=True, check=True
-        ).stdout.split()[0]
-        cache_dir = self.tmp / "cache" / "claude-statusline"
-        cache_dir.mkdir(parents=True)
-        (cache_dir / f"prs-v2-{key}.json").write_text(json.dumps(prs))
-        stdin = json.dumps({"model": {"display_name": "M"}, "workspace": {"current_dir": str(self.repo)}})
-        out = subprocess.run(
-            ["sh", str(SCRIPT)], input=stdin, capture_output=True, text=True, env=self.env, check=True
-        ).stdout
-        lines = out.split("\n")
+        lines = run_statusline(self.tmp, branch, prs, {"model": {"display_name": "M"}})
         return lines[1] if len(lines) > 1 else ""
 
     def test_closed_issue_shows_as_chip_after_its_pr(self):

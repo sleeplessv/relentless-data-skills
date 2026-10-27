@@ -1,7 +1,7 @@
 """Render the statusline README screenshots into skills/statusline/assets/.
 
 Runs skills/statusline/scripts/statusline.sh against a throwaway repo and a
-fake PR cache, as tests/test_statusline.py does, converts its ANSI output to
+fake PR cache, through the same tests/statusline_fixture.py as the tests, converts its ANSI output to
 HTML, and screenshots the HTML with headless Google Chrome. Each image comes
 in a dark and a light version. Rerun after changing the script's colours:
 
@@ -14,14 +14,16 @@ import json
 import os
 import re
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SCRIPT = REPO_ROOT / "skills" / "statusline" / "scripts" / "statusline.sh"
+sys.path.insert(0, str(REPO_ROOT / "tests"))
+from statusline_fixture import pr, run_statusline  # noqa: E402
+
 OUT = REPO_ROOT / "skills" / "statusline" / "assets"
 CHROME = os.environ.get("CHROME", "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome")
-REPO_URL = "https://github.com/acme/widgets"
 
 THEMES = {
     "dark": {"bg": (30, 30, 30), "fg": (212, 212, 212), "label": "#9a9ea8", "rule": "#55585f", "frame": "#3a3a3a"},
@@ -30,18 +32,6 @@ THEMES = {
 
 RUNNING = [{"__typename": "CheckRun", "status": "IN_PROGRESS"}]
 FAILED = [{"__typename": "CheckRun", "status": "COMPLETED", "conclusion": "FAILURE"}]
-
-
-def pr(number, closes=(), checks=(), branch=None, draft=False):
-    return {
-        "number": number,
-        "url": f"{REPO_URL}/pull/{number}",
-        "isDraft": draft,
-        "isCrossRepository": False,
-        "headRefName": branch or f"branch-{number}",
-        "statusCheckRollup": list(checks),
-        "closingIssuesReferences": [{"number": n, "url": f"{REPO_URL}/issues/{n}"} for n in closes],
-    }
 
 
 PRS = [
@@ -58,29 +48,12 @@ PRS = [
 def run(branch, used, prs, tmp: Path) -> list[str]:
     """Run the script in a fresh repo named my-project on `branch`. Return its lines."""
     tmp.mkdir()
-    repo = tmp / "my-project"
-    repo.mkdir()
-    git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
-    subprocess.run([*git, "init", "-q", "-b", branch], check=True)
-    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
-    key = subprocess.run(["cksum"], input=str(repo), capture_output=True, text=True, check=True).stdout.split()[0]
-    cache = tmp / "cache" / "claude-statusline"
-    cache.mkdir(parents=True)
-    (cache / f"prs-v2-{key}.json").write_text(json.dumps(prs))
-    bin_dir = tmp / "bin"
-    bin_dir.mkdir()
-    (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
-    (bin_dir / "gh").chmod(0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "XDG_CACHE_HOME": str(tmp / "cache")}
-    stdin = json.dumps({
+    return run_statusline(tmp, branch, prs, {
         "model": {"display_name": "Opus 5.5"},
         "effort": {"level": "high"},
         "context_window": {"total_input_tokens": used, "context_window_size": 200000,
                            "used_percentage": used / 2000},
-        "workspace": {"current_dir": str(repo)},
-    })
-    out = subprocess.run(["sh", str(SCRIPT)], input=stdin, capture_output=True, text=True, env=env, check=True)
-    return out.stdout.split("\n")
+    }, repo_name="my-project")
 
 
 SGR = re.compile(r"\x1b\[([0-9;]*)m|\x1b\]8;;[^\x1b]*\x1b\\")

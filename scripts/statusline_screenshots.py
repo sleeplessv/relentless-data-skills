@@ -56,13 +56,21 @@ PRS = [
 
 
 def run(branch, used, prs, tmp: Path) -> list[str]:
-    """Run the script in a fresh repo named my-project on `branch`. Return its lines."""
+    """Run the script in a fresh repo named my-project on `branch`, which adds
+    120 lines and removes 34 from origin/main. Return its lines."""
     tmp.mkdir()
     repo = tmp / "my-project"
     repo.mkdir()
     git = ["git", "-C", str(repo), "-c", "user.name=t", "-c", "user.email=t@t"]
-    subprocess.run([*git, "init", "-q", "-b", branch], check=True)
-    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
+    subprocess.run([*git, "init", "-q", "-b", "main"], check=True)
+    (repo / "app.py").write_text("".join(f"old {n}\n" for n in range(100)))
+    subprocess.run([*git, "add", "app.py"], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], check=True)
+    subprocess.run([*git, "update-ref", "refs/remotes/origin/main", "HEAD"], check=True)
+    subprocess.run([*git, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], check=True)
+    subprocess.run([*git, "checkout", "-q", "-b", branch], check=True)
+    (repo / "app.py").write_text("".join(f"old {n}\n" for n in range(34, 100)))
+    (repo / "preflight.py").write_text("".join(f"new {n}\n" for n in range(120)))
     key = subprocess.run(["cksum"], input=str(repo), capture_output=True, text=True, check=True).stdout.split()[0]
     cache = tmp / "cache" / "claude-statusline"
     cache.mkdir(parents=True)
@@ -232,7 +240,8 @@ def main():
                 (*span(l1, "▰▰▱▱▱▱▱▱▱▱"), "context bar"),
                 (*span(l1, "42k/200k (21%)"), "tokens used / window"),
                 (*span(l1, "my-project"), "directory"),
-                (*span(l1, "(ticket-46-preflight)"), "git branch"),
+                (*span(l1, "(ticket-46-preflight"), "git branch"),
+                (*span(l1, "+120 \u221234"), "branch diff"),
             ]),
             (l2, [
                 (*span(l2, "#48 ∅"), "PR, no issue"),

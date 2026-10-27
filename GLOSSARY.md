@@ -25,3 +25,5 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.
 - **Target**: the resolved connection, environment, project root, snowman dir, and `.env` file for one snowman run, produced by `resolve_target`.
+- **Branch diff**: the lines the checked-out branch adds and removes, measured from the point where it split from the default branch to the working tree. It is what the branch's PR would show if everything were committed now. _Avoid_: session lines, PR diff.
+- **Session edits**: the lines Claude added and removed during one Claude Code session, whatever branch they landed on. Distinct from the branch diff.

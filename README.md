@@ -25,7 +25,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`ship`](skills/ship/) | Commit, publish, and merge working-tree changes through a pull request. |
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes into conventional commits and push them to the remote when asked. |
 | [`snowman`](skills/snowman/) | Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution. |
-| [`statusline`](skills/statusline/) | Show the current model, reasoning effort, context window usage, directory, git branch, and open pull requests in the Claude Code status line. |
+| [`statusline`](skills/statusline/) | Show the current model, reasoning effort, context window usage, directory, git branch and its diff, and open pull requests in the Claude Code status line. |
 | [`student-mode`](skills/student-mode/) | Write tutorial-grade Python, SQL, and Java for learners instead of production-grade code, for the rest of the session. Python leans on pandas and NumPy for data science coursework. |
 | [`visual-report`](skills/visual-report/) | Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals. |
 <!-- skills-table:end -->

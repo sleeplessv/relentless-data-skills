@@ -1,6 +1,6 @@
 ---
 name: statusline
-description: Installs a Claude Code status line that shows the current model, reasoning effort, context window usage, directory, git branch, and open pull requests.
+description: Installs a Claude Code status line that shows the current model, reasoning effort, context window usage, directory, git branch and its diff, and open pull requests.
 disable-model-invocation: true
 ---
 
@@ -9,11 +9,13 @@ disable-model-invocation: true
 Installs `scripts/statusline.sh` as the Claude Code status line. The rendered status line looks like:
 
 ```text
-Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | my-project (ticket-46-preflight)
+Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | my-project (ticket-46-preflight +120 −34)
 #48 ∅ [#47 46] #45 39 41 #44 ∅ #42 37 +2 | PRs ✓3 ⧗1 ✗1 ✎2
 ```
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from sage green through sand to coral as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
+
+After the branch comes the branch diff: the lines the branch adds and removes, from where it split from the default branch to the working tree, untracked files included. The default branch is `origin/HEAD`, or local `main` or `master` when `origin/HEAD` is missing or points at a deleted branch. The diff is hidden on the default branch, on a detached HEAD, and when the branch changes nothing. It needs git 2.26 or later.
 
 The PR line is the second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state. After each PR come the issues it closes, as numbers on an orange chip. The line ends with counts of the repo's open pull requests by state. The README lists the symbols and colours. The PR line needs `gh`, signed in to an account that can read the repo. Without `gh`, the status line leaves the PR line out.
 
@@ -55,7 +57,7 @@ Pipe sample input through the installed script from inside a git repo:
 echo '{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_window":{"total_input_tokens":42000,"context_window_size":200000,"used_percentage":21.4},"workspace":{"current_dir":"'"$PWD"'"}}' | ~/.claude/statusline.sh
 ```
 
-Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Report the rendered lines to the user.
+Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Off the default branch, a branch with changes also shows its diff, such as `+120 −34`. Report the rendered lines to the user.
 
 The first run starts a background fetch of the PR counts, so the PR line can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the line stays hidden.
 

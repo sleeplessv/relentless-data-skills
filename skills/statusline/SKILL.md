@@ -45,13 +45,7 @@ If the file does not exist, create it with only the `statusLine` key below. Othe
 
 `refreshInterval` reruns the script every 30 seconds, so the PR segment catches up while the session is idle. Without it, Claude Code reruns the script only on conversation events.
 
-Then add the PR refresh hook. It runs the script after each Bash command, and the script refreshes the PR segment when the command changed a PR, such as `gh pr create` or `git push`. If `hooks.PostToolUse` already has an entry whose command is `~/.claude/statusline.sh --refresh-prs`, leave it. Otherwise append this entry to the `hooks.PostToolUse` list, creating `hooks` and the list if they do not exist:
-
-```json
-{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/statusline.sh --refresh-prs" }] }
-```
-
-Change only those two keys and keep every other setting, including other hooks. Run `jq empty <file>` to confirm that the file is still valid JSON.
+Change only that key and keep every other setting. Run `jq empty <file>` to confirm that the file is still valid JSON.
 
 ### Step 4: Prove it works
 

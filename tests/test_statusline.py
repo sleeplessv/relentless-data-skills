@@ -161,27 +161,6 @@ class StatuslineTest(unittest.TestCase):
         self.assertEqual(json.loads(self.cache.read_text()), [pr(97)])
         self.assertGreaterEqual(time.time() - self.cache.stat().st_mtime, 600)
 
-    def hook(self, command):
-        """Run the script as a PostToolUse hook after the Bash `command`."""
-        self.cache_dir.mkdir(parents=True)
-        stamp = self.cache_dir / "prs-v2-1.stamp"
-        stamp.touch()
-        stdin = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
-        subprocess.run(["sh", str(SCRIPT), "--refresh-prs"], input=stdin, text=True, env=self.env, check=True)
-        return stamp.exists()
-
-    def test_hook_expires_the_stamp_after_a_pr_command(self):
-        for command in ("gh pr create --fill", "git push -u origin x && gh pr merge 5", "git -C ../wt push"):
-            with self.subTest(command=command):
-                self.setUp()
-                self.assertFalse(self.hook(command))
-
-    def test_hook_keeps_the_stamp_after_other_commands(self):
-        for command in ("gh pr list", "git status", "gh pr view 5"):
-            with self.subTest(command=command):
-                self.setUp()
-                self.assertTrue(self.hook(command))
-
 
 if __name__ == "__main__":
     unittest.main()

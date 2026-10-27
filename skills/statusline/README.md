@@ -105,11 +105,6 @@ Claude Code also reruns the script every 30 seconds, through
 `refreshInterval` in the settings, so the line catches up while the session
 is idle. Without it, the line updates only when the conversation changes.
 
-A `PostToolUse` hook makes PR changes from the session show on the next run.
-After a Bash command that runs `gh pr create`, `merge`, `close`, `reopen`,
-`ready`, or `edit`, or `git push`, the hook runs the script with
-`--refresh-prs`, which makes the next refresh due at once.
-
 When a refresh fails, such as when `gh` is signed out or offline, the line
 keeps the last counts. Once they are two minutes old, it adds their age, such
 as `(5m old)`, in dim text. To change that threshold, edit `PR_STALE_SEC`.
@@ -130,8 +125,8 @@ npx skills add sleeplessv/relentless-data-skills/skills/statusline
 
 The skill runs when you ask to show the model or context usage under the
 prompt, or to set up the status line. It copies the script to
-`~/.claude/statusline.sh`, sets the `statusLine` key and adds the PR refresh
-hook in `~/.claude/settings.json`, and asks before replacing an existing
+`~/.claude/statusline.sh`, sets only the `statusLine` key in
+`~/.claude/settings.json`, and asks before replacing an existing
 status line or script.
 
 To install the status line without the skill, copy `scripts/statusline.sh` to
@@ -140,13 +135,6 @@ to `~/.claude/settings.json`:
 
 ```json
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 30 }
-```
-
-To refresh the PR line as soon as the session changes a PR, also add this
-entry to the `hooks.PostToolUse` list in the same file:
-
-```json
-{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/statusline.sh --refresh-prs" }] }
 ```
 
 ## Files

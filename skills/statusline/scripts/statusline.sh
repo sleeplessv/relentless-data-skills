@@ -3,7 +3,6 @@
 # then open PRs, the issues each closes, and PR counts on a second line.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
-# With --refresh-prs, it runs as a PostToolUse hook instead (see below).
 #
 # Colours: Claude Code orange marks identity (model, branch, issue chips).
 # Softened sage, sand, and coral mark status, and dim text marks the rest.
@@ -25,16 +24,6 @@ PR_LIST_MAX=5
 
 if ! command -v jq >/dev/null 2>&1; then
   printf 'statusline: install jq'
-  exit 0
-fi
-
-# As a PostToolUse hook: after a Bash command that changes PRs, expire the
-# refresh stamp of every repo, so the next status line run fetches. All repos,
-# because the command may have run in another worktree of the same repo.
-if [ "$1" = --refresh-prs ]; then
-  jq -r '.tool_input.command // ""' 2>/dev/null \
-    | grep -Eq 'gh pr (create|merge|close|reopen|ready|edit)|git( -C [^ ]+)? push' \
-    && rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/"prs-v2-*.stamp
   exit 0
 fi
 

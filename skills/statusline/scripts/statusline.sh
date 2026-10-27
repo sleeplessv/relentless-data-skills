@@ -174,8 +174,8 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   prs=${prs% |}
   # Dim the separators. No other text on the line contains " | ".
   prs=$(printf '%s' "$prs" | sed "s/ | / $(printf '\033')[2m|$(printf '\033')[0m /g")
-  # Mark old counts with their age, such as (5m old), so they do not pass for
-  # current. With no PRs to show, the age still shows after PRs.
+  # Add the age to old counts, such as (5m old), so nobody reads them as
+  # current. With no PRs to show, the line is PRs (5m old).
   cache_age=$(age "$cache")
   if [ "${cache_age:-0}" -ge "$PR_STALE_SEC" ]; then
     if [ "$cache_age" -ge 3600 ]; then old="$((cache_age / 3600))h"; else old="$((cache_age / 60))m"; fi

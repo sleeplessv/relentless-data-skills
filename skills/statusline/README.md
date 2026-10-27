@@ -25,17 +25,17 @@ directory, git branch, and open pull requests under the prompt.
 | Context bar | `▰▰▱▱▱▱▱▱▱▱` | Tokens used, one cell per 20k, rounded to the nearest cell. The bar is full from 190k, whatever the size of the window. |
 | Tokens | `42k/200k (21%)` | Tokens used against the size of the context window, rounded to the nearest 1k. The colour shows how full the context is (see [Context usage](#context-usage)). |
 | Directory | `my-project` | Name of the current directory. |
-| Branch | `(ticket-46-preflight)` | Current git branch, or the short commit hash on a detached HEAD. Outside a git repo, it is left out. |
+| Branch | `(ticket-46-preflight)` | Current git branch, or the short commit hash on a detached HEAD. Outside a git repo, the script leaves it out. |
 
 ### Second line
 
 The second line lists the repo's open pull requests. It needs `gh`. Without
-it, or when the repo has no open PRs, the line is left out.
+`gh`, or when the repo has no open PRs, the script leaves the line out.
 
 | Part | Example | Meaning |
 | --- | --- | --- |
 | PR | `#48` | An open PR, newest first, coloured by its state (see the table below). Click it to open the PR in terminals that support OSC 8 hyperlinks. |
-| Issue chip | `46` on orange | An issue the PR closes when it merges, through `Closes #N` in the PR body or the PR's **Development** sidebar. The chip has no `#`, so it stands apart from PR numbers, and links to the issue. |
+| Issue chip | `46` on orange | An issue the PR closes when it merges, through `Closes #N` in the PR body or the PR's **Development** sidebar. The chip has no `#`, so you can tell it from a PR number. It links to the issue. |
 | No issue | `∅` | The PR closes no issue. |
 | Your branch's PR | `[#47 46]` | The PR from the current branch, in brackets. It always shows, even when it is older than the newest five. A fork PR never counts, even from a branch of the same name. |
 | More | `+2` | Open PRs beyond the newest five. To change the limit, edit `PR_LIST_MAX` at the top of the script. |
@@ -97,17 +97,18 @@ Sage green and sand are softer on light terminal themes than on dark ones.
 
 A background `gh pr list` refreshes the PR line, so `gh` never delays the
 status line. The script caches the result in `~/.cache/claude-statusline/`
-and refreshes it when the last attempt is 20 seconds old. A new result shows
+and refreshes it once the last attempt is at least 20 seconds old. A new result shows
 on the next run of the script. To change the interval, edit `PR_REFRESH_SEC`
 at the top of the script.
 
 Claude Code also reruns the script every 30 seconds, through
 `refreshInterval` in the settings, so the line catches up while the session
-is idle. Without it, the line updates only when the conversation changes.
+is idle. Without `refreshInterval`, the line updates only when the
+conversation changes.
 
 When a refresh fails, such as when `gh` is signed out or offline, the line
-keeps the last counts. Once they are two minutes old, it adds their age, such
-as `(5m old)`, in dim text. To change that threshold, edit `PR_STALE_SEC`.
+keeps the last counts. Once the counts are two minutes old, the line adds
+their age in dim text, such as `(5m old)`. To change that threshold, edit `PR_STALE_SEC`.
 
 ## Install
 
@@ -123,11 +124,10 @@ npx skills add sleeplessv/relentless-data-skills/skills/statusline
 /plugin install statusline@relentless-data-skills
 ```
 
-The skill runs when you ask to show the model or context usage under the
-prompt, or to set up the status line. It copies the script to
-`~/.claude/statusline.sh`, sets only the `statusLine` key in
-`~/.claude/settings.json`, and asks before replacing an existing
-status line or script.
+Run the skill with `/statusline`. Claude does not start it on its own. It
+copies the script to `~/.claude/statusline.sh`, sets only the `statusLine` key
+in `~/.claude/settings.json`, and asks before replacing an existing status line
+or script.
 
 To install the status line without the skill, copy `scripts/statusline.sh` to
 `~/.claude/statusline.sh` and run `chmod +x` on it. Then add the following key

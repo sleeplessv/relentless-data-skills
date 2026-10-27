@@ -15,7 +15,7 @@ Opus 5.5 · high | ▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%) | my-project (t
 
 The bar fills by tokens used, whatever the size of the context window, and the text shades from sage green through sand to coral as usage grows. The thresholds are named variables at the top of the script, and the README describes them.
 
-The PR segment sits on a second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state. After each PR come the issues it closes, as numbers on an orange chip. The line ends with counts of the repo's open pull requests by state. The README lists the symbols and colours. The segment needs `gh`, signed in to an account that can read the repo. Without it, the status line leaves that line out.
+The PR line is the second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state. After each PR come the issues it closes, as numbers on an orange chip. The line ends with counts of the repo's open pull requests by state. The README lists the symbols and colours. The PR line needs `gh`, signed in to an account that can read the repo. Without `gh`, the status line leaves the PR line out.
 
 The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
 
@@ -24,7 +24,7 @@ The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp,
 ### Step 1: Check prerequisites
 
 - Run `command -v jq`. If `jq` is missing, tell the user to install it and stop. On macOS, the command is `brew install jq`. On Linux, use the distribution's package.
-- Run `gh auth status`. If `gh` is missing or signed out, tell the user that the PR segment stays hidden until they install `gh` or run `gh auth login`. Then continue.
+- Run `gh auth status`. If `gh` is missing or signed out, tell the user that the PR line stays hidden until they install `gh` or run `gh auth login`. Then continue.
 - Resolve the absolute path of this skill's `scripts/statusline.sh`.
 
 ### Step 2: Copy the script
@@ -43,7 +43,7 @@ If the file does not exist, create it with only the `statusLine` key below. Othe
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 30 }
 ```
 
-`refreshInterval` reruns the script every 30 seconds, so the PR segment catches up while the session is idle. Without it, Claude Code reruns the script only on conversation events.
+`refreshInterval` reruns the script every 30 seconds, so the PR line catches up while the session is idle. Without it, Claude Code reruns the script only on conversation events.
 
 Change only that key and keep every other setting. Run `jq empty <file>` to confirm that the file is still valid JSON.
 

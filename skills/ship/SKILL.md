@@ -65,16 +65,14 @@ Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), st
 
 ```bash
 gh pr create --base main --title "<conventional subject>" --body "$(cat <<'EOF'
-## Summary
-- one bullet per commit group
-
+<body>
 EOF
 )"
 ```
 
 - The title is the conventional-commit subject of the dominant change (e.g. `feat: add ship skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
-- The body has `## Summary`, one bullet per commit group (a single group gets one or two bullets; don't pad to fill). No test-plan boilerplate.
-- On a live branch, when the PR includes commits that predate this run, the title and bullets describe the whole PR (everything the squash lands on `main`), not just this session's groups.
+- Write the body with the **`pr`** skill, following its template. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.
+- On a live branch, when the PR includes commits that predate this run, the title and body describe the whole PR (everything the squash lands on `main`), not just this session's groups.
 - Do not use em dashes in the title or body. Use a comma, colon, or parentheses, or rewrite the sentence. Same rule as the commit messages.
 
 ## Step 5: Merge and clean up

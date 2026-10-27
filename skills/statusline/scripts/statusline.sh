@@ -1,6 +1,6 @@
 #!/bin/sh
 # Claude Code status line: model and effort | bar used/size (pct) | dir (branch),
-# then open PRs and PR counts on a second line.
+# then open PRs, the issues each closes, and PR counts on a second line.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
@@ -12,7 +12,8 @@ FADE_SPAN=80000
 CELL=20000
 # Minutes between background refreshes of the open-PR counts.
 PR_REFRESH_MIN=1
-# Most open PR numbers to list, newest first. The rest show as +N.
+# Most open PR numbers to list, newest first. The rest show as +N, except the
+# PR for the current branch, which always shows.
 PR_LIST_MAX=5
 
 if ! command -v jq >/dev/null 2>&1; then
@@ -59,21 +60,24 @@ printf '\033[36m%s\033[0m | \033[%sm%s %s/%s (%s%%)\033[0m' \
 
 if [ -n "$cwd" ]; then
   printf ' | %s' "$(basename "$cwd")"
-  branch=$(git --no-optional-locks -C "$cwd" symbolic-ref --short HEAD 2>/dev/null \
-    || git --no-optional-locks -C "$cwd" rev-parse --short HEAD 2>/dev/null)
+  # On a detached HEAD, head_branch is empty and branch is the short commit hash.
+  head_branch=$(git --no-optional-locks -C "$cwd" symbolic-ref --short HEAD 2>/dev/null)
+  branch=${head_branch:-$(git --no-optional-locks -C "$cwd" rev-parse --short HEAD 2>/dev/null)}
   [ -n "$branch" ] && printf ' \033[35m(%s)\033[0m' "$branch"
 fi
 
 # Open PRs in the repo, on a second line, by state: ready with checks passed
 # (or no checks), ready with checks running, ready with a failed check, and
 # draft. Before the counts, each open PR shows as a clickable #number, coloured
-# by its state.
+# by its state, then the issues it closes as chips.
 top=$([ -n "$cwd" ] && git --no-optional-locks -C "$cwd" rev-parse --show-toplevel 2>/dev/null)
 if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   cache_dir="${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline"
   key=$(printf '%s' "$top" | cksum | cut -d' ' -f1)
-  cache="$cache_dir/prs-$key.json"
-  lock="$cache_dir/prs-$key.lock"
+  # The v2 cache adds each PR's branch, fork flag, and closing issues. The new
+  # name stops the script from reading an old cache that lacks them.
+  cache="$cache_dir/prs-v2-$key.json"
+  lock="$cache_dir/prs-v2-$key.lock"
   mkdir -p "$cache_dir"
 
   # Refresh in the background, so gh never delays the status line. The lock
@@ -85,14 +89,14 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
     (
       cd "$top" \
         && gh pr list --state open --limit 200 \
-          --json number,url,isDraft,statusCheckRollup >"$cache.tmp" \
+          --json number,url,isDraft,statusCheckRollup,headRefName,isCrossRepository,closingIssuesReferences >"$cache.tmp" \
         && mv "$cache.tmp" "$cache" \
         || { rm -f "$cache.tmp"; touch "$cache"; }
       rmdir "$lock"
     ) </dev/null >/dev/null 2>&1 &
   fi
 
-  prs=$(jq -r --argjson max "$PR_LIST_MAX" '
+  prs=$(jq -r --argjson max "$PR_LIST_MAX" --arg head "$head_branch" '
     def state:
       if .isDraft then "draft"
       else
@@ -112,9 +116,32 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
                  failed: "38;2;231;76;60", draft: "38;5;245"}[.];
     # OSC 8 hyperlink, so the terminal opens the PR on click.
     def link($url; $text): "\u001b]8;;\($url)\u001b\\\($text)\u001b]8;;\u001b\\";
+    # An issue, as a white number on an orange chip. The chip links to the issue
+    # when the URL is known.
+    def chip: "\u001b[48;2;215;119;87;38;2;255;255;255m\(
+      if .url then link(.url; " \(.number) ") else " \(.number) " end)\u001b[0m";
+    # A PR, then the issues it closes, or an amber ∅ when it closes none.
+    def entry: "\u001b[\(state | colour)m\(link(.url; "#\(.number)"))\u001b[0m"
+      + ([.closingIssuesReferences[]? | " \(chip)"] | join("")
+        | if . == "" then " \u001b[38;2;255;191;0m∅\u001b[0m" else . end);
+    def bold($s): "\u001b[1m\($s)\u001b[0m";
+    # True for the PR from the current branch. False for a fork PR, even from a
+    # branch of the same name.
+    def current: $head != "" and .headRefName == $head and (.isCrossRepository | not);
+    # On a branch with no PR, the issue its name starts with, such as
+    # ticket-51-x, issue-51-x, 51-x, or me/ticket-51-x. The URL comes from any PR.
+    (map(select(.number)) as $prs
+      | $head | capture("^(([^/]+/)?(ticket|issue)-)?(?<n>[0-9]+)(-|$)")? | .n as $n
+      | select($prs | all(current | not))
+      | {number: $n, url: ($prs[0].url // null
+          | if . then sub("/pull/[0-9]+$"; "/issues/\($n)") else . end)}
+      | "on \(chip) \u001b[38;5;245m(no PR)\u001b[0m |"),
     (map(select(.number))
-      | (.[:$max] | map("\u001b[\(state | colour)m\(link(.url; "#\(.number)"))\u001b[0m"))
-        + (if length > $max then ["+\(length - $max)"] else [] end)
+      # The newest PRs, and also the PR for the current branch when it is older.
+      | (.[:$max] + (.[$max:] | map(select(current)))) as $shown
+      | (length - ($shown | length)) as $rest
+      | ($shown | map(if current then bold("[") + entry + bold("]") else entry end))
+        + (if $rest > 0 then ["+\($rest)"] else [] end)
       | join(" ")
       | select(. != "")
       | "\(.) |"),
@@ -128,5 +155,7 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
       | select(. != "")
       | "PRs \(.)")
   ' "$cache" 2>/dev/null | paste -sd' ' -)
+  # Drop the trailing separator when no PR follows the issue from the branch name.
+  prs=${prs% |}
   if [ -n "$prs" ]; then printf '\n%s' "$prs"; fi
 fi

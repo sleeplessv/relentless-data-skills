@@ -3,6 +3,7 @@
 # then open PRs, the issues each closes, and PR counts on a second line.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
+# With --refresh-prs, it runs as a PostToolUse hook instead (see below).
 #
 # Colours: Claude Code orange marks identity (model, branch, issue chips).
 # Softened sage, sand, and coral mark status, and dim text marks the rest.
@@ -13,8 +14,11 @@
 GREEN_UNTIL=90000
 FADE_SPAN=80000
 CELL=20000
-# Minutes between background refreshes of the open-PR counts.
-PR_REFRESH_MIN=1
+# Seconds between background refreshes of the open-PR counts.
+PR_REFRESH_SEC=20
+# Counts older than this many seconds, such as after failed refreshes, show
+# their age.
+PR_STALE_SEC=120
 # Most open PR numbers to list, newest first. The rest show as +N, except the
 # PR for the current branch, which always shows.
 PR_LIST_MAX=5
@@ -23,6 +27,19 @@ if ! command -v jq >/dev/null 2>&1; then
   printf 'statusline: install jq'
   exit 0
 fi
+
+# As a PostToolUse hook: after a Bash command that changes PRs, expire the
+# refresh stamp of every repo, so the next status line run fetches. All repos,
+# because the command may have run in another worktree of the same repo.
+if [ "$1" = --refresh-prs ]; then
+  jq -r '.tool_input.command // ""' 2>/dev/null \
+    | grep -Eq 'gh pr (create|merge|close|reopen|ready|edit)|git( -C [^ ]+)? push' \
+    && rm -f "${XDG_CACHE_HOME:-$HOME/.cache}/claude-statusline/"prs-v2-*.stamp
+  exit 0
+fi
+
+# Seconds since a file last changed. Empty when the file does not exist.
+age() { m=$(date -r "$1" +%s 2>/dev/null) && echo $(($(date +%s) - m)); }
 
 input=$(cat)
 eval "$(printf '%s' "$input" | jq -r '@sh "
@@ -83,20 +100,24 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   # name stops the script from reading an old cache that lacks them.
   cache="$cache_dir/prs-v2-$key.json"
   lock="$cache_dir/prs-v2-$key.lock"
+  stamp="$cache_dir/prs-v2-$key.stamp"
   mkdir -p "$cache_dir"
 
-  # Refresh in the background, so gh never delays the status line. The lock
-  # stops parallel refreshes. A lock older than two minutes is from a refresh
-  # that died. On failure, touch the cache to wait a full interval before
-  # trying again, and keep the last counts.
+  # Refresh in the background, so gh never delays the status line. The stamp
+  # marks the last attempt, so a failed refresh waits a full interval before
+  # trying again. The cache changes only on success, so its age is the age of
+  # the counts. The lock stops parallel refreshes. A lock older than two
+  # minutes is from a refresh that died.
   [ -n "$(find "$lock" -maxdepth 0 -mmin +2 2>/dev/null)" ] && rmdir "$lock" 2>/dev/null
-  if [ -z "$(find "$cache" -mmin -"$PR_REFRESH_MIN" 2>/dev/null)" ] && mkdir "$lock" 2>/dev/null; then
+  stamp_age=$(age "$stamp")
+  if [ "${stamp_age:-$PR_REFRESH_SEC}" -ge "$PR_REFRESH_SEC" ] && mkdir "$lock" 2>/dev/null; then
+    touch "$stamp"
     (
       cd "$top" \
         && gh pr list --state open --limit 200 \
           --json number,url,isDraft,statusCheckRollup,headRefName,isCrossRepository,closingIssuesReferences >"$cache.tmp" \
-        && mv "$cache.tmp" "$cache" \
-        || { rm -f "$cache.tmp"; touch "$cache"; }
+        && mv "$cache.tmp" "$cache"
+      rm -f "$cache.tmp"
       rmdir "$lock"
     ) </dev/null >/dev/null 2>&1 &
   fi
@@ -164,5 +185,12 @@ if [ -n "$top" ] && command -v gh >/dev/null 2>&1; then
   prs=${prs% |}
   # Dim the separators. No other text on the line contains " | ".
   prs=$(printf '%s' "$prs" | sed "s/ | / $(printf '\033')[2m|$(printf '\033')[0m /g")
+  # Mark old counts with their age, such as (5m old), so they do not pass for
+  # current. With no PRs to show, the age still shows after PRs.
+  cache_age=$(age "$cache")
+  if [ "${cache_age:-0}" -ge "$PR_STALE_SEC" ]; then
+    if [ "$cache_age" -ge 3600 ]; then old="$((cache_age / 3600))h"; else old="$((cache_age / 60))m"; fi
+    prs="${prs:-PRs} $(printf '\033[2m(%s old)\033[0m' "$old")"
+  fi
   if [ -n "$prs" ]; then printf '\n%s' "$prs"; fi
 fi

@@ -97,13 +97,22 @@ Sage green and sand are softer on light terminal themes than on dark ones.
 
 A background `gh pr list` refreshes the PR line, so `gh` never delays the
 status line. The script caches the result in `~/.cache/claude-statusline/`
-and refreshes it every minute. To change the interval, edit `PR_REFRESH_MIN`
+and refreshes it when the last attempt is 20 seconds old. A new result shows
+on the next run of the script. To change the interval, edit `PR_REFRESH_SEC`
 at the top of the script.
 
 Claude Code also reruns the script every 30 seconds, through
-`refreshInterval` in the settings, so a merged or closed PR drops off while
-the session is idle. Without it, the line updates only when the conversation
-changes.
+`refreshInterval` in the settings, so the line catches up while the session
+is idle. Without it, the line updates only when the conversation changes.
+
+A `PostToolUse` hook makes PR changes from the session show on the next run.
+After a Bash command that runs `gh pr create`, `merge`, `close`, `reopen`,
+`ready`, or `edit`, or `git push`, the hook runs the script with
+`--refresh-prs`, which makes the next refresh due at once.
+
+When a refresh fails, such as when `gh` is signed out or offline, the line
+keeps the last counts. Once they are two minutes old, it adds their age, such
+as `(5m old)`, in dim text. To change that threshold, edit `PR_STALE_SEC`.
 
 ## Install
 
@@ -121,9 +130,9 @@ npx skills add sleeplessv/relentless-data-skills/skills/statusline
 
 The skill runs when you ask to show the model or context usage under the
 prompt, or to set up the status line. It copies the script to
-`~/.claude/statusline.sh`, sets only the `statusLine` key in
-`~/.claude/settings.json`, and asks before replacing an existing status line
-or script.
+`~/.claude/statusline.sh`, sets the `statusLine` key and adds the PR refresh
+hook in `~/.claude/settings.json`, and asks before replacing an existing
+status line or script.
 
 To install the status line without the skill, copy `scripts/statusline.sh` to
 `~/.claude/statusline.sh` and run `chmod +x` on it. Then add the following key
@@ -131,6 +140,13 @@ to `~/.claude/settings.json`:
 
 ```json
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 30 }
+```
+
+To refresh the PR line as soon as the session changes a PR, also add this
+entry to the `hooks.PostToolUse` list in the same file:
+
+```json
+{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "~/.claude/statusline.sh --refresh-prs" }] }
 ```
 
 ## Files

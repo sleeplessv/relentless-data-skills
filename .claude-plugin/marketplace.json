@@ -336,7 +336,7 @@
       "name": "statusline",
       "source": "./skills/statusline",
       "description": "Show the current model, reasoning effort, context window usage, directory, git branch, and open pull requests in the Claude Code status line.",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "author": {
         "name": "sleeplessv"
       },

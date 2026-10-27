@@ -1,9 +1,9 @@
 """Tests for skills/statusline/scripts/statusline.sh.
 
 Runs the script as Claude Code does: status line JSON on stdin, output on
-stdout. Each test builds a throwaway git repo on a chosen branch and a fresh
-PR cache, so the script never refreshes it, and puts a stub gh on PATH, so
-nothing reaches the network. Run from the repo root:
+stdout. Each test builds a throwaway git repo on a chosen branch, a PR cache,
+and a fresh refresh stamp, so the script does not refresh the cache unless the
+test asks it to. A stub gh on PATH keeps everything off the network. Run from the repo root:
 
     python3 -m unittest tests.test_statusline -v
 """
@@ -14,6 +14,7 @@ import os
 import re
 import subprocess
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -48,26 +49,34 @@ class StatuslineTest(unittest.TestCase):
         self.repo.mkdir()
         bin_dir = self.tmp / "bin"
         bin_dir.mkdir()
-        gh = bin_dir / "gh"
-        gh.write_text("#!/bin/sh\nexit 1\n")
-        gh.chmod(0o755)
+        self.gh = bin_dir / "gh"
+        self.gh.write_text("#!/bin/sh\nexit 1\n")
+        self.gh.chmod(0o755)
+        self.cache_dir = self.tmp / "cache" / "claude-statusline"
         self.env = {
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "XDG_CACHE_HOME": str(self.tmp / "cache"),
         }
 
-    def render(self, branch, prs):
-        """Run the script on `branch` with `prs` cached. Return the second line."""
+    def render(self, branch, prs, cache_age=0, stamp=True):
+        """Run the script on `branch` with `prs` cached `cache_age` seconds ago.
+
+        Without `stamp`, the refresh is due. Return the second line.
+        """
         git = ["git", "-C", str(self.repo), "-c", "user.name=t", "-c", "user.email=t@t"]
         subprocess.run([*git, "init", "-q", "-b", branch], check=True)
         subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "init"], check=True)
         key = subprocess.run(
             ["cksum"], input=str(self.repo), capture_output=True, text=True, check=True
         ).stdout.split()[0]
-        cache_dir = self.tmp / "cache" / "claude-statusline"
-        cache_dir.mkdir(parents=True)
-        (cache_dir / f"prs-v2-{key}.json").write_text(json.dumps(prs))
+        self.cache_dir.mkdir(parents=True)
+        self.cache = self.cache_dir / f"prs-v2-{key}.json"
+        self.cache.write_text(json.dumps(prs))
+        then = time.time() - cache_age
+        os.utime(self.cache, (then, then))
+        if stamp:
+            (self.cache_dir / f"prs-v2-{key}.stamp").touch()
         stdin = json.dumps({"model": {"display_name": "M"}, "workspace": {"current_dir": str(self.repo)}})
         out = subprocess.run(
             ["sh", str(SCRIPT)], input=stdin, capture_output=True, text=True, env=self.env, check=True
@@ -115,6 +124,63 @@ class StatuslineTest(unittest.TestCase):
     def test_fork_pr_from_a_same_named_branch_is_not_the_current_pr(self):
         line = self.render("main", [pr(97, closes=[5], branch="main", fork=True)])
         self.assertEqual(ANSI.sub("", line), "#97  5  | PRs ✓1")
+
+
+    def test_counts_past_the_stale_age_show_how_old_they_are(self):
+        line = self.render("main", [pr(97)], cache_age=5 * 60 + 10)
+        self.assertIn("\x1b[2m(5m old)\x1b[0m", line)
+        self.assertEqual(ANSI.sub("", line), "#97 ∅ | PRs ✓1 (5m old)")
+
+    def test_old_counts_show_hours(self):
+        line = self.render("main", [pr(97)], cache_age=3 * 3600 + 60)
+        self.assertEqual(ANSI.sub("", line), "#97 ∅ | PRs ✓1 (3h old)")
+
+    def test_recent_counts_show_no_age(self):
+        line = self.render("main", [pr(97)], cache_age=90)
+        self.assertEqual(ANSI.sub("", line), "#97 ∅ | PRs ✓1")
+
+    def test_age_shows_when_old_cache_has_no_prs(self):
+        line = self.render("main", [], cache_age=600)
+        self.assertEqual(ANSI.sub("", line), "PRs (10m old)")
+
+    def test_due_refresh_replaces_the_cache(self):
+        self.gh.write_text(f"#!/bin/sh\nprintf '%s' '{json.dumps([pr(98)])}'\n")
+        self.render("main", [pr(97)], cache_age=600, stamp=False)
+        for _ in range(50):
+            if json.loads(self.cache.read_text() or "[]") == [pr(98)]:
+                break
+            time.sleep(0.1)
+        self.assertEqual(json.loads(self.cache.read_text()), [pr(98)])
+
+    def test_failed_refresh_keeps_the_cache_and_its_age(self):
+        self.render("main", [pr(97)], cache_age=600, stamp=False)
+        for _ in range(50):
+            if not (self.cache_dir / f"{self.cache.stem}.lock").exists():
+                break
+            time.sleep(0.1)
+        self.assertEqual(json.loads(self.cache.read_text()), [pr(97)])
+        self.assertGreaterEqual(time.time() - self.cache.stat().st_mtime, 600)
+
+    def hook(self, command):
+        """Run the script as a PostToolUse hook after the Bash `command`."""
+        self.cache_dir.mkdir(parents=True)
+        stamp = self.cache_dir / "prs-v2-1.stamp"
+        stamp.touch()
+        stdin = json.dumps({"tool_name": "Bash", "tool_input": {"command": command}})
+        subprocess.run(["sh", str(SCRIPT), "--refresh-prs"], input=stdin, text=True, env=self.env, check=True)
+        return stamp.exists()
+
+    def test_hook_expires_the_stamp_after_a_pr_command(self):
+        for command in ("gh pr create --fill", "git push -u origin x && gh pr merge 5", "git -C ../wt push"):
+            with self.subTest(command=command):
+                self.setUp()
+                self.assertFalse(self.hook(command))
+
+    def test_hook_keeps_the_stamp_after_other_commands(self):
+        for command in ("gh pr list", "git status", "gh pr view 5"):
+            with self.subTest(command=command):
+                self.setUp()
+                self.assertTrue(self.hook(command))
 
 
 if __name__ == "__main__":

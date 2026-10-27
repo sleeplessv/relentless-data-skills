@@ -183,6 +183,22 @@ class StatuslineTest(unittest.TestCase):
         line = ANSI.sub("", self.first_line())
         self.assertTrue(line.endswith("(feature +4 \u22120)"), line)
 
+    def test_branch_diff_leaves_out_untracked_nested_repos(self):
+        self.feature_repo()
+        (self.repo / "new.txt").write_text("1\n2\n")
+        # git add refuses a nested repo with no commits, which would drop the
+        # whole batch of untracked files.
+        (self.repo / "empty").mkdir()
+        self.git("init", "-q", cwd=self.repo / "empty")
+        # One with a commit counts nothing either, rather than one line.
+        (self.repo / "full").mkdir()
+        self.git("init", "-q", cwd=self.repo / "full")
+        (self.repo / "full" / "f.txt").write_text("f\n")
+        self.git("add", "f.txt", cwd=self.repo / "full")
+        self.git("commit", "-q", "-m", "f", cwd=self.repo / "full")
+        line = ANSI.sub("", self.first_line())
+        self.assertTrue(line.endswith("(feature +2 \u22120)"), line)
+
     def test_branch_diff_removes_its_temp_index_when_killed(self):
         self.feature_repo()
         (self.repo / "new.txt").write_text("1\n")

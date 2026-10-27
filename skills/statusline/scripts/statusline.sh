@@ -112,7 +112,10 @@ if [ -n "$cwd" ]; then
     # With no real index to copy, git creates the throwaway index from scratch.
     cp "$real" "$idx" 2>/dev/null || rm -f "$idx"
     # Literal pathspecs, so a file named like :(exclude)a or *.txt is one path.
+    # Nested repos, listed with a trailing /, are left out and count nothing:
+    # git add refuses one with no commits, and drops the whole batch.
     git --no-optional-locks -C "$top" ls-files -z --others --exclude-standard \
+      | grep -zv '/$' \
       | GIT_INDEX_FILE="$idx" git --literal-pathspecs --no-optional-locks -C "$top" add -N --pathspec-from-file=- --pathspec-file-nul >/dev/null 2>&1
     # The lines added and removed, as "added removed". An empty diff gives
     # nothing, and shows nothing.

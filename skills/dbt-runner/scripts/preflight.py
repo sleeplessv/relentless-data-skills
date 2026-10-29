@@ -255,7 +255,20 @@ def first_level_keys(lines: list, start: int, parent_indent: int) -> tuple:
     return keys, i
 
 
-def check_profile(context: dict) -> tuple:
+def resolve_profiles_path(context: dict, project_root=None) -> Path:
+    """The profiles.yml dbt will read, in dbt's order (references/install.md
+    Step 1.2): the context file's `profiles_path`, else `$DBT_PROFILES_DIR`,
+    else a project-local `profiles.yml`, else `~/.dbt/profiles.yml`."""
+    if context.get("profiles_path"):
+        return Path(os.path.expanduser(context["profiles_path"]))
+    if os.environ.get("DBT_PROFILES_DIR"):
+        return Path(os.path.expanduser(os.environ["DBT_PROFILES_DIR"])) / "profiles.yml"
+    if project_root is not None and (Path(project_root) / "profiles.yml").is_file():
+        return Path(project_root) / "profiles.yml"
+    return Path(os.path.expanduser("~/.dbt/profiles.yml"))
+
+
+def check_profile(context: dict, project_root=None) -> tuple:
     profile = context.get("profile", "")
     target = context.get("target", "")
     if not profile or not target:
@@ -263,14 +276,7 @@ def check_profile(context: dict) -> tuple:
             "context file lacks profile/target keys. Remedy: re-run the"
             " bootstrap (references/install.md)."
         )
-    profiles_path = Path(
-        os.path.expanduser(
-            context.get("profiles_path")
-            or os.path.join(
-                os.environ.get("DBT_PROFILES_DIR", "~/.dbt"), "profiles.yml"
-            )
-        )
-    )
+    profiles_path = resolve_profiles_path(context, project_root)
     if not profiles_path.is_file():
         return FAIL, (
             f"no profiles.yml at {profiles_path}. Remedy: dbt has no"
@@ -472,7 +478,7 @@ def main(argv=None) -> int:
         ("env", check_env_vars(context)),
         ("key", check_private_key(context)),
         ("packages", check_packages(project_root, context.get("runner", ""))),
-        ("profile", check_profile(context)),
+        ("profile", check_profile(context, project_root)),
         ("runner", check_runner(context, project_root)),
     ]
     failed = 0

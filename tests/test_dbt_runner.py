@@ -313,6 +313,33 @@ class ProfileCheckTests(unittest.TestCase):
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("profiles.yml", msg)
 
+    def test_project_root_profiles_found_without_profiles_path(self):
+        """A project that ships its own profiles.yml passes with no
+        `profiles_path` in the context (dbt reads the cwd before ~/.dbt)."""
+        with contextlib.ExitStack() as stack:
+            project = TempProject(stack)
+            env = {k: v for k, v in os.environ.items() if k != "DBT_PROFILES_DIR"}
+            with mock.patch.dict(os.environ, env, clear=True):
+                status, msg = preflight.check_profile(
+                    {"profile": "corp_dt", "target": "local"}, project.root
+                )
+        self.assertEqual(status, preflight.OK)
+        self.assertIn(str(project.profiles), msg)
+
+    def test_dbt_profiles_dir_beats_project_root(self):
+        with contextlib.ExitStack() as stack:
+            project = TempProject(stack)
+            other = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+            (other / "profiles.yml").write_text(
+                "other_profile:\n  target: dev\n  outputs:\n    dev:\n"
+                "      type: snowflake\n", encoding="utf-8")
+            with mock.patch.dict(os.environ, {"DBT_PROFILES_DIR": str(other)}):
+                status, msg = preflight.check_profile(
+                    {"profile": "corp_dt", "target": "local"}, project.root
+                )
+        self.assertEqual(status, preflight.FAIL)
+        self.assertIn(str(other), msg)
+
 
 CORE_1_8_VERSION = """\
 Core:

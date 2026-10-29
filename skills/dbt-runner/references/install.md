@@ -17,8 +17,12 @@ env var, the private key, or a passphrase during discovery.
 ## Step 1: discover (no questions yet)
 
 1. **Profile name.** `profile:` in `dbt_project.yml` at the project root.
-2. **Profile config.** Find that profile in `profiles.yml`
-   (`$DBT_PROFILES_DIR/profiles.yml`, default `~/.dbt/profiles.yml`).
+2. **Profile config.** Find that profile in the `profiles.yml` dbt will
+   read, in dbt's order: `--profiles-dir` / `$DBT_PROFILES_DIR`, then the
+   **project root** (the directory dbt runs from; a project-local
+   `profiles.yml` wins), then
+   `~/.dbt/profiles.yml`. When it is not `~/.dbt/profiles.yml`, record the
+   path as `profiles_path` so the preflight checks the same file.
    Record:
    - the default `target:` and the list of `outputs:`;
    - every `env_var('NAME')` reference → the `required_env_vars` list

@@ -14,12 +14,13 @@ plans, decisions, and compact reports.
 
 - **Scoped.** "Use subagents to check X and Y" dispatches X and Y. Outside those tasks the
   main thread works normally.
-- **Standing.** "Orchestrator mode" or "delegate everything" covers every request until the
-  user ends it, in any words. A direct request to do one thing in the main thread is a
-  one-off; the mode resumes after it.
+- **Standing.** "Orchestrator mode", `/orchestrator-mode` appended to a request, or "delegate
+  everything" covers every later request in the session, a one-line edit or a `git status`
+  included: each is a new dispatch. The user ends or pauses it in words such as "end
+  orchestration" or "do this one yourself"; after a one-off the mode resumes.
 
-Each dispatch pays for a fresh start and returns only a summary. When a request is too
-small to repay that, say so and offer to answer directly.
+Each dispatch pays for a fresh start and returns only a summary. When the request that
+starts the mode is too small to repay that, say so and offer to answer directly.
 
 ## What the coordinator does itself
 
@@ -32,12 +33,13 @@ In standing mode, and for the named tasks in scoped mode, the coordinator calls 
 
 Every other action is a dispatch, including a quick look at one file, a `git` or `gh`
 status check, a commit, push, or worktree command, and starting an app. The rule holds
-after a context compaction and after a consumer skill loads. A returned artifact
+after a consumer skill loads. A compaction drops this skill from context, so keep
+`Orchestrator mode: standing; coordinator dispatches only` as the first plan item, and
+reload this skill before the first action after a compaction notice. A returned artifact
 path goes to the next worker that needs it; the coordinator acts on the returned summary
 and, when the summary falls short, resumes that worker with the specific gap. Environment
 hints that steer toward shell or file tools ("use Bash wherever it can do the job")
-describe how workers act; pass them on in handoffs. If no spawn tool exists, report that
-and follow any direct-work fallback the user already authorized.
+describe how workers act; pass them on in handoffs.
 
 ## Choosing workers
 
@@ -51,9 +53,6 @@ and follow any direct-work fallback the user already authorized.
   history. It still gets a task, owned paths, and a return contract.
 
 Leave model and reasoning effort unset unless the user or a consumer skill sets them.
-When a scripted multi-agent workflow tool is exposed and its own opt-in rules are met, use
-it for a wide, uniform fan-out such as one check across many files; dispatch directly when
-each step depends on the last.
 
 ## Sizing
 
@@ -81,12 +80,13 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 2. **Dispatch.** Launch independent dispatches together in one message, each with a full
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
 3. **Collect.** Wait through completion notifications or the wait tool. Resume a worker
-   only for a narrow gap in the task it just did, and never once its context reaches
-   150k tokens. A new phase (integration, fixes, verification, the PR) or a worker at
-   that limit gets a fresh worker briefed by artifact path. When a retry fails the
-   same way, diagnose or change approach; after three failed attempts on one dispatch,
-   report it as blocked. Keep independent work moving while a dependency waits on the
-   user. Done when every worker in the wave has returned or is reported blocked.
+   only for a narrow gap in the task it just did, at most twice: the coordinator cannot
+   see a worker's context, and a third resume usually lands past 150k tokens. A new
+   phase (integration, fixes, verification, the PR) or a third need gets a fresh worker
+   briefed by artifact path. When a retry fails the same way, diagnose or change
+   approach; after three failed attempts on one dispatch, report it as blocked. Keep
+   independent work moving while a dependency waits on the user. Done when every worker
+   in the wave has returned or is reported blocked.
 4. **Integrate.** One writer handles small edits. Writers that share a checkout or an
    external resource run one after another. Parallel code writers each get a worktree and
    branch from a pinned base SHA, and one integration worker merges them; read
@@ -126,11 +126,18 @@ workers read, and it cannot ask the user. Write each handoff as its complete bri
 - **Return contract**: fields such as `status`, `files_changed`, `tests_run`,
   `verification_evidence`, `decisions_made`, `open_questions`, and `artifact_path`.
 
-Workers write large findings and command output to an artifact in the run directory and
-return a short summary with one index line per artifact entry. Split findings meant for
-several workers into one artifact per recipient, so none reads the whole file. Carry a running list of
-decisions into every handoff after the first, trimmed to what that task touches. Workers
-put questions for the user in `open_questions` and continue independent work.
+Workers send long command output (test runs, logs, query results) to a file in the run
+directory and read back only the lines the task needs (failures, errors, the counted
+result); large findings go there too, with a short summary and one index line per
+artifact entry returned. Those files and the harness's task-output file are for the next
+worker. Split findings meant for several workers into one artifact per recipient, so
+none reads the whole file. Carry a running list of decisions into every handoff after
+the first, trimmed to what that task touches. Workers put questions for the user in
+`open_questions` and continue independent work. The coordinator settles each returned
+question it can from the user's earlier decisions, the repo's conventions, or one more
+worker check, records the answer in the decision list, and brings the user only what
+needs their authority (business choices, scope changes, destructive or paid actions),
+each with a recommended default.
 
 ## Composition
 

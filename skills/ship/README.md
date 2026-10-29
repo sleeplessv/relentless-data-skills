@@ -7,7 +7,9 @@ deletes the local and remote branches.
 
 The skill sets `disable-model-invocation: true`, so it never starts from
 conversation. Run it as `/ship`, or as `/ship clean` to skip the merge
-confirmation.
+confirmation. On a clean tree it resumes from where the branch stands: an open
+PR goes to the CI wait and merge, commits that are not pushed yet go to the push
+and PR. On `main` with unpushed commits it stops and names them.
 
 ## What it does
 
@@ -83,7 +85,8 @@ npx skills add sleeplessv/relentless-data-skills/skills/ship
   errors.
 - The `smart-git-commit` skill. Without it, ship uses a shorter built-in
   commit workflow.
-- The `pr` skill. Without it, ship writes a plain Summary body.
+- The `pr` skill, loaded with the Skill tool during Step 4. Without it, ship
+  writes a plain Summary body.
 - A permission rule that allows `gh pr merge`, for unattended `/ship clean`
   runs in background or auto mode. Without the rule, the merge stops at a
   permission prompt.

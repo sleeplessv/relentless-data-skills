@@ -10,13 +10,13 @@ Take the current working-tree changes from branch to merged PR in one pass: bran
 
 **Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
 
-**Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit.
+**Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit. The PR's checks are the test gate: the flow runs git and gh commands plus what the `smart-git-commit` and `pr` skills read, and nothing that executes the code.
 
 ## Step 0: Preflight
 
 Run in parallel:
 
-- `git status`. If the tree is clean and there is nothing to commit, say so and stop.
+- `git status` and `git log --oneline origin/main..HEAD`. A clean tree on a feature branch still ships when the branch holds work: with an open PR on the current branch (the Step 2 `gh pr list --state open` check) resume at Step 5; with commits ahead of `origin/main` and no PR, resume at the Step 3 push. A clean tree on `main` with commits ahead of `origin/main` is not ship's to push: name those commits and stop. A branch with neither is nothing to ship: say so and stop.
 - `gh auth status` and `git remote get-url origin`. If `gh` is missing or unauthenticated, or there is no `origin` remote, stop with a clear message before touching anything.
 
 **Run all `gh` and `git fetch`/`pull`/`push`/`ls-remote` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
@@ -71,18 +71,18 @@ EOF
 ```
 
 - The title is the conventional-commit subject of the dominant change (e.g. `feat: add ship skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
-- Write the body with the **`pr`** skill, following its template. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.
+- Load the **`pr`** skill with the Skill tool (`Skill: pr`) and write the body to its template: Summary, Evidence, Merge Danger. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.
 - On a live branch, when the PR includes commits that predate this run, the title and body describe the whole PR (everything the squash lands on `main`), not just this session's groups.
 - Do not use em dashes in the title or body. Use a comma, colon, or parentheses, or rewrite the sentence. Same rule as the commit messages.
 
 ## Step 5: Merge and clean up
 
-`<number>` is the PR number from Step 4. Name it in every `gh pr` command, because the current branch may not be the PR's.
+`<number>` is the PR number from Step 4, or the open PR Step 0 found. Name it in every `gh pr` command, because the current branch may not be the PR's.
 
 **CI gate, under `clean` too.** Before any merge question, wait for each PR's checks to settle, then read them:
 
 ```bash
-gh pr checks <number> --watch --fail-fast   # blocks until every check finishes or one fails
+gh pr checks <number> --watch --fail-fast >/dev/null 2>&1   # blocks until every check finishes or one fails; the JSON below is the read
 gh pr checks <number> --json name,bucket
 ```
 

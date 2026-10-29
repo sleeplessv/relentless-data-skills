@@ -275,7 +275,7 @@
       "name": "ship",
       "source": "./skills/ship",
       "description": "Commit, publish, and merge working-tree changes through a pull request.",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "author": {
         "name": "sleeplessv"
       },

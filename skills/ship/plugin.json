@@ -1,6 +1,6 @@
 {
   "name": "ship",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Commit, publish, and merge working-tree changes through a pull request.",
   "author": {
     "name": "sleeplessv"

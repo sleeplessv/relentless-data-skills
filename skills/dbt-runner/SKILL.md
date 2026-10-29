@@ -45,6 +45,11 @@ check (`OK`/`FAIL`/`SKIP`), non-zero exit on any `FAIL`. Fix every `FAIL`
 before running dbt; each line says how. Don't re-run it before every
 command; once per session is the contract, plus once more after any
 environment change (new shell, edited `.env`, switched target).
+A fresh worktree or scratch checkout is such a change, and the place the
+preflight pays: it starts without `dbt_packages/`, often without `.env`,
+and a worktree-isolated agent's shell guard rejects `source` and chained
+commands (failures.md, `isolated in the worktree`). Run it there before
+the first command.
 
 ## Invocation rules, every dbt command
 
@@ -79,7 +84,9 @@ environment change (new shell, edited `.env`, switched target).
    trivially. `PASS=n ERROR=0` on an empty model proves it compiles, nothing
    more. When a model's source is populated outside dbt's DAG (ML scores,
    externally-loaded tables), count the rows before reporting success, and
-   exercise the logic on synthetic rows via `<runner> show --inline`.
+   exercise the logic on synthetic rows via `<runner> show --inline`,
+   capping rows with `--limit N` (`show` appends its own `limit`; one
+   inside the SQL is a syntax error).
 
 ## Reading the result
 

@@ -4,8 +4,8 @@ Only relevant when the context file says `engine: v2` (legacy: `fusion`).
 These are dbt v2 (the engine formerly called dbt Fusion) behaviors whose
 error messages point *away* from the real cause. Generic triage (and dbt
 v1 experience) will mislead you here.
-They were observed on the former Fusion distribution and are not verified
-on dbt OSS.
+On dbt v1 the unit-test fixture gap below reads `Invalid column name … in unit
+test fixture`; see [failures.md](failures.md).
 
 ## `invalid identifier '<COLUMN>'` inside a **unit test**
 

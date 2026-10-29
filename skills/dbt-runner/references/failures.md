@@ -52,6 +52,20 @@ Snowflake deliberately doesn't say which. In order:
    doesn't exist. Check the target line in dbt's startup output against
    the context file.
 
+## `003001 (42501): SQL access control error` · `Insufficient privileges to operate on schema`
+
+The connection worked; the role cannot write where the target points.
+In order:
+
+1. **Shell role is not the target's role.** `SNOWFLAKE_ROLE` in this shell
+   is a personal or reader role; the target expects the role named in
+   `.env.example` or the context Setup section. Fix: set that role for the
+   call and record it in Project lore.
+2. **Schema is read-only for you by design** (a shared DEV reporting
+   schema). Build into your workspace schema or target, or prove the SQL
+   read-only with `<runner> show --inline` and report the grant gap.
+   Grants are account-side: report, don't request or retry.
+
 ## Hang while acquiring a warehouse, or `is suspended` / resource-monitor errors
 
 1. Warehouse suspended and the role lacks `OPERATE`/auto-resume. The run
@@ -67,6 +81,25 @@ Snowflake deliberately doesn't say which. In order:
    running `<runner> deps` are a known offender). `git diff package-lock.yml`;
    revert unless intentional, then `<runner> deps`.
 
+## `Invalid column name: '<col>' in unit test fixture` · `Accepted columns for … are: […]`
+
+A unit test errors at compile time, on dbt v1 and v2 alike. dbt types a
+fixture against the **relation that exists in the target schema**, not
+against the model SQL in your branch. In order:
+
+1. **Upstream not rebuilt since the column was added.** The column is new
+   in this branch and the input or expected-output model was last built
+   before it. Fix: refresh the relation's shape without rows,
+   `<runner> run --empty --select <upstream models>`, then re-run the
+   unit test. Including the upstream in the test's selection also works,
+   at the price of a real build.
+2. **Input is a source or model that does not exist in this target.**
+   Nothing to infer from. Fix: give the fixture its own schema with
+   `format: sql` rows that cast every column
+   (`select null::varchar as col, …`).
+3. Only then a typo: compare the column with the `Accepted columns` list
+   in the message.
+
 ## `No models available` · `Nothing to do`
 
 **This exits 0 and looks like success while doing nothing.**
@@ -74,6 +107,23 @@ Snowflake deliberately doesn't say which. In order:
 1. Typo'd `--select`: model name, selector syntax, or path. Fix: verify
    with `<runner> ls --select <sel>` before re-running the build.
 2. Selector excluded everything (tags/state filters). Same verification.
+
+## `isolated in the worktree … Refusing to run it` (harness guard; dbt never started)
+
+A worktree-isolated agent's shell guard rejects command text it cannot
+prove git-free. The exit is the guard's, not dbt's. Triggers seen:
+`source` / `. <file>`, a heredoc, `bash <script>`, a JSON argument such
+as `--warn-error-options '{…}'`, and anything chained after the dbt call.
+
+1. Fix the command shape. One dbt call per Bash command:
+   `cd <worktree>/dbt_project && <runner> <cmd> > <log> 2>&1`, nothing
+   after it; read the log in the next call. Load env with
+   `uv run --env-file <abs .env> dbt …` (see `Env var required` above).
+   Drop the JSON `--warn-error-options`; prove the selection with
+   `<runner> ls -s <sel>` instead.
+2. `uv` prints `VIRTUAL_ENV=… does not match the project environment
+   path … will be ignored` on the first worktree call and builds
+   `<worktree>/.venv` from its cache in seconds. Noise, not a failure.
 
 ## Blank output from a piped dbt command
 

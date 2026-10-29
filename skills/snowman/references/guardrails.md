@@ -20,6 +20,19 @@ Snowflake role and trusted read functions are still required. The check also
 rejects some valid reads. Bare aliases named `set`, for example, match a blocked
 keyword, while `update_date` does not. `SYSTEM$` reads are blocked as a group.
 
+### Blocked reads and substitutes
+
+| Blocked | Read-only substitute |
+| --- | --- |
+| `LIST @stage/path` | `SELECT METADATA$FILENAME, METADATA$FILE_LAST_MODIFIED, COUNT(*) FROM @stage/path (FILE_FORMAT => '<db>.<schema>.<format>') GROUP BY 1, 2`. `DIRECTORY(@stage)` works only where the stage has a directory table enabled. |
+| `SYSTEM$TYPEOF(col)` | `DESCRIBE TABLE` for a column's declared type; the stderr `# types:` note names a result's VARIANT, OBJECT and ARRAY columns. |
+| `SYSTEM$CLUSTERING_INFORMATION`, other `SYSTEM$` reads | `SHOW TABLES LIKE '<t>' IN SCHEMA <db>.<schema> ->> SELECT "cluster_by", "automatic_clustering" FROM $1` for clustering; otherwise stage the statement for the user. |
+| `USE WAREHOUSE`, `USE ROLE`, `USE DATABASE` | `--warehouse <name>` for one call; the role comes from the connection, so pick the `--env` whose connection holds the access, or stage the check for the user. Qualify object names fully instead of `USE DATABASE`. |
+
+A literal `&name` in SQL, such as `'F&W'`, fails with `ERROR: SQL rendering error`:
+the CLI resolves SnowSQL-style `&variables` before sending the query. Build the
+string as `'F' || CHR(38) || 'W'` or filter with `LIKE 'F%W'`.
+
 After validation, the wrapper resolves the connection and `default_warehouse`
 from project context. An explicit environment selects its own settings.
 Queries fall back to `default_env`. Unknown environments, mixed context forms,

@@ -8,7 +8,10 @@ creation for the setup worker, granted on resume after the user says create; one
 target project for the policy and ADR writers); goal; decisions so far with their reasons, and
 open questions to flag rather than guess; prior findings quoted word for word; run directory;
 skills by path; a return contract. Add the paths in `<run>/setup.md`, the policy file, and the
-project's tracker and triage-label docs. When `technical-writing` or `unslop` is `absent`, the
+project's tracker and triage-label docs. Briefs that run `gh` set `export GH_REPO=<owner/repo>`
+from `<run>/setup.md`, since workers run from the run directory, not the repo. Every shell
+block in these references runs as one `bash` call (`bash -c '…'` or a heredoc to `bash`): the
+Bash tool may be zsh, which aborts on an unmatched glob and expands a leading `=`. When `technical-writing` or `unslop` is `absent`, the
 brief says "write plainly" in place of the path, and the run report names the gap.
 
 **Vocabulary.** Every brief names the `codebase-design` vocabulary (module, interface,

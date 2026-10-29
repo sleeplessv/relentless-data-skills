@@ -167,6 +167,46 @@ class EnvCheckTests(unittest.TestCase):
         self.assertEqual(status, preflight.SKIP)
 
 
+class WorktreeContextTests(unittest.TestCase):
+    """A worktree without the (gitignored) context file reads the main one."""
+
+    def git(self, cwd, *args):
+        subprocess.run(["git", "-C", str(cwd), *args], check=True,
+                       capture_output=True)
+
+    def make_repo(self, stack):
+        main = Path(stack.enter_context(tempfile.TemporaryDirectory()))
+        self.git(main, "init", "-q")
+        project = main / "dbt_project"
+        project.mkdir()
+        (project / ".gitignore").write_text(".dbt-runner/\n")
+        self.git(main, "add", ".")
+        self.git(main, "-c", "user.name=t", "-c", "user.email=t@t",
+                 "commit", "-qm", "init")
+        return main
+
+    def test_worktree_falls_back_to_main_checkout(self):
+        with contextlib.ExitStack() as stack:
+            main = self.make_repo(stack)
+            ctx_dir = main / "dbt_project" / ".dbt-runner"
+            ctx_dir.mkdir()
+            (ctx_dir / "context.md").write_text(context_md(), encoding="utf-8")
+            wt = Path(stack.enter_context(tempfile.TemporaryDirectory())) / "wt"
+            self.git(main, "worktree", "add", "-q", str(wt))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                data = preflight.load_context(wt / "dbt_project")
+            self.assertEqual(data["profile"], "corp_dt")
+            self.assertIn("main checkout", buf.getvalue())
+
+    def test_no_context_anywhere_still_fails(self):
+        with contextlib.ExitStack() as stack:
+            main = self.make_repo(stack)
+            with self.assertRaises(SystemExit) as caught:
+                preflight.load_context(main / "dbt_project")
+            self.assertIn("FAIL context", str(caught.exception))
+
+
 class PrivateKeyCheckTests(unittest.TestCase):
     def test_existing_key_ok(self):
         with tempfile.NamedTemporaryFile(suffix=".p8") as key:

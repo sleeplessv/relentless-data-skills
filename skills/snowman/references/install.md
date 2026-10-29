@@ -102,7 +102,8 @@ environments:
 `default_warehouse` is optional. If omitted, the connection's setting applies.
 Use the body for facts that help later investigations, without repeating
 frontmatter. Include database purpose, relevant schemas, warehouse sizes and
-auto-suspend settings, observed roles, and the discovery date. For multiple
+auto-suspend settings, observed roles, naming and grant conventions, and the
+discovery date. For multiple
 accounts, group those facts by environment. Do not invent access grants from
 a role name or mark an untested database as readable.
 

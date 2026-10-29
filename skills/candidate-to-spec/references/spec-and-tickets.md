@@ -9,7 +9,8 @@ candidate this spec blocks, directly or through other deferred candidates, each 
 comment body per [Candidate file](workers.md#candidate-file). `DEFERRED` is the file the publish
 loop is on. Ticket variables are defined under [Tickets](#tickets).
 
-The worker assigns the variables and runs a block in one Bash call; `set -euo pipefail` stops the
+The worker assigns the variables, with `GH_REPO` exported per [Briefs](workers.md#briefs), and
+runs a block in one `bash` call (not zsh); `set -euo pipefail` stops the
 call at the first failing command, and the worker returns that command and its output for the
 main thread to report. The worker records each command's result in `<run>/<slug>/spec.md` or
 `tickets.md`, keyed by step, item (ticket or deferred file), and command; a step resumed after a

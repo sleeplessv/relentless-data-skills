@@ -59,7 +59,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 1. Read the ticket and claim it
 
-`gh issue view <N> --comments`: read the body AND comments. Save the body, relevant comments, and acceptance criteria as the `## Requirements` section of `ticket-snapshot.md` in the run directory before implementation starts; reviewers enforce that section ([Independent review](references/review-and-pr.md#independent-review)). Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
+`gh issue view <N> --json number,title,body,labels,assignees,comments`: read the body AND comments (`--comments` and `--json` cannot be combined). Save the body, relevant comments, and acceptance criteria as the `## Requirements` section of `ticket-snapshot.md` in the run directory before implementation starts; reviewers enforce that section ([Independent review](references/review-and-pr.md#independent-review)). Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
 
 ### 2. Pick a base branch
 
@@ -72,10 +72,10 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 Check applicable branch conventions and `git status --porcelain`. Preserve unrelated dirty work in place and
 use an isolated checkout if needed. Ask only about required uncommitted inputs or overlapping edits whose
-ownership is unclear; do not automatically stash or reset. Fetch the intended base and pin `base_sha`. Use the
-environment's branch prefix, keeping `ticket-<N>-<slug>` in the name. Recognize older `feat/ticket-<N>-*` and
-`feat/issue-<N>-*` branches when investigating resumes. Create the branch from the SHA, not a moving branch
-ref.
+ownership is unclear; do not automatically stash or reset. Fetch the intended base and pin `base_sha`. Name the
+branch `<type>/ticket-<N>-<slug>` (`feat`, `fix`, …) unless the repo's docs set another convention; other
+tools' prefixes (`codex/`) are not one. Recognize older `feat/issue-<N>-*` branches when investigating resumes.
+Create the branch from the SHA, not a moving branch ref.
 
 For a prior attempt, read its findings and compare local and remote tips before choosing it. Multiple
 candidates require evidence of which attempt belongs to this task. Preserve the existing WIP tip; work on a

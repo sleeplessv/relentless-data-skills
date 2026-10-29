@@ -117,8 +117,8 @@ redispatch only when dependency changes or integration evidence require it, pres
 Serialize writers on the integration checkout and allocate separate ports, databases, and output
 paths for parallel checks. With four slots, the root and three implementers leave no simultaneous
 integration slot. Use a slot released by completion before refilling it, or reserve one for
-transient setup, tracker, and integration work. Reuse workers for these sequential roles instead
-of keeping separate service agents active. Count review children in the same capacity budget.
+transient setup, tracker, and integration work. Brief a fresh worker for each sequential role
+from artifact paths rather than resuming a finished one, and stop service agents when idle. Count review children in the same capacity budget.
 
 Reconstruct running, completed, integrated, and satisfied attempts from the run record on resume.
 An unowned ticket has no active implementer: no running worker or unresolved active attempt in
@@ -280,8 +280,9 @@ this gate owns independent review of the complete feature.
 Prepare a draft body during setup with the intended scope and links to the spec and tickets.
 Every draft, update, and final body follows implement-ticket's shared
 [PR body](../../implement-ticket/references/review-and-pr.md#pr-body) contract and invokes `pr`.
-Create or reuse one draft PR as soon as the verified, preserved integration branch has a
-publishable diff. Use explicit `--base`, `--head`, and `--body-file`. A branch with
+Keep the body local until step 3 and create the PR there, after the final check, unless the
+user asks for an early draft; then create or reuse one draft PR once the verified, preserved
+integration branch has a publishable diff. Use explicit `--base`, `--head`, and `--body-file`. A branch with
 no diff may not support PR creation; record that pending state and retry after verified work
 lands. Do not create empty commits or product changes solely to open a PR.
 
@@ -294,5 +295,6 @@ After all gates pass, refresh complete open-ticket coverage. Add closing
 lines only for tickets with current satisfaction evidence in the integrated head. Add
 `Closes #<spec>` only when every open ticket is covered and every spec requirement has current
 completion evidence, including in a selected-ticket run that happens to cover the whole spec.
-Publish the `pr` body, then mark the same PR ready for review. Preserve the current body locally
+Publish the `pr` body and run `gh pr checks <PR> --watch`; a failing required CI check goes back
+to the fix loop. Then mark the same PR ready for review. Preserve the current body locally
 if publication is blocked. Never merge the PR.

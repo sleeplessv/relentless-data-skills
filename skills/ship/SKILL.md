@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Take the current working-tree changes from branch to merged PR in one pass: branch off `main`, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
 
-**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply.
+**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
 
 **Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit.
 

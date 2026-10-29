@@ -73,6 +73,10 @@ environment the user named. If unresolved in a multi-account project, ask first.
 
 1. Inspect the target table or, for a new table, its schema. For data changes,
    preview or count affected rows with a SELECT in the target environment.
+   For new roles, users, or schemas, take names and the grant topology from
+   existing peers in the target account (`SHOW ROLES`, `SHOW GRANTS TO ROLE`,
+   `SHOW GRANTS OF ROLE`) and cite the precedent in the script. Record any
+   convention the user confirms in the context body.
 2. Stage the script with a purpose-specific `--name` and the required `--env`.
 3. Return the path and manual command, plus any destructive-keyword warning.
 4. Once the user reports execution and requests verification, check the effect

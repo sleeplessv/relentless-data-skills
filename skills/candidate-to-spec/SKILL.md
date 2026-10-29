@@ -29,7 +29,7 @@ One setup worker, with the run directory chosen per `orchestrator-mode`. It:
    dependency. Optional, each with its fallback at the step that uses it: `prototype`,
    `ponytail-review`, `technical-writing`, `unslop`, `domain-modeling`.
 2. Records the project's issue-tracker doc and triage-label doc. The tracker is GitHub through
-   `gh`. The references write the canonical label names `needs-triage`, `ready-for-agent`,
+   `gh`; it records the tracker repo as `owner/repo` (`gh repo view --json nameWithOwner`). The references write the canonical label names `needs-triage`, `ready-for-agent`,
    and `spec`; where the triage-label doc maps a canonical name to another string, substitute
    that string in every command.
    It lists the repo's labels per [Labels](references/spec-and-tickets.md#labels), compared
@@ -39,7 +39,8 @@ One setup worker, with the run directory chosen per `orchestrator-mode`. It:
 Return: `status`, `missing_required`, `missing_labels`, `policy` (path or `absent`). A
 non-empty `missing_required` stops the run here, with the gap named. Each label in
 `missing_labels` is one question to the user: create it (the setup worker, resumed, runs the
-create command), or stop. Done when the setup worker's latest return has `missing_required` and
+create command), or stop. When the harness blocks the create, give the user the exact
+`gh label create` command to run themselves, then resume the worker to re-list. Done when the setup worker's latest return has `missing_required` and
 `missing_labels` empty.
 
 ## Workflow

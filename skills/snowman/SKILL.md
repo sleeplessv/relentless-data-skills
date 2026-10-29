@@ -106,7 +106,9 @@ the script. Snowman does neither.
   `CURRENT_WAREHOUSE()` when no warehouse is configured in context.
 - Prefer `SHOW TERSE` and project metadata with `->> SELECT "col" FROM $1`.
   Use plain `SHOW` for `rows` and `bytes`, which TERSE omits. Project columns
-  explicitly when TERSE does not shrink an object's output.
+  explicitly when TERSE does not shrink an object's output. Project only
+  columns you have seen in that SHOW's output; run it once with
+  `--max-rows 1` first when unsure.
 - Select the columns needed for the question. Investigate incidental anomalies
   only when relevant. Otherwise mention them briefly in the answer.
 - Run related queries together in your investigation. Delegate only broad,

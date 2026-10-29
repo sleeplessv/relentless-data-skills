@@ -12,6 +12,9 @@ a worker that wrote none of the change. Pass it the tested `head_sha`, the findi
 path, the check commands from step 6, the smoke commands or script from step 7, and the
 implementing worker's resource allocation.
 
+Verifiers, reviewers, and fix workers return results inline and the coordinator saves them; the
+harness may block their report-file writes. Only implementers write the evidence artifact.
+
 The verifier uses a clean checkout at `head_sha`, confirms `HEAD` matches, reruns every recorded
 command changed only where a checkout path must point at its own checkout, records each such
 substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
@@ -115,6 +118,9 @@ Preserve required repository-template fields and the caller's issue links or clo
 Put executed commands and observed results in Evidence. If the repo requires a Test plan field,
 point it to those results rather than duplicating them.
 Use `--body-file` for multiline `gh pr create` and `gh pr edit` bodies.
+GitHub applies closing keywords only on PRs into the default branch: when `pr_base` is another
+branch, say in the body and the report that `Closes #<N>` takes effect after retargeting. Keep
+`Closes #<N>` when the only open items are post-merge or post-deploy checks, and list them.
 
 Gather before/after evidence while implementing. The before observation can be a red test,
 reproduction output, screenshot, or prior artifact. Record its commit and command or capture
@@ -134,7 +140,11 @@ The implementing worker owns this section. After independent review, push the ch
 confirm the remote tip. Author the PR body.
 A new defect returns to implementation, checks, and review.
 Update or reuse the ticket's draft PR with `Closes #<N>` and the observed results.
+After the push, run `gh pr checks <PR> --watch`; a failing required CI check is a defect, and a
+pending one counts as unexecuted evidence.
 Mark it ready only when required checks, review outcomes, and the remote tip cover the same head.
+The report lists temporary code, post-merge manual steps, and deferred cleanup, and offers a
+follow-up issue with acceptance criteria for them.
 Post and record the stop comment with the PR URL and outcome, then report them to the user.
 Leave merging to the human. A blocked or denied publication step preserves the branch and body,
 keeps the PR a draft, and takes the stop path with a stop comment that states what remains.

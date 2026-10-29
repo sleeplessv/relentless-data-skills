@@ -30,7 +30,9 @@ In standing mode, and for the named tasks in scoped mode, the coordinator calls 
 - skill loading, including a file read of a skill's SKILL.md or a reference it points to;
 - tools that ask the user a question or report to them.
 
-Every other action is a dispatch, including a quick look at one file. A returned artifact
+Every other action is a dispatch, including a quick look at one file, a `git` or `gh`
+status check, a commit, push, or worktree command, and starting an app. The rule holds
+after a context compaction and after a consumer skill loads. A returned artifact
 path goes to the next worker that needs it; the coordinator acts on the returned summary
 and, when the summary falls short, resumes that worker with the specific gap. Environment
 hints that steer toward shell or file tools ("use Bash wherever it can do the job")
@@ -72,12 +74,16 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    Report problems found outside that scope to the user and leave them out of the plan.
    Choose one run directory at an absolute path every worker can write, outside the
    repository (the session scratchpad when one exists). Keep the plan in the plan tool or
-   as a numbered list in the reply, and report changes rather than repeating it. Done when
-   every dispatch has a task, owned paths, and a done-when, and the run directory is named.
+   as a numbered list in the reply, and report changes rather than repeating it. When the
+   request changes a branch or PR, state its end state (uncommitted, committed, or pushed)
+   and ask once if the user hasn't said. Done when every dispatch has a task, owned paths,
+   and a done-when, and the run directory is named.
 2. **Dispatch.** Launch independent dispatches together in one message, each with a full
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
 3. **Collect.** Wait through completion notifications or the wait tool. Resume a worker
-   with the specific gap instead of restarting its investigation. When a retry fails the
+   only for a narrow gap in the task it just did, and never once its context reaches
+   150k tokens. A new phase (integration, fixes, verification, the PR) or a worker at
+   that limit gets a fresh worker briefed by artifact path. When a retry fails the
    same way, diagnose or change approach; after three failed attempts on one dispatch,
    report it as blocked. Keep independent work moving while a dependency waits on the
    user. Done when every worker in the wave has returned or is reported blocked.
@@ -121,7 +127,8 @@ workers read, and it cannot ask the user. Write each handoff as its complete bri
   `verification_evidence`, `decisions_made`, `open_questions`, and `artifact_path`.
 
 Workers write large findings and command output to an artifact in the run directory and
-return a short summary with one index line per artifact entry. Carry a running list of
+return a short summary with one index line per artifact entry. Split findings meant for
+several workers into one artifact per recipient, so none reads the whole file. Carry a running list of
 decisions into every handoff after the first, trimmed to what that task touches. Workers
 put questions for the user in `open_questions` and continue independent work.
 

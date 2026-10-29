@@ -14,6 +14,8 @@ skill front-loads the former and catalogues the latter.
 
 Check for **`.dbt-runner/context.md`** in the dbt project root.
 
+- **Absent in a git worktree** → the preflight reads the main checkout's
+  context file at the same project path; use that one, no bootstrap.
 - **Absent** → first run. Read [references/install.md](references/install.md)
   and run the bootstrap (discovers profile, target, engine, required env
   vars → writes the context file). Then continue.
@@ -24,7 +26,8 @@ Check for **`.dbt-runner/context.md`** in the dbt project root.
   install also wrote `core`.
 
 The context file holds **names only, never secrets**: no env-var values,
-no passphrases. It is committed to the project repo.
+no passphrases. Commit it to the project repo; a project that ignores it
+relies on the worktree fallback above.
 
 ## Preflight, once per session, before the first dbt command
 

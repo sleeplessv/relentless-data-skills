@@ -270,6 +270,15 @@ class TestEnforceReadOnly(SnowmanTestCase):
             'SELECT 1 AS "$$"; DROP TABLE t; SELECT 1 AS "$$"',
         )
 
+    def test_blocks_statement_hidden_behind_backslash_escaped_quote(self):
+        # Snowflake reads \' as an escaped quote, so the literal ends at the
+        # second ' and the DROP is a real second statement.
+        self.assert_blocked(snowman.enforce_read_only, "SELECT 'a\\'';DROP TABLE t;--'")
+
+    def test_allows_backslash_escapes_inside_literals(self):
+        self.assert_allowed("SELECT 'it\\'s'")
+        self.assert_allowed("SELECT '\\\\'")
+
     def test_allows_dollar_quoted_literal(self):
         self.assert_allowed("SELECT $$DROP$$")
 
@@ -343,6 +352,14 @@ class TestResolveTarget(SnowmanTestCase):
             self.resolve(root),
             snowman.Target("analytics", None, root, root / ".snowman", None),
         )
+
+    def test_reads_the_frontmatter_once(self):
+        root = self.make_project(MULTI_ENV_FRONTMATTER)
+        with mock.patch.object(
+            snowman, "parse_frontmatter", wraps=snowman.parse_frontmatter
+        ) as parse:
+            self.resolve(root, "prod")
+        self.assertEqual(parse.call_count, 1)
 
     def test_walks_up_from_a_nested_start(self):
         root = self.make_project()
@@ -467,6 +484,23 @@ class TestDotenv(SnowmanTestCase):
         self.assertEqual(parsed["SINGLE"], "quoted one")
         self.assertEqual(parsed["DOUBLE"], "quoted two")
 
+    def test_inline_comment_dropped_from_unquoted_value(self):
+        env_file = self.write_env("PRIVATE_KEY_PASSPHRASE=secret  # prod key\n")
+        self.assertEqual(snowman.load_dotenv(env_file)["PRIVATE_KEY_PASSPHRASE"], "secret")
+
+    def test_hash_inside_quoted_value_kept(self):
+        env_file = self.write_env('A="se #cret"\nB=\'x # y\'\nC=pa#ss\n')
+        parsed = snowman.load_dotenv(env_file)
+        self.assertEqual(parsed, {"A": "se #cret", "B": "x # y", "C": "pa#ss"})
+
+    def test_inline_comment_dropped_after_quoted_value(self):
+        env_file = self.write_env('A="q" # c\n')
+        self.assertEqual(snowman.load_dotenv(env_file)["A"], "q")
+
+    def test_comment_only_value_is_empty(self):
+        env_file = self.write_env("B=  # only\n")
+        self.assertEqual(snowman.load_dotenv(env_file)["B"], "")
+
     def test_malformed_lines_skipped(self):
         env_file = self.write_env("no_equals_sign\n123BAD=x\nGOOD=1\n")
         parsed = snowman.load_dotenv(env_file)
@@ -484,17 +518,25 @@ class TestDotenv(SnowmanTestCase):
         self.assertEqual(merged, dict(os.environ))
 
 
-class TestFindEnvFile(SnowmanTestCase):
+class TestFindUp(SnowmanTestCase):
     def test_walks_up(self):
         root = self.make_bare_dir()
         (root / ".env").write_text("X=1\n", encoding="utf-8")
         nested = root / "a" / "b"
         nested.mkdir(parents=True)
-        self.assertEqual(snowman.find_env_file(nested), root / ".env")
+        self.assertEqual(snowman.find_up(nested, ".env"), root / ".env")
+
+    def test_nested_relative_path(self):
+        root = self.make_project()
+        nested = root / "a"
+        nested.mkdir()
+        self.assertEqual(
+            snowman.find_up(nested, ".snowman/context.md"), root / ".snowman" / "context.md"
+        )
 
     def test_none_when_absent(self):
         root = self.make_bare_dir()
-        self.assertIsNone(snowman.find_env_file(root))
+        self.assertIsNone(snowman.find_up(root, ".env"))
 
 
 class TestStage(SnowmanTestCase):
@@ -582,6 +624,19 @@ class TestStage(SnowmanTestCase):
             names,
             ["20260102-030405__noop-1.sql", "20260102-030405__noop.sql"],
         )
+
+    def test_concurrent_writer_is_not_overwritten(self):
+        # Patching exists() reproduces the old exists()-then-write race, where
+        # another writer took the name after the check.
+        root = self.enter(self.make_project())
+        staged = root / ".snowman" / "staged"
+        staged.mkdir()
+        theirs = staged / "20260102-030405__noop.sql"
+        theirs.write_text("theirs\n", encoding="utf-8")
+        with mock.patch.object(Path, "exists", return_value=False):
+            self.run_stage("SELECT 2", "noop", None, now=datetime(2026, 1, 2, 3, 4, 5))
+        self.assertEqual(theirs.read_text(encoding="utf-8"), "theirs\n")
+        self.assertIn("SELECT 2", (staged / "20260102-030405__noop-1.sql").read_text(encoding="utf-8"))
 
     def test_stage_blocks_without_context(self):
         self.enter(self.make_bare_dir())
@@ -794,20 +849,21 @@ class TestCleanSnowStderr(SnowmanTestCase):
         self.assertEqual(snowman.clean_snow_stderr(""), "")
 
 
-class TestUniquePath(SnowmanTestCase):
+class TestReservePath(SnowmanTestCase):
     def test_timestamp_base_and_suffix(self):
         root = self.make_bare_dir()
-        path = snowman.unique_path(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5))
+        path = snowman.reserve_path(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5))
         self.assertEqual(path, root / "20260102-030405__noop.sql")
+        self.assertEqual(path.read_text(encoding="utf-8"), "")
 
     def test_bumps_while_the_path_exists(self):
         root = self.make_bare_dir()
         now = datetime(2026, 1, 2, 3, 4, 5)
         (root / "20260102-030405__noop.sql").touch()
         (root / "20260102-030405__noop-1.sql").touch()
-        path = snowman.unique_path(root, "noop", ".sql", now)
+        path = snowman.reserve_path(root, "noop", ".sql", now)
         self.assertEqual(path.name, "20260102-030405__noop-2.sql")
-        self.assertFalse(path.exists())
+        self.assertEqual(path.read_text(encoding="utf-8"), "")
 
 
 class TestSpillFullResult(SnowmanTestCase):
@@ -835,6 +891,18 @@ class TestSpillFullResult(SnowmanTestCase):
         self.assertEqual(second.name, first.stem + "-1.json")
         self.assertIn("1", first.read_text(encoding="utf-8"))
         self.assertIn("2", second.read_text(encoding="utf-8"))
+
+    def test_concurrent_writer_does_not_lose_the_result(self):
+        # Patching exists() reproduces the old exists()-then-write race, where
+        # another writer took the name after the check.
+        snowman_dir = self.make_project() / ".snowman"
+        fixed = datetime(2026, 9, 3, 18, 12, 0)
+        first = snowman.spill_full_result([{"N": 1}], "SELECT 1", snowman_dir, now=fixed)
+        with mock.patch.object(Path, "exists", return_value=False):
+            second = snowman.spill_full_result([{"N": 2}], "SELECT 1", snowman_dir, now=fixed)
+        self.assertEqual(second.name, first.stem + "-1.json")
+        self.assertEqual(json.loads(first.read_text(encoding="utf-8"))["rows"], [{"N": 1}])
+        self.assertEqual(json.loads(second.read_text(encoding="utf-8"))["rows"], [{"N": 2}])
 
 
 class TestRunSnow(SnowmanTestCase):

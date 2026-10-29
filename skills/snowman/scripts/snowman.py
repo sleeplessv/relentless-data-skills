@@ -60,8 +60,10 @@ AUTH_ERROR_RE = re.compile(
 # (key-pair auth is itself JWT-based and OAuth failures also mention tokens),
 # hence the authenticator lookup.
 BROWSER_AUTHENTICATORS = {"OAUTH_AUTHORIZATION_CODE", "EXTERNALBROWSER"}
+# Single-quoted literals honour Snowflake's backslash escapes (\' does not
+# close them). Quoted identifiers and $$ strings have no backslash escapes.
 ANALYSIS_TOKEN_RE = re.compile(
-    r"/\*.*?\*/|--[^\n]*|//[^\n]*|\$\$.*?\$\$|'(?:[^']|'')*'|\"(?:[^\"]|\"\")*\"",
+    r"/\*.*?\*/|--[^\n]*|//[^\n]*|\$\$.*?\$\$|'(?:[^'\\]|\\.|'')*'|\"(?:[^\"]|\"\")*\"",
     flags=re.S,
 )
 
@@ -78,13 +80,21 @@ class ResultProcessingError(Exception):
     """Snow succeeded, but its result could not be decoded or preserved."""
 
 
-def find_context(start: Path) -> Path:
-    """Walk up from `start` to find .snowman/context.md."""
-    here = start.resolve()
-    for d in (here, *here.parents):
-        candidate = d / ".snowman" / "context.md"
+def find_up(start: Path, relative: str) -> Path | None:
+    """Walk up from `start` to the nearest file at `relative`, or ``None``."""
+    start = start.resolve()
+    for d in (start, *start.parents):
+        candidate = d / relative
         if candidate.is_file():
             return candidate
+    return None
+
+
+def find_context(start: Path) -> Path:
+    """Walk up from `start` to find .snowman/context.md."""
+    context = find_up(start, ".snowman/context.md")
+    if context is not None:
+        return context
     raise Blocked(
         "no .snowman/context.md found in this project. Run the snowman "
         "bootstrap first (see references/install.md)."
@@ -140,8 +150,11 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
 
 def resolve_connection(
     context: Path, env: str | None, *, for_stage: bool = False
-) -> tuple[str, str | None]:
-    """Resolve ``(connection, environment-or-None)`` from the frontmatter.
+) -> tuple[str, str | None, dict[str, str]]:
+    """Resolve ``(connection, environment-or-None, settings)`` from the frontmatter.
+
+    ``settings`` is the chosen environment's keys, or the top-level keys in
+    the single-connection form.
 
     Legacy form (single ``connection:``): ``--env`` is rejected. Multi-env
     form (``environments:``): queries fall back to ``default_env``. Staging
@@ -176,7 +189,7 @@ def resolve_connection(
         connection = environments[chosen].get("connection")
         if not connection:
             raise Blocked(f"environment {chosen!r} in {context} has no `connection:` value.")
-        return connection, chosen
+        return connection, chosen, environments[chosen]
 
     if env:
         raise Blocked(
@@ -187,17 +200,7 @@ def resolve_connection(
     connection = top.get("connection")
     if not connection:
         raise Blocked(f"{context} frontmatter has no `connection:` value.")
-    return connection, None
-
-
-def find_env_file(start: Path) -> Path | None:
-    """Walk up from `start` to find a .env file (nearest wins)."""
-    start = start.resolve()
-    for d in (start, *start.parents):
-        candidate = d / ".env"
-        if candidate.is_file():
-            return candidate
-    return None
+    return connection, None, top
 
 
 class Target(NamedTuple):
@@ -231,15 +234,15 @@ def resolve_target(
         environment = project_root = snowman_dir = None
     else:
         context = find_context(start)
-        connection, environment = resolve_connection(context, env, for_stage=for_stage)
-        top, environments = parse_frontmatter(context)
-        settings = environments[environment] if environment else top
+        connection, environment, settings = resolve_connection(
+            context, env, for_stage=for_stage
+        )
         warehouse = settings.get("default_warehouse")
         snowman_dir = context.parent
         project_root = snowman_dir.parent
     return Target(
         connection, environment, project_root, snowman_dir,
-        find_env_file(project_root or start), warehouse,
+        find_up(project_root or start, ".env"), warehouse,
     )
 
 
@@ -260,8 +263,13 @@ def load_dotenv(path: Path) -> dict[str, str]:
         if not sep or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
             continue
         value = value.strip()
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
-            value = value[1:-1]
+        end = value.find(value[0], 1) if value[:1] in ("'", '"') else -1
+        if end > 0:
+            # Quoted: keep the text between the quotes, `#` included; drop the rest.
+            value = value[1:end]
+        else:
+            # Unquoted: `#` at the start or after whitespace begins a comment.
+            value = re.sub(r"(?:^|\s)#.*$", "", value).strip()
         out[key] = value
     return out
 
@@ -671,19 +679,23 @@ def gitignored_dir(path: Path) -> Path:
     return path
 
 
-def unique_path(directory: Path, base: str, suffix: str, now: datetime) -> Path:
-    """``<directory>/<timestamp>__<base><suffix>`` that does not exist yet.
+def reserve_path(directory: Path, base: str, suffix: str, now: datetime) -> Path:
+    """Create an empty ``<directory>/<timestamp>__<base><suffix>``; return it.
 
     The timestamp is ``now`` to the second. A clash appends ``-1``, ``-2``
-    and so on to ``base`` until the name is free.
+    and so on to ``base``. Creation is exclusive, so parallel callers never
+    get the same file.
     """
     stem = f"{now:%Y%m%d-%H%M%S}__{base}"
     path = directory / f"{stem}{suffix}"
     bump = 1
-    while path.exists():
-        path = directory / f"{stem}-{bump}{suffix}"
-        bump += 1
-    return path
+    while True:
+        try:
+            path.open("x").close()
+            return path
+        except FileExistsError:
+            path = directory / f"{stem}-{bump}{suffix}"
+            bump += 1
 
 
 def spill_full_result(
@@ -694,8 +706,8 @@ def spill_full_result(
     results_dir = (gitignored_dir(snowman_dir / "results") if snowman_dir
                    else Path(tempfile.mkdtemp(prefix="snowman-results-")))
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
-    path = unique_path(results_dir, digest, ".json", now or datetime.now())
-    with path.open("x", encoding="utf-8") as out:
+    path = reserve_path(results_dir, digest, ".json", now or datetime.now())
+    with path.open("w", encoding="utf-8") as out:
         json.dump({"rows": rows, "types": types or []}, out, separators=(",", ":"), ensure_ascii=False)
         out.write("\n")
     return path
@@ -720,7 +732,7 @@ def stage(
 
     now = now or datetime.now()
     env_part = f"{env_name}__" if env_name else ""
-    path = unique_path(staged_dir, f"{env_part}{slug}", ".sql", now)
+    path = reserve_path(staged_dir, f"{env_part}{slug}", ".sql", now)
     rel = path.relative_to(target.project_root)
 
     run_args = ["snow", "sql", "-f", str(rel), "--connection", connection]

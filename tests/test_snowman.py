@@ -1018,6 +1018,16 @@ class TestExecute(SnowmanTestCase):
                 args = self.sql_args()
                 self.assertEqual(args[args.index("--warehouse") + 1], expected)
 
+    def test_warehouse_flag_overrides_context_warehouse(self):
+        context = SINGLE_CONN_FRONTMATTER.replace(
+            "connection: analytics", "connection: analytics\ndefault_warehouse: SMALL_WH"
+        )
+        self.enter(self.make_project(context))
+        self.run_execute({"sql": OK}, "SELECT 1", warehouse="BIG_WH")
+        args = self.sql_args()
+        self.assertEqual(args.count("--warehouse"), 1)
+        self.assertEqual(args[args.index("--warehouse") + 1], "BIG_WH")
+
     def test_describe_appended_after_trailing_semicolon_and_comment(self):
         self.assertEqual(
             snowman.with_describe("SELECT 1;  "),
@@ -1480,14 +1490,14 @@ class TestMainCli(SnowmanTestCase):
             argv = ["snowman.py", "--max-rows", "5", "--max-cell", "10", "--json", "SELECT 1"]
             self.assertEqual(snowman.main(argv), 0)
         execute.assert_called_once_with(
-            "SELECT 1", connection_override=None, env=None, fmt="json", max_rows=5, max_cell=10, max_output=16000
+            "SELECT 1", connection_override=None, env=None, fmt="json", max_rows=5, max_cell=10, max_output=16000, warehouse=None
         )
 
     def test_main_output_flag_defaults(self):
         with mock.patch.object(snowman, "execute", return_value=0) as execute:
             self.assertEqual(snowman.main(["snowman.py", "SELECT 1"]), 0)
         execute.assert_called_once_with(
-            "SELECT 1", connection_override=None, env=None, fmt="csv", max_rows=50, max_cell=200, max_output=16000
+            "SELECT 1", connection_override=None, env=None, fmt="csv", max_rows=50, max_cell=200, max_output=16000, warehouse=None
         )
 
     def test_main_routes_to_execute(self):
@@ -1524,6 +1534,13 @@ class TestMainCli(SnowmanTestCase):
         ):
             err = self.run_main_blocked(["SELECT 1"])
         self.assertEqual(err, "BLOCKED: `snow` CLI not found on PATH.\n")
+
+    def test_main_passes_warehouse_to_stage(self):
+        root = self.enter(self.make_project())
+        with contextlib.redirect_stdout(io.StringIO()):
+            snowman.main(["snowman.py", "--stage", "--name", "noop", "--warehouse", "BIG_WH", "DROP TABLE t"])
+        [staged] = (root / ".snowman" / "staged").glob("*.sql")
+        self.assertIn("--warehouse BIG_WH", staged.read_text())
 
     def test_main_routes_to_stage(self):
         root = self.enter(self.make_project())

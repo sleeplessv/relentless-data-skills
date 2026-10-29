@@ -32,7 +32,13 @@ python3 <skill-dir>/scripts/snowman.py "<SQL>"
 `<skill-dir>` is this skill's directory. Submit one statement per call.
 The wrapper appends `DESCRIBE RESULT` to obtain column types in the same session.
 It applies `default_warehouse` from the selected context. If absent, the named
-connection's warehouse setting applies.
+connection's warehouse setting applies. `--warehouse <name>` overrides both for
+one query or staged script. `USE WAREHOUSE` is blocked.
+
+To shorten repeated calls, set `S=<skill-dir>/scripts/snowman.py` and run
+`python3 "$S" ...`. Never put `python3` or flags in that variable: zsh does not
+split it, so the call fails with exit 127. Write shell blocks that also run
+under zsh, with no `declare -A` or other bash-only syntax.
 
 Stdout contains only CSV data, or a compact JSON array with `--json`.
 Types, truncation notices, and artifact paths go to stderr. Keep the streams

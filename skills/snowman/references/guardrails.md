@@ -124,7 +124,7 @@ It accepts DML, DDL, and multiple statements. Empty scripts are rejected.
 Files are gitignored under `.snowman/staged/<timestamp>__<slug>.sql`.
 Multi-environment filenames also contain the environment. The header identifies
 the target and includes a shell-quoted `snow sql -f ... --connection ...` command
-with `--warehouse` when context specifies one. Run commands use paths relative
+with `--warehouse` from the flag, or from context when it specifies one. Run commands use paths relative
 to the project root.
 
 Destructive keywords add a `-- WARNING:` header, but do not prevent staging.

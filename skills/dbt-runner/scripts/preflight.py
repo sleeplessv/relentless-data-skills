@@ -111,14 +111,45 @@ def parse_frontmatter(text: str, where: str) -> dict:
     return data
 
 
+def main_checkout_context(project_root: Path):
+    """The context file at the same project path in the repo's main checkout.
+
+    A git worktree starts without the context file when the project ignores
+    it; the main checkout usually has one. Returns None outside a worktree
+    or when git is unavailable.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse",
+             "--path-format=absolute", "--git-common-dir", "--show-prefix"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    lines = out.stdout.splitlines()
+    if out.returncode != 0 or not lines:
+        return None
+    prefix = lines[1] if len(lines) > 1 else ""
+    candidate = Path(lines[0]).parent / prefix / CONTEXT_RELPATH
+    if candidate.resolve() == (project_root / CONTEXT_RELPATH).resolve():
+        return None
+    return candidate if candidate.is_file() else None
+
+
 def load_context(project_root: Path) -> dict:
     context_path = project_root / CONTEXT_RELPATH
     if not context_path.is_file():
-        raise SystemExit(
-            f"{FAIL} context: no {CONTEXT_RELPATH} found under {project_root}."
-            " First run in this project — do the bootstrap in"
-            " references/install.md, then re-run the preflight."
-        )
+        fallback = main_checkout_context(project_root)
+        if fallback is None:
+            raise SystemExit(
+                f"{FAIL} context: no {CONTEXT_RELPATH} found under"
+                f" {project_root}. First run in this project — do the"
+                " bootstrap in references/install.md, then re-run the"
+                " preflight."
+            )
+        print(f"{OK:<4} context: worktree has none; read the main"
+              f" checkout's {fallback}")
+        context_path = fallback
     return parse_frontmatter(
         context_path.read_text(encoding="utf-8"), str(context_path)
     )
@@ -136,9 +167,10 @@ def check_env_vars(context: dict) -> tuple:
     if missing:
         return FAIL, (
             "missing or empty: " + ", ".join(missing)
-            + ". Remedy: export them (the project .env or your shell"
-            " profile usually sets these), then re-run. dbt's env_var()"
-            " raises at parse time, so dbt cannot run until these are set."
+            + ". Remedy: pass the project's env file to the runner"
+            " (`uv run --env-file <abs path> dbt ...`) or export them in"
+            " your shell profile, then re-run. dbt's env_var() raises at"
+            " parse time, so dbt cannot run until these are set."
         )
     return OK, f"all {len(required)} required env vars set and non-empty"
 

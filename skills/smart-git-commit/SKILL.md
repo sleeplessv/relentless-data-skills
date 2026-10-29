@@ -48,6 +48,8 @@ If recent commits use scopes (`feat(api): …`), use the same scopes; otherwise 
 
 ### Step 4: Commit each group
 
+Before the first group, run `git reset -q` so already-staged files join only their own group. If a file shows in both `git diff --cached` and `git diff` (a partial `git add -p`), ask first: the reset discards that split.
+
 For each group, stage only its files and commit:
 
 ```bash
@@ -86,7 +88,7 @@ After all commits are created, confirm `git status` is clean, so no changed file
 
 Push only when the request asked for it: the user said "push" ("commit and push", "push it"), or a calling skill's workflow includes the push. A plain "commit" ends here, with the commits local.
 
-To push:
+To push to an existing upstream, first check its PR: if `gh pr list --head "$(git branch --show-current)" --state merged --json number --jq length` prints more than `0`, the branch was already merged; stop and report instead of pushing.
 
 ```bash
 git push

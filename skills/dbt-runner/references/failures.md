@@ -11,9 +11,11 @@ them in order and stop at the first hit. `<runner>` is the context file's
 dbt fails at **parse time**. It never reached the warehouse.
 
 1. The env var named in the message is unset/empty in *this shell*. New
-   shells and subagents don't inherit a sourced `.env`. Fix: source the
-   project `.env` / export the var; re-run the preflight to catch the rest
-   in one pass.
+   shells and subagents don't inherit a sourced `.env`. Fix: pass the env
+   file to the runner as an argument (`uv run --env-file <abs path> dbt …`;
+   record the file in the context body). Sandboxed and worktree agents refuse
+   `source`, `eval`, or `env $(…)` in a compound command. Re-run the preflight
+   to catch the rest in one pass.
 
 ## `JWT token is invalid` · `Could not deserialize key data` · key file errors
 

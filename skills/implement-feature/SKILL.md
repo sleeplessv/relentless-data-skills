@@ -92,7 +92,8 @@ Follow [Frontier scheduling](references/reference.md#frontier-scheduling) throug
    unrelated running tickets. Conflict resolutions and fixes require
    [Post-resolution tests](references/reference.md#post-resolution-tests).
 4. After the merged tree passes checks and is preserved, update the frontier and dispatch
-   newly ready tickets. Create or update the feature draft PR as verified work accumulates.
+   newly ready tickets. Update the local PR body as verified work accumulates; open an early
+   draft PR only on request ([Feature PR](references/reference.md#feature-pr)).
    Retain failed WIP and continue independent tickets. Clean up only preserved, owned resources
    with the exact [Cleanup](references/reference.md#cleanup) commands.
 
@@ -116,7 +117,7 @@ Readers of a fixed SHA share no concurrent writer.
 Send actionable in-scope findings to one fix worker, then rerun affected gates on the new SHA.
 Resolve whole-spec coverage gaps before final completion. Report requirements outside an
 explicit ticket list without implementing them. Diagnose repeated failures or change approach.
-For partial work, verify the preserved integration and report incomplete gates with the draft PR.
+For partial work, verify the preserved integration and report incomplete gates with the PR body, published as a draft PR when one exists.
 
 Done when both gates pass on the preserved head and the recorded completion obligations are met.
 

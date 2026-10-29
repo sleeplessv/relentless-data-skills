@@ -1,6 +1,6 @@
 {
   "name": "dbt-runner",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Run dbt commands and diagnose failures with project setup checks and captured output.",
   "author": {
     "name": "sleeplessv"

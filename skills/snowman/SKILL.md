@@ -12,7 +12,9 @@ read-only. Use a least-privilege connection and trusted read functions.
 
 ## Load project context
 
-Find and load `.snowman/context.md` by walking up from the current directory.
+Find and load `.snowman/context.md` by walking up from the working directory, so
+run the wrapper from inside the project (`cd <project> && python3 ...`), not from
+a scratchpad or temp directory, which has no context above it.
 If absent, follow [the bootstrap](references/install.md) before proceeding.
 Queries require context, except bootstrap discovery with `--connection <name>`.
 Once context exists, let the wrapper resolve the connection from it.
@@ -36,9 +38,10 @@ connection's warehouse setting applies. `--warehouse <name>` overrides both for
 one query or staged script. `USE WAREHOUSE` is blocked.
 
 To shorten repeated calls, set `S=<skill-dir>/scripts/snowman.py` and run
-`python3 "$S" ...`. Never put `python3` or flags in that variable: zsh does not
-split it, so the call fails with exit 127. Write shell blocks that also run
-under zsh, with no `declare -A` or other bash-only syntax.
+`python3 "$S" ...`. Never put `python3` or flags in any shell variable: zsh does
+not split `$S` or `$FLAGS`, so the call fails with exit 127 or an argparse usage
+error. Write shell blocks that also run under zsh, with no `declare -A` or other
+bash-only syntax.
 
 Stdout contains only CSV data, or a compact JSON array with `--json`.
 Types, truncation notices, and artifact paths go to stderr. Keep the streams
@@ -57,13 +60,19 @@ Any truncated result saves full rows and schema as JSON. Follow the stderr
 the query or loading the whole file into context. See
 [output details](references/guardrails.md#output) when parsing or recovering results.
 
+When stdout is redirected to a file for post-processing, lift the preview limits
+(`--json --max-rows 0 --max-output 0`, plus `--max-cell 0` when values matter):
+the truncation notice stays on stderr and a truncated file looks complete.
+
 ## Handle failures
 
 Read the reason after `BLOCKED:`. It describes a refusal before querying,
 including SQL, context, or configuration problems. Fix setup failures or
-reformulate an authorized read. Stage changes only when
-the user requested them. Never bypass the wrapper to evade a refusal.
-If `snow` is missing from PATH, install Snowflake CLI before retrying.
+reformulate an authorized read. For a blocked `LIST`, `SYSTEM$`, or `USE`, use
+the [substitutes](references/guardrails.md#blocked-reads-and-substitutes).
+Stage changes only when the user requested them. Never bypass the wrapper to
+evade a refusal. If `snow` is missing from PATH, install Snowflake CLI before
+retrying.
 
 After a query-processing failure, inspect the reported `# raw CLI stdout:` file
 locally. It preserves received output for recovery. Do not rerun automatically.
@@ -102,10 +111,17 @@ and manual run command, including the connection and configured warehouse.
 Relay both and any destructive-keyword warning. The user executes and cleans up
 the script. Snowman does neither.
 
+Compose staged SQL only from complete values: a full `--json` result file or the
+saved `# full result:` artifact, never a preview. Before relaying the path, run
+`grep -c '…(+' <path>`: `0` (exit 1) passes; any other count is a truncated value and the script is not ready.
+
 ## Explore efficiently
 
-- Start from the narrowest known scope. For an exact table, inspect that table.
-  Discover databases or schemas only when their names are missing.
+- Start from the narrowest known scope. Take column and schema names from a
+  `DESCRIBE TABLE ... ->> SELECT "name","type" FROM $1`, `INFORMATION_SCHEMA.COLUMNS`,
+  or the dbt model's SQL and `schema` config before the first SELECT on a table;
+  a name inferred from the model's purpose fails with `invalid identifier` and
+  costs a round trip. Discover databases or schemas only when their names are missing.
 - Bound exploratory reads with filters, `LIMIT`, or `SAMPLE`. Preview limits
   reduce output, not query cost. Use smaller samples and tighter filters in prod.
   Before a heavy query, state the configured warehouse or verify

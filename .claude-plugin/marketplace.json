@@ -315,7 +315,7 @@
       "name": "snowman",
       "source": "./skills/snowman",
       "description": "Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution.",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "author": {
         "name": "sleeplessv"
       },

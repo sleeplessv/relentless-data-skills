@@ -34,6 +34,9 @@ named settings are the durable handle; check them when a number matters.
   unless the `worktree.baseRef` setting is `head`.
 - **Completion.** Claude Code workers run in the background and report through completion
   notifications, so the coordinator waits for those notifications.
+- **Scripted fan-out.** When a scripted multi-agent workflow tool is exposed and its own
+  opt-in rules are met, use it for a wide, uniform fan-out such as one check across many
+  files; dispatch directly when each step depends on the last.
 
 ## Nesting sub-orchestrators
 

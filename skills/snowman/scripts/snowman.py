@@ -701,7 +701,10 @@ def spill_full_result(
     return path
 
 
-def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) -> int:
+def stage(
+    sql: str, name: str, env: str | None, *,
+    warehouse: str | None = None, now: datetime | None = None,
+) -> int:
     """Write the SQL to .snowman/staged/ for manual execution. Never runs it."""
     if not sql.strip():
         raise Blocked("empty script. Nothing to stage.")
@@ -721,8 +724,9 @@ def stage(sql: str, name: str, env: str | None, *, now: datetime | None = None) 
     rel = path.relative_to(target.project_root)
 
     run_args = ["snow", "sql", "-f", str(rel), "--connection", connection]
-    if target.warehouse:
-        run_args += ["--warehouse", target.warehouse]
+    warehouse = warehouse or target.warehouse
+    if warehouse:
+        run_args += ["--warehouse", warehouse]
     run_cmd = shlex.join(run_args)
     destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
     header = [
@@ -821,6 +825,7 @@ def execute(
     max_rows: int = DEFAULT_MAX_ROWS,
     max_cell: int = DEFAULT_MAX_CELL,
     max_output: int = DEFAULT_MAX_OUTPUT,
+    warehouse: str | None = None,
 ) -> int:
     validate_limits(fmt, max_rows, max_cell, max_output)
     if not sql.strip():
@@ -833,8 +838,9 @@ def execute(
     sub_env = snow_env(env_file)
     query_args = ["sql", "-q", with_describe(sql), "--connection", connection,
                   "--format", "JSON_EXT", "--enhanced-exit-codes"]
-    if target.warehouse:
-        query_args += ["--warehouse", target.warehouse]
+    warehouse = warehouse or target.warehouse
+    if warehouse:
+        query_args += ["--warehouse", warehouse]
     result = run_snow(query_args, sub_env)
 
     if result.stderr:
@@ -905,6 +911,10 @@ def main(argv: list[str]) -> int:
         "back to default_env for queries). Required with --stage there",
     )
     parser.add_argument(
+        "--warehouse", metavar="NAME",
+        help="warehouse for this run, overriding the context's default_warehouse",
+    )
+    parser.add_argument(
         "--max-rows", type=int, default=DEFAULT_MAX_ROWS, metavar="N",
         help="rows to print before spilling the full result to "
         f".snowman/results/ (default {DEFAULT_MAX_ROWS}, 0 = unlimited)",
@@ -939,7 +949,7 @@ def main(argv: list[str]) -> int:
 
     try:
         if args.stage:
-            return stage(args.sql, args.name, args.env)
+            return stage(args.sql, args.name, args.env, warehouse=args.warehouse)
         return execute(
             args.sql,
             connection_override=args.connection,
@@ -948,6 +958,7 @@ def main(argv: list[str]) -> int:
             max_rows=args.max_rows,
             max_cell=args.max_cell,
             max_output=args.max_output,
+            warehouse=args.warehouse,
         )
     except Blocked as refusal:
         print(f"BLOCKED: {refusal}", file=sys.stderr)

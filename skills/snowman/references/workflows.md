@@ -66,6 +66,26 @@ Start with a count or distribution, then fetch filtered examples:
 
 Return the finding with the counts or example rows that support it.
 
+## Investigate query history
+
+Use this for slow queries, warehouse load, or what ran at a given time.
+
+- `<db>.INFORMATION_SCHEMA.QUERY_HISTORY`, `QUERY_HISTORY_BY_USER`,
+  `_BY_WAREHOUSE`, and `_BY_SESSION` are table functions. Call them as
+  `SELECT ... FROM TABLE(<db>.INFORMATION_SCHEMA.QUERY_HISTORY(END_TIME_RANGE_START => ..., RESULT_LIMIT => 10000))`.
+  They return at most 100 rows unless `RESULT_LIMIT` is set, up to 10,000.
+- These functions cover only the last 7 days. An older range fails with
+  `Cannot retrieve data from more than 7 days ago`.
+- They omit spill, pruning, and DML row columns such as
+  `BYTES_SPILLED_TO_LOCAL_STORAGE`, `PARTITIONS_SCANNED`, and `ROWS_UPDATED`.
+  Query `SNOWFLAKE.ACCOUNT_USAGE.QUERY_HISTORY` for those or for anything
+  older than 7 days. Its rows can lag up to 45 minutes behind.
+- For one query's plan, use
+  `SELECT * FROM TABLE(GET_QUERY_OPERATOR_STATS('<query_id>'))` and project the
+  `OPERATOR_STATISTICS` fields needed.
+- Before writing a query against an unfamiliar view, check its columns:
+  `DESCRIBE VIEW SNOWFLAKE.ACCOUNT_USAGE.<view> ->> SELECT "name" FROM $1`.
+
 ## Stage a change
 
 Follow [the staging policy](../SKILL.md#stage-requested-changes). Reuse the target

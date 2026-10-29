@@ -119,8 +119,11 @@ Put executed commands and observed results in Evidence. If the repo requires a T
 point it to those results rather than duplicating them.
 Use `--body-file` for multiline `gh pr create` and `gh pr edit` bodies.
 GitHub applies closing keywords only on PRs into the default branch: when `pr_base` is another
-branch, say in the body and the report that `Closes #<N>` takes effect after retargeting. Keep
-`Closes #<N>` when the only open items are post-merge or post-deploy checks, and list them.
+branch, say in the body and the report that `Closes #<N>` takes effect after retargeting.
+Choose the closing line by the repo's issue-tracker rule when its docs set one (a repo may, for
+example, want `Refs #<N>` while post-merge verification remains); otherwise keep `Closes #<N>` when the only
+open items are post-merge or post-deploy checks, and list them. Record the choice under `## Author decisions`
+instead of asking.
 
 Gather before/after evidence while implementing. The before observation can be a red test,
 reproduction output, screenshot, or prior artifact. Record its commit and command or capture
@@ -139,7 +142,7 @@ Merge Danger using the actual change. Replace stale draft claims on resume.
 The implementing worker owns this section. After independent review, push the checked head and
 confirm the remote tip. Author the PR body.
 A new defect returns to implementation, checks, and review.
-Update or reuse the ticket's draft PR with `Closes #<N>` and the observed results.
+Update or reuse the ticket's draft PR with the closing line chosen in [PR body](#pr-body) and the observed results.
 After the push, run `gh pr checks <PR> --watch`; a failing required CI check is a defect, and a
 pending one counts as unexecuted evidence.
 Mark it ready only when required checks, review outcomes, and the remote tip cover the same head.

@@ -28,11 +28,13 @@ coordinator owns PRs, issue actions, and independent review.
 
 Apply [Writing](references/setup.md#writing) to authored prose using `technical-writing` and `unslop`. Include the resolved writing references in worker briefs. Solo PR creation and updates follow [PR body](references/review-and-pr.md#pr-body), which uses `pr` for structure and preserves the repository template.
 
-**Use configured execution permissions.** Run commands normally. If a necessary command is blocked, use the
-available scoped escalation and report a denial accurately. A denied command with no escalation available is a
-blocked step: finish every step that does not depend on it, then take the stop path naming the exact command. The task's existing authorization governs external
-mutations. Reuse the user's authorization for lifecycle comments without asking again. Record which
-assignments and labels this run changes and alter only those on a stop path.
+**Use configured execution permissions.** Run `gh` from the repository's main checkout even when the work lives
+in a worktree or the run directory: elsewhere the active account can differ and a private repo fails with
+`Could not resolve to a Repository`; the fix is to change directory and rerun. If a necessary command is blocked,
+use the available scoped escalation and report a denial accurately. A denied command with no escalation available
+is a blocked step: finish every step that does not depend on it, then take the stop path naming the exact command.
+The task's existing authorization governs external mutations. Reuse the user's authorization for lifecycle comments
+without asking again. Record which assignments and labels this run changes and alter only those on a stop path.
 
 ### Ticket lifecycle comments
 
@@ -59,7 +61,7 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 1. Read the ticket and claim it
 
-`gh issue view <N> --json number,title,body,labels,assignees,comments`: read the body AND comments (`--comments` and `--json` cannot be combined). Save the body, relevant comments, and acceptance criteria as the `## Requirements` section of `ticket-snapshot.md` in the run directory before implementation starts; reviewers enforce that section ([Independent review](references/review-and-pr.md#independent-review)). Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
+`gh issue view <N> --json number,title,body,labels,assignees,comments,state,closedByPullRequestsReferences`: read the body AND comments (`--comments` and `--json` cannot be combined). A closed state or a linked merged PR means the ticket may already hold on the base: check the criteria there before claiming, branching, or posting a start comment, and take the [No-change outcome](references/review-and-pr.md#no-change-outcome) from step 1 when they do. Save the body, relevant comments, and acceptance criteria as the `## Requirements` section of `ticket-snapshot.md` in the run directory before implementation starts; reviewers enforce that section ([Independent review](references/review-and-pr.md#independent-review)). Note title, acceptance criteria, blocked-by links, and scope labels (`needs-info`, `wontfix`, etc. → stop and ask, with one exception: `needs-info` applied by a prior agent's own stop (its findings comment is on the ticket) when the user explicitly named this ticket resolves that prior stop; defer any label change until ownership and workspace preflight pass). Before claiming, confirm it is a **ticket, not a spec**: a body with no concrete acceptance criteria that reads as a multi-ticket document (solution/scope sections, user stories, several independent deliverables) is a spec the auto-pick regex missed. Stop and ask. If assigned to someone else, surface that before any issue mutation. An assignment to self is advisory, not an exclusive lock. Complete the base and workspace preflight first; then claim within existing authorization and record whether this run added the assignment. Post the start comment after step 3 completes.
 
 ### 2. Pick a base branch
 
@@ -70,18 +72,16 @@ If the user provided a number, use it as `<N>`. Otherwise auto-pick the **lowest
 
 ### 3. Create the ticket branch
 
-Check applicable branch conventions and `git status --porcelain`. Preserve unrelated dirty work in place and
-use an isolated checkout if needed. Ask only about required uncommitted inputs or overlapping edits whose
-ownership is unclear; do not automatically stash or reset. Fetch the intended base and pin `base_sha`. Name the
-branch `<type>/ticket-<N>-<slug>` (`feat`, `fix`, …) unless the repo's docs set another convention; other
-tools' prefixes (`codex/`) are not one. Recognize older `feat/issue-<N>-*` branches when investigating resumes.
-Create the branch from the SHA, not a moving branch ref.
+Check applicable branch conventions and `git status --porcelain`. Fetch the intended base and pin `base_sha`. Build
+in a dedicated worktree cut from that SHA (`git worktree add <path> -b <branch> <base_sha>`, `<path>` a sibling such
+as `../<repo>-worktrees/ticket-<N>-<slug>` when writable, else under the run directory), created by the worker, not
+the harness `isolation: worktree` option, so the user's checkout and unrelated dirty work stay in place. Ask only
+about required uncommitted inputs or overlapping edits whose ownership is unclear; do not automatically stash or
+reset. Name the branch `<type>/ticket-<N>-<slug>` (`feat`, `fix`, …) unless the repo's docs or merged PRs set another convention; other tools' prefixes (`codex/`) are not one.
 
-For a prior attempt, read its findings and compare local and remote tips before choosing it. Multiple
-candidates require evidence of which attempt belongs to this task. Preserve the existing WIP tip; work on a
-fresh attempt branch before rebasing onto `base_sha` when rewriting a pushed branch is not already authorized.
-Abort an unsuccessful rebase explicitly. Keep its saved tip and findings available if rebuilding from the base
-is necessary. Report the actual branch and preservation state, including any push failure.
+For a prior attempt, read its findings and compare local and remote tips; several candidates need evidence of
+which one belongs to this task. Preserve the WIP tip: rebase a fresh attempt branch onto `base_sha` unless
+rewriting the pushed branch is authorized, abort a failed rebase explicitly, and report the branch, preservation state, and any push failure.
 
 Post and record the start comment before proceeding to step 4.
 
@@ -102,7 +102,7 @@ Before choosing a path: an acceptance criterion that is subjective or unverifiab
 
 Throughout:
 
-- In solo runs, open a **draft PR within the first 1–2 commits**. Follow [PR body](references/review-and-pr.md#pr-body), including pending evidence and `Closes #<N>`. Push the branch, then use `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body-file <body-file>`. Reuse an existing branch PR on resume. If publication fails, preserve the body, keep implementing locally, and report the error.
+- In solo runs, open a **draft PR within the first 1–2 commits**. Follow [PR body](references/review-and-pr.md#pr-body), including pending evidence and the closing line it chooses (`Closes #<N>` unless the repo's rule says otherwise). Push the branch, then use `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body-file <body-file>`. Reuse an existing branch PR on resume. If publication fails, preserve the body, keep implementing locally, and report the error.
 - Capture before/after observations with their commands, commits, and artifact paths as you work. Preserve red-test output or the prior artifact for the PR's Evidence section.
 - Keep the loop **tight** while building: type-check and run the single test file you're touching as you go; save the full suite for step 6.
 - Keep commits scoped and conventional (`feat:`, `fix:`, `test:`, …).
@@ -138,8 +138,8 @@ Stop and surface to the user (do not improvise) if:
 - The ticket is blocked by a ticket/PR that has no branch yet.
 - Required uncommitted inputs or overlapping work cannot be used safely without a user decision.
 - A required check is blocked and diagnosis or a different authorized approach cannot make further useful progress. Repeated identical failures call for a changed approach, not an arbitrary claim of completion.
-- A required publication command, such as `gh pr ready`, is denied and no escalation is available.
-- Every acceptance criterion already holds on `base_sha`: follow [No-change outcome](references/review-and-pr.md#no-change-outcome).
+
+Decide without asking when every acceptance criterion stays intact (test layout, a name or value format, where a commit lands, a follow-up issue, label housekeeping): take the option you would recommend, record it under `## Author decisions` with its reason, and list it in the PR body.
 
 When stopping, preserve work and report the actual branch, HEAD, worktree path, dirty files, and push outcome.
 Push WIP when authorized; a failed push leaves local work that must remain. Record the failure, attempts, and

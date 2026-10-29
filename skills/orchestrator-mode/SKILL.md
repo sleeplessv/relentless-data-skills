@@ -81,7 +81,7 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
 3. **Collect.** Wait through completion notifications or the wait tool. Resume a worker
    only for a narrow gap in the task it just did, at most twice: the coordinator cannot
-   see a worker's context, and a third resume usually lands past 150k tokens. A new
+   see a worker's context, and a third resume usually lands past 110k tokens. A new
    phase (integration, fixes, verification, the PR) or a third need gets a fresh worker
    briefed by artifact path. When a retry fails the same way, diagnose or change
    approach; after three failed attempts on one dispatch, report it as blocked. Keep

@@ -1,0 +1,200 @@
+[
+ {
+  "skill": "candidate-to-spec",
+  "version": "0.1.1",
+  "skill_md_lines": 129,
+  "references_files": 3,
+  "scripts_files": 0,
+  "disable_model_invocation": true,
+  "commits": 2,
+  "total_tracked_lines": 728,
+  "tracked_files": 6
+ },
+ {
+  "skill": "dbt-runner",
+  "version": "0.1.8",
+  "skill_md_lines": 134,
+  "references_files": 3,
+  "scripts_files": 1,
+  "disable_model_invocation": false,
+  "commits": 15,
+  "total_tracked_lines": 1064,
+  "tracked_files": 7
+ },
+ {
+  "skill": "dlt-bootstrap",
+  "version": "0.1.1",
+  "skill_md_lines": 133,
+  "references_files": 3,
+  "scripts_files": 0,
+  "disable_model_invocation": false,
+  "commits": 10,
+  "total_tracked_lines": 388,
+  "tracked_files": 6
+ },
+ {
+  "skill": "fabric-lineage-dag",
+  "version": "0.1.2",
+  "skill_md_lines": 89,
+  "references_files": 3,
+  "scripts_files": 17,
+  "disable_model_invocation": false,
+  "commits": 6,
+  "total_tracked_lines": 3635,
+  "tracked_files": 23
+ },
+ {
+  "skill": "gh-weekly-report",
+  "version": "0.1.2",
+  "skill_md_lines": 119,
+  "references_files": 1,
+  "scripts_files": 2,
+  "disable_model_invocation": true,
+  "commits": 8,
+  "total_tracked_lines": 1060,
+  "tracked_files": 6
+ },
+ {
+  "skill": "implement-feature",
+  "version": "0.2.5",
+  "skill_md_lines": 142,
+  "references_files": 1,
+  "scripts_files": 0,
+  "disable_model_invocation": true,
+  "commits": 21,
+  "total_tracked_lines": 513,
+  "tracked_files": 4
+ },
+ {
+  "skill": "implement-ticket",
+  "version": "0.2.8",
+  "skill_md_lines": 150,
+  "references_files": 4,
+  "scripts_files": 0,
+  "disable_model_invocation": true,
+  "commits": 22,
+  "total_tracked_lines": 538,
+  "tracked_files": 7
+ },
+ {
+  "skill": "metabase",
+  "version": "0.1.0",
+  "skill_md_lines": 150,
+  "references_files": 3,
+  "scripts_files": 1,
+  "disable_model_invocation": false,
+  "commits": 4,
+  "total_tracked_lines": 1803,
+  "tracked_files": 7
+ },
+ {
+  "skill": "orchestrator-mode",
+  "version": "0.5.4",
+  "skill_md_lines": 147,
+  "references_files": 1,
+  "scripts_files": 0,
+  "disable_model_invocation": false,
+  "commits": 25,
+  "total_tracked_lines": 306,
+  "tracked_files": 4
+ },
+ {
+  "skill": "prefect",
+  "version": "0.2.2",
+  "skill_md_lines": 150,
+  "references_files": 0,
+  "scripts_files": 0,
+  "disable_model_invocation": false,
+  "commits": 9,
+  "total_tracked_lines": 241,
+  "tracked_files": 3
+ },
+ {
+  "skill": "qualify-delegation",
+  "version": "0.1.0",
+  "skill_md_lines": 123,
+  "references_files": 0,
+  "scripts_files": 0,
+  "disable_model_invocation": false,
+  "commits": 1,
+  "total_tracked_lines": 183,
+  "tracked_files": 3
+ },
+ {
+  "skill": "review-pbi-diff",
+  "version": "0.1.3",
+  "skill_md_lines": 150,
+  "references_files": 1,
+  "scripts_files": 2,
+  "disable_model_invocation": true,
+  "commits": 8,
+  "total_tracked_lines": 1927,
+  "tracked_files": 6
+ },
+ {
+  "skill": "ship",
+  "version": "0.1.7",
+  "skill_md_lines": 148,
+  "references_files": 0,
+  "scripts_files": 0,
+  "disable_model_invocation": true,
+  "commits": 17,
+  "total_tracked_lines": 260,
+  "tracked_files": 3
+ },
+ {
+  "skill": "smart-git-commit",
+  "version": "0.1.3",
+  "skill_md_lines": 114,
+  "references_files": 0,
+  "scripts_files": 0,
+  "disable_model_invocation": false,
+  "commits": 13,
+  "total_tracked_lines": 183,
+  "tracked_files": 3
+ },
+ {
+  "skill": "snowman",
+  "version": "0.1.4",
+  "skill_md_lines": 143,
+  "references_files": 3,
+  "scripts_files": 1,
+  "disable_model_invocation": false,
+  "commits": 23,
+  "total_tracked_lines": 1601,
+  "tracked_files": 7
+ },
+ {
+  "skill": "statusline",
+  "version": "0.5.0",
+  "skill_md_lines": 64,
+  "references_files": 0,
+  "scripts_files": 1,
+  "disable_model_invocation": true,
+  "commits": 10,
+  "total_tracked_lines": 1038,
+  "tracked_files": 8
+ },
+ {
+  "skill": "student-mode",
+  "version": "0.2.0",
+  "skill_md_lines": 150,
+  "references_files": 0,
+  "scripts_files": 0,
+  "disable_model_invocation": true,
+  "commits": 4,
+  "total_tracked_lines": 215,
+  "tracked_files": 3
+ },
+ {
+  "skill": "visual-report",
+  "version": "0.1.3",
+  "skill_md_lines": 56,
+  "references_files": 2,
+  "scripts_files": 1,
+  "disable_model_invocation": false,
+  "commits": 12,
+  "total_tracked_lines": 1318,
+  "tracked_files": 6
+ }
+]

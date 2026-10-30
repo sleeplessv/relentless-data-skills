@@ -1,0 +1,948 @@
+<!-- PROTOTYPE, throwaway. variant-navy-coral-v2.html: Navy & coral revision 2. Figure 8 shows a diff in GitHub's light diff colours; Figure 3 draws tag-badge nodes as hand-built SVG. All prototypes are listed in prototypes.html; the floating pill links there. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the relentless-data-skills catalogue is built and checked</title>
+<style>
+  /* ===== TOKENS: P1 Navy & coral (palette/contrast.py). Every text pair is checked in gen-c/contrast_c.py. ===== */
+  :root {
+    --paper: #ffffff;
+    --surface: #f4f7f7;        /* sidebar, takeaways, so-what */
+    --ink: #102542;            /* text and structure */
+    --muted: #5f5348;          /* captions how-to-read, labels: 7.45:1 */
+    --line: #e1e7e7;
+    --line-2: #d3dcdc;
+    --rule: #7b8786;           /* DAG edges, graphic 3.7:1 */
+    --coral: #f87060;          /* fill only, navy text on it */
+    --coral-text: #c2493a;     /* coral as text, on white only */
+    --coral-line: #d95646;     /* coral as line or series */
+    --coral-soft: #fff1ed;
+    --th-bg: #edf1f1;
+    --bar: #dce4e3;            /* in-cell bars */
+    --zebra: #f7f9f9;
+    --code-fg: #24514e;        /* code family: teal */
+    --code-pill: #cdd7d6;
+    --code-bg: #eef3f3;
+    --code-gutter: #e2eaea;
+    --code-gutter-fg: #4a5755;
+    --code-mark: #e3e9f2;        /* annotated line: slate tint from ink */
+    --code-mark-gutter: #d5deeb;
+    /* annotation = navy marker + slate tint; diff red/green only on diff lines */
+    --red: #a3123a; --red-soft: #fbe7ec; --red-text: #8c0f32;          /* problems only */
+    --amber: #b7791f; --amber-soft: #fcf2dd; --amber-text: #714800;    /* callouts only */
+    --taupe: #8a7766; --sage: #4f7f7c;
+    /* diff colours: GitHub light theme. The one exception to "red = problems only": red and green mark removed and added lines, inside diffs only. */
+    --gh-fg: #1f2328; --gh-num: #57606a;
+    --gh-add: #e6ffec; --gh-add-num: #ccffd8; --gh-add-word: #abf2bc; --gh-add-sign: #1a7f37;
+    --gh-del: #ffebe9; --gh-del-num: #ffd7d5; --gh-del-word: #ff818266; --gh-del-sign: #d1242f;
+    --gh-hunk: #ddf4ff; --gh-hunk-fg: #57606a;
+    /* answer box: P2 Green-blue ramp treatment */
+    --ans-bg: #ffffff; --ans-border: #184e77; --ans-label: #1a759f; --ans-ink: #102a3f;
+    --shadow: 0 1px 2px rgba(16, 37, 66, 0.05), 0 4px 14px rgba(16, 37, 66, 0.06);
+
+    --display: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --s-2: 0.72rem; --s-1: 0.833rem; --s0: 1rem; --s1: 1.25rem; --s2: 1.563rem; --s3: 1.953rem; --s4: 2.441rem;
+    --sidebar: 248px;
+    --sticky: 2.75rem;
+    --pill: 5rem;              /* switcher pill height plus its margin, kept clear at the page bottom */
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 3.5rem; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: var(--s0); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--coral-line); text-underline-offset: 2px; }
+  code { font-family: var(--mono); font-size: 0.85em; background: var(--code-pill); color: var(--code-fg); padding: 0.08em 0.4em; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+  b, strong { font-weight: 650; }
+  h1, h2, h3 { font-family: var(--display); letter-spacing: -0.02em; margin: 0; }
+  .num, .tnum { font-variant-numeric: tabular-nums; }
+  .eyebrow { font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+
+  /* ---------- sidebar (B's numbered list) ---------- */
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar); padding: 1.75rem 1.1rem var(--pill); background: var(--surface); overflow-y: auto; }
+  .side .brand { font-variant-caps: all-small-caps; letter-spacing: 0.07em; font-size: 1.05rem; font-weight: 700; line-height: 1.25; margin: 0 0.3rem 0.4rem; }
+  .side .meta { font-size: var(--s-2); color: var(--muted); line-height: 1.45; margin: 0 0.3rem 1.4rem; }
+  .side .meta code { font-size: 0.95em; }
+  .toc { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-2); }
+  .toc li { border-bottom: 1px solid var(--line-2); }
+  .toc a { display: grid; grid-template-columns: 1.7rem 1fr; gap: 0.35rem; padding: 0.5rem 0.55rem; margin: 2px 0; color: var(--ink); font-size: var(--s-1); line-height: 1.3; text-decoration: none; border-radius: 6px; }
+  .toc a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: var(--s-2); font-weight: 700; padding-top: 0.1rem; }
+  .toc a:hover { background: #e6ecec; }
+  .toc a.current { background: var(--ink); color: #ffffff; font-weight: 600; }
+  .toc a.current .n { color: var(--coral); }
+  .side .visuals { margin: 1.5rem 0.3rem 0; font-size: var(--s-2); }
+  .side .visuals dt { font-variant-caps: all-small-caps; letter-spacing: 0.08em; font-weight: 700; font-size: var(--s-1); color: var(--ink); margin: 0.7rem 0 0.2rem; }
+  .side .visuals dd { margin: 0; }
+  .side .visuals dd a { color: var(--muted); display: block; padding: 0.1rem 0; text-decoration: none; line-height: 1.35; }
+  .side .visuals dd a:hover { color: var(--ink); text-decoration: underline; }
+  .toc-inline { display: none; }
+
+  /* ---------- content ---------- */
+  .content { margin-left: var(--sidebar); padding: 2.5rem 3rem var(--pill); max-width: calc(var(--sidebar) + 1140px); }
+  .masthead { margin-bottom: 1.75rem; }
+  .masthead .kicker { color: var(--coral-text); margin: 0 0 0.6rem; }
+  .masthead h1 { font-size: var(--s4); line-height: 1.08; font-weight: 750; max-width: 22ch; }
+  .masthead .byline { font-size: var(--s-1); color: var(--muted); margin: 0.75rem 0 0; }
+
+  .answer { background: var(--ans-bg); color: var(--ans-ink); border: 1px solid var(--ans-border); border-radius: var(--radius); padding: 1.2rem 1.5rem 1.3rem; margin: 0 0 1rem; box-shadow: var(--shadow); }
+  .answer .label { color: var(--ans-label); margin: 0 0 0.55rem; }
+  .answer .claim { font-family: var(--display); font-size: 1.45rem; line-height: 1.3; letter-spacing: -0.015em; font-weight: 650; margin: 0; max-width: 38em; }
+  .answer .claim code { font-size: 0.78em; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin: 0 0 3rem; }
+  .stat { background: var(--surface); border-radius: var(--radius); padding: 0.9rem 1.15rem 1rem; }
+  .stat .v { font-family: var(--display); font-size: var(--s3); color: var(--ink); font-weight: 750; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 0.5em; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  .stat .l { font-size: var(--s-1); color: var(--muted); margin-top: 0.45rem; line-height: 1.35; }
+
+  section.sec { margin: 0 0 3.25rem; }
+  h2.sec-head { position: sticky; top: 0; z-index: 5; background: var(--paper); border-bottom: 1px solid var(--line-2); font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; padding: 0; margin: 0 0 1.1rem; display: flex; gap: 0.75rem; align-items: center; height: var(--sticky); }
+  h2.sec-head .n { color: var(--coral-text); font-variant-numeric: tabular-nums; font-size: 0.95rem; }
+  h2.sec-head .count { margin-left: auto; font-weight: 600; color: var(--muted); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.08em; }
+  .prose { max-width: 68ch; }
+  .prose p { margin: 0 0 0.85rem; }
+  ul.points { margin: 0 0 0.9rem; padding: 0; list-style: none; max-width: 68ch; }
+  ul.points li { position: relative; padding-left: 1.1rem; margin: 0 0 0.35rem; }
+  ul.points li::before { content: ""; position: absolute; left: 0.1rem; top: 0.62em; width: 0.4rem; height: 0.4rem; border-radius: 50%; background: var(--coral-line); }
+
+  /* figure rows */
+  .fig { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 1rem 2rem; margin: 1.4rem 0 1.9rem; align-items: start; }
+  .fig.wide { grid-template-columns: minmax(0, 1fr); }
+  .fig .visual { min-width: 0; }
+  .fig .margin { font-size: var(--s-1); line-height: 1.5; }
+  .fig.wide .margin { max-width: 72ch; }
+  .caption { margin: 0; color: var(--ink); }
+  .caption .figno { font-weight: 750; color: var(--coral-text); }
+  .caption .how { color: var(--muted); }
+  .sowhat { margin: 0.8rem 0 0; padding: 0.65rem 0.85rem 0.7rem; background: var(--surface); border-radius: 6px; color: var(--ink); font-size: var(--s-1); line-height: 1.45; font-weight: 500; }
+  .sowhat .lbl, .dag-notes h3 { display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--coral-text); font-weight: 750; margin-bottom: 0.2rem; font-family: var(--body); }
+  .figframe { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+  .figframe.table { padding: 0.25rem 0.85rem 0.6rem; }
+  .figframe.scroll { overflow-x: auto; }
+  .chart { width: 100%; min-height: 200px; }
+  .chart.vega-embed { display: block; }
+  .chart.vega-embed svg { display: block; }
+
+  /* DAG notes: bullets in place of paragraphs */
+  .dag-notes { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 0.9rem; margin-top: 0.9rem; font-size: var(--s-1); line-height: 1.45; }
+  .dag-notes > div { background: var(--surface); border-radius: 6px; padding: 0.65rem 0.85rem 0.7rem; }
+  .dag-notes .cap { background: transparent; padding: 0.65rem 0 0; }
+  .dag-notes h3 { font-size: var(--s-2); }
+  .dag-notes .cap h3 { color: var(--coral-text); }
+  .dag-notes ul { margin: 0; padding: 0; list-style: none; }
+  .dag-notes li { position: relative; padding-left: 0.95rem; margin: 0 0 0.25rem; }
+  .dag-notes li::before { content: ""; position: absolute; left: 0.05rem; top: 0.6em; width: 0.35rem; height: 0.35rem; border-radius: 50%; background: var(--coral-line); }
+  .dag-notes .cap li { color: var(--muted); }
+  .dag-notes .cap li::before { background: var(--muted); }
+
+  /* takeaways */
+  .takeaways { margin: 1.1rem 0 0; padding: 0.85rem 1.1rem 0.9rem; border-radius: var(--radius); background: var(--surface); list-style: none; max-width: 72ch; }
+  .takeaways::before { content: "Takeaways"; display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 750; margin-bottom: 0.4rem; }
+  .takeaways li { margin: 0 0 0.4rem; padding-left: 1.1rem; position: relative; }
+  .takeaways li::before { content: ""; position: absolute; left: 0.05rem; top: 0.55em; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--coral); }
+  .takeaways li:last-child { margin-bottom: 0; }
+
+  /* callouts: amber note, red problem. Full border, never a side strip. */
+  .callout { max-width: 68ch; margin: 0.4rem 0 1rem; padding: 0.6rem 0.9rem; border-radius: 6px; font-size: var(--s-1); line-height: 1.45; }
+  .callout b { font-weight: 750; }
+  .callout.note { background: var(--amber-soft); border: 1px solid var(--amber); color: var(--amber-text); }
+  .callout.problem { background: var(--red-soft); border: 1px solid var(--red); color: var(--red-text); }
+  .callout.problem b::before { content: "\2715\00a0"; }
+
+  /* tables */
+  table.data { border-collapse: collapse; width: 100%; font-size: var(--s-1); line-height: 1.3; }
+  table.data th, table.data td { padding: 0.38rem 0.55rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.data th { position: sticky; top: var(--sticky); z-index: 3; background: var(--th-bg); color: var(--ink); border-bottom: 1px solid var(--ink); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 750; line-height: 1.25; vertical-align: bottom; }
+  table.data th:first-child { border-radius: 6px 0 0 0; }
+  table.data th:last-child { border-radius: 0 6px 0 0; }
+  table.data th.txt, table.data td.txt, table.data td.id { text-align: left; }
+  table.data th.num, table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data td.id { font-family: var(--mono); font-size: 0.88em; white-space: nowrap; }
+  table.data td.txt { overflow-wrap: break-word; }
+  table.data td code { font-size: 0.84em; white-space: normal; }
+  .dag-notes code, .caption code { white-space: normal; }
+  table.data td.id code { background: none; padding: 0; color: var(--ink); }
+  #table-2 { table-layout: fixed; }
+  #table-2 td.id { white-space: normal; font-size: 0.8em; }
+  #table-2 col.c-id { width: 29%; } #table-2 col.c-label { width: 41%; } #table-2 col.c-group { width: 18%; } #table-2 col.c-deg { width: 12%; }
+  /* Table 1, SKILL.md lines: a bar behind a bold numeral, sized to the 150-line budget; budget cells are coral */
+  table.data td.lines { padding: 0.2rem 0.55rem; }
+  table.data td.lines .cbar { position: relative; display: block; padding: 0.16rem 0.4rem; border-radius: 3px; z-index: 0; font-weight: 650; }
+  table.data td.lines .cbar::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--w); background: var(--bar); border-radius: 3px; z-index: -1; }
+  table.data td.lines.at .cbar { color: var(--ink); font-weight: 800; }
+  table.data td.lines.at .cbar::before { background: var(--coral); }
+  table.data tfoot td { border-top: 1px solid var(--ink); border-bottom: 0; font-weight: 650; }
+  table.data tbody tr:nth-child(even) td { background: var(--zebra); }
+  table.data tbody tr:hover td { background: var(--coral-soft); }
+  table.sortable th { cursor: pointer; user-select: none; padding-right: 1.3rem; position: sticky; }
+  table.sortable th::after { content: "\2195"; position: absolute; right: 0.3rem; bottom: 0.4rem; color: var(--muted); font-size: 0.9em; }
+  table.sortable th[aria-sort="ascending"]::after { content: "\2191"; color: var(--ink); }
+  table.sortable th[aria-sort="descending"]::after { content: "\2193"; color: var(--ink); }
+  table.sortable th[aria-sort] { text-decoration: underline; text-underline-offset: 3px; }
+  details.more { margin: 0.5rem 0 0; font-size: var(--s-1); }
+  details.more summary { cursor: pointer; color: var(--ink); font-weight: 650; list-style: none; padding: 0.3rem 0; }
+  details.more summary::before { content: "+ "; color: var(--coral-text); }
+  details.more[open] summary::before { content: "\2013 "; }
+  details.more summary .when-open { display: none; }
+  details.more[open] summary .when-open { display: inline; }
+  details.more[open] summary .when-closed { display: none; }
+
+  /* matrix: symbol and colour, never colour alone */
+  table.matrix th.mark, table.matrix td.mark { text-align: center; width: 4.6rem; }
+  table.matrix td.mark { font-size: 1rem; line-height: 1; padding-top: 0.45rem; font-weight: 700; }
+  table.matrix td.mark.pass { color: var(--ink); }
+  table.matrix td.mark.fail { color: var(--red); }
+  table.matrix td.mark.blocked { color: var(--muted); }
+  table.matrix td.mark .mark-note { display: block; font-size: 0.62rem; color: var(--muted); margin-top: 0.15rem; font-weight: 500; }
+  table.matrix td.tier { white-space: nowrap; color: var(--muted); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.05em; padding-top: 0.5rem; }
+  table.matrix tr[data-first="1"] td { border-top: 1px solid var(--line-2); }
+  table.matrix tr.tier-defect td.tier { color: var(--red); font-weight: 700; }
+
+  /* code excerpt: tinted bordered panel, line-number gutter, filled markers */
+  pre.code { margin: 0; padding: 0.6rem 0; font-family: var(--mono); font-size: 0.8rem; line-height: 1.65; counter-reset: ln 353; overflow-x: auto; background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--code-pill); border-radius: var(--radius); }
+  pre.code code { white-space: normal; background: none; padding: 0; font-size: inherit; display: block; color: inherit; font-weight: 450; }
+  pre.code .l { display: block; position: relative; padding: 0 3.2rem 0 4.3rem; white-space: pre; }
+  pre.code .l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; top: 0; bottom: 0; width: 3.3rem; padding-right: 0.6rem; text-align: right; color: var(--code-gutter-fg); background: var(--code-gutter); font-variant-numeric: tabular-nums; font-size: 0.9em; }
+  pre.code .l.mark { background: var(--code-mark); }
+  pre.code .l.mark::before { color: var(--ink); font-weight: 800; background: var(--code-mark-gutter); }
+  pre.code .l.mark::after { content: attr(data-m); position: absolute; right: 0.6rem; top: 0.14rem; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--ink); color: #ffffff; font-size: 0.7rem; font-weight: 800; text-align: center; line-height: 1.25rem; font-family: var(--body); }
+  /* diff panel: same panel, gutter and markers as the code excerpt; two line-number columns; GitHub diff colours */
+  pre.code.diff .l { display: grid; grid-template-columns: 3rem 3rem 1.4rem minmax(0, 1fr); padding: 0 3.2rem 0 0; white-space: normal; }
+  pre.code.diff .l::before { content: none; }
+  pre.code.diff .o, pre.code.diff .n { text-align: right; padding-right: 0.55rem; background: var(--code-gutter); color: var(--code-gutter-fg); font-size: 0.9em; font-variant-numeric: tabular-nums; }
+  pre.code.diff .sg { text-align: center; user-select: none; font-weight: 700; }
+  pre.code.diff .t { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 0.4rem; }
+  pre.code.diff .l.add { background: var(--gh-add); color: var(--gh-fg); }
+  pre.code.diff .l.add .o, pre.code.diff .l.add .n { background: var(--gh-add-num); color: var(--gh-num); }
+  pre.code.diff .l.add .sg { color: var(--gh-add-sign); }
+  pre.code.diff .l.add .w { background: var(--gh-add-word); border-radius: 3px; }
+  pre.code.diff .l.del { background: var(--gh-del); color: var(--gh-fg); }
+  pre.code.diff .l.del .o, pre.code.diff .l.del .n { background: var(--gh-del-num); color: var(--gh-num); }
+  pre.code.diff .l.del .sg { color: var(--gh-del-sign); }
+  pre.code.diff .l.del .w { background: var(--gh-del-word); border-radius: 3px; }
+  pre.code.diff .l.hunk { background: var(--gh-hunk); color: var(--gh-hunk-fg); }
+  pre.code.diff .l.hunk .o, pre.code.diff .l.hunk .n { background: var(--gh-hunk); }
+  pre.code.diff .l.hunk .t { padding: 0.15rem 0; }
+  ol.markers { list-style: none; margin: 1rem 0 0; padding: 0; font-size: var(--s-1); display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; }
+  ol.markers li { position: relative; padding-left: 1.9rem; line-height: 1.45; }
+  ol.markers li .k { position: absolute; left: 0; top: 0.05rem; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--ink); color: #ffffff; font-size: 0.7rem; font-weight: 800; text-align: center; line-height: 1.25rem; }
+  ol.markers li .ln { font-family: var(--mono); color: var(--muted); font-size: 0.85em; font-weight: 600; }
+
+  /* timeline */
+  ol.timeline { list-style: none; margin: 0; padding: 0.25rem 0; font-size: var(--s-1); position: relative; }
+  ol.timeline::before { content: ""; position: absolute; left: calc(1.6rem + 6.4rem + 0.5rem - 1px + 0.4rem); top: 0.8rem; bottom: 0.8rem; width: 2px; background: var(--line-2); }
+  ol.timeline li { display: grid; grid-template-columns: 1.6rem 6.4rem 1rem 1fr; gap: 0 0.5rem; align-items: start; padding: 0.32rem 0.4rem; position: relative; border-radius: 6px; }
+  ol.timeline .tl-n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: var(--s-2); padding-top: 0.15rem; }
+  ol.timeline .tl-date { font-variant-numeric: tabular-nums; color: var(--muted); }
+  ol.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--ink); margin: 0.38rem 0 0 -0.05rem; position: relative; z-index: 1; }
+  ol.timeline .tl-body { line-height: 1.4; }
+  ol.timeline .tl-body code { font-size: 0.86em; }
+  ol.timeline .tl-note { display: block; color: var(--muted); font-size: var(--s-2); }
+  ol.timeline li.key { background: var(--coral-soft); border: 1px solid #f6cfc6; }
+  ol.timeline li.key .tl-dot { background: var(--coral); width: 14px; height: 14px; margin: 0.25rem 0 0 -0.18rem; box-shadow: 0 0 0 1.5px var(--coral-line); }
+  ol.timeline li.key .tl-date, ol.timeline li.key .tl-n { color: var(--ink); font-weight: 750; }
+  ol.timeline li.key .tl-body { font-weight: 650; }
+  ol.timeline li.key .tl-note { color: var(--muted); font-weight: 500; }
+  ol.timeline li.key .tl-body code { background: var(--coral); color: var(--ink); font-weight: 700; }
+
+  /* proportion bars */
+  .bars { padding: 0.75rem 1.1rem; }
+  .bar-row { display: grid; grid-template-columns: 11rem 1fr; gap: 0.75rem; align-items: center; padding: 0.22rem 0; font-size: var(--s-1); }
+  .bar-label { font-family: var(--mono); font-size: 0.78rem; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .bar-fill { height: 1rem; background: var(--ink); border-radius: 0 3px 3px 0; flex: 0 0 auto; }
+  .bar-row:first-child .bar-fill { background: var(--coral-line); }
+  .bar-row.other .bar-fill { background: var(--taupe); }
+  .bar-row.other .bar-label { color: var(--muted); font-family: var(--body); }
+  .bar-num { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: var(--s-1); }
+  .bar-num b { font-weight: 750; color: var(--ink); }
+  .bar-sub { color: var(--muted); font-size: var(--s-2); }
+
+  /* limits */
+  ol.limits { margin: 0; padding-left: 1.4rem; max-width: 68ch; }
+  ol.limits li { margin-bottom: 0.45rem; }
+  ol.limits li::marker { color: var(--coral-text); font-weight: 700; }
+
+  /* DAG legend */
+  .legend { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: var(--s-2); color: var(--muted); margin: 0.7rem 0 0; }
+  .legend .k { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend .tgk { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; padding: 1px 5px; border-radius: 2.5px; line-height: 1.35; }
+  .legend .grpk { display: inline-block; width: 1.6rem; height: 0.9rem; border: 1px dashed var(--rule); border-radius: 3px; background: var(--paper); }
+  /* DAG: tag-badge nodes on a tinted canvas. LR when the frame is wide, TB when it is narrow. */
+  #dag-frame { background: var(--surface); padding: 0.9rem 0.6rem; container-type: inline-size; }
+  #dag-frame svg.dag { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
+  #dag-frame svg.dag-tb { display: none; }
+  @container (max-width: 979px) { #dag-frame svg.dag-lr { display: none; } #dag-frame svg.dag-tb { display: block; } }
+  svg.dag .edges path { fill: none; stroke: var(--rule); stroke-width: 1.5; }
+  svg.dag .box { fill: var(--paper); stroke: var(--rule); stroke-width: 1; }
+  svg.dag .group .box { stroke-dasharray: 4 2; }
+  svg.dag .focus .box { fill: var(--coral-soft); stroke: var(--coral-line); stroke-width: 2; }
+  svg.dag text.tg { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; }
+  svg.dag text.nm { font-family: var(--body); font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+  svg.dag text.cp { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+  svg.dag .cnt { fill: var(--th-bg); stroke: var(--rule); stroke-width: 1; }
+  svg.dag text.cn { font-family: var(--mono); font-size: 11px; font-weight: 700; fill: var(--ink); }
+
+
+  pre.mermaid { margin: 0; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+  pre.mermaid svg { display: block; margin: 0 auto; }
+  #dag-frame pre.mermaid svg { max-width: 100%; height: auto; }
+
+  /* switcher */
+  .proto-switch { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 0.75rem; background: var(--ink); color: #fff; border-radius: 999px; padding: 0.45rem 0.9rem; font: 600 13px/1 var(--body); box-shadow: 0 4px 16px rgba(0,0,0,0.3); border: 2px solid #fff; outline: 1px solid var(--ink); }
+  .proto-switch a { color: #fff; font-size: 16px; padding: 0 0.3rem; text-decoration: none; }
+  .proto-switch a:hover { color: var(--coral); }
+  .proto-switch .lbl { letter-spacing: 0.04em; }
+
+  @media (max-width: 1100px) {
+    .side { display: none; }
+    .content { margin-left: 0; padding: 2rem 2rem var(--pill); }
+    .toc-inline { display: block; margin: 0 0 2rem; background: var(--surface); border-radius: var(--radius); padding: 0.75rem 1rem; }
+    .toc-inline ol { margin: 0; padding-left: 1.6rem; columns: 2; column-gap: 2rem; font-size: var(--s-1); }
+    .toc-inline li { break-inside: avoid; margin-bottom: 0.2rem; }
+    .toc-inline li::marker { color: var(--coral-text); font-weight: 700; }
+  }
+  @media (max-width: 900px) {
+    .content { padding: 1.5rem 1rem var(--pill); }
+    .fig { grid-template-columns: minmax(0, 1fr); }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    ol.markers { grid-template-columns: 1fr; }
+    .dag-notes { grid-template-columns: 1fr 1fr; }
+    .dag-notes .cap { grid-column: 1 / -1; }
+    #table-1 { font-size: 0.72rem; }
+    #table-1 th, #table-1 td { padding-left: 0.3rem; padding-right: 0.3rem; }
+    #table-1 th { letter-spacing: 0; padding-right: 1.05rem; }
+    #table-1 td.lines { padding-left: 0.2rem; padding-right: 0.2rem; }
+    #table-1-fig .figframe { padding-left: 0.4rem; padding-right: 0.4rem; }
+    #table-1 td.id { font-size: 0.82em; }
+    table.matrix th.mark, table.matrix td.mark { width: 3.6rem; }
+    table.matrix th, table.matrix td { padding-left: 0.35rem; padding-right: 0.35rem; }
+  }
+  @media print {
+    .side, .proto-switch, details.more { display: none !important; }
+    body { background: #fff; }
+    .content { margin-left: 0; padding: 0; max-width: none; }
+    .toc-inline { display: block; }
+    .fig, .figframe, table.data, pre.code, ol.timeline { break-inside: avoid; page-break-inside: avoid; }
+    .figframe, .answer { box-shadow: none; }
+    h2.sec-head { position: static; }
+    table.data th { position: static; }
+    #t2-rest { display: table-row-group !important; }
+    .figframe.scroll { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="side" aria-label="Contents">
+  <p class="brand">How the relentless-data-skills catalogue is built and checked</p>
+  <p class="meta">Commit <code>a590a62</code> on main, measured 2026-10-30.</p>
+  <ol class="toc" id="toc">
+    <li><a href="#s1"><span class="n">01</span><span>The catalogue at a glance</span></a></li>
+    <li><a href="#s2"><span class="n">02</span><span>The 150-line budget</span></a></li>
+    <li><a href="#s3"><span class="n">03</span><span>How the repo grew</span></a></li>
+    <li><a href="#s4"><span class="n">04</span><span>What depends on what</span></a></li>
+    <li><a href="#s5"><span class="n">05</span><span>How the render check runs</span></a></li>
+    <li><a href="#s6"><span class="n">06</span><span>How the verdict is decided</span></a></li>
+    <li><a href="#s7"><span class="n">07</span><span>How visual-report got its check</span></a></li>
+    <li><a href="#s8"><span class="n">08</span><span>Where the lines live</span></a></li>
+    <li><a href="#s9"><span class="n">09</span><span>Limits</span></a></li>
+  </ol>
+  <dl class="visuals">
+    <dt>Tables</dt>
+    <dd><a href="#table-1-fig">Table 1. The catalogue</a></dd>
+    <dd><a href="#table-2-fig">Table 2. Graph nodes</a></dd>
+    <dt>Figures</dt>
+    <dd><a href="#fig-1">1. SKILL.md lines against the budget</a></dd>
+    <dd><a href="#fig-2">2. Commits per month</a></dd>
+    <dd><a href="#fig-3">3. Dependencies around visual-report</a></dd>
+    <dd><a href="#fig-4">4. One run of the render check</a></dd>
+    <dd><a href="#fig-5">5. The verdict function</a></dd>
+    <dd><a href="#fig-6">6. Condition to verdict</a></dd>
+    <dd><a href="#fig-7">7. visual-report history</a></dd>
+    <dd><a href="#fig-8">8. The Verify step, before and after</a></dd>
+    <dd><a href="#fig-9">9. Tracked lines per folder</a></dd>
+  </dl>
+</aside>
+
+<main class="content">
+  <header class="masthead">
+    <p class="kicker eyebrow">Report &middot; relentless-data-skills &middot; commit a590a62</p>
+    <h1>How the relentless-data-skills catalogue is built and checked</h1>
+    <p class="byline">Measured on 2026-10-30 at commit <code>a590a62</code> on main. Every number comes from the repo at that commit.</p>
+  </header>
+
+  <section class="answer" aria-label="Answer">
+    <p class="label eyebrow">Answer</p>
+    <p class="claim">Every SKILL.md fits the 150-line budget that <code>scripts/lint_skill.py</code> enforces in CI, and five of 18 sit exactly on it. The bulk is in scripts. <code>fabric-lineage-dag</code> holds 17 of the 26 script files and 21% of the 17,001 tracked lines.</p>
+  </section>
+  <div class="stats" aria-label="Headline numbers">
+    <div class="stat"><div class="v">18</div><div class="l">skill folders, 8 with DMI set</div></div>
+    <div class="stat"><div class="v">127.3<small> / 150</small></div><div class="l">mean SKILL.md lines against the budget</div></div>
+    <div class="stat"><div class="v">5<small> of 18</small></div><div class="l">SKILL.md files at exactly 150 lines</div></div>
+    <div class="stat"><div class="v">17,001</div><div class="l">tracked lines, 21.4% in one folder</div></div>
+  </div>
+
+  <nav class="toc-inline" aria-label="Contents">
+    <ol>
+      <li><a href="#s1">The catalogue at a glance</a></li>
+      <li><a href="#s2">The 150-line budget</a></li>
+      <li><a href="#s3">How the repo grew</a></li>
+      <li><a href="#s4">What depends on what</a></li>
+      <li><a href="#s5">How the render check runs</a></li>
+      <li><a href="#s6">How the verdict is decided</a></li>
+      <li><a href="#s7">How visual-report got its check</a></li>
+      <li><a href="#s8">Where the lines live</a></li>
+      <li><a href="#s9">Limits</a></li>
+    </ol>
+  </nav>
+
+  <!-- ================= 1 ================= -->
+  <section class="sec" id="s1">
+    <h2 class="sec-head"><span class="n">01</span><span>The catalogue at a glance</span><span class="count">Table 1</span></h2>
+    <div class="prose">
+      <p>The catalogue is 18 skill folders under <code>skills/</code>, each with a SKILL.md and a <code>plugin.json</code>. Table 1 lists them. SKILL.md length stays in a narrow band, 56 to 150 lines. Script count ranges from 0 to 17.</p>
+    </div>
+
+    <div class="fig wide" id="table-1-fig">
+      <div class="visual">
+        <div class="figframe table">
+        <table class="data sortable" id="table-1">
+<thead><tr>
+<th class="txt" data-type="txt">Skill</th>
+<th class="num" data-type="txt">Version</th>
+<th class="num" data-type="num">SKILL.md (lines)</th>
+<th class="num" data-type="num">references/ (files)</th>
+<th class="num" data-type="num">scripts/ (files)</th>
+<th class="txt" data-type="num">DMI</th>
+<th class="num" data-type="num">Commits</th>
+<th class="num" data-type="num">Tracked (files)</th>
+<th class="num" data-type="num">Tracked (lines)</th>
+</tr></thead>
+<tbody>
+<tr><td class="id">candidate-to-spec</td><td class="num" data-v="000.001.001"><code>0.1.1</code></td><td class="num lines"><span class="cbar" style="--w:86.0%">129</span></td><td class="num">3</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">2</td><td class="num">6</td><td class="num">728</td></tr>
+<tr><td class="id">dbt-runner</td><td class="num" data-v="000.001.008"><code>0.1.8</code></td><td class="num lines"><span class="cbar" style="--w:89.3%">134</span></td><td class="num">3</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">15</td><td class="num">7</td><td class="num">1,064</td></tr>
+<tr><td class="id">dlt-bootstrap</td><td class="num" data-v="000.001.001"><code>0.1.1</code></td><td class="num lines"><span class="cbar" style="--w:88.7%">133</span></td><td class="num">3</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">10</td><td class="num">6</td><td class="num">388</td></tr>
+<tr><td class="id">fabric-lineage-dag</td><td class="num" data-v="000.001.002"><code>0.1.2</code></td><td class="num lines"><span class="cbar" style="--w:59.3%">89</span></td><td class="num">3</td><td class="num">17</td><td class="txt" data-v="0">no</td><td class="num">6</td><td class="num">23</td><td class="num">3,635</td></tr>
+<tr><td class="id">gh-weekly-report</td><td class="num" data-v="000.001.002"><code>0.1.2</code></td><td class="num lines"><span class="cbar" style="--w:79.3%">119</span></td><td class="num">1</td><td class="num">2</td><td class="txt" data-v="1">yes</td><td class="num">8</td><td class="num">6</td><td class="num">1,060</td></tr>
+<tr><td class="id">implement-feature</td><td class="num" data-v="000.002.005"><code>0.2.5</code></td><td class="num lines"><span class="cbar" style="--w:94.7%">142</span></td><td class="num">1</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">21</td><td class="num">4</td><td class="num">513</td></tr>
+<tr><td class="id">implement-ticket</td><td class="num" data-v="000.002.008"><code>0.2.8</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">4</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">22</td><td class="num">7</td><td class="num">538</td></tr>
+<tr><td class="id">metabase</td><td class="num" data-v="000.001.000"><code>0.1.0</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">3</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">4</td><td class="num">7</td><td class="num">1,803</td></tr>
+<tr><td class="id">orchestrator-mode</td><td class="num" data-v="000.005.004"><code>0.5.4</code></td><td class="num lines"><span class="cbar" style="--w:98.0%">147</span></td><td class="num">1</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">25</td><td class="num">4</td><td class="num">306</td></tr>
+<tr><td class="id">prefect</td><td class="num" data-v="000.002.002"><code>0.2.2</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">9</td><td class="num">3</td><td class="num">241</td></tr>
+<tr><td class="id">qualify-delegation</td><td class="num" data-v="000.001.000"><code>0.1.0</code></td><td class="num lines"><span class="cbar" style="--w:82.0%">123</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">1</td><td class="num">3</td><td class="num">183</td></tr>
+<tr><td class="id">review-pbi-diff</td><td class="num" data-v="000.001.003"><code>0.1.3</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">1</td><td class="num">2</td><td class="txt" data-v="1">yes</td><td class="num">8</td><td class="num">6</td><td class="num">1,927</td></tr>
+<tr><td class="id">ship</td><td class="num" data-v="000.001.007"><code>0.1.7</code></td><td class="num lines"><span class="cbar" style="--w:98.7%">148</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">17</td><td class="num">3</td><td class="num">260</td></tr>
+<tr><td class="id">smart-git-commit</td><td class="num" data-v="000.001.003"><code>0.1.3</code></td><td class="num lines"><span class="cbar" style="--w:76.0%">114</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">13</td><td class="num">3</td><td class="num">183</td></tr>
+<tr><td class="id">snowman</td><td class="num" data-v="000.001.004"><code>0.1.4</code></td><td class="num lines"><span class="cbar" style="--w:95.3%">143</span></td><td class="num">3</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">23</td><td class="num">7</td><td class="num">1,601</td></tr>
+<tr><td class="id">statusline</td><td class="num" data-v="000.005.000"><code>0.5.0</code></td><td class="num lines"><span class="cbar" style="--w:42.7%">64</span></td><td class="num">0</td><td class="num">1</td><td class="txt" data-v="1">yes</td><td class="num">10</td><td class="num">8</td><td class="num">1,038</td></tr>
+<tr><td class="id">student-mode</td><td class="num" data-v="000.002.000"><code>0.2.0</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">4</td><td class="num">3</td><td class="num">215</td></tr>
+<tr><td class="id">visual-report</td><td class="num" data-v="000.001.003"><code>0.1.3</code></td><td class="num lines"><span class="cbar" style="--w:37.3%">56</span></td><td class="num">2</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">12</td><td class="num">6</td><td class="num">1,318</td></tr>
+</tbody>
+<tfoot><tr><td class="txt">Total, 18 skills</td><td></td><td class="num">2,291</td><td class="num">28</td><td class="num">26</td><td class="txt">8 yes</td><td class="num">210</td><td class="num">112</td><td class="num">17,001</td></tr></tfoot>
+</table>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Table 1.</span> Every skill folder with its version, SKILL.md length, file counts, commits and tracked size. <span class="how">Each bar is that SKILL.md's share of the 150-line budget. Coral cells sit exactly on it. DMI means <code>disable-model-invocation: true</code>. A commit that touches several skills counts once per skill, so Commits sums to 210, not 124. Click a header to sort.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>The budget caps the prompt, not the skill. Folder size comes from scripts.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>Eight of 18 skills set DMI. The linter requires it for any skill that runs <code>git push</code> or <code>gh pr merge</code>.</li>
+      <li>Five SKILL.md files sit on the budget. None is over it.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 2 ================= -->
+  <section class="sec" id="s2">
+    <h2 class="sec-head"><span class="n">02</span><span>The 150-line budget</span><span class="count">Figure 1</span></h2>
+    <div class="prose">
+      <p><code>scripts/lint_skill.py</code> sets <code>LINE_BUDGET = 150</code> on line 35 and fails any longer SKILL.md. CI's <code>skill-lint</code> job runs it on every push and pull request. Detail that does not fit goes in <code>references/</code>, which the agent reads only when SKILL.md sends it there. Figure 1 shows every SKILL.md against the budget.</p>
+    </div>
+
+    <div class="fig" id="fig-1">
+      <div class="visual">
+        <div class="figframe"><div id="vl-bar" class="chart"></div></div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 1.</span> SKILL.md length per skill, longest first. <span class="how">The dashed line is the 150-line budget. Coral bars sit exactly on it. Mean 127.3 lines, minimum 56 (visual-report).</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>Five skills are at the limit and two more are within 3 lines of it. The budget binds.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 3 ================= -->
+  <section class="sec" id="s3">
+    <h2 class="sec-head"><span class="n">03</span><span>How the repo grew</span><span class="count">Figure 2</span></h2>
+    <div class="prose">
+      <p><code>main</code> has 124 commits between 2026-05-21 and 2026-10-29, 5 of them merges. Under ADR-0001, each merged pull request bumps the version of every skill it touches. CI's <code>skill-version-check</code> job enforces the bump. Figure 2 counts commits by month.</p>
+    </div>
+
+    <div class="fig" id="fig-2">
+      <div class="visual">
+        <div class="figframe"><div id="vl-line" class="chart"></div></div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 2.</span> Commits on <code>main</code> per month. <span class="how">Counted with <code>git log</code>, merges included. Total 124.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>Work came in two waves, June (37) and September to October (59).</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>The most-touched folders are orchestrator-mode (25 commits), snowman (23) and implement-ticket (22).</li>
+    </ul>
+  </section>
+
+  <!-- ================= 4 ================= -->
+  <section class="sec" id="s4">
+    <h2 class="sec-head"><span class="n">04</span><span>What depends on what</span><span class="count">Figure 3, Table 2</span></h2>
+    <ul class="points">
+      <li>The full graph has 56 nodes and 84 edges. Table 2 lists every node.</li>
+      <li>An edge from A to B means A names, runs, imports or reads B.</li>
+      <li>The two hubs are not skills. <code>lint_skill.py</code> has degree 21 and the CI <code>tests</code> job has degree 13.</li>
+      <li>Figure 3 draws the two hops around <code>visual-report</code>.</li>
+    </ul>
+
+    <div class="fig wide" id="fig-3">
+      <div class="visual">
+        <div class="figframe" id="dag-frame">
+<svg class="dag dag-lr" viewBox="-6.0 -29.0 1120.0 268.0" width="1120" style="max-width:1120px" role="img" aria-label="Dependency graph: two-hop neighbourhood of visual-report, 11 nodes"><defs><marker id="arr-lr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#7b8786"/></marker></defs><g class="edges"><path d="M200.0,150 C212.0,150 212.0,120 224.0,120" marker-end="url(#arr-lr)"/><path d="M200.0,150 C212.0,150 212.0,210 224.0,210" marker-end="url(#arr-lr)"/><path d="M200.0,0 L424.0,0 C437.0,0 437.0,75 450.0,75" marker-end="url(#arr-lr)"/><path d="M200.0,60 L424.0,60 C437.0,60 437.0,75 450.0,75" marker-end="url(#arr-lr)"/><path d="M426.0,120 C438.0,120 438.0,75 450.0,75" marker-end="url(#arr-lr)"/><path d="M652.0,75 C664.0,75 664.0,30 676.0,30" marker-end="url(#arr-lr)"/><path d="M652.0,75 C664.0,75 664.0,120 676.0,120" marker-end="url(#arr-lr)"/><path d="M878.0,120 C890.0,120 890.0,60 902.0,60" marker-end="url(#arr-lr)"/><path d="M878.0,120 C890.0,120 890.0,120 902.0,120" marker-end="url(#arr-lr)"/><path d="M878.0,120 C890.0,120 890.0,180 902.0,180" marker-end="url(#arr-lr)"/><path d="M426.0,210 L876.0,210 C889.0,210 889.0,180 902.0,180" marker-end="url(#arr-lr)"/></g><g class="nodes"><g class="dn" transform="translate(0.0,-23.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#4f7f7c"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SCR</text><text class="nm" x="44.2" y="19.5">check.sh</text><text class="cp" x="10" y="37">scripts/ · degree 4</text><title>check_sh</title></g><g class="dn" transform="translate(0.0,37.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="21.8" height="14" rx="2.5" fill="#1a759f"/><text class="tg" x="20.9" y="18.6" text-anchor="middle" fill="#ffffff">CI</text><text class="nm" x="37.8" y="19.5">skill-lint</text><text class="cp" x="10" y="37">CI job · degree 1</text><title>ci_lint</title></g><g class="dn" transform="translate(0.0,127.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="21.8" height="14" rx="2.5" fill="#1a759f"/><text class="tg" x="20.9" y="18.6" text-anchor="middle" fill="#ffffff">CI</text><text class="nm" x="37.8" y="19.5">tests</text><text class="cp" x="10" y="37">CI job · degree 13</text><title>ci_tests</title></g><g class="dn" transform="translate(226.0,97.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#5f5348"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">TST</text><text class="nm" x="44.2" y="19.5">test_lint_skill.py</text><text class="cp" x="10" y="37">tests/ · degree 2</text><title>test_lint_skill</title></g><g class="dn" transform="translate(226.0,187.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#5f5348"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">TST</text><text class="nm" x="44.2" y="19.5">test_visual_report.py</text><text class="cp" x="10" y="37">tests/ · degree 2</text><title>test_visual_report</title></g><g class="dn" transform="translate(452.0,52.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#4f7f7c"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SCR</text><text class="nm" x="44.2" y="19.5">lint_skill.py</text><text class="cp" x="10" y="37">scripts/ · degree 21</text><title>lint_skill</title></g><g class="dn group" transform="translate(678.0,7.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#102542"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SKL</text><text class="nm" x="44.2" y="19.5">other skills</text><text class="cp" x="10" y="37">skills/ · 17 folders</text><rect class="cnt" x="168" y="13.0" width="24" height="20" rx="3"/><text class="cn" x="180" y="27.2" text-anchor="middle">17</text><title>other_skills</title></g><g class="dn focus" transform="translate(678.0,97.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#f87060"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#102542">SKL</text><text class="nm" x="44.2" y="19.5">visual-report</text><text class="cp" x="10" y="37">skills/ · degree 4</text><title>visual_report</title></g><g class="dn" transform="translate(904.0,157.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#24514e"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SKS</text><text class="nm" x="44.2" y="19.5">check_render.py</text><text class="cp" x="10" y="37">scripts/ · degree 2</text><title>check_render</title></g><g class="dn" transform="translate(904.0,37.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#ffffff" stroke="#4a5755"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#4a5755">REF</text><text class="nm" x="44.2" y="19.5">HTML-REPORT.md</text><text class="cp" x="10" y="37">references/ · degree 1</text><title>html_report</title></g><g class="dn" transform="translate(904.0,97.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#ffffff" stroke="#4a5755"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#4a5755">REF</text><text class="nm" x="44.2" y="19.5">VISUAL-LANGUAGE.md</text><text class="cp" x="10" y="37">references/ · degree 1</text><title>visual_language</title></g></g></svg>
+<svg class="dag dag-tb" viewBox="-6.0 -6.0 648.0 418.0" width="648" style="max-width:648px" role="img" aria-label="Dependency graph: two-hop neighbourhood of visual-report, 11 nodes"><defs><marker id="arr-tb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" fill="#7b8786"/></marker></defs><g class="edges"><path d="M100.0,46.0 C100.0,67.0 316.0,67.0 316.0,88.0" marker-end="url(#arr-tb)"/><path d="M100.0,46.0 C100.0,67.0 100.0,67.0 100.0,88.0" marker-end="url(#arr-tb)"/><path d="M532.0,46.0 L532.0,134.0 C532.0,156.0 424.0,156.0 424.0,178.0" marker-end="url(#arr-tb)"/><path d="M316.0,46.0 L316.0,134.0 C316.0,156.0 424.0,156.0 424.0,178.0" marker-end="url(#arr-tb)"/><path d="M316.0,136.0 C316.0,157.0 424.0,157.0 424.0,178.0" marker-end="url(#arr-tb)"/><path d="M424.0,226.0 C424.0,247.0 532.0,247.0 532.0,268.0" marker-end="url(#arr-tb)"/><path d="M424.0,226.0 C424.0,247.0 316.0,247.0 316.0,268.0" marker-end="url(#arr-tb)"/><path d="M316.0,316.0 C316.0,337.0 316.0,337.0 316.0,358.0" marker-end="url(#arr-tb)"/><path d="M316.0,316.0 C316.0,337.0 532.0,337.0 532.0,358.0" marker-end="url(#arr-tb)"/><path d="M316.0,316.0 C316.0,337.0 100.0,337.0 100.0,358.0" marker-end="url(#arr-tb)"/><path d="M100.0,136.0 L100.0,314.0 C100.0,336.0 100.0,336.0 100.0,358.0" marker-end="url(#arr-tb)"/></g><g class="nodes"><g class="dn" transform="translate(432.0,0.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#4f7f7c"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SCR</text><text class="nm" x="44.2" y="19.5">check.sh</text><text class="cp" x="10" y="37">scripts/ · degree 4</text><title>check_sh</title></g><g class="dn" transform="translate(216.0,0.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="21.8" height="14" rx="2.5" fill="#1a759f"/><text class="tg" x="20.9" y="18.6" text-anchor="middle" fill="#ffffff">CI</text><text class="nm" x="37.8" y="19.5">skill-lint</text><text class="cp" x="10" y="37">CI job · degree 1</text><title>ci_lint</title></g><g class="dn" transform="translate(0.0,0.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="21.8" height="14" rx="2.5" fill="#1a759f"/><text class="tg" x="20.9" y="18.6" text-anchor="middle" fill="#ffffff">CI</text><text class="nm" x="37.8" y="19.5">tests</text><text class="cp" x="10" y="37">CI job · degree 13</text><title>ci_tests</title></g><g class="dn" transform="translate(216.0,90.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#5f5348"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">TST</text><text class="nm" x="44.2" y="19.5">test_lint_skill.py</text><text class="cp" x="10" y="37">tests/ · degree 2</text><title>test_lint_skill</title></g><g class="dn" transform="translate(0.0,90.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#5f5348"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">TST</text><text class="nm" x="44.2" y="19.5">test_visual_report.py</text><text class="cp" x="10" y="37">tests/ · degree 2</text><title>test_visual_report</title></g><g class="dn" transform="translate(324.0,180.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#4f7f7c"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SCR</text><text class="nm" x="44.2" y="19.5">lint_skill.py</text><text class="cp" x="10" y="37">scripts/ · degree 21</text><title>lint_skill</title></g><g class="dn group" transform="translate(432.0,270.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#102542"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SKL</text><text class="nm" x="44.2" y="19.5">other skills</text><text class="cp" x="10" y="37">skills/ · 17 folders</text><rect class="cnt" x="168" y="13.0" width="24" height="20" rx="3"/><text class="cn" x="180" y="27.2" text-anchor="middle">17</text><title>other_skills</title></g><g class="dn focus" transform="translate(216.0,270.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#f87060"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#102542">SKL</text><text class="nm" x="44.2" y="19.5">visual-report</text><text class="cp" x="10" y="37">skills/ · degree 4</text><title>visual_report</title></g><g class="dn" transform="translate(0.0,360.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#24514e"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#ffffff">SKS</text><text class="nm" x="44.2" y="19.5">check_render.py</text><text class="cp" x="10" y="37">scripts/ · degree 2</text><title>check_render</title></g><g class="dn" transform="translate(216.0,360.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#ffffff" stroke="#4a5755"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#4a5755">REF</text><text class="nm" x="44.2" y="19.5">HTML-REPORT.md</text><text class="cp" x="10" y="37">references/ · degree 1</text><title>html_report</title></g><g class="dn" transform="translate(432.0,360.0)"><rect class="box" width="200" height="46" rx="5"/><rect class="tag" x="10" y="8" width="28.2" height="14" rx="2.5" fill="#ffffff" stroke="#4a5755"/><text class="tg" x="24.1" y="18.6" text-anchor="middle" fill="#4a5755">REF</text><text class="nm" x="44.2" y="19.5">VISUAL-LANGUAGE.md</text><text class="cp" x="10" y="37">references/ · degree 1</text><title>visual_language</title></g></g></svg>
+        </div>
+        <p class="legend"><span class="k"><span class="tgk" style="background:#102542;color:#ffffff">SKL</span>skill</span><span class="k"><span class="tgk" style="background:#4f7f7c;color:#ffffff">SCR</span>root script</span><span class="k"><span class="tgk" style="background:#1a759f;color:#ffffff">CI</span>CI job</span><span class="k"><span class="tgk" style="background:#5f5348;color:#ffffff">TST</span>test</span><span class="k"><span class="tgk" style="background:#24514e;color:#ffffff">SKS</span>skill script</span><span class="k"><span class="tgk" style="background:#ffffff;color:#4a5755;box-shadow:inset 0 0 0 1px #4a5755">REF</span>reference</span><span class="k"><span class="tgk" style="background:#f87060;color:#102542">SKL</span>subject</span><span class="k"><span class="grpk"></span>merged group, count at right</span></p>
+      </div>
+      <div class="dag-notes">
+        <div class="cap">
+          <p class="caption"><span class="figno">Figure 3.</span> Two-hop neighbourhood of <code>visual-report</code>.</p>
+          <ul>
+            <li>11 of 56 nodes drawn.</li>
+            <li>Dashed box: the 17 other skills the linter reads.</li>
+            <li>CI <code>tests</code> is three hops out. It runs the skill's test.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>How to read</h3>
+          <ul>
+            <li>Arrows point from reader to read.</li>
+            <li>Badge: node type. Coral: the subject.</li>
+            <li>Second line: folder and degree.</li>
+          </ul>
+        </div>
+        <div>
+          <h3>So what</h3>
+          <ul>
+            <li>Only the linter and one test reach <code>visual-report</code> from outside.</li>
+            <li><code>check_render.py</code> has two callers, SKILL.md and its test.</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+
+    <div class="fig" id="table-2-fig">
+      <div class="visual">
+        <div class="figframe table">
+        <table class="data sortable" id="table-2" data-show="20">
+<colgroup><col class="c-id"><col class="c-label"><col class="c-group"><col class="c-deg"></colgroup>
+<thead><tr>
+<th class="txt" data-type="txt">Node id</th>
+<th class="txt" data-type="txt">Label</th>
+<th class="txt" data-type="txt">Group</th>
+<th class="num" data-type="num">Degree (edges)</th>
+</tr></thead>
+<tbody id="t2-main">
+<tr><td class="id"><code>lint_<wbr>skill</code></td><td class="txt">scripts/<wbr>lint_skill.py</td><td class="txt">root-script</td><td class="num">21</td></tr>
+<tr><td class="id"><code>ci_<wbr>tests</code></td><td class="txt">CI job tests (py3.9 + 3.13)</td><td class="txt">ci</td><td class="num">13</td></tr>
+<tr><td class="id"><code>dlt-bootstrap</code></td><td class="txt">dlt-bootstrap</td><td class="txt">skill</td><td class="num">5</td></tr>
+<tr><td class="id"><code>implement-feature</code></td><td class="txt">implement-feature</td><td class="txt">skill</td><td class="num">5</td></tr>
+<tr><td class="id"><code>ship</code></td><td class="txt">ship</td><td class="txt">skill</td><td class="num">5</td></tr>
+<tr><td class="id"><code>sync_<wbr>registry</code></td><td class="txt">scripts/<wbr>sync_registry.py</td><td class="txt">root-script</td><td class="num">5</td></tr>
+<tr><td class="id"><code>skill_<wbr>versions</code></td><td class="txt">scripts/<wbr>skill_versions.py</td><td class="txt">root-script</td><td class="num">5</td></tr>
+<tr><td class="id"><code>test_<wbr>skill_<wbr>git_<wbr>sequences</code></td><td class="txt">tests/<wbr>test_skill_git_sequences.py</td><td class="txt">test</td><td class="num">5</td></tr>
+<tr><td class="id"><code>candidate-to-spec</code></td><td class="txt">candidate-to-spec</td><td class="txt">skill</td><td class="num">4</td></tr>
+<tr><td class="id"><code>orchestrator-mode</code></td><td class="txt">orchestrator-mode</td><td class="txt">skill</td><td class="num">4</td></tr>
+<tr><td class="id"><code>visual-report</code></td><td class="txt">visual-report</td><td class="txt">skill</td><td class="num">4</td></tr>
+<tr><td class="id"><code>check_<wbr>sh</code></td><td class="txt">scripts/<wbr>check.sh</td><td class="txt">root-script</td><td class="num">4</td></tr>
+<tr><td class="id"><code>dbt-runner</code></td><td class="txt">dbt-runner</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>gh-weekly-report</code></td><td class="txt">gh-weekly-report</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>implement-ticket</code></td><td class="txt">implement-ticket</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>review-pbi-diff</code></td><td class="txt">review-pbi-diff</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>smart-git-commit</code></td><td class="txt">smart-git-commit</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>snowman</code></td><td class="txt">snowman</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>test_<wbr>candidate_<wbr>to_<wbr>spec_<wbr>commands</code></td><td class="txt">tests/<wbr>test_candidate_to_spec_commands.py</td><td class="txt">test</td><td class="num">3</td></tr>
+<tr><td class="id"><code>test_<wbr>gh_<wbr>weekly_<wbr>report</code></td><td class="txt">tests/<wbr>test_gh_weekly_report.py</td><td class="txt">test</td><td class="num">3</td></tr>
+</tbody>
+<tbody id="t2-rest" hidden>
+<tr><td class="id"><code>test_<wbr>review_<wbr>pbi_<wbr>diff</code></td><td class="txt">tests/<wbr>test_review_pbi_diff.py</td><td class="txt">test</td><td class="num">3</td></tr>
+<tr><td class="id"><code>statusline_<wbr>sh</code></td><td class="txt">statusline/<wbr>scripts/<wbr>statusline.sh</td><td class="txt">skill-script</td><td class="num">3</td></tr>
+<tr><td class="id"><code>fabric-lineage-dag</code></td><td class="txt">fabric-lineage-dag</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>metabase</code></td><td class="txt">metabase</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>prefect</code></td><td class="txt">prefect</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>statusline</code></td><td class="txt">statusline</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>check_<wbr>doc_<wbr>urls</code></td><td class="txt">scripts/<wbr>check_doc_urls.py</td><td class="txt">root-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>plugin_<wbr>json</code></td><td class="txt">skills/<wbr>*/<wbr>plugin.json (18 manifests)</td><td class="txt">manifest</td><td class="num">2</td></tr>
+<tr><td class="id"><code>ci_<wbr>version</code></td><td class="txt">CI job skill-version-check</td><td class="txt">ci</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>dbt_<wbr>runner</code></td><td class="txt">tests/<wbr>test_dbt_runner.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>dlt_<wbr>bootstrap</code></td><td class="txt">tests/<wbr>test_dlt_bootstrap.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>lint_<wbr>skill</code></td><td class="txt">tests/<wbr>test_lint_skill.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>metabase</code></td><td class="txt">tests/<wbr>test_metabase.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>skill_<wbr>versions</code></td><td class="txt">tests/<wbr>test_skill_versions.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>snowman</code></td><td class="txt">tests/<wbr>test_snowman.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>statusline</code></td><td class="txt">tests/<wbr>test_statusline.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>sync_<wbr>registry</code></td><td class="txt">tests/<wbr>test_sync_registry.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>visual_<wbr>report</code></td><td class="txt">tests/<wbr>test_visual_report.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>check_<wbr>render</code></td><td class="txt">visual-report/<wbr>scripts/<wbr>check_render.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>snowman_<wbr>py</code></td><td class="txt">snowman/<wbr>scripts/<wbr>snowman.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>mb_<wbr>py</code></td><td class="txt">metabase/<wbr>scripts/<wbr>mb.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>preflight_<wbr>py</code></td><td class="txt">dbt-runner/<wbr>scripts/<wbr>preflight.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>extract_<wbr>changes</code></td><td class="txt">review-pbi-diff/<wbr>scripts/<wbr>extract_changes.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>check_<wbr>artifact</code></td><td class="txt">review-pbi-diff/<wbr>scripts/<wbr>check_artifact.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>collect_<wbr>py</code></td><td class="txt">gh-weekly-report/<wbr>scripts/<wbr>collect.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>render_<wbr>py</code></td><td class="txt">gh-weekly-report/<wbr>scripts/<wbr>render.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>if_<wbr>reference</code></td><td class="txt">implement-feature/<wbr>references/<wbr>reference.md</td><td class="txt">reference</td><td class="num">2</td></tr>
+<tr><td class="id"><code>qualify-delegation</code></td><td class="txt">qualify-delegation</td><td class="txt">skill</td><td class="num">1</td></tr>
+<tr><td class="id"><code>student-mode</code></td><td class="txt">student-mode</td><td class="txt">skill</td><td class="num">1</td></tr>
+<tr><td class="id"><code>statusline_<wbr>shots</code></td><td class="txt">scripts/<wbr>statusline_screenshots.py</td><td class="txt">root-script</td><td class="num">1</td></tr>
+<tr><td class="id"><code>ci_<wbr>lint</code></td><td class="txt">CI job skill-lint</td><td class="txt">ci</td><td class="num">1</td></tr>
+<tr><td class="id"><code>ci_<wbr>urls</code></td><td class="txt">CI job doc-url-liveness</td><td class="txt">ci</td><td class="num">1</td></tr>
+<tr><td class="id"><code>fld_<wbr>scripts</code></td><td class="txt">fabric-lineage-dag/<wbr>scripts/<wbr> (17 files)</td><td class="txt">skill-script</td><td class="num">1</td></tr>
+<tr><td class="id"><code>html_<wbr>report</code></td><td class="txt">visual-report/<wbr>references/<wbr>HTML-REPORT.md</td><td class="txt">reference</td><td class="num">1</td></tr>
+<tr><td class="id"><code>visual_<wbr>language</code></td><td class="txt">visual-report/<wbr>references/<wbr>VISUAL-LANGUAGE.md</td><td class="txt">reference</td><td class="num">1</td></tr>
+<tr><td class="id"><code>ci_<wbr>plugin</code></td><td class="txt">CI job plugin-validate</td><td class="txt">ci</td><td class="num">0</td></tr>
+</tbody>
+</table>
+<details class="more" data-target="t2-rest"><summary><span class="when-closed">Show the remaining 36 rows (56 nodes in total)</span><span class="when-open">Hide the remaining 36 rows (showing all 56)</span></summary></details>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Table 2.</span> All 56 graph nodes, highest degree first. <span class="how">Degree is in-edges plus out-edges. The first 20 rows show. Open the control under the table for the rest.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>Eight nodes have degree 5 or more. Only three of them are skills.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 5 ================= -->
+  <section class="sec" id="s5">
+    <h2 class="sec-head"><span class="n">05</span><span>How the render check runs</span><span class="count">Figure 4</span></h2>
+    <div class="prose">
+      <p><code>check_render.py</code> opens a report in headless Chromium and reads the rendered page, not the console. It records diagram facts, opens hidden tabs and <code>&lt;details&gt;</code>, then records them again. Each diagram ends as ok or one of eight faults, such as clipped or illegible. The run stops at 140 s. Figure 4 follows one run.</p>
+    </div>
+
+    <div class="fig wide" id="fig-4">
+      <div class="visual">
+        <div class="figframe seq">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant S as Script (check_render.py)
+  participant R as Report file
+  participant C as Chromium (Playwright)
+  participant N as CDNs
+  A->>S: run check_render.py
+  S->>R: read_source(report)
+  alt cannot read it, or no playwright
+    S-->>A: FAIL, exit 1, or BLOCKED, exit 2
+  end
+  S->>+C: launch, then goto file URL (load, 30 s)
+  C->>N: GET scripts and modules
+  N-->>C: reached or failed
+  S->>C: settle() 2 s quiet, facts(), reveal(), facts()
+  C-->>S: diagram facts, twice
+  S->>C: images(), screenshots(), probe() 15 s each
+  C-->>S: error text, or env
+  alt a request failed and no host answered
+    S->>N: fetch package.json, no-cors, 5 s
+  end
+  deactivate C
+  S-->>A: PASS, FAIL or BLOCKED, exit 0, 1, 2
+</pre>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 4.</span> One run of <code>check_render.py</code>, from the agent's command to the verdict. <span class="how">Solid arrows are calls. Dashed arrows are replies. Each <code>alt</code> box runs only when its condition holds. The script's 17 steps are condensed to 12 messages.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>An unrendered diagram counts as a defect only after a CDN probe clears the network.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 6 ================= -->
+  <section class="sec" id="s6">
+    <h2 class="sec-head"><span class="n">06</span><span>How the verdict is decided</span><span class="count">Figures 5 and 6</span></h2>
+    <div class="prose">
+      <p><code>verdict()</code> checks four tiers in order and returns at the first match (Figure 5). Figure 6 gives the verdict for each condition on its own. Exit codes are PASS 0, FAIL 1 and BLOCKED 2.</p>
+    </div>
+    <p class="callout note"><b>Note.</b> SKILL.md defines BLOCKED as "unverified, not passing".</p>
+
+    <div class="fig wide" id="fig-5">
+      <div class="visual">
+<pre class="code"><code><span class="l">def verdict(result):</span><span class="l">    &quot;&quot;&quot;Proof of a defect beats an environment problem, which beats softer evidence.</span><span class="l"> </span><span class="l">    An error diagram, a 404, or a broken image is a defect whatever else went</span><span class="l">    wrong. An unreachable CDN explains unrendered diagrams and script errors,</span><span class="l">    so those count only when the network was fine.</span><span class="l">    &quot;&quot;&quot;</span><span class="l mark" data-m="1">    if result.get(&quot;blocked&quot;):</span><span class="l">        return BLOCKED</span><span class="l">    diagrams = result.get(&quot;diagrams&quot;, [])</span><span class="l">    requests = result.get(&quot;requests&quot;, [])</span><span class="l mark" data-m="2">    if (any(d[&quot;status&quot;] in DRAWN_BAD and not d.get(&quot;env&quot;) for d in diagrams)</span><span class="l">            or any(r[&quot;kind&quot;] == &quot;defect&quot; for r in requests)</span><span class="l mark" data-m="3">            or result.get(&quot;broken_images&quot;) or result.get(&quot;hung&quot;)):</span><span class="l">        return FAIL</span><span class="l mark" data-m="4">    if (any(r[&quot;kind&quot;] == &quot;blocked&quot; for r in requests)</span><span class="l">            or any(d.get(&quot;env&quot;) for d in diagrams) or result.get(&quot;incomplete&quot;)):</span><span class="l">        return BLOCKED</span><span class="l mark" data-m="5">    if (any(d[&quot;status&quot;] in NOT_DRAWN for d in diagrams)</span><span class="l">            or result.get(&quot;page_errors&quot;) or result.get(&quot;console_errors&quot;)):</span><span class="l">        return FAIL</span><span class="l">    return PASS</span></code></pre>
+        <ol class="markers">
+          <li><span class="k">1</span><span class="ln">361</span> <code>blocked</code> means the check never ran, so it wins outright.</li>
+          <li><span class="k">2</span><span class="ln">365</span> A <code>DRAWN_BAD</code> status proves a defect, unless the diagram's module never loaded.</li>
+          <li><span class="k">3</span><span class="ln">367</span> A broken image or a frozen tab fails with no network excuse.</li>
+          <li><span class="k">4</span><span class="ln">369-370</span> An unreachable CDN or a timeout gives BLOCKED.</li>
+          <li><span class="k">5</span><span class="ln">372</span> Unrendered diagrams and console errors fail only when the network was fine.</li>
+        </ol>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 5.</span> <code>verdict()</code>, lines 354 to 375 of <code>skills/visual-report/scripts/check_render.py</code>. <span class="how">Line numbers match the source. Numbered markers point to the notes under the code.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>The order is the design. A network fault never becomes a page defect.</p>
+      </div>
+    </div>
+
+    <div class="fig wide" id="fig-6">
+      <div class="visual">
+        <div class="figframe table">
+        <table class="data matrix" id="matrix">
+<thead><tr><th class="num">#</th><th class="txt">Condition</th><th class="txt">Status or field in <code>result</code></th><th class="mark">PASS</th><th class="mark">FAIL</th><th class="mark">BLOCKED</th><th class="txt">Tier</th></tr></thead>
+<tbody>
+<tr class="tier-defect" data-first="1"><td class="num">1</td><td class="txt">Diagram is Mermaid&#x27;s error diagram</td><td class="txt"><code>status: error (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">2</td><td class="txt">Diagram collapsed to a speck or shows no labels</td><td class="txt"><code>status: empty (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">3</td><td class="txt">Diagram shrunk until labels are unreadable (under 6 px)</td><td class="txt"><code>status: illegible (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">4</td><td class="txt">Diagram cut off by an overflow:hidden box</td><td class="txt"><code>status: clipped (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">5</td><td class="txt">Broken image</td><td class="txt"><code>broken_images non-empty</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">6</td><td class="txt">Resource answers 404, or a non-CDN host does not exist while others loaded</td><td class="txt"><code>requests[].kind == &quot;defect&quot;</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">7</td><td class="txt">Page freezes its tab (a query takes over 10 s)</td><td class="txt"><code>hung set</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-soft" data-first="1"><td class="num">8</td><td class="txt">Diagram never rendered or still rendering (network fine)</td><td class="txt"><code>status: unrendered or rendering (NOT_DRAWN)</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">soft</td></tr>
+<tr class="tier-soft"><td class="num">9</td><td class="txt">Page error or console error (network fine)</td><td class="txt"><code>page_errors, console_errors</code></td><td class="mark"></td><td class="mark fail">&#10005;</td><td class="mark"></td><td class="txt tier">soft</td></tr>
+<tr class="tier-environment" data-first="1"><td class="num">10</td><td class="txt">No Playwright import or no browser could launch</td><td class="txt"><code>blocked set</code></td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9670;</td><td class="txt tier">environment</td></tr>
+<tr class="tier-environment"><td class="num">11</td><td class="txt">A CDN host unreachable or answering HTTP 5xx</td><td class="txt"><code>requests[].kind == &quot;blocked&quot; or diagram env</code></td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9670;</td><td class="txt tier">environment</td></tr>
+<tr class="tier-environment"><td class="num">12</td><td class="txt">Check did not finish within 140 s (or watchdog at 160 s)</td><td class="txt"><code>incomplete set</code></td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9670;</td><td class="txt tier">environment</td></tr>
+<tr class="tier-note" data-first="1"><td class="num">13</td><td class="txt">Diagram still hidden after reveal (listed, not judged)</td><td class="txt"><code>unverified</code></td><td class="mark pass">&#9679;<span class="mark-note">listed</span></td><td class="mark"></td><td class="mark"></td><td class="txt tier">note</td></tr>
+<tr data-first="1"><td class="num">14</td><td class="txt">None of the above</td><td class="txt"></td><td class="mark pass">&#9679;</td><td class="mark"></td><td class="mark"></td><td class="txt tier"></td></tr>
+</tbody></table>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 6.</span> Each condition from the script's docstring and the verdict it gives on its own. <span class="how">&#10005; is FAIL, &#9670; is BLOCKED and &#9679; is PASS. When several conditions hold, the order in Figure 5 decides.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>Only three conditions end in BLOCKED, and the environment causes all three.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>A drawn defect fails. An environment fault blocks. Softer evidence fails only when the network was fine.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 7 ================= -->
+  <section class="sec" id="s7">
+    <h2 class="sec-head"><span class="n">07</span><span>How visual-report got its check</span><span class="count">Figures 7 and 8</span></h2>
+    <div class="prose">
+      <p><code>skills/visual-report/</code> has 12 commits on <code>main</code>. Ten are prose passes across many skills. Commit 088a29f added the render check and its tests (Figure 7). The same commit rewrote the Verify step in SKILL.md to run it (Figure 8).</p>
+    </div>
+
+    <div class="fig wide" id="fig-7">
+      <div class="visual">
+        <div class="figframe">
+          <ol class="timeline">
+<li><span class="tl-n">1</span><span class="tl-date">2026-06-09</span><span class="tl-dot"></span><span class="tl-body"><code>6db3ef0</code> feat: add visual-report skill<span class="tl-note">skill created</span></span></li>
+<li><span class="tl-n">2</span><span class="tl-date">2026-06-09</span><span class="tl-dot"></span><span class="tl-body"><code>f9b72a8</code> docs(skills): add prefect debug/CLI protocol and visual-report improvements</span></li>
+<li><span class="tl-n">3</span><span class="tl-date">2026-06-09</span><span class="tl-dot"></span><span class="tl-body"><code>dc10b07</code> chore: remove license and version from multiple skill files</span></li>
+<li><span class="tl-n">4</span><span class="tl-date">2026-06-12</span><span class="tl-dot"></span><span class="tl-body"><code>49a91cc</code> Generate marketplace.json and the README skills table from plugin.json (#27)<span class="tl-note">plugin.json becomes source of truth</span></span></li>
+<li><span class="tl-n">5</span><span class="tl-date">2026-06-18</span><span class="tl-dot"></span><span class="tl-body"><code>5961bf5</code> docs(skills): quality pass across all 9 skills (#28)<span class="tl-note">catalogue had 9 skills</span></span></li>
+<li><span class="tl-n">6</span><span class="tl-date">2026-07-24</span><span class="tl-dot"></span><span class="tl-body"><code>83b2c2b</code> docs(skills): tune all skills for Opus 5 prompting guidance (#41)</span></li>
+<li><span class="tl-n">7</span><span class="tl-date">2026-09-03</span><span class="tl-dot"></span><span class="tl-body"><code>fa5e069</code> docs: remove em dashes from skill docs prose (#59)</span></li>
+<li><span class="tl-n">8</span><span class="tl-date">2026-09-03</span><span class="tl-dot"></span><span class="tl-body"><code>ebdcdce</code> snowman: token-efficient CSV output, cleaner errors, plain-language docs (#61)</span></li>
+<li><span class="tl-n">9</span><span class="tl-date">2026-09-16</span><span class="tl-dot"></span><span class="tl-body"><code>207218c</code> docs(skills): refresh descriptions and documentation links (#69)</span></li>
+<li><span class="tl-n">10</span><span class="tl-date">2026-09-23</span><span class="tl-dot"></span><span class="tl-body"><code>3db5ecb</code> chore(skills): apply prompt audit for Fable 5.1 (#71)</span></li>
+<li class="key"><span class="tl-n">11</span><span class="tl-date">2026-10-03</span><span class="tl-dot"></span><span class="tl-body"><code>088a29f</code> feat(skills): add prove-it-works checks (#75)<span class="tl-note">adds scripts/check_render.py (+985) and tests/test_visual_report.py (+345); 16 files, +2,605 / -41</span></span></li>
+<li><span class="tl-n">12</span><span class="tl-date">2026-10-18</span><span class="tl-dot"></span><span class="tl-body"><code>dc788de</code> chore: migrate agent config to GLOSSARY.md and AGENTS.md (#91)</span></li>
+</ol>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 7.</span> Every commit that touched <code>skills/visual-report/</code>, oldest first. <span class="how">The highlighted entry, 088a29f, added <code>check_render.py</code> and <code>tests/test_visual_report.py</code>.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>The check arrived four months after the skill, in one pull request.</p>
+      </div>
+    </div>
+
+    <div class="fig wide" id="fig-8">
+      <div class="visual">
+<pre class="code diff"><code><span class="l hunk"><span class="o"></span><span class="n"></span><span class="sg"></span><span class="t">&#64;&#64; -35,3 +35,15 &#64;&#64; Write one self-contained HTML file and open it.</span></span><span class="l ctx"><span class="o">35</span><span class="n">35</span><span class="sg"> </span><span class="t">- **House style:** the editorial aesthetic in [HTML-REPORT.md](references/HTML-REPORT.md) is the style, lean, not corporate-dashboard. Apply it; don&#x27;t invent a new look per report.</span></span><span class="l del mark" data-m="1"><span class="o">36</span><span class="n"></span><span class="sg">-</span><span class="t">- **Verify:** a Mermaid syntax error never fails loudly; it renders as an error <span class="w">blob</span> in <span class="w">the</span> <span class="w">page.</span> <span class="w">Before</span> <span class="w">handing</span> <span class="w">over,</span> <span class="w">re-read</span> every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML), then <span class="w">check</span> the <span class="w">rendered </span>page <span class="w">for</span> <span class="w">no</span> <span class="w">error</span> <span class="w">blobs</span> <span class="w">and</span> <span class="w">every diagram legible. Fix and reload until it&#x27;s clean.</span></span></span><span class="l add"><span class="o"></span><span class="n">36</span><span class="sg">+</span><span class="t">- **Verify:** a Mermaid syntax error never fails loudly; it renders as an error <span class="w">blob, with nothing on the console,</span> in <span class="w">a</span> <span class="w">page</span> <span class="w">you</span> <span class="w">never</span> <span class="w">see.</span> <span class="w">Re-read</span> every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML), then <span class="w">render</span> the page <span class="w">headlessly</span> <span class="w">(`&lt;skill-dir&gt;`</span> <span class="w">is</span> <span class="w">this</span> <span class="w">skill&#x27;s</span> <span class="w">directory):</span></span></span><span class="l add"><span class="o"></span><span class="n">37</span><span class="sg">+</span><span class="t"> </span></span><span class="l add"><span class="o"></span><span class="n">38</span><span class="sg">+</span><span class="t">  ```bash</span></span><span class="l add mark" data-m="2"><span class="o"></span><span class="n">39</span><span class="sg">+</span><span class="t">  uv run --no-project --with playwright python &lt;skill-dir&gt;/scripts/check_render.py &lt;report.html&gt;</span></span><span class="l add"><span class="o"></span><span class="n">40</span><span class="sg">+</span><span class="t">  ```</span></span><span class="l add"><span class="o"></span><span class="n">41</span><span class="sg">+</span><span class="t"> </span></span><span class="l add"><span class="o"></span><span class="n">42</span><span class="sg">+</span><span class="t">  It judges what a reader sees: it waits for Mermaid to finish, opens tabs, toggles, and `&lt;details&gt;`, and ends `PASS`, `FAIL`, or `BLOCKED`.</span></span><span class="l add"><span class="o"></span><span class="n">43</span><span class="sg">+</span><span class="t"> </span></span><span class="l add mark" data-m="3"><span class="o"></span><span class="n">44</span><span class="sg">+</span><span class="t">  - `FAIL`: fix every line under `problems` (each failing diagram comes with its source line and Mermaid&#x27;s error) and rerun.</span></span><span class="l add mark" data-m="4"><span class="o"></span><span class="n">45</span><span class="sg">+</span><span class="t">  - `BLOCKED` means unverified, not passing: the environment kept the check from running. Apply the fix it prints, or hand the report over saying its render is unchecked.</span></span><span class="l add mark" data-m="5"><span class="o"></span><span class="n">46</span><span class="sg">+</span><span class="t">  - `PASS`: read every screenshot it lists. `diagram-&lt;n&gt;.png` shows each diagram for legibility; `page-&lt;k&gt;.png` slices the page by viewport height, and is the only check on your hand-built CSS/SVG visuals (overlapping labels, arrows that miss their target, text spilling out of boxes). Fix what you see and rerun. Resolve each `warnings` entry, and name each `unverified` diagram when you hand over.</span></span><span class="l add"><span class="o"></span><span class="n">47</span><span class="sg">+</span><span class="t"> </span></span><span class="l add"><span class="o"></span><span class="n">48</span><span class="sg">+</span><span class="t">  Verify is done at `PASS`, with every screenshot read and every warning resolved.</span></span><span class="l ctx"><span class="o">37</span><span class="n">49</span><span class="sg"> </span><span class="t"> </span></span></code></pre>
+        <ol class="markers">
+          <li><span class="k">1</span><span class="ln">-36</span> Before: re-read the Mermaid blocks and look at the page yourself.</li>
+          <li><span class="k">2</span><span class="ln">+39</span> After: run <code>check_render.py</code> on the report.</li>
+          <li><span class="k">3</span><span class="ln">+44</span> <code>FAIL</code>: fix each problem and rerun.</li>
+          <li><span class="k">4</span><span class="ln">+45</span> <code>BLOCKED</code> counts as unverified, never as a pass.</li>
+          <li><span class="k">5</span><span class="ln">+46</span> <code>PASS</code> still needs every screenshot read.</li>
+        </ol>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 8.</span> The Verify step of <code>skills/visual-report/SKILL.md</code>, before and after commit 088a29f. <span class="how">Red lines were removed, green lines added. The darker tint marks the changed words. The left column numbers the old file, the right column the new.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>One line of judgement became a command with three outcomes.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 8 ================= -->
+  <section class="sec" id="s8">
+    <h2 class="sec-head"><span class="n">08</span><span>Where the lines live</span><span class="count">Figure 9</span></h2>
+    <div class="prose">
+      <p>The five largest folders hold 60.5% of the 17,001 tracked lines (Figure 9).</p>
+    </div>
+
+    <div class="fig" id="fig-9">
+      <div class="visual">
+        <div class="figframe bars">
+          <div class="bar-row"><span class="bar-label">fabric-lineage-dag</span><div class="bar-track"><div class="bar-fill" style="width:70.0%"></div><span class="bar-num"><b>21.4%</b> <span class="bar-sub">3,635 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">review-pbi-diff</span><div class="bar-track"><div class="bar-fill" style="width:37.0%"></div><span class="bar-num"><b>11.3%</b> <span class="bar-sub">1,927 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">metabase</span><div class="bar-track"><div class="bar-fill" style="width:34.7%"></div><span class="bar-num"><b>10.6%</b> <span class="bar-sub">1,803 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">snowman</span><div class="bar-track"><div class="bar-fill" style="width:30.7%"></div><span class="bar-num"><b>9.4%</b> <span class="bar-sub">1,601 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">visual-report</span><div class="bar-track"><div class="bar-fill" style="width:25.5%"></div><span class="bar-num"><b>7.8%</b> <span class="bar-sub">1,318 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">dbt-runner</span><div class="bar-track"><div class="bar-fill" style="width:20.6%"></div><span class="bar-num"><b>6.3%</b> <span class="bar-sub">1,064 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">gh-weekly-report</span><div class="bar-track"><div class="bar-fill" style="width:20.3%"></div><span class="bar-num"><b>6.2%</b> <span class="bar-sub">1,060 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">statusline</span><div class="bar-track"><div class="bar-fill" style="width:20.0%"></div><span class="bar-num"><b>6.1%</b> <span class="bar-sub">1,038 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">candidate-to-spec</span><div class="bar-track"><div class="bar-fill" style="width:14.1%"></div><span class="bar-num"><b>4.3%</b> <span class="bar-sub">728 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">implement-ticket</span><div class="bar-track"><div class="bar-fill" style="width:10.5%"></div><span class="bar-num"><b>3.2%</b> <span class="bar-sub">538 lines</span></span></div></div>
+<div class="bar-row other"><span class="bar-label">8 other skills</span><div class="bar-track"><div class="bar-fill" style="width:43.8%"></div><span class="bar-num"><b>13.4%</b> <span class="bar-sub">2,289 lines</span></span></div></div>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 9.</span> The ten largest skill folders by tracked lines. <span class="how">Bars are scaled to the largest folder. Each label gives the share, then the line count. The other eight skills share 13.4%.</span></p>
+        <p class="sowhat"><span class="lbl">So what</span>Size follows script code. orchestrator-mode has the most commits (25) but only 306 lines.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>fabric-lineage-dag's 17 scripts make it 21% of all tracked lines. Its SKILL.md is 89 lines.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 9 ================= -->
+  <section class="sec" id="s9">
+    <h2 class="sec-head"><span class="n">09</span><span>Limits</span><span class="count">What this report cannot show</span></h2>
+    <ol class="limits">
+      <li>Commit counts include merges and count a multi-skill commit once per skill.</li>
+      <li>Graph edges come from grep and imports, not from run-time traces.</li>
+      <li>Tracked lines count every file with <code>wc -l</code>, so binary assets count as almost zero.</li>
+      <li>Figure 4 was read from the source, not traced from a live run.</li>
+    </ol>
+  </section>
+</main>
+
+<nav class="proto-switch" aria-label="Prototype navigation">
+  <a href="prototypes.html" target="_top">&larr; All prototypes</a>
+</nav>
+
+<!-- Vega stack: classic scripts, order matters (vega -> vega-lite -> vega-embed) -->
+<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@6.5.0/build/vega-lite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@7.3.0/build/vega-embed.min.js"></script>
+<script>
+  const VL_CONFIG = {
+    font: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+    mark: { color: "#0b6e4f" },                       // accent for single-colour marks
+    range: { category: ["#0b6e4f", "#d1495b", "#edae49", "#30638e", "#8a8f98"] }, // optional: series colours
+    axis: { labelColor: "#59636e", titleColor: "#1f2328", gridColor: "#eaeef2" },
+    view: { stroke: null }
+  };
+  const VL_OPTS = { renderer: "svg", actions: false };
+  // vegaEmbed("#chart-id", { $schema: "https://vega.github.io/schema/vega-lite/v6.json", data: { values: [...] }, mark: "bar", encoding: {...}, config: VL_CONFIG }, VL_OPTS);
+
+  // This report's theme on top of the proven block: one accent, no series colours in use.
+  const VL_THEME = Object.assign({}, VL_CONFIG, {"font": "-apple-system, \"Segoe UI\", Helvetica, Arial, sans-serif", "mark": {"color": "#102542"}, "axis": {"labelColor": "#5f5348", "titleColor": "#102542", "gridColor": "#e1e7e7", "domainColor": "#7b8786", "tickColor": "#7b8786", "labelFontSize": 11.5, "titleFontSize": 11.5}, "range": {"category": ["#102542", "#d95646", "#4f7f7c", "#8a7766"]}, "view": {"stroke": null}});
+  const barSpec = {"$schema": "https://vega.github.io/schema/vega-lite/v6.json", "width": "container", "height": 400, "data": {"values": [{"skill": "implement-ticket", "lines": 150}, {"skill": "metabase", "lines": 150}, {"skill": "prefect", "lines": 150}, {"skill": "review-pbi-diff", "lines": 150}, {"skill": "student-mode", "lines": 150}, {"skill": "ship", "lines": 148}, {"skill": "orchestrator-mode", "lines": 147}, {"skill": "snowman", "lines": 143}, {"skill": "implement-feature", "lines": 142}, {"skill": "dbt-runner", "lines": 134}, {"skill": "dlt-bootstrap", "lines": 133}, {"skill": "candidate-to-spec", "lines": 129}, {"skill": "qualify-delegation", "lines": 123}, {"skill": "gh-weekly-report", "lines": 119}, {"skill": "smart-git-commit", "lines": 114}, {"skill": "fabric-lineage-dag", "lines": 89}, {"skill": "statusline", "lines": 64}, {"skill": "visual-report", "lines": 56}]}, "layer": [{"mark": {"type": "bar", "height": 14}, "encoding": {"y": {"field": "skill", "type": "nominal", "sort": null, "title": null, "axis": {"labelFont": "ui-monospace, Menlo, monospace", "labelFontSize": 11.5}}, "x": {"field": "lines", "type": "quantitative", "title": "SKILL.md length (lines)", "scale": {"domain": [0, 182]}, "axis": {"values": [0, 50, 100, 150], "tickCount": 4}}, "color": {"condition": {"test": "datum.lines == 150", "value": "#d95646"}, "value": "#102542"}}}, {"mark": {"type": "text", "align": "right", "fontSize": 11, "fontWeight": "bold", "font": "ui-monospace, Menlo, monospace"}, "encoding": {"y": {"field": "skill", "type": "nominal", "sort": null}, "x": {"datum": 180}, "text": {"field": "lines"}, "color": {"condition": {"test": "datum.lines == 150", "value": "#c2493a"}, "value": "#5f5348"}}}, {"data": {"values": [{"budget": 150}]}, "mark": {"type": "rule", "strokeDash": [4, 3], "color": "#102542", "strokeWidth": 1.2}, "encoding": {"x": {"field": "budget", "type": "quantitative"}}}, {"data": {"values": [{"budget": 150, "label": "LINE_BUDGET = 150"}]}, "mark": {"type": "text", "align": "right", "baseline": "bottom", "dx": -4, "dy": -2, "fontSize": 10, "fontWeight": "bold", "color": "#102542"}, "encoding": {"x": {"field": "budget", "type": "quantitative"}, "y": {"value": 0}, "text": {"field": "label"}}}]};
+  barSpec.config = VL_THEME;
+  const lineSpec = {"$schema": "https://vega.github.io/schema/vega-lite/v6.json", "width": "container", "height": 280, "data": {"values": [{"month": "2026-05", "commits": 4}, {"month": "2026-06", "commits": 37}, {"month": "2026-07", "commits": 14}, {"month": "2026-08", "commits": 10}, {"month": "2026-09", "commits": 23}, {"month": "2026-10", "commits": 36}]}, "layer": [{"mark": {"type": "line", "point": {"size": 70, "filled": true}, "strokeWidth": 2.5, "color": "#102542"}, "encoding": {"x": {"field": "month", "type": "ordinal", "title": "Author month (2026)", "axis": {"labelAngle": 0, "labelExpr": "slice(datum.value, 5)"}}, "y": {"field": "commits", "type": "quantitative", "title": "Commits on main", "scale": {"domain": [0, 40]}}}}, {"mark": {"type": "text", "dy": -13, "fontSize": 12, "fontWeight": "bold", "color": "#102542"}, "encoding": {"x": {"field": "month", "type": "ordinal"}, "y": {"field": "commits", "type": "quantitative"}, "text": {"field": "commits"}}}]};
+  lineSpec.config = VL_THEME;
+  window.__vegaDone = Promise.all([
+    vegaEmbed("#vl-bar", barSpec, VL_OPTS),
+    vegaEmbed("#vl-line", lineSpec, VL_OPTS)
+  ]);
+</script>
+
+<script>
+  // ---- click-to-sort on every column of every table.sortable ----
+  (function () {
+    function cellKey(td, type) {
+      if (td.dataset.v !== undefined) {
+        return type === "num" ? parseFloat(td.dataset.v) : td.dataset.v;
+      }
+      const t = td.textContent.trim();
+      if (type === "num") { const v = parseFloat(t.replace(/,/g, "")); return isNaN(v) ? -Infinity : v; }
+      return t.toLowerCase();
+    }
+    function sortTable(table, idx, th) {
+      const ths = table.querySelectorAll("thead th");
+      const dir = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+      ths.forEach(h => h.removeAttribute("aria-sort"));
+      th.setAttribute("aria-sort", dir);
+      const type = th.dataset.type || "txt";
+      const rows = Array.from(table.querySelectorAll("tbody tr"));
+      const sign = dir === "ascending" ? 1 : -1;
+      rows.sort((a, b) => {
+        const ka = cellKey(a.cells[idx], type), kb = cellKey(b.cells[idx], type);
+        return (ka < kb ? -1 : ka > kb ? 1 : 0) * sign;
+      });
+      const bodies = table.querySelectorAll("tbody");
+      const show = parseInt(table.dataset.show || "0", 10);
+      if (show && bodies.length === 2) {
+        rows.forEach((r, k) => (k < show ? bodies[0] : bodies[1]).appendChild(r));
+      } else {
+        rows.forEach(r => bodies[0].appendChild(r));
+      }
+    }
+    document.querySelectorAll("table.sortable").forEach(table => {
+      table.querySelectorAll("thead th").forEach((th, idx) => {
+        th.setAttribute("tabindex", "0");
+        th.setAttribute("title", "Sort by " + th.textContent.trim());
+        th.addEventListener("click", () => sortTable(table, idx, th));
+        th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortTable(table, idx, th); } });
+      });
+    });
+    // ---- details toggle shows the hidden tbody ----
+    document.querySelectorAll("details.more[data-target]").forEach(d => {
+      const target = document.getElementById(d.dataset.target);
+      d.addEventListener("toggle", () => { target.hidden = !d.open; });
+    });
+  })();
+
+  // ---- current section in the sidebar ----
+  (function () {
+    const links = Array.from(document.querySelectorAll("#toc a"));
+    const byId = {};
+    links.forEach(a => { byId[a.getAttribute("href").slice(1)] = a; });
+    const sections = Array.from(document.querySelectorAll("section.sec"));
+    const visible = new Map();
+    function update() {
+      let best = null;
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom) best = sections[sections.length - 1];
+      for (const s of sections) {
+        if (best) break;
+        const r = s.getBoundingClientRect();
+        if (r.top <= 120 && r.bottom > 120) { best = s; break; }
+      }
+      if (!best) {
+        for (const s of sections) { if (visible.get(s.id)) { best = s; break; } }
+      }
+      links.forEach(a => a.classList.remove("current"));
+      if (best && byId[best.id]) byId[best.id].classList.add("current");
+    }
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver(entries => {
+        entries.forEach(e => visible.set(e.target.id, e.isIntersecting));
+        update();
+      }, { rootMargin: "-10% 0px -60% 0px", threshold: [0, 0.1, 0.5, 1] });
+      sections.forEach(s => io.observe(s));
+    }
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+  })();
+
+</script>
+
+<!-- Mermaid stack: ESM, pinned. Must be type="module". -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs";
+  import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.2.3/dist/mermaid-layout-elk.esm.min.mjs";
+  mermaid.registerLayoutLoaders(elkLayouts);
+  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", fontFamily: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif', theme: "base", themeVariables: {"fontFamily": "-apple-system, \"Segoe UI\", Helvetica, Arial, sans-serif", "fontSize": "13px", "primaryColor": "#ffffff", "primaryBorderColor": "#102542", "primaryTextColor": "#102542", "secondaryColor": "#edf1f1", "tertiaryColor": "#ffffff", "lineColor": "#7b8786", "textColor": "#102542", "noteBkgColor": "#fcf2dd", "noteBorderColor": "#b7791f", "noteTextColor": "#102542", "actorBkg": "#edf1f1", "actorBorder": "#102542", "actorTextColor": "#102542", "actorLineColor": "#7b8786", "signalColor": "#102542", "signalTextColor": "#102542", "labelBoxBkgColor": "#edf1f1", "labelBoxBorderColor": "#7b8786", "labelTextColor": "#102542", "loopTextColor": "#102542", "activationBorderColor": "#d95646", "activationBkgColor": "#fff1ed", "sequenceNumberColor": "#ffffff"}, sequence: { useMaxWidth: true, actorFontWeight: 600, messageFontSize: 13, actorFontSize: 14, width: 130, height: 30, boxMargin: 5, messageMargin: 14, mirrorActors: false, wrap: false, actorMargin: 40 } });
+  await mermaid.run();
+</script>
+</body>
+</html>

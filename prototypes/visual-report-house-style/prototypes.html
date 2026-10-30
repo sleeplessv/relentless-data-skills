@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visual report prototypes</title>
+<style>
+  :root {
+    --ink: #102542;
+    --muted: #3d4f66;
+    --line: #d5dbe3;
+    --hover: #f2f5f9;
+    --sel: #e6ecf4;
+    --chosen: #1b6b46;
+    --rejected: #8a2e2e;
+    --current: #102542;
+    --lost: #6b5a1e;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: #fff; color: var(--ink); font: 15px/1.45 var(--font); display: grid; grid-template-columns: 340px 1fr; }
+  aside { border-right: 1px solid var(--line); overflow-y: auto; height: 100vh; padding: 20px 18px 32px; }
+  h1 { font-size: 20px; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .intro { color: var(--muted); margin: 0 0 18px; font-size: 14px; }
+  .intro a { color: var(--ink); }
+  h2 { font-size: 13px; text-transform: none; margin: 22px 0 6px; color: var(--ink); }
+  h2 small { display: block; font-weight: 400; color: var(--muted); font-size: 13px; margin-top: 2px; }
+  ul { list-style: none; margin: 0; padding: 0; }
+  li button { all: unset; box-sizing: border-box; display: block; width: 100%; padding: 9px 10px; border-radius: 6px; cursor: pointer; }
+  li button:hover { background: var(--hover); }
+  li button:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+  li button[aria-current="true"] { background: var(--sel); }
+  .name { font-weight: 650; display: flex; align-items: center; gap: 8px; justify-content: space-between; }
+  .desc { display: block; color: var(--muted); font-size: 13.5px; margin-top: 2px; }
+  .status { font-size: 11.5px; font-weight: 650; padding: 1px 7px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+  .s-chosen { color: var(--chosen); }
+  .s-rejected { color: var(--rejected); }
+  .s-current { color: #fff; background: var(--current); border-color: var(--current); }
+  .s-lost { color: var(--lost); }
+  .s-superseded { color: var(--muted); }
+  .feedback { margin: 6px 10px 0; padding: 0; font-size: 13px; color: var(--muted); }
+  .feedback li { list-style: disc; margin-left: 16px; }
+  main { display: flex; flex-direction: column; height: 100vh; min-width: 0; }
+  .bar { display: flex; align-items: baseline; gap: 14px; padding: 12px 18px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .bar strong { font-size: 16px; }
+  .bar .file { color: var(--muted); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .bar a { margin-left: auto; color: var(--ink); font-weight: 600; }
+  #toggle { font: 600 14px var(--font); color: var(--ink); background: #fff; border: 1px solid var(--ink); border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  #toggle:hover { background: var(--hover); }
+  #toggle:focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+  body.collapsed { grid-template-columns: 1fr; }
+  body.collapsed aside { display: none; }
+  iframe { flex: 1; width: 100%; border: 0; background: #fff; }
+  @media (max-width: 900px) {
+    body { display: block; }
+    aside { height: auto; border-right: 0; border-bottom: 1px solid var(--line); }
+    main { height: 90vh; }
+  }
+</style>
+</head>
+<body>
+<aside id="list-panel">
+  <h1>Visual report prototypes</h1>
+  <p class="intro">Every prototype from the house-style redesign, in decision order. Full record: <a href="handoff.md" target="_blank">handoff.md</a>.</p>
+  <nav id="list" aria-label="Prototypes"></nav>
+</aside>
+<main>
+  <div class="bar">
+    <button id="toggle" type="button" aria-controls="list-panel"></button>
+    <strong id="cur-name"></strong>
+    <span class="file" id="cur-file"></span>
+    <a id="cur-open" href="#" target="_blank" rel="noopener">Open in new tab &#8599;</a>
+  </div>
+  <iframe id="frame" title="Selected prototype"></iframe>
+</main>
+<script>
+  const STEPS = [
+    { title: "Step 1. Structure", note: "Three layouts of one report. B was chosen.", items: [
+      { id: "a", name: "A. Editorial", file: "variant-a.html", status: "rejected", desc: "Long-form editorial layout; cleanest, holds at 768px." },
+      { id: "b", name: "B. Dossier", file: "variant-b.html", status: "chosen", desc: "Sticky sidebar, dense reading aids, working sticky headers." },
+      { id: "c", name: "C. Brief", file: "variant-c.html", status: "rejected", desc: "Shortest layout; Limits as a table. Regenerated from its surviving generator." }
+    ]},
+    { title: "Step 2. B revisions", note: "", feedback: ["Navigation of B better", "Too cold", "Decorative bar", "Low-contrast captions", "Code needs colour"], items: [
+      { id: "b1", name: "B1. Warm paper", file: "variant-b1.html", status: "superseded", desc: "Dossier on warm paper with a restrained teal accent." },
+      { id: "b2", name: "B2. Cool paper", file: "variant-b2.html", status: "superseded", desc: "Dossier on cool paper with a dark sidebar." }
+    ]},
+    { title: "Step 3. Palettes", note: "", items: [
+      { id: "pal1", name: "Round 1 palettes", file: "palette-test-v1.html", status: "rejected", desc: "Oxblood, brass, forest & copper, navy & gold." },
+      { id: "pal2", name: "Round 2 palettes", file: "palette-test.html", status: "chosen", desc: "Your four: Navy & coral (chosen), Green–blue ramp (answer box taken), Sky & amber, Relentless Data." }
+    ]},
+    { title: "Step 4. Current", note: "", items: [
+      { id: "navy-coral", name: "Navy & coral", file: "variant-navy-coral.html", status: "superseded", desc: "Dossier layout in Navy & coral, answer box from Green–blue ramp." },
+      { id: "navy-coral-v2", name: "Navy & coral v2 — GitHub diff colours, new DAG nodes", file: "variant-navy-coral-v2.html", status: "current", desc: "Diffs in GitHub's green and red (Figure 8). Figure 3 nodes redrawn as hand-built SVG with type badges." }
+    ]}
+  ];
+  const DEFAULT = "navy-coral-v2";
+  const list = document.getElementById("list");
+  const all = {};
+  for (const step of STEPS) {
+    const h = document.createElement("h2");
+    h.textContent = step.title;
+    if (step.note) { const s = document.createElement("small"); s.textContent = step.note; h.appendChild(s); }
+    list.appendChild(h);
+    if (step.feedback) {
+      const s = document.createElement("small"); s.textContent = "Feedback on these:"; h.appendChild(s);
+      const fb = document.createElement("ul"); fb.className = "feedback";
+      step.feedback.forEach(t => { const li = document.createElement("li"); li.textContent = t; fb.appendChild(li); });
+      list.appendChild(fb);
+    }
+    const ul = document.createElement("ul");
+    for (const it of step.items) {
+      all[it.id] = it;
+      const li = document.createElement("li");
+      const b = document.createElement("button");
+      b.dataset.id = it.id;
+      b.innerHTML = `<span class="name"><span></span><span class="status s-${it.status}">${it.status}</span></span><span class="desc"></span>`;
+      b.querySelector(".name span").textContent = it.name;
+      b.querySelector(".desc").textContent = it.desc;
+      b.addEventListener("click", () => { location.hash = it.id; });
+      li.appendChild(b); ul.appendChild(li);
+    }
+    list.appendChild(ul);
+  }
+  const frame = document.getElementById("frame");
+  function show() {
+    const id = all[location.hash.slice(1)] ? location.hash.slice(1) : DEFAULT;
+    const it = all[id];
+    document.querySelectorAll("#list button").forEach(b => b.setAttribute("aria-current", b.dataset.id === id ? "true" : "false"));
+    document.getElementById("cur-name").textContent = it.name;
+    document.getElementById("cur-file").textContent = it.file;
+    document.getElementById("cur-open").href = it.file;
+    if (frame.getAttribute("src") !== it.file) frame.setAttribute("src", it.file);
+  }
+  // The list starts collapsed on wide screens so the preview is wider than the
+  // Dossier sidebar breakpoint (1100px) and the sticky sidebar shows.
+  const toggle = document.getElementById("toggle");
+  function setCollapsed(c) {
+    document.body.classList.toggle("collapsed", c);
+    toggle.textContent = c ? "\u2630 Show all prototypes" : "\u00ab Hide list";
+    toggle.setAttribute("aria-expanded", String(!c));
+  }
+  toggle.addEventListener("click", () => setCollapsed(!document.body.classList.contains("collapsed")));
+  setCollapsed(window.innerWidth >= 1200);
+  window.addEventListener("hashchange", show);
+  show();
+</script>
+</body>
+</html>

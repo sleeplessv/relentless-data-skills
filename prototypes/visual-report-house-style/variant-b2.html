@@ -1,0 +1,933 @@
+<!-- PROTOTYPE, throwaway. Five layouts of one report: variant-a.html (Editorial), variant-b.html (Dossier), variant-b1.html (Dossier, warm), variant-b2.html (Dossier, bold), variant-c.html (Brief). All prototypes are listed in prototypes.html; the floating pill links there. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the relentless-data-skills catalogue is built and checked</title>
+<style>
+  /* ===== THEME: b2, bold. A confident, coloured document. ===== */
+  :root {
+    --paper: #eaeef3;          /* page, cool light */
+    --panel: #ffffff;          /* figures, tables, code */
+    --inset: #e1e7ee;          /* code background, inline code pills, bars */
+    --inset-2: #d2dae4;        /* line-number gutter, table zebra */
+    --side-bg: #1b2430;        /* sidebar, dark ink surface */
+    --side-ink: #e8edf3;
+    --side-muted: #9fabba;
+    --ink: #15202b;
+    --slate: #5a6675;
+    --line: #cbd3dd;
+    --line-soft: #dfe5ec;
+    --accent: #0a6b6f;
+    --accent-ink: #ffffff;
+    --accent-soft: #c3e3e2;
+    --accent-tint: #dcefee;
+    --red: #c0262b;
+    --amber: #b7791f;
+    --amber-soft: #fbf3e4;
+    --shadow: 0 2px 6px rgba(15, 30, 50, 0.10), 0 10px 28px rgba(15, 30, 50, 0.10);
+    --sec-bg: var(--accent-tint);
+    --sec-border: var(--accent);
+    --answer-bg: var(--accent);
+    --answer-ink: #ffffff;
+    --answer-edge: 1px solid var(--accent);
+    --stat-size: var(--s5);
+    --th-bg: var(--accent-soft);
+    --th-ink: var(--ink);
+    --answer-label: rgba(255,255,255,0.85);
+    --answer-code-bg: rgba(255,255,255,0.18);
+    --side-border: 0;
+    --side-hover: rgba(255,255,255,0.08);
+    --side-current-bg: var(--accent);
+    --side-current-ink: #ffffff;
+    --side-badge-bg: rgba(255,255,255,0.14);
+    --side-badge-ink: #ffffff;
+    --side-current-badge-bg: #ffffff;
+    --side-current-badge-ink: var(--accent);
+    --mm-muted: #a3aebc;
+  }
+  /* ===== SHARED ANATOMY: identical in b1 and b2 ===== */
+  :root {
+    --display: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --s-2: 0.64rem; --s-1: 0.8rem; --s0: 1rem; --s1: 1.25rem; --s2: 1.563rem; --s3: 1.953rem; --s4: 2.441rem; --s5: 3.052rem;
+    --sidebar: 240px;
+    --sticky: 2.75rem;
+    --pill: 5rem;              /* switcher pill height plus its margin, kept clear at the page bottom */
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 3.5rem; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: var(--s0); line-height: 1.5; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 0.86em; background: var(--inset); padding: 0.06em 0.38em; border-radius: 4px; color: var(--ink); }
+  b, strong { font-weight: 600; }
+  h1, h2, h3 { font-family: var(--display); letter-spacing: -0.02em; margin: 0; }
+  .num, .tnum { font-variant-numeric: tabular-nums; }
+  .eyebrow { font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+  .badge { display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 0.7rem; font-weight: 700; font-variant-numeric: tabular-nums; flex: 0 0 auto; }
+
+  /* ---------- sidebar ---------- */
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar); padding: 1.75rem 1.25rem var(--pill); border-right: var(--side-border); background: var(--side-bg); color: var(--side-ink); overflow-y: auto; }
+  .side .brand { font-family: var(--display); font-size: var(--s0); font-weight: 700; line-height: 1.3; letter-spacing: -0.01em; margin: 0 0 0.6rem; padding-bottom: 0.6rem; position: relative; }
+  .side .brand::after { content: ""; position: absolute; left: 0; bottom: 0; width: 2.5rem; height: 3px; background: var(--accent); border-radius: 2px; }
+  .side .meta { font-size: var(--s-2); color: var(--side-muted); line-height: 1.4; margin: 0 0 1.25rem; }
+  .side .meta code { font-size: 0.95em; background: rgba(127,127,127,0.14); color: inherit; }
+  .toc { list-style: none; margin: 0; padding: 0; }
+  .toc li + li { margin-top: 2px; }
+  .toc a { display: grid; grid-template-columns: 1.5rem 1fr; gap: 0.55rem; align-items: start; padding: 0.35rem 0.5rem; border-radius: 6px; color: var(--side-ink); font-size: var(--s-1); line-height: 1.3; }
+  .toc a .badge { margin-top: -0.05rem; background: var(--side-badge-bg); color: var(--side-badge-ink); }
+  .toc a:hover { text-decoration: none; background: var(--side-hover); }
+  .toc a.current { background: var(--side-current-bg); font-weight: 600; color: var(--side-current-ink); }
+  .toc a.current .badge { background: var(--side-current-badge-bg); color: var(--side-current-badge-ink); }
+  .side .visuals { margin-top: 1.4rem; font-size: var(--s-2); color: var(--side-muted); }
+  .side .visuals dt { font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; color: var(--side-ink); margin: 0.7rem 0 0.25rem; }
+  .side .visuals dd { margin: 0; }
+  .side .visuals dd a { color: var(--side-muted); display: block; padding: 0.07rem 0; }
+  .side .visuals dd a:hover { color: var(--side-ink); }
+  .toc-inline { display: none; }
+
+  /* ---------- content ---------- */
+  .content { margin-left: var(--sidebar); padding: 2.5rem 3rem var(--pill); max-width: calc(var(--sidebar) + 1140px); }
+  .masthead { margin-bottom: 1.75rem; }
+  .masthead .kicker { color: var(--accent); margin: 0 0 0.6rem; }
+  .masthead h1 { font-size: var(--s4); line-height: 1.08; font-weight: 700; max-width: 22ch; }
+  .masthead .byline { font-size: var(--s-1); color: var(--slate); margin: 0.75rem 0 0; }
+
+  .answer { background: var(--answer-bg); color: var(--answer-ink); border: 1px solid var(--line); border-left: var(--answer-edge); border-radius: var(--radius); padding: 1.25rem 1.5rem 1.35rem; margin: 0 0 1rem; box-shadow: var(--shadow); }
+  .answer .label { color: var(--answer-label); margin: 0 0 0.6rem; }
+  .answer code { background: var(--answer-code-bg); color: var(--answer-ink); }
+  .answer .claim { font-family: var(--display); font-size: 1.5rem; line-height: 1.28; letter-spacing: -0.015em; font-weight: 600; margin: 0; max-width: 36em; }
+  .answer .claim code { font-size: 0.78em; font-weight: 500; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); margin: 0 0 3rem; box-shadow: var(--shadow); overflow: hidden; }
+  .stat { padding: 1rem 1.4rem 1.1rem; }
+  .stat + .stat { border-left: 1px solid var(--line-soft); }
+  .stat .v { font-family: var(--display); font-size: var(--stat-size); color: var(--accent); font-weight: 700; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 0.45em; font-weight: 500; color: var(--slate); letter-spacing: 0; }
+  .stat .l { font-size: var(--s-2); color: var(--slate); margin-top: 0.5rem; line-height: 1.35; }
+
+  section.sec { margin: 0 0 3.5rem; }
+  h2.sec-head { position: sticky; top: 0; z-index: 5; background: var(--sec-bg); border-bottom: 2px solid var(--sec-border); border-radius: 6px 6px 0 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.01em; padding: 0 0.75rem; margin: 0 0 1.25rem; display: flex; gap: 0.7rem; align-items: center; height: var(--sticky); }
+  h2.sec-head .badge { width: 1.7rem; height: 1.7rem; font-size: 0.78rem; }
+  h2.sec-head .count { margin-left: auto; font-weight: 600; color: var(--slate); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.1em; }
+  .prose { max-width: 72ch; }
+  .prose p { margin: 0 0 0.9rem; }
+  .prose ul, .prose ol { margin: 0 0 0.9rem; padding-left: 1.25rem; }
+  .prose li { margin-bottom: 0.25rem; }
+
+  /* figure rows */
+  .fig { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 1rem 2rem; margin: 1.5rem 0 2rem; align-items: start; }
+  .fig.wide { grid-template-columns: minmax(0, 1fr); }
+  .fig .visual { min-width: 0; }
+  .fig .margin { font-size: var(--s-1); line-height: 1.45; }
+  .fig.wide .margin { max-width: 72ch; }
+  .caption { margin: 0; color: var(--ink); }
+  .caption .figno { font-weight: 700; letter-spacing: -0.01em; color: var(--accent); }
+  .caption .how { color: var(--slate); }
+  .sowhat { margin: 0.9rem 0 0; padding: 0.7rem 0.9rem 0.8rem; background: var(--accent-tint); border-left: 4px solid var(--accent); border-radius: 0 6px 6px 0; font-size: var(--s0); line-height: 1.4; }
+  .sowhat::before { content: "So what"; display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--accent); font-weight: 700; margin-bottom: 0.25rem; }
+  .figframe { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+  .figframe.table { padding: 0.25rem 0.85rem 0.6rem; }
+  .figframe.scroll { overflow-x: auto; }
+  .chart { width: 100%; min-height: 200px; }
+  .chart.vega-embed { display: block; }
+  .chart.vega-embed svg { display: block; }
+
+  /* takeaways */
+  .takeaways { margin: 1.25rem 0 0; padding: 0.85rem 1.1rem 0.9rem; border: 1px solid var(--line); border-top: 3px solid var(--ink); border-radius: 0 0 var(--radius) var(--radius); background: var(--panel); list-style: none; max-width: 72ch; }
+  .takeaways::before { content: "Takeaways"; display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; margin-bottom: 0.45rem; }
+  .takeaways li { margin: 0 0 0.45rem; padding-left: 1.1rem; position: relative; }
+  .takeaways li::before { content: ""; position: absolute; left: 0; top: 0.55em; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--accent); }
+  .takeaways li:last-child { margin-bottom: 0; }
+
+  /* tables */
+  table.data { border-collapse: collapse; width: 100%; font-size: var(--s-1); line-height: 1.3; }
+  table.data th, table.data td { padding: 0.36rem 0.55rem; border-bottom: 1px solid var(--line-soft); vertical-align: top; }
+  table.data th { position: sticky; top: var(--sticky); z-index: 3; background: var(--th-bg); color: var(--th-ink); border-bottom: 2px solid var(--accent); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; line-height: 1.25; vertical-align: bottom; }
+  table.data th:first-child { border-radius: 6px 0 0 0; }
+  table.data th:last-child { border-radius: 0 6px 0 0; }
+  table.data th.txt, table.data td.txt, table.data td.id { text-align: left; }
+  table.data th.num, table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data td.id { font-family: var(--mono); font-size: 0.86em; white-space: nowrap; }
+  table.data td.txt { overflow-wrap: break-word; }
+  table.data td code { font-size: 0.84em; }
+  table.data td.id code { background: none; padding: 0; }
+  #table-2 { table-layout: fixed; }
+  #table-2 td.id { white-space: normal; }
+  #table-2 col.c-id { width: 29%; } #table-2 col.c-label { width: 41%; } #table-2 col.c-group { width: 18%; } #table-2 col.c-deg { width: 12%; }
+  #table-2 td.id { font-size: 0.8em; }
+  /* Table 1, SKILL.md lines: a bar behind the number, sized to the 150-line budget; the budget cells are filled in the accent */
+  table.data td.lines { padding: 0.2rem 0.55rem; }
+  table.data td.lines .cbar { position: relative; display: block; padding: 0.16rem 0.4rem; border-radius: 3px; z-index: 0; }
+  table.data td.lines .cbar::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--w); background: var(--inset-2); border-radius: 3px; z-index: -1; }
+  table.data td.lines.at .cbar { color: var(--accent-ink); font-weight: 700; }
+  table.data td.lines.at .cbar::before { background: var(--accent); }
+  table.data tfoot td { border-top: 2px solid var(--ink); border-bottom: 0; font-weight: 600; }
+  table.data tbody tr:nth-child(even) td { background: color-mix(in srgb, var(--inset) 45%, transparent); }
+  table.data tbody tr:hover td { background: var(--accent-tint); }
+  table.sortable th { cursor: pointer; user-select: none; padding-right: 1.3rem; position: sticky; }
+  table.sortable th::after { content: "\2195"; position: absolute; right: 0.3rem; bottom: 0.4rem; opacity: 0.5; font-size: 0.9em; }
+  table.sortable th[aria-sort="ascending"]::after { content: "\2191"; opacity: 1; }
+  table.sortable th[aria-sort="descending"]::after { content: "\2193"; opacity: 1; }
+  table.sortable th[aria-sort] { text-decoration: underline; text-underline-offset: 3px; }
+  details.more { margin: 0.5rem 0 0; font-size: var(--s-1); }
+  details.more summary { cursor: pointer; color: var(--accent); font-weight: 600; list-style: none; padding: 0.3rem 0; }
+  details.more summary::before { content: "+ "; }
+  details.more[open] summary::before { content: "\2013 "; }
+  details.more summary .when-open { display: none; }
+  details.more[open] summary .when-open { display: inline; }
+  details.more[open] summary .when-closed { display: none; }
+
+  /* matrix */
+  table.matrix th.mark, table.matrix td.mark { text-align: center; width: 4.6rem; }
+  table.matrix td.mark { font-size: 1.05rem; line-height: 1; padding-top: 0.45rem; }
+  table.matrix td.mark.pass { color: var(--accent); }
+  table.matrix td.mark.fail { color: var(--red); }
+  table.matrix td.mark.blocked { color: var(--amber); }
+  table.matrix td.mark .mark-note { display: block; font-size: 0.6rem; color: var(--slate); margin-top: 0.15rem; }
+  table.matrix td.tier { white-space: nowrap; color: var(--slate); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.05em; padding-top: 0.5rem; }
+  table.matrix tr[data-first="1"] td { border-top: 2px solid var(--line); }
+  table.matrix tr.tier-environment td.tier { color: var(--amber); }
+  table.matrix tr.tier-defect td.tier { color: var(--red); }
+
+  /* code excerpt */
+  pre.code { margin: 0; padding: 0.6rem 0; font-family: var(--mono); font-size: 0.8rem; line-height: 1.6; counter-reset: ln 353; overflow-x: auto; background: var(--inset); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: var(--radius); box-shadow: var(--shadow); }
+  pre.code code { background: none; padding: 0; font-size: inherit; display: block; }
+  pre.code .l { display: block; position: relative; padding: 0 3.2rem 0 4.2rem; white-space: pre; }
+  pre.code .l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; top: 0; bottom: 0; width: 3.3rem; padding-right: 0.6rem; text-align: right; color: var(--slate); background: var(--inset-2); font-variant-numeric: tabular-nums; font-size: 0.9em; }
+  pre.code .l.mark { background: var(--accent-soft); }
+  pre.code .l.mark::before { color: var(--accent); font-weight: 700; }
+  pre.code .l.mark::after { content: attr(data-m); position: absolute; right: 0.6rem; top: 0.14rem; width: 1.2rem; height: 1.2rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 0.68rem; font-weight: 700; text-align: center; line-height: 1.2rem; font-family: var(--body); }
+  ol.markers { list-style: none; margin: 1rem 0 0; padding: 0; font-size: var(--s-1); display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; }
+  ol.markers li { position: relative; padding-left: 1.8rem; line-height: 1.4; }
+  ol.markers li .k { position: absolute; left: 0; top: 0.05rem; width: 1.2rem; height: 1.2rem; border-radius: 50%; background: var(--accent); color: var(--accent-ink); font-size: 0.68rem; font-weight: 700; text-align: center; line-height: 1.2rem; }
+  ol.markers li .ln { font-family: var(--mono); color: var(--slate); font-size: 0.85em; }
+
+  /* timeline */
+  ol.timeline { list-style: none; margin: 0; padding: 0.25rem 0; font-size: var(--s-1); position: relative; }
+  ol.timeline::before { content: ""; position: absolute; left: calc(1.6rem + 6.4rem + 0.5rem - 1px + 0.4rem); top: 0.8rem; bottom: 0.8rem; width: 2px; background: var(--line); }
+  ol.timeline li { display: grid; grid-template-columns: 1.6rem 6.4rem 1rem 1fr; gap: 0 0.5rem; align-items: start; padding: 0.32rem 0.4rem; position: relative; border-radius: 6px; }
+  ol.timeline .tl-n { color: var(--slate); font-variant-numeric: tabular-nums; font-size: var(--s-2); padding-top: 0.15rem; }
+  ol.timeline .tl-date { font-variant-numeric: tabular-nums; color: var(--slate); }
+  ol.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid var(--panel); box-shadow: 0 0 0 1px var(--accent); margin: 0.38rem 0 0 -0.05rem; position: relative; z-index: 1; }
+  ol.timeline .tl-body { line-height: 1.4; }
+  ol.timeline .tl-body code { font-size: 0.86em; }
+  ol.timeline .tl-note { display: block; color: var(--slate); font-size: var(--s-2); }
+  ol.timeline li.key { background: var(--accent-tint); box-shadow: inset 4px 0 0 var(--accent); }
+  ol.timeline li.key .tl-dot { background: var(--accent); width: 14px; height: 14px; margin: 0.25rem 0 0 -0.18rem; box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-soft); }
+  ol.timeline li.key .tl-date, ol.timeline li.key .tl-n { color: var(--accent); font-weight: 700; }
+  ol.timeline li.key .tl-body { font-weight: 600; }
+  ol.timeline li.key .tl-note { color: var(--ink); font-weight: 400; }
+  ol.timeline li.key .tl-body code { background: var(--accent); color: var(--accent-ink); }
+
+  /* proportion bars */
+  .bars { padding: 0.75rem 1.1rem; }
+  .bar-row { display: grid; grid-template-columns: 11rem 1fr; gap: 0.75rem; align-items: center; padding: 0.22rem 0; font-size: var(--s-1); }
+  .bar-label { font-family: var(--mono); font-size: 0.78rem; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .bar-fill { height: 1rem; background: var(--accent); border-radius: 0 3px 3px 0; flex: 0 0 auto; }
+  .bar-row.other .bar-fill { background: var(--slate); opacity: 0.5; }
+  .bar-row.other .bar-label { color: var(--slate); font-family: var(--body); }
+  .bar-num { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: var(--s-1); }
+  .bar-num b { font-weight: 700; color: var(--accent); }
+  .bar-sub { color: var(--slate); font-size: var(--s-2); }
+
+  /* limits */
+  ol.limits { margin: 0; padding-left: 1.4rem; max-width: 72ch; }
+  ol.limits li { margin-bottom: 0.6rem; }
+
+  /* key legend for DAG */
+  .legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; font-size: var(--s-2); color: var(--slate); margin: 0.75rem 0 0; }
+  .legend span::before { content: ""; display: inline-block; width: 0.75rem; height: 0.75rem; margin-right: 0.3rem; vertical-align: -0.1rem; border: 1px solid; border-radius: 2px; }
+  .legend .k-hub::before { border: 3px solid var(--ink); background: transparent; }
+  .legend .k-c1::before { background: #c6e3e3; border-color: #0f6b6b; }
+  .legend .k-c2::before { background: #cfdeee; border-color: #30638e; }
+  .legend .k-c3::before { background: #dfd4ee; border-color: #7b5ea7; }
+  .legend .k-c4::before { background: #e2e3e0; border-color: #6b7280; }
+  .legend .k-c5::before { background: #d9e6c0; border-color: #5a7d2a; }
+  .legend .k-c6::before { background: #ecd1e0; border-color: #a0427a; }
+
+  pre.mermaid { margin: 0; font-family: var(--mono); font-size: 0.75rem; color: var(--slate); }
+  pre.mermaid svg { display: block; margin: 0 auto; }
+
+  /* switcher */
+  .proto-switch { position: fixed; left: 50%; bottom: 1rem; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 0.75rem; background: #000; color: #fff; border-radius: 999px; padding: 0.45rem 0.9rem; font: 600 13px/1 var(--body); box-shadow: 0 4px 16px rgba(0,0,0,0.35); border: 2px solid #fff; outline: 1px solid #000; }
+  .proto-switch a { color: #fff; font-size: 16px; padding: 0 0.3rem; text-decoration: none; }
+  .proto-switch a:hover { color: #ffd166; }
+  .proto-switch .lbl { letter-spacing: 0.04em; }
+
+  @media (max-width: 1100px) {
+    .side { display: none; }
+    .content { margin-left: 0; padding: 2rem 2rem var(--pill); }
+    .toc-inline { display: block; margin: 0 0 2rem; background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 0.75rem 1rem; }
+    .toc-inline ol { margin: 0; padding-left: 1.6rem; columns: 2; column-gap: 2rem; font-size: var(--s-1); }
+    .toc-inline li { break-inside: avoid; margin-bottom: 0.2rem; }
+    .toc-inline li a { color: var(--ink); }
+  }
+  @media (max-width: 900px) {
+    .content { padding: 1.5rem 1rem var(--pill); }
+    .fig { grid-template-columns: minmax(0, 1fr); }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat:nth-child(3) { border-left: 0; }
+    .stat:nth-child(n+3) { border-top: 1px solid var(--line-soft); }
+    ol.markers { grid-template-columns: 1fr; }
+    #table-1-fig .visual { overflow-x: auto; }
+    #table-1-fig table.data th { position: relative; top: auto; }
+  }
+  @media print {
+    .side, .proto-switch, details.more { display: none !important; }
+    body { background: #fff; }
+    .content { margin-left: 0; padding: 0; max-width: none; }
+    .toc-inline { display: block; }
+    .fig, .figframe, table.data, pre.code, ol.timeline { break-inside: avoid; page-break-inside: avoid; }
+    .figframe, .answer, .stats, pre.code { box-shadow: none; }
+    h2.sec-head { position: static; }
+    table.data th { position: static; }
+    #t2-rest { display: table-row-group !important; }
+    .figframe.scroll { overflow: visible; }
+  }
+</style>
+</head>
+<body>
+
+<aside class="side" aria-label="Contents">
+  <p class="brand">How the relentless-data-skills catalogue is built and checked</p>
+  <p class="meta">Measured at commit <code>a590a62</code> (main, 2026-10-29) on 2026-10-30. Explanation.</p>
+  <ol class="toc" id="toc">
+    <li><a href="#s1"><span class="badge">1</span><span>The catalogue at a glance</span></a></li>
+    <li><a href="#s2"><span class="badge">2</span><span>The 150-line budget</span></a></li>
+    <li><a href="#s3"><span class="badge">3</span><span>How the repo grew</span></a></li>
+    <li><a href="#s4"><span class="badge">4</span><span>What depends on what</span></a></li>
+    <li><a href="#s5"><span class="badge">5</span><span>How the render check runs</span></a></li>
+    <li><a href="#s6"><span class="badge">6</span><span>How the verdict is decided</span></a></li>
+    <li><a href="#s7"><span class="badge">7</span><span>How visual-report got its check</span></a></li>
+    <li><a href="#s8"><span class="badge">8</span><span>Where the lines live</span></a></li>
+    <li><a href="#s9"><span class="badge">9</span><span>Limits</span></a></li>
+  </ol>
+  <dl class="visuals">
+    <dt>Tables</dt>
+    <dd><a href="#table-1-fig">Table 1. The catalogue</a></dd>
+    <dd><a href="#table-2-fig">Table 2. DAG nodes</a></dd>
+    <dt>Figures</dt>
+    <dd><a href="#fig-1">1. SKILL.md lines against the budget</a></dd>
+    <dd><a href="#fig-2">2. Commits per month</a></dd>
+    <dd><a href="#fig-3">3. Dependencies around visual-report</a></dd>
+    <dd><a href="#fig-4">4. One run of the render check</a></dd>
+    <dd><a href="#fig-5">5. The verdict function</a></dd>
+    <dd><a href="#fig-6">6. Condition to verdict</a></dd>
+    <dd><a href="#fig-7">7. visual-report history</a></dd>
+    <dd><a href="#fig-8">8. Tracked lines per folder</a></dd>
+  </dl>
+</aside>
+
+<main class="content">
+  <header class="masthead">
+    <p class="kicker eyebrow">Dossier &middot; relentless-data-skills &middot; commit a590a62</p>
+    <h1>How the relentless-data-skills catalogue is built and checked</h1>
+    <p class="byline">Measured on 2026-10-30 at commit <code>a590a62</code> (main, 2026-10-29). Every number below comes from the repo at that commit.</p>
+  </header>
+
+  <section class="answer" aria-label="Answer">
+    <p class="label eyebrow">Answer</p>
+    <p class="claim">Every always-loaded SKILL.md fits the 150-line budget that <code>scripts/lint_skill.py</code> enforces in CI, and five of 18 sit exactly on it. The catalogue's weight lives in scripts and references: <code>fabric-lineage-dag</code> alone holds 17 of the 26 script files and 21% of the 17,001 tracked lines.</p>
+  </section>
+  <div class="stats" aria-label="Headline numbers">
+    <div class="stat"><div class="v">18</div><div class="l">skills under <code>skills/</code>, 8 with <code>disable-model-invocation: true</code></div></div>
+    <div class="stat"><div class="v">127.3<small> / 150</small></div><div class="l">mean SKILL.md lines against the budget; 2,291 lines in total</div></div>
+    <div class="stat"><div class="v">5<small> of 18</small></div><div class="l">SKILL.md files at exactly 150 lines; none above</div></div>
+    <div class="stat"><div class="v">17,001</div><div class="l">tracked lines across all skill folders; 21.4% in one folder</div></div>
+  </div>
+
+  <nav class="toc-inline" aria-label="Contents">
+    <ol>
+      <li><a href="#s1">The catalogue at a glance</a></li>
+      <li><a href="#s2">The 150-line budget</a></li>
+      <li><a href="#s3">How the repo grew</a></li>
+      <li><a href="#s4">What depends on what</a></li>
+      <li><a href="#s5">How the render check runs</a></li>
+      <li><a href="#s6">How the verdict is decided</a></li>
+      <li><a href="#s7">How visual-report got its check</a></li>
+      <li><a href="#s8">Where the lines live</a></li>
+      <li><a href="#s9">Limits</a></li>
+    </ol>
+  </nav>
+
+  <!-- ================= 1 ================= -->
+  <section class="sec" id="s1">
+    <h2 class="sec-head"><span class="badge">1</span><span>The catalogue at a glance</span><span class="count">Table 1</span></h2>
+    <div class="prose">
+      <p>The catalogue is 18 skill folders under <code>skills/</code>. Each folder holds an always-loaded SKILL.md and a <code>plugin.json</code> manifest. Twelve folders add a <code>references/</code> directory, and eight add <code>scripts/</code>. Table 1 lists every folder with what the repo measures about it. Figure 8, in section 8, shows where the 17,001 tracked lines sit.</p>
+      <p>Two columns in Table 1 move almost together, and two do not. The SKILL.md column runs from 56 to 150 lines, a flat band. The scripts column runs from 0 to 17, and the tracked-lines column from 183 to 3,635. A skill's size is its scripts, not its prompt.</p>
+    </div>
+
+    <div class="fig wide" id="table-1-fig">
+      <div class="visual">
+        <div class="figframe table">
+        <table class="data sortable" id="table-1">
+<thead><tr>
+<th class="txt" data-type="txt">Skill</th>
+<th class="num" data-type="txt">Version</th>
+<th class="num" data-type="num">SKILL.md (lines)</th>
+<th class="num" data-type="num">references/ (files)</th>
+<th class="num" data-type="num">scripts/ (files)</th>
+<th class="txt" data-type="num">DMI</th>
+<th class="num" data-type="num">Commits</th>
+<th class="num" data-type="num">Tracked (files)</th>
+<th class="num" data-type="num">Tracked (lines)</th>
+</tr></thead>
+<tbody>
+<tr><td class="id">candidate-to-spec</td><td class="num" data-v="000.001.001"><code>0.1.1</code></td><td class="num lines"><span class="cbar" style="--w:86.0%">129</span></td><td class="num">3</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">2</td><td class="num">6</td><td class="num">728</td></tr>
+<tr><td class="id">dbt-runner</td><td class="num" data-v="000.001.008"><code>0.1.8</code></td><td class="num lines"><span class="cbar" style="--w:89.3%">134</span></td><td class="num">3</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">15</td><td class="num">7</td><td class="num">1,064</td></tr>
+<tr><td class="id">dlt-bootstrap</td><td class="num" data-v="000.001.001"><code>0.1.1</code></td><td class="num lines"><span class="cbar" style="--w:88.7%">133</span></td><td class="num">3</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">10</td><td class="num">6</td><td class="num">388</td></tr>
+<tr><td class="id">fabric-lineage-dag</td><td class="num" data-v="000.001.002"><code>0.1.2</code></td><td class="num lines"><span class="cbar" style="--w:59.3%">89</span></td><td class="num">3</td><td class="num">17</td><td class="txt" data-v="0">no</td><td class="num">6</td><td class="num">23</td><td class="num">3,635</td></tr>
+<tr><td class="id">gh-weekly-report</td><td class="num" data-v="000.001.002"><code>0.1.2</code></td><td class="num lines"><span class="cbar" style="--w:79.3%">119</span></td><td class="num">1</td><td class="num">2</td><td class="txt" data-v="1">yes</td><td class="num">8</td><td class="num">6</td><td class="num">1,060</td></tr>
+<tr><td class="id">implement-feature</td><td class="num" data-v="000.002.005"><code>0.2.5</code></td><td class="num lines"><span class="cbar" style="--w:94.7%">142</span></td><td class="num">1</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">21</td><td class="num">4</td><td class="num">513</td></tr>
+<tr><td class="id">implement-ticket</td><td class="num" data-v="000.002.008"><code>0.2.8</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">4</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">22</td><td class="num">7</td><td class="num">538</td></tr>
+<tr><td class="id">metabase</td><td class="num" data-v="000.001.000"><code>0.1.0</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">3</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">4</td><td class="num">7</td><td class="num">1,803</td></tr>
+<tr><td class="id">orchestrator-mode</td><td class="num" data-v="000.005.004"><code>0.5.4</code></td><td class="num lines"><span class="cbar" style="--w:98.0%">147</span></td><td class="num">1</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">25</td><td class="num">4</td><td class="num">306</td></tr>
+<tr><td class="id">prefect</td><td class="num" data-v="000.002.002"><code>0.2.2</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">9</td><td class="num">3</td><td class="num">241</td></tr>
+<tr><td class="id">qualify-delegation</td><td class="num" data-v="000.001.000"><code>0.1.0</code></td><td class="num lines"><span class="cbar" style="--w:82.0%">123</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">1</td><td class="num">3</td><td class="num">183</td></tr>
+<tr><td class="id">review-pbi-diff</td><td class="num" data-v="000.001.003"><code>0.1.3</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">1</td><td class="num">2</td><td class="txt" data-v="1">yes</td><td class="num">8</td><td class="num">6</td><td class="num">1,927</td></tr>
+<tr><td class="id">ship</td><td class="num" data-v="000.001.007"><code>0.1.7</code></td><td class="num lines"><span class="cbar" style="--w:98.7%">148</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">17</td><td class="num">3</td><td class="num">260</td></tr>
+<tr><td class="id">smart-git-commit</td><td class="num" data-v="000.001.003"><code>0.1.3</code></td><td class="num lines"><span class="cbar" style="--w:76.0%">114</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="0">no</td><td class="num">13</td><td class="num">3</td><td class="num">183</td></tr>
+<tr><td class="id">snowman</td><td class="num" data-v="000.001.004"><code>0.1.4</code></td><td class="num lines"><span class="cbar" style="--w:95.3%">143</span></td><td class="num">3</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">23</td><td class="num">7</td><td class="num">1,601</td></tr>
+<tr><td class="id">statusline</td><td class="num" data-v="000.005.000"><code>0.5.0</code></td><td class="num lines"><span class="cbar" style="--w:42.7%">64</span></td><td class="num">0</td><td class="num">1</td><td class="txt" data-v="1">yes</td><td class="num">10</td><td class="num">8</td><td class="num">1,038</td></tr>
+<tr><td class="id">student-mode</td><td class="num" data-v="000.002.000"><code>0.2.0</code></td><td class="num lines at"><span class="cbar" style="--w:100.0%">150</span></td><td class="num">0</td><td class="num">0</td><td class="txt" data-v="1">yes</td><td class="num">4</td><td class="num">3</td><td class="num">215</td></tr>
+<tr><td class="id">visual-report</td><td class="num" data-v="000.001.003"><code>0.1.3</code></td><td class="num lines"><span class="cbar" style="--w:37.3%">56</span></td><td class="num">2</td><td class="num">1</td><td class="txt" data-v="0">no</td><td class="num">12</td><td class="num">6</td><td class="num">1,318</td></tr>
+</tbody>
+<tfoot><tr><td class="txt">Total, 18 skills</td><td></td><td class="num">2,291</td><td class="num">28</td><td class="num">26</td><td class="txt">8 yes</td><td class="num">210</td><td class="num">112</td><td class="num">17,001</td></tr></tfoot>
+</table>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Table 1.</span> Every skill folder under <code>skills/</code> with its manifest version, the size of its always-loaded SKILL.md, how many files it keeps in <code>references/</code> and <code>scripts/</code>, whether the model may invoke it on its own, how many commits have touched the folder, and the folder's tracked files and lines. <span class="how">Version is <code>plugin.json</code>. Lines are <code>wc -l SKILL.md</code>. File counts are <code>git ls-files</code> under each subfolder. DMI is <code>disable-model-invocation: true</code> in the frontmatter. Commits is <code>git log --oneline -- skills/&lt;name&gt; | wc -l</code>, so a commit that touches several skills counts once per skill and the column sums to 210, more than the repo's 124 commits. In the SKILL.md column the bar behind each count is its share of the 150-line budget, and a filled teal cell sits exactly on the budget. Click a header to sort.</span></p>
+        <p class="sowhat">The SKILL.md column is nearly flat (56 to 150) while the scripts and commits columns are not. The budget shapes the prompt, not the skill.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>Eight of 18 skills carry <code>disable-model-invocation: true</code>. The linter forces it onto any skill whose files run a shared-state command such as <code>git push</code> or <code>gh pr merge</code>.</li>
+      <li>Five SKILL.md files sit exactly on the 150-line budget and none is above it. The scripts column runs from 0 to 17 files, so the folders differ in code, not in prompt length.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 2 ================= -->
+  <section class="sec" id="s2">
+    <h2 class="sec-head"><span class="badge">2</span><span>The 150-line budget</span><span class="count">Figure 1</span></h2>
+    <div class="prose">
+      <p><code>scripts/lint_skill.py</code> sets <code>LINE_BUDGET</code> to 150 on line 35 and fails any SKILL.md above it with "SKILL.md is N lines (budget 150)" (line 160). CI's <code>skill-lint</code> job runs the linter on every push and pull request, and <code>scripts/check.sh</code> runs it locally. Figure 1 puts every SKILL.md against that line.</p>
+      <p>The source comment on lines 32 to 34 calls the budget "deliberately stricter than the docs' 500-line guidance". The point is progressive disclosure. The SKILL.md is loaded on every turn, so it carries the rules. Detail moves into <code>references/</code>, which the linter does not count and the agent reads only when a rule sends it there.</p>
+      <p>The linter checks more than length. It requires the <code>name</code> and <code>description</code> frontmatter keys, rejects unknown keys, caps the description at 1,024 characters, and demands a "Use when" clause unless DMI is true. It also enforces the side-effect rule from the first takeaway above: a file that runs <code>git push</code> or <code>gh pr merge</code> makes the skill DMI, or the skill must be allow-listed with a reason.</p>
+    </div>
+
+    <div class="fig" id="fig-1">
+      <div class="visual">
+        <div class="figframe"><div id="vl-bar" class="chart"></div></div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 1.</span> The length of each skill's SKILL.md, sorted descending, with a reference line at 150, the <code>LINE_BUDGET</code> constant in <code>scripts/lint_skill.py</code> (line 35). <span class="how">A bar that touches the line is at the limit, not over it. Teal bars are the five at exactly 150. Grey bars are under. The linter fails any SKILL.md above 150, and CI's <code>skill-lint</code> job runs it on every push and pull request. Mean 127.3, minimum 56 (visual-report).</span></p>
+        <p class="sowhat">Five skills sit exactly on the budget and two more are within 3 lines of it. The ceiling is load-bearing, not nominal.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>All 18 SKILL.md files are at or under the 150-line budget, five sit exactly on it, and the mean is 127 lines. The linter that enforces the budget runs on every push and pull request.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 3 ================= -->
+  <section class="sec" id="s3">
+    <h2 class="sec-head"><span class="badge">3</span><span>How the repo grew</span><span class="count">Figure 2</span></h2>
+    <div class="prose">
+      <p>The repo has 124 commits on <code>main</code>, 5 of them merges, between the first commit on 2026-05-21 ("feat: initial prefect-skill") and the last on 2026-10-29 ("fix(orchestrator-mode) ... (#110)"). Figure 2 counts them by month.</p>
+      <p>Versioning follows ADR-0001. Every merged pull request that touches a skill folder bumps that skill once, patch by default, and new skills start at 0.1.0. CI's <code>skill-version-check</code> job runs <code>scripts/skill_versions.py --check</code> and <code>scripts/sync_registry.py --check</code> to hold that line. README edits, assets, scripts, deletions and permission changes all count. Versions in Table 1 run from 0.1.0 (metabase, qualify-delegation) to 0.5.4 (orchestrator-mode).</p>
+    </div>
+
+    <div class="fig" id="fig-2">
+      <div class="visual">
+        <div class="figframe"><div id="vl-line" class="chart"></div></div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 2.</span> Commits on <code>main</code> by author month, from the first commit (2026-05-21) to the last (2026-10-29). <span class="how">Measured with <code>git log --date=format:%Y-%m --pretty=%ad | sort | uniq -c</code>. The count includes the 5 merge commits. Six points, y-axis from 0 to 40, the value printed above each point. Total 124.</span></p>
+        <p class="sowhat">Activity comes in two waves, June (37) and September to October (59), with a quiet July to August (24).</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>The repo's 124 commits arrive in two waves, June (37) and September to October (59). orchestrator-mode (25), snowman (23) and implement-ticket (22) are the most-touched skill folders.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 4 ================= -->
+  <section class="sec" id="s4">
+    <h2 class="sec-head"><span class="badge">4</span><span>What depends on what</span><span class="count">Figure 3, Table 2</span></h2>
+    <div class="prose">
+      <p>The dependency graph records what names, runs, imports or reads what: 56 nodes and 84 directed edges across the 18 skills, 6 root scripts, the 18 manifests as one node, 5 CI jobs, 13 test files, 10 skill-owned script nodes and 3 reference files that something outside their own skill reads. Figure 3 draws the part of it around <code>visual-report</code>. Table 2 lists every node with its degree.</p>
+      <p>The two hubs are not skills. <code>scripts/lint_skill.py</code> has degree 21 because it reads every <code>skills/*/SKILL.md</code>, and the CI <code>tests</code> job has degree 13 because it runs all 13 test modules on Python 3.9 and 3.13. Among skills, <code>orchestrator-mode</code> is the most depended-on, with in-degree 3 from other skills plus the linter. <code>visual-report</code> connects only to its own script, its two references, the linter and one test.</p>
+      <p>The five CI jobs in <code>.github/workflows/ci.yml</code> are <code>skill-version-check</code>, <code>tests</code>, <code>skill-lint</code>, <code>plugin-validate</code> and <code>doc-url-liveness</code>. <code>plugin-validate</code> runs <code>claude plugin validate .</code> on Node 22, which is not a repo script, so it has no outgoing edge. <code>doc-url-liveness</code> also runs on a Monday 06:00 UTC schedule.</p>
+    </div>
+
+    <div class="fig wide" id="fig-3">
+      <div class="visual">
+        <div class="figframe scroll" id="dag-frame">
+<pre class="mermaid">
+---
+config:
+  layout: elk
+  elk:
+    mergeEdges: true
+    nodePlacementStrategy: LINEAR_SEGMENTS
+  flowchart:
+    useMaxWidth: false
+    padding: 6
+  themeVariables:
+    fontSize: 11px
+---
+flowchart TB
+  visual_report["visual-report (SKILL.md)"]
+  lint_skill["scripts/lint_skill.py"]
+  check_sh["scripts/check.sh"]
+  ci_tests["CI job tests (py3.9 + 3.13)"]
+  ci_lint["CI job skill-lint"]
+  test_lint_skill["tests/test_lint_skill.py"]
+  test_visual_report["tests/test_visual_report.py"]
+  check_render["visual-report/scripts/check_render.py"]
+  html_report["visual-report/references/HTML-REPORT.md"]
+  visual_language["visual-report/references/VISUAL-LANGUAGE.md"]
+  other_skills["17 other skills"]
+  visual_report --> check_render
+  visual_report --> html_report
+  visual_report --> visual_language
+  test_lint_skill --> lint_skill
+  test_visual_report --> check_render
+  ci_lint --> lint_skill
+  ci_tests --> test_lint_skill
+  ci_tests --> test_visual_report
+  check_sh --> lint_skill
+  lint_skill --> other_skills
+  lint_skill --> visual_report
+  classDef c1 fill:#c6e3e3,stroke:#0f6b6b,color:#1b1f23;
+  classDef c2 fill:#cfdeee,stroke:#30638e,color:#1b1f23;
+  classDef c3 fill:#dfd4ee,stroke:#7b5ea7,color:#1b1f23;
+  classDef c4 fill:#e2e3e0,stroke:#6b7280,color:#1b1f23;
+  classDef c5 fill:#d9e6c0,stroke:#5a7d2a,color:#1b1f23;
+  classDef c6 fill:#ecd1e0,stroke:#a0427a,color:#1b1f23;
+  classDef hub stroke-width:3px;
+  classDef focus stroke-width:3px,font-weight:bold;
+  class visual_report,other_skills c1;
+  class lint_skill,check_sh c2;
+  class ci_tests,ci_lint c3;
+  class test_lint_skill,test_visual_report c4;
+  class check_render c5;
+  class html_report,visual_language c6;
+  class lint_skill,ci_tests hub;
+  class visual_report focus;
+</pre>
+        </div>
+        <p class="legend"><span class="k-c1">skill</span><span class="k-c2">root script</span><span class="k-c3">CI job</span><span class="k-c4">test</span><span class="k-c5">skill-owned script</span><span class="k-c6">reference</span><span class="k-hub">thick border: hub (degree 21 and 13) or the skill itself</span></p>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 3.</span> The neighbourhood of <code>visual-report</code> in the dependency graph: every node within two hops of the skill, plus the CI <code>tests</code> job that runs its test file. The 17 other skills that <code>lint_skill.py</code> reads are drawn as one node. The full graph is 56 nodes and 84 directed edges, and Table 2 lists all 56 nodes. <span class="how">An edge A to B means A names, runs, imports or reads B. Skill-to-skill edges come from grep of SKILL.md and <code>references/</code> only. Test edges come from each test module's imports or file-path constants. CI edges come from <code>ci.yml</code>. Thick borders mark the two hubs, <code>lint_skill.py</code> (degree 21) and the <code>tests</code> job (degree 13), and the skill itself.</span></p>
+        <p class="sowhat">Nothing outside its own folder reads <code>visual-report</code> except the linter and its test. Its script, <code>check_render.py</code>, is reached from two directions, the SKILL.md that invokes it and the test that imports it.</p>
+      </div>
+    </div>
+
+    <div class="fig" id="table-2-fig">
+      <div class="visual">
+        <div class="figframe table">
+        <table class="data sortable" id="table-2" data-show="20">
+<colgroup><col class="c-id"><col class="c-label"><col class="c-group"><col class="c-deg"></colgroup>
+<thead><tr>
+<th class="txt" data-type="txt">Node id</th>
+<th class="txt" data-type="txt">Label</th>
+<th class="txt" data-type="txt">Group</th>
+<th class="num" data-type="num">Degree (edges)</th>
+</tr></thead>
+<tbody id="t2-main">
+<tr><td class="id"><code>lint_<wbr>skill</code></td><td class="txt">scripts/<wbr>lint_skill.py</td><td class="txt">root-script</td><td class="num">21</td></tr>
+<tr><td class="id"><code>ci_<wbr>tests</code></td><td class="txt">CI job tests (py3.9 + 3.13)</td><td class="txt">ci</td><td class="num">13</td></tr>
+<tr><td class="id"><code>dlt-bootstrap</code></td><td class="txt">dlt-bootstrap</td><td class="txt">skill</td><td class="num">5</td></tr>
+<tr><td class="id"><code>implement-feature</code></td><td class="txt">implement-feature</td><td class="txt">skill</td><td class="num">5</td></tr>
+<tr><td class="id"><code>ship</code></td><td class="txt">ship</td><td class="txt">skill</td><td class="num">5</td></tr>
+<tr><td class="id"><code>sync_<wbr>registry</code></td><td class="txt">scripts/<wbr>sync_registry.py</td><td class="txt">root-script</td><td class="num">5</td></tr>
+<tr><td class="id"><code>skill_<wbr>versions</code></td><td class="txt">scripts/<wbr>skill_versions.py</td><td class="txt">root-script</td><td class="num">5</td></tr>
+<tr><td class="id"><code>test_<wbr>skill_<wbr>git_<wbr>sequences</code></td><td class="txt">tests/<wbr>test_skill_git_sequences.py</td><td class="txt">test</td><td class="num">5</td></tr>
+<tr><td class="id"><code>candidate-to-spec</code></td><td class="txt">candidate-to-spec</td><td class="txt">skill</td><td class="num">4</td></tr>
+<tr><td class="id"><code>orchestrator-mode</code></td><td class="txt">orchestrator-mode</td><td class="txt">skill</td><td class="num">4</td></tr>
+<tr><td class="id"><code>visual-report</code></td><td class="txt">visual-report</td><td class="txt">skill</td><td class="num">4</td></tr>
+<tr><td class="id"><code>check_<wbr>sh</code></td><td class="txt">scripts/<wbr>check.sh</td><td class="txt">root-script</td><td class="num">4</td></tr>
+<tr><td class="id"><code>dbt-runner</code></td><td class="txt">dbt-runner</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>gh-weekly-report</code></td><td class="txt">gh-weekly-report</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>implement-ticket</code></td><td class="txt">implement-ticket</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>review-pbi-diff</code></td><td class="txt">review-pbi-diff</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>smart-git-commit</code></td><td class="txt">smart-git-commit</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>snowman</code></td><td class="txt">snowman</td><td class="txt">skill</td><td class="num">3</td></tr>
+<tr><td class="id"><code>test_<wbr>candidate_<wbr>to_<wbr>spec_<wbr>commands</code></td><td class="txt">tests/<wbr>test_candidate_to_spec_commands.py</td><td class="txt">test</td><td class="num">3</td></tr>
+<tr><td class="id"><code>test_<wbr>gh_<wbr>weekly_<wbr>report</code></td><td class="txt">tests/<wbr>test_gh_weekly_report.py</td><td class="txt">test</td><td class="num">3</td></tr>
+</tbody>
+<tbody id="t2-rest" hidden>
+<tr><td class="id"><code>test_<wbr>review_<wbr>pbi_<wbr>diff</code></td><td class="txt">tests/<wbr>test_review_pbi_diff.py</td><td class="txt">test</td><td class="num">3</td></tr>
+<tr><td class="id"><code>statusline_<wbr>sh</code></td><td class="txt">statusline/<wbr>scripts/<wbr>statusline.sh</td><td class="txt">skill-script</td><td class="num">3</td></tr>
+<tr><td class="id"><code>fabric-lineage-dag</code></td><td class="txt">fabric-lineage-dag</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>metabase</code></td><td class="txt">metabase</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>prefect</code></td><td class="txt">prefect</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>statusline</code></td><td class="txt">statusline</td><td class="txt">skill</td><td class="num">2</td></tr>
+<tr><td class="id"><code>check_<wbr>doc_<wbr>urls</code></td><td class="txt">scripts/<wbr>check_doc_urls.py</td><td class="txt">root-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>plugin_<wbr>json</code></td><td class="txt">skills/<wbr>*/<wbr>plugin.json (18 manifests)</td><td class="txt">manifest</td><td class="num">2</td></tr>
+<tr><td class="id"><code>ci_<wbr>version</code></td><td class="txt">CI job skill-version-check</td><td class="txt">ci</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>dbt_<wbr>runner</code></td><td class="txt">tests/<wbr>test_dbt_runner.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>dlt_<wbr>bootstrap</code></td><td class="txt">tests/<wbr>test_dlt_bootstrap.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>lint_<wbr>skill</code></td><td class="txt">tests/<wbr>test_lint_skill.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>metabase</code></td><td class="txt">tests/<wbr>test_metabase.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>skill_<wbr>versions</code></td><td class="txt">tests/<wbr>test_skill_versions.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>snowman</code></td><td class="txt">tests/<wbr>test_snowman.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>statusline</code></td><td class="txt">tests/<wbr>test_statusline.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>sync_<wbr>registry</code></td><td class="txt">tests/<wbr>test_sync_registry.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>test_<wbr>visual_<wbr>report</code></td><td class="txt">tests/<wbr>test_visual_report.py</td><td class="txt">test</td><td class="num">2</td></tr>
+<tr><td class="id"><code>check_<wbr>render</code></td><td class="txt">visual-report/<wbr>scripts/<wbr>check_render.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>snowman_<wbr>py</code></td><td class="txt">snowman/<wbr>scripts/<wbr>snowman.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>mb_<wbr>py</code></td><td class="txt">metabase/<wbr>scripts/<wbr>mb.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>preflight_<wbr>py</code></td><td class="txt">dbt-runner/<wbr>scripts/<wbr>preflight.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>extract_<wbr>changes</code></td><td class="txt">review-pbi-diff/<wbr>scripts/<wbr>extract_changes.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>check_<wbr>artifact</code></td><td class="txt">review-pbi-diff/<wbr>scripts/<wbr>check_artifact.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>collect_<wbr>py</code></td><td class="txt">gh-weekly-report/<wbr>scripts/<wbr>collect.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>render_<wbr>py</code></td><td class="txt">gh-weekly-report/<wbr>scripts/<wbr>render.py</td><td class="txt">skill-script</td><td class="num">2</td></tr>
+<tr><td class="id"><code>if_<wbr>reference</code></td><td class="txt">implement-feature/<wbr>references/<wbr>reference.md</td><td class="txt">reference</td><td class="num">2</td></tr>
+<tr><td class="id"><code>qualify-delegation</code></td><td class="txt">qualify-delegation</td><td class="txt">skill</td><td class="num">1</td></tr>
+<tr><td class="id"><code>student-mode</code></td><td class="txt">student-mode</td><td class="txt">skill</td><td class="num">1</td></tr>
+<tr><td class="id"><code>statusline_<wbr>shots</code></td><td class="txt">scripts/<wbr>statusline_screenshots.py</td><td class="txt">root-script</td><td class="num">1</td></tr>
+<tr><td class="id"><code>ci_<wbr>lint</code></td><td class="txt">CI job skill-lint</td><td class="txt">ci</td><td class="num">1</td></tr>
+<tr><td class="id"><code>ci_<wbr>urls</code></td><td class="txt">CI job doc-url-liveness</td><td class="txt">ci</td><td class="num">1</td></tr>
+<tr><td class="id"><code>fld_<wbr>scripts</code></td><td class="txt">fabric-lineage-dag/<wbr>scripts/<wbr> (17 files)</td><td class="txt">skill-script</td><td class="num">1</td></tr>
+<tr><td class="id"><code>html_<wbr>report</code></td><td class="txt">visual-report/<wbr>references/<wbr>HTML-REPORT.md</td><td class="txt">reference</td><td class="num">1</td></tr>
+<tr><td class="id"><code>visual_<wbr>language</code></td><td class="txt">visual-report/<wbr>references/<wbr>VISUAL-LANGUAGE.md</td><td class="txt">reference</td><td class="num">1</td></tr>
+<tr><td class="id"><code>ci_<wbr>plugin</code></td><td class="txt">CI job plugin-validate</td><td class="txt">ci</td><td class="num">0</td></tr>
+</tbody>
+</table>
+<details class="more" data-target="t2-rest"><summary><span class="when-closed">Show the remaining 36 rows (56 nodes in total)</span><span class="when-open">Hide the remaining 36 rows (showing all 56)</span></summary></details>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Table 2.</span> The 56 nodes of the dependency graph with their group and degree, highest degree first. <span class="how">Degree is in-edges plus out-edges. The first 20 rows show by default. Open the control under the table for the other 36. Sorting a column re-splits the rows, so the first 20 are always the top of the current sort.</span></p>
+        <p class="sowhat">Eight nodes have degree 5 or more, and only three of them are skills (implement-feature, ship, dlt-bootstrap). The rest are scripts, tests and CI.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 5 ================= -->
+  <section class="sec" id="s5">
+    <h2 class="sec-head"><span class="badge">5</span><span>How the render check runs</span><span class="count">Figure 4</span></h2>
+    <div class="prose">
+      <p>A visual report is verified by <code>skills/visual-report/scripts/check_render.py</code>, 985 lines added on 2026-10-03 in commit 088a29f. SKILL.md (line 39) invokes it as <code>uv run --no-project --with playwright python &lt;skill-dir&gt;/scripts/check_render.py &lt;report.html&gt;</code>, with <code>--shots DIR</code> (default <code>&lt;report-stem&gt;-check/</code> beside the report) and <code>--timeout N</code> (default 20 s). Figure 4 follows one run from the agent's command to the verdict line.</p>
+      <p>The timings are the constants at the top of the file. <code>LOAD_TIMEOUT_S</code> is 30, <code>QUIET_MS</code> is 2000, <code>CALL_TIMEOUT_S</code> is 10, <code>PROBE_TIMEOUT_S</code> is 15, and the default <code>--timeout</code> is 20. The overall limit is 30 + 20 + 90 = 140 s, and a daemon watchdog fires at 160 s. If the watchdog fires, the script marks the run incomplete and emits what it has with <code>os._exit</code>.</p>
+      <p>The script reads the rendered DOM, not the console. It snapshots diagram facts once, then opens tabs, toggles and <code>&lt;details&gt;</code> as a reader would and snapshots again. Each diagram is classified as error, rendering, lazy, unrendered, hidden, illegible, empty, clipped or ok (lines 242 to 271), with warnings for labels under 9 px or a diagram that runs past the window's right edge. Up to 20 suspect diagrams are re-rendered offscreen with the page's own Mermaid module, which is how the script learns whether the module ever loaded.</p>
+    </div>
+
+    <div class="fig wide" id="fig-4">
+      <div class="visual">
+        <div class="figframe seq">
+<pre class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant S as Script (check_render.py)
+  participant R as Report file
+  participant C as Chromium (Playwright)
+  participant N as CDNs
+  A->>S: run check_render.py
+  S->>R: read_source(report)
+  alt cannot read it, or no playwright
+    S-->>A: FAIL, exit 1, or BLOCKED, exit 2
+  end
+  S->>+C: launch, then goto file URL (load, 30 s)
+  C->>N: GET scripts and modules
+  N-->>C: reached or failed
+  S->>C: settle() 2 s quiet, facts(), reveal(), facts()
+  C-->>S: diagram facts, twice
+  S->>C: images(), screenshots(), probe() 15 s each
+  C-->>S: error text, or env
+  alt a request failed and no host answered
+    S->>N: fetch package.json, no-cors, 5 s
+  end
+  deactivate C
+  S-->>A: PASS, FAIL or BLOCKED, exit 0, 1, 2
+</pre>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 4.</span> One run of the render check from the agent's command to the verdict line, with five participants, left to right: Agent, Script (<code>check_render.py</code>), the Report file, Chromium (headless, via Playwright) and CDNs (the hosts in <code>CDN_HOSTS</code>). <span class="how">Solid arrows are calls the script makes. Dashed returns carry facts the script reads. The <code>alt</code> boxes are the two exits before the browser starts and the network probe that runs only when a request failed and no host answered. The diagram is condensed from the script's 17 steps to 12 messages: the browser launch, the 160 s watchdog and the page load are one message, the settle and both fact snapshots are one, the image check, the screenshots and the offscreen probes are one, and the two early exits (cannot read the report, Playwright not importable) share one branch. <code>browser.close()</code> (10 s cap) runs before the verdict line and is not drawn. The last message prints the JSON result, then the bare verdict line.</span></p>
+        <p class="sowhat">The script never trusts the console. It reads the rendered DOM twice, before and after opening hidden containers, re-renders suspect diagrams offscreen, and asks a known-good CDN URL whether the network is to blame before it lets an unrendered diagram count as a defect.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 6 ================= -->
+  <section class="sec" id="s6">
+    <h2 class="sec-head"><span class="badge">6</span><span>How the verdict is decided</span><span class="count">Figures 5 and 6</span></h2>
+    <div class="prose">
+      <p>The verdict is 22 lines, <code>verdict()</code> on lines 354 to 375. Figure 5 shows them. Figure 6 maps each condition from the module docstring (lines 2 to 25) to the verdict it produces on its own. The exit codes are PASS 0, FAIL 1, BLOCKED 2, from <code>EXIT = {PASS: 0, FAIL: 1, BLOCKED: 2}</code> near the top of the file.</p>
+      <p>The function is a precedence ladder, and the order is the design. A defect the page proves on its own comes first. An environment problem comes second, because an unreachable CDN explains an unrendered diagram, so the script refuses to call that a page defect. The softer evidence, unrendered blocks and console errors, counts only once the network has been ruled out. That is why SKILL.md glosses BLOCKED as "unverified, not passing".</p>
+    </div>
+
+    <div class="fig" id="fig-5">
+      <div class="visual">
+<pre class="code"><code><span class="l">def verdict(result):</span><span class="l">    &quot;&quot;&quot;Proof of a defect beats an environment problem, which beats softer evidence.</span><span class="l"> </span><span class="l">    An error diagram, a 404, or a broken image is a defect whatever else went</span><span class="l">    wrong. An unreachable CDN explains unrendered diagrams and script errors,</span><span class="l">    so those count only when the network was fine.</span><span class="l">    &quot;&quot;&quot;</span><span class="l mark" data-m="1">    if result.get(&quot;blocked&quot;):</span><span class="l">        return BLOCKED</span><span class="l">    diagrams = result.get(&quot;diagrams&quot;, [])</span><span class="l">    requests = result.get(&quot;requests&quot;, [])</span><span class="l mark" data-m="2">    if (any(d[&quot;status&quot;] in DRAWN_BAD and not d.get(&quot;env&quot;) for d in diagrams)</span><span class="l">            or any(r[&quot;kind&quot;] == &quot;defect&quot; for r in requests)</span><span class="l mark" data-m="3">            or result.get(&quot;broken_images&quot;) or result.get(&quot;hung&quot;)):</span><span class="l">        return FAIL</span><span class="l mark" data-m="4">    if (any(r[&quot;kind&quot;] == &quot;blocked&quot; for r in requests)</span><span class="l">            or any(d.get(&quot;env&quot;) for d in diagrams) or result.get(&quot;incomplete&quot;)):</span><span class="l">        return BLOCKED</span><span class="l mark" data-m="5">    if (any(d[&quot;status&quot;] in NOT_DRAWN for d in diagrams)</span><span class="l">            or result.get(&quot;page_errors&quot;) or result.get(&quot;console_errors&quot;)):</span><span class="l">        return FAIL</span><span class="l">    return PASS</span></code></pre>
+        <ol class="markers">
+          <li><span class="k">1</span><span class="ln">361</span> <code>result["blocked"]</code> is set only when the check could not run at all (no Playwright, no browser, the script itself crashed), so it short-circuits everything else.</li>
+          <li><span class="k">2</span><span class="ln">365</span> <code>DRAWN_BAD</code> is <code>{"error", "empty", "illegible", "clipped"}</code>, statuses where Mermaid ran and drew something wrong. That is proof of a defect unless the probe marked the diagram <code>env</code>, meaning its module never loaded.</li>
+          <li><span class="k">3</span><span class="ln">367</span> A broken image or a frozen tab (<code>hung</code>) is a FAIL on its own, with no network excuse.</li>
+          <li><span class="k">4</span><span class="ln">369-370</span> A request classified "blocked" (a CDN host unreachable or answering 5xx), an <code>env</code>-flagged diagram, or a timed-out check means the page is unverified, so BLOCKED beats the softer FAILs below.</li>
+          <li><span class="k">5</span><span class="ln">372</span> <code>NOT_DRAWN</code> is <code>{"unrendered", "rendering"}</code>. With page and console errors, these count only once lines 369 to 370 have ruled out a network explanation.</li>
+        </ol>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 5.</span> Lines 354 to 375 of <code>skills/visual-report/scripts/check_render.py</code>, the whole <code>verdict()</code> function. <span class="how">The four <code>if</code> blocks are a precedence ladder. The first one that matches wins, so a defect in the page outranks an environment problem, which outranks the softer evidence of unrendered blocks and console errors. Numbered markers in the right margin point at the lines explained in the list under the code. Supporting constants on lines 50 to 75: <code>MIN_LABEL_PX = 6</code> (below this, illegible), <code>SMALL_LABEL_PX = 9</code> (warn), <code>TINY_PX = 24</code> (a speck).</span></p>
+        <p class="sowhat">The ordering is the design. An unreachable CDN explains an unrendered diagram, so the script refuses to call that a page defect.</p>
+      </div>
+    </div>
+
+    <div class="fig wide" id="fig-6">
+      <div class="visual">
+        <div class="figframe table">
+        <table class="data matrix" id="matrix">
+<thead><tr><th class="num">#</th><th class="txt">Condition (docstring wording)</th><th class="txt">Status or field in <code>result</code></th><th class="mark">PASS</th><th class="mark">FAIL</th><th class="mark">BLOCKED</th><th class="txt">Tier</th></tr></thead>
+<tbody>
+<tr class="tier-defect" data-first="1"><td class="num">1</td><td class="txt">Diagram is Mermaid&#x27;s error diagram</td><td class="txt"><code>status: error (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">2</td><td class="txt">Diagram collapsed to a speck or shows no labels</td><td class="txt"><code>status: empty (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">3</td><td class="txt">Diagram shrunk until labels are unreadable (under 6 px)</td><td class="txt"><code>status: illegible (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">4</td><td class="txt">Diagram cut off by an overflow:hidden box</td><td class="txt"><code>status: clipped (DRAWN_BAD)</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">5</td><td class="txt">Broken image</td><td class="txt"><code>broken_images non-empty</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">6</td><td class="txt">Resource answers 404, or a non-CDN host does not exist while others loaded</td><td class="txt"><code>requests[].kind == &quot;defect&quot;</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-defect"><td class="num">7</td><td class="txt">Page freezes its tab (a query takes over 10 s)</td><td class="txt"><code>hung set</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">defect</td></tr>
+<tr class="tier-soft" data-first="1"><td class="num">8</td><td class="txt">Diagram never rendered or still rendering (network fine)</td><td class="txt"><code>status: unrendered or rendering (NOT_DRAWN)</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">soft</td></tr>
+<tr class="tier-soft"><td class="num">9</td><td class="txt">Page error or console error (network fine)</td><td class="txt"><code>page_errors, console_errors</code></td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td class="txt tier">soft</td></tr>
+<tr class="tier-environment" data-first="1"><td class="num">10</td><td class="txt">No Playwright import or no browser could launch</td><td class="txt"><code>blocked set</code></td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9679;</td><td class="txt tier">environment</td></tr>
+<tr class="tier-environment"><td class="num">11</td><td class="txt">A CDN host unreachable or answering HTTP 5xx</td><td class="txt"><code>requests[].kind == &quot;blocked&quot; or diagram env</code></td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9679;</td><td class="txt tier">environment</td></tr>
+<tr class="tier-environment"><td class="num">12</td><td class="txt">Check did not finish within 140 s (or watchdog at 160 s)</td><td class="txt"><code>incomplete set</code></td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9679;</td><td class="txt tier">environment</td></tr>
+<tr class="tier-note" data-first="1"><td class="num">13</td><td class="txt">Diagram still hidden after reveal (listed, not judged)</td><td class="txt"><code>unverified</code></td><td class="mark pass">&#9679;<span class="mark-note">listed</span></td><td class="mark"></td><td class="mark"></td><td class="txt tier">note</td></tr>
+<tr data-first="1"><td class="num">14</td><td class="txt">None of the above</td><td class="txt"><code></code></td><td class="mark pass">&#9679;</td><td class="mark"></td><td class="mark"></td><td class="txt tier"></td></tr>
+</tbody></table>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 6.</span> The conditions named in the script's module docstring (lines 2 to 25) as rows, the three verdicts as columns. A filled mark is the verdict that condition produces on its own. <span class="how">When several conditions hold at once, Figure 5's ladder applies: any FAIL in the defect tier (rows 1 to 7) beats BLOCKED, and BLOCKED beats the soft FAIL tier (rows 8 to 9). Row 8 becomes BLOCKED, not FAIL, when row 11 also holds. Row 13 is listed in the result but not judged. Red marks are FAIL, amber marks are BLOCKED, teal marks are PASS.</span></p>
+        <p class="sowhat">Only three rows end in BLOCKED, and all three are the environment's fault. That is why SKILL.md says "BLOCKED means unverified, not passing".</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li><code>verdict()</code> decides in 22 lines with a fixed precedence. A drawn defect, 404, broken image or frozen tab is FAIL. An unreachable CDN, missing browser or timed-out check is BLOCKED. An unrendered block or console error is FAIL only when the network was fine.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 7 ================= -->
+  <section class="sec" id="s7">
+    <h2 class="sec-head"><span class="badge">7</span><span>How visual-report got its check</span><span class="count">Figure 7</span></h2>
+    <div class="prose">
+      <p>Figure 7 follows one folder, <code>skills/visual-report/</code>, through its whole history on <code>main</code>: 12 commits between 2026-06-09 and 2026-10-18. Ten of them are prose and style passes that touched many skills at once. One, 088a29f on 2026-10-03, added <code>check_render.py</code> (985 lines) and <code>tests/test_visual_report.py</code> (345 lines) in a pull request that also gave review-pbi-diff and ship their own "prove-it-works" checks.</p>
+    </div>
+
+    <div class="fig" id="fig-7">
+      <div class="visual">
+        <div class="figframe">
+          <ol class="timeline">
+<li><span class="tl-n">1</span><span class="tl-date">2026-06-09</span><span class="tl-dot"></span><span class="tl-body"><code>6db3ef0</code> feat: add visual-report skill<span class="tl-note">skill created</span></span></li>
+<li><span class="tl-n">2</span><span class="tl-date">2026-06-09</span><span class="tl-dot"></span><span class="tl-body"><code>f9b72a8</code> docs(skills): add prefect debug/CLI protocol and visual-report improvements</span></li>
+<li><span class="tl-n">3</span><span class="tl-date">2026-06-09</span><span class="tl-dot"></span><span class="tl-body"><code>dc10b07</code> chore: remove license and version from multiple skill files</span></li>
+<li><span class="tl-n">4</span><span class="tl-date">2026-06-12</span><span class="tl-dot"></span><span class="tl-body"><code>49a91cc</code> Generate marketplace.json and the README skills table from plugin.json (#27)<span class="tl-note">plugin.json becomes source of truth</span></span></li>
+<li><span class="tl-n">5</span><span class="tl-date">2026-06-18</span><span class="tl-dot"></span><span class="tl-body"><code>5961bf5</code> docs(skills): quality pass across all 9 skills (#28)<span class="tl-note">catalogue had 9 skills</span></span></li>
+<li><span class="tl-n">6</span><span class="tl-date">2026-07-24</span><span class="tl-dot"></span><span class="tl-body"><code>83b2c2b</code> docs(skills): tune all skills for Opus 5 prompting guidance (#41)</span></li>
+<li><span class="tl-n">7</span><span class="tl-date">2026-09-03</span><span class="tl-dot"></span><span class="tl-body"><code>fa5e069</code> docs: remove em dashes from skill docs prose (#59)</span></li>
+<li><span class="tl-n">8</span><span class="tl-date">2026-09-03</span><span class="tl-dot"></span><span class="tl-body"><code>ebdcdce</code> snowman: token-efficient CSV output, cleaner errors, plain-language docs (#61)</span></li>
+<li><span class="tl-n">9</span><span class="tl-date">2026-09-16</span><span class="tl-dot"></span><span class="tl-body"><code>207218c</code> docs(skills): refresh descriptions and documentation links (#69)</span></li>
+<li><span class="tl-n">10</span><span class="tl-date">2026-09-23</span><span class="tl-dot"></span><span class="tl-body"><code>3db5ecb</code> chore(skills): apply prompt audit for Fable 5.1 (#71)</span></li>
+<li class="key"><span class="tl-n">11</span><span class="tl-date">2026-10-03</span><span class="tl-dot"></span><span class="tl-body"><code>088a29f</code> feat(skills): add prove-it-works checks (#75)<span class="tl-note">adds scripts/check_render.py (+985) and tests/test_visual_report.py (+345); 16 files, +2,605 / -41</span></span></li>
+<li><span class="tl-n">12</span><span class="tl-date">2026-10-18</span><span class="tl-dot"></span><span class="tl-body"><code>dc788de</code> chore: migrate agent config to GLOSSARY.md and AGENTS.md (#91)</span></li>
+</ol>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 7.</span> Every commit on <code>main</code> that touched <code>skills/visual-report/</code>, oldest at the top. This is the folder's whole history, 12 commits. <span class="how">The accented entry is 088a29f, which added <code>check_render.py</code> (985 lines) and <code>tests/test_visual_report.py</code> (345 lines) in a pull request that also gave review-pbi-diff and ship their own "prove-it-works" checks. Everything before it is prose and style passes.</span></p>
+        <p class="sowhat">The render check arrived four months after the skill, in one 2,605-insertion pull request, and the one commit since has only touched docs and config.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>The render check reached visual-report on 2026-10-03, four months after the skill, in one pull request that added 985 lines of checker and 345 lines of tests. The folder's 12-commit history is otherwise docs passes.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 8 ================= -->
+  <section class="sec" id="s8">
+    <h2 class="sec-head"><span class="badge">8</span><span>Where the lines live</span><span class="count">Figure 8</span></h2>
+    <div class="prose">
+      <p>Figure 8 ranks the ten largest skill folders by lines across every git-tracked file. The top five together are 60.5% of the 17,001 tracked lines. The eight skills not listed share 13.4%.</p>
+    </div>
+
+    <div class="fig" id="fig-8">
+      <div class="visual">
+        <div class="figframe bars">
+          <div class="bar-row"><span class="bar-label">fabric-lineage-dag</span><div class="bar-track"><div class="bar-fill" style="width:70.0%"></div><span class="bar-num"><b>21.4%</b> <span class="bar-sub">3,635 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">review-pbi-diff</span><div class="bar-track"><div class="bar-fill" style="width:37.0%"></div><span class="bar-num"><b>11.3%</b> <span class="bar-sub">1,927 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">metabase</span><div class="bar-track"><div class="bar-fill" style="width:34.7%"></div><span class="bar-num"><b>10.6%</b> <span class="bar-sub">1,803 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">snowman</span><div class="bar-track"><div class="bar-fill" style="width:30.7%"></div><span class="bar-num"><b>9.4%</b> <span class="bar-sub">1,601 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">visual-report</span><div class="bar-track"><div class="bar-fill" style="width:25.5%"></div><span class="bar-num"><b>7.8%</b> <span class="bar-sub">1,318 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">dbt-runner</span><div class="bar-track"><div class="bar-fill" style="width:20.6%"></div><span class="bar-num"><b>6.3%</b> <span class="bar-sub">1,064 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">gh-weekly-report</span><div class="bar-track"><div class="bar-fill" style="width:20.3%"></div><span class="bar-num"><b>6.2%</b> <span class="bar-sub">1,060 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">statusline</span><div class="bar-track"><div class="bar-fill" style="width:20.0%"></div><span class="bar-num"><b>6.1%</b> <span class="bar-sub">1,038 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">candidate-to-spec</span><div class="bar-track"><div class="bar-fill" style="width:14.1%"></div><span class="bar-num"><b>4.3%</b> <span class="bar-sub">728 lines</span></span></div></div>
+<div class="bar-row"><span class="bar-label">implement-ticket</span><div class="bar-track"><div class="bar-fill" style="width:10.5%"></div><span class="bar-num"><b>3.2%</b> <span class="bar-sub">538 lines</span></span></div></div>
+<div class="bar-row other"><span class="bar-label">8 other skills</span><div class="bar-track"><div class="bar-fill" style="width:43.8%"></div><span class="bar-num"><b>13.4%</b> <span class="bar-sub">2,289 lines</span></span></div></div>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 8.</span> The ten largest skill folders by lines across every git-tracked file (SKILL.md, README, <code>plugin.json</code>, references, scripts, assets), as a share of the 17,001-line catalogue. <span class="how">Bars are scaled to the largest folder. The number at the end of each bar is the folder's share, then its line count. The top five together are 60.5% of all tracked lines. The eight skills not listed share 13.4%, shown as the grey bar.</span></p>
+        <p class="sowhat">Line count follows scripts, not prose. The four largest folders are the four with the most script code, while the most-committed skill (orchestrator-mode, 25 commits) is only 306 lines.</p>
+      </div>
+    </div>
+
+    <ul class="takeaways">
+      <li>Script code, not prompt text, is where the catalogue's bulk lives. fabric-lineage-dag's 17 scripts make its folder 3,635 lines, 21% of the 17,001 tracked lines, with an 89-line SKILL.md.</li>
+    </ul>
+  </section>
+
+  <!-- ================= 9 ================= -->
+  <section class="sec" id="s9">
+    <h2 class="sec-head"><span class="badge">9</span><span>Limits</span><span class="count">What this report cannot show</span></h2>
+    <div class="prose">
+      <p>Four measurement choices bound what the figures above can claim.</p>
+    </div>
+    <ol class="limits">
+      <li>Commit counts include the 5 merge commits, and a commit that touches several skill folders is counted once per folder, so Table 1's commits column sums to 210, not 124.</li>
+      <li>Skill-to-skill and test-to-skill edges in Figure 3 and Table 2 are grep- and import-based. A skill name that appears in prose counts as an edge, and nothing here verifies that the dependency is exercised at run time.</li>
+      <li>"Tracked lines" in Table 1 and Figure 8 counts every git-tracked file in a folder with <code>wc -l</code>, including README and <code>plugin.json</code>, and treats binary assets (statusline's screenshots) as zero or a few lines.</li>
+      <li>The sequence in Figure 4 was read from the source, not traced from a live run. No report was rendered to produce this content, and the CI job list reflects <code>ci.yml</code> at commit a590a62 only.</li>
+    </ol>
+  </section>
+</main>
+
+<nav class="proto-switch" aria-label="Prototype navigation">
+  <a href="prototypes.html" target="_top">&larr; All prototypes</a>
+</nav>
+
+<!-- Vega stack: classic scripts, order matters (vega -> vega-lite -> vega-embed) -->
+<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@6.5.0/build/vega-lite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@7.3.0/build/vega-embed.min.js"></script>
+<script>
+  const VL_CONFIG = {
+    font: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+    mark: { color: "#0b6e4f" },                       // accent for single-colour marks
+    range: { category: ["#0b6e4f", "#d1495b", "#edae49", "#30638e", "#8a8f98"] }, // optional: series colours
+    axis: { labelColor: "#59636e", titleColor: "#1f2328", gridColor: "#eaeef2" },
+    view: { stroke: null }
+  };
+  const VL_OPTS = { renderer: "svg", actions: false };
+  // vegaEmbed("#chart-id", { $schema: "https://vega.github.io/schema/vega-lite/v6.json", data: { values: [...] }, mark: "bar", encoding: {...}, config: VL_CONFIG }, VL_OPTS);
+
+  // This report's theme on top of the proven block: one accent, no series colours in use.
+  const VL_THEME = Object.assign({}, VL_CONFIG, {"font": "-apple-system, \"Segoe UI\", Helvetica, Arial, sans-serif", "mark": {"color": "#0a6b6f"}, "axis": {"labelColor": "#5a6675", "titleColor": "#15202b", "gridColor": "#dfe5ec", "domainColor": "#dfe5ec", "tickColor": "#dfe5ec", "labelFontSize": 11.5, "titleFontSize": 11.5}, "view": {"stroke": null}});
+  const barSpec = {"$schema": "https://vega.github.io/schema/vega-lite/v6.json", "width": "container", "height": 400, "data": {"values": [{"skill": "implement-ticket", "lines": 150}, {"skill": "metabase", "lines": 150}, {"skill": "prefect", "lines": 150}, {"skill": "review-pbi-diff", "lines": 150}, {"skill": "student-mode", "lines": 150}, {"skill": "ship", "lines": 148}, {"skill": "orchestrator-mode", "lines": 147}, {"skill": "snowman", "lines": 143}, {"skill": "implement-feature", "lines": 142}, {"skill": "dbt-runner", "lines": 134}, {"skill": "dlt-bootstrap", "lines": 133}, {"skill": "candidate-to-spec", "lines": 129}, {"skill": "qualify-delegation", "lines": 123}, {"skill": "gh-weekly-report", "lines": 119}, {"skill": "smart-git-commit", "lines": 114}, {"skill": "fabric-lineage-dag", "lines": 89}, {"skill": "statusline", "lines": 64}, {"skill": "visual-report", "lines": 56}]}, "layer": [{"mark": {"type": "bar", "height": 14}, "encoding": {"y": {"field": "skill", "type": "nominal", "sort": null, "title": null, "axis": {"labelFont": "ui-monospace, Menlo, monospace", "labelFontSize": 11.5}}, "x": {"field": "lines", "type": "quantitative", "title": "SKILL.md length (lines)", "scale": {"domain": [0, 182]}, "axis": {"values": [0, 50, 100, 150], "tickCount": 4}}, "color": {"condition": {"test": "datum.lines == 150", "value": "#0a6b6f"}, "value": "#a3aebc"}}}, {"mark": {"type": "text", "align": "right", "fontSize": 11, "fontWeight": "bold", "font": "ui-monospace, Menlo, monospace"}, "encoding": {"y": {"field": "skill", "type": "nominal", "sort": null}, "x": {"datum": 180}, "text": {"field": "lines"}, "color": {"condition": {"test": "datum.lines == 150", "value": "#0a6b6f"}, "value": "#5a6675"}}}, {"data": {"values": [{"budget": 150}]}, "mark": {"type": "rule", "strokeDash": [4, 3], "color": "#15202b", "strokeWidth": 1.2}, "encoding": {"x": {"field": "budget", "type": "quantitative"}}}, {"data": {"values": [{"budget": 150, "label": "LINE_BUDGET = 150 (lint_skill.py:35)"}]}, "mark": {"type": "text", "align": "right", "baseline": "bottom", "dx": -4, "dy": -2, "fontSize": 10, "fontWeight": "bold", "color": "#15202b"}, "encoding": {"x": {"field": "budget", "type": "quantitative"}, "y": {"value": 0}, "text": {"field": "label"}}}]};
+  barSpec.config = VL_THEME;
+  const lineSpec = {"$schema": "https://vega.github.io/schema/vega-lite/v6.json", "width": "container", "height": 280, "data": {"values": [{"month": "2026-05", "commits": 4}, {"month": "2026-06", "commits": 37}, {"month": "2026-07", "commits": 14}, {"month": "2026-08", "commits": 10}, {"month": "2026-09", "commits": 23}, {"month": "2026-10", "commits": 36}]}, "layer": [{"mark": {"type": "line", "point": {"size": 70, "filled": true}, "strokeWidth": 2.5, "color": "#0a6b6f"}, "encoding": {"x": {"field": "month", "type": "ordinal", "title": "Author month (2026)", "axis": {"labelAngle": 0, "labelExpr": "slice(datum.value, 5)"}}, "y": {"field": "commits", "type": "quantitative", "title": "Commits on main", "scale": {"domain": [0, 40]}}}}, {"mark": {"type": "text", "dy": -13, "fontSize": 12, "fontWeight": "bold", "color": "#0a6b6f"}, "encoding": {"x": {"field": "month", "type": "ordinal"}, "y": {"field": "commits", "type": "quantitative"}, "text": {"field": "commits"}}}]};
+  lineSpec.config = VL_THEME;
+  window.__vegaDone = Promise.all([
+    vegaEmbed("#vl-bar", barSpec, VL_OPTS),
+    vegaEmbed("#vl-line", lineSpec, VL_OPTS)
+  ]);
+</script>
+
+<script>
+  // ---- click-to-sort on every column of every table.sortable ----
+  (function () {
+    function cellKey(td, type) {
+      if (td.dataset.v !== undefined) {
+        return type === "num" ? parseFloat(td.dataset.v) : td.dataset.v;
+      }
+      const t = td.textContent.trim();
+      if (type === "num") { const v = parseFloat(t.replace(/,/g, "")); return isNaN(v) ? -Infinity : v; }
+      return t.toLowerCase();
+    }
+    function sortTable(table, idx, th) {
+      const ths = table.querySelectorAll("thead th");
+      const dir = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+      ths.forEach(h => h.removeAttribute("aria-sort"));
+      th.setAttribute("aria-sort", dir);
+      const type = th.dataset.type || "txt";
+      const rows = Array.from(table.querySelectorAll("tbody tr"));
+      const sign = dir === "ascending" ? 1 : -1;
+      rows.sort((a, b) => {
+        const ka = cellKey(a.cells[idx], type), kb = cellKey(b.cells[idx], type);
+        return (ka < kb ? -1 : ka > kb ? 1 : 0) * sign;
+      });
+      const bodies = table.querySelectorAll("tbody");
+      const show = parseInt(table.dataset.show || "0", 10);
+      if (show && bodies.length === 2) {
+        rows.forEach((r, k) => (k < show ? bodies[0] : bodies[1]).appendChild(r));
+      } else {
+        rows.forEach(r => bodies[0].appendChild(r));
+      }
+    }
+    document.querySelectorAll("table.sortable").forEach(table => {
+      table.querySelectorAll("thead th").forEach((th, idx) => {
+        th.setAttribute("tabindex", "0");
+        th.setAttribute("title", "Sort by " + th.textContent.trim());
+        th.addEventListener("click", () => sortTable(table, idx, th));
+        th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortTable(table, idx, th); } });
+      });
+    });
+    // ---- details toggle shows the hidden tbody ----
+    document.querySelectorAll("details.more[data-target]").forEach(d => {
+      const target = document.getElementById(d.dataset.target);
+      d.addEventListener("toggle", () => { target.hidden = !d.open; });
+    });
+  })();
+
+  // ---- current section in the sidebar ----
+  (function () {
+    const links = Array.from(document.querySelectorAll("#toc a"));
+    const byId = {};
+    links.forEach(a => { byId[a.getAttribute("href").slice(1)] = a; });
+    const sections = Array.from(document.querySelectorAll("section.sec"));
+    const visible = new Map();
+    function update() {
+      let best = null;
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom) best = sections[sections.length - 1];
+      for (const s of sections) {
+        if (best) break;
+        const r = s.getBoundingClientRect();
+        if (r.top <= 120 && r.bottom > 120) { best = s; break; }
+      }
+      if (!best) {
+        for (const s of sections) { if (visible.get(s.id)) { best = s; break; } }
+      }
+      links.forEach(a => a.classList.remove("current"));
+      if (best && byId[best.id]) byId[best.id].classList.add("current");
+    }
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver(entries => {
+        entries.forEach(e => visible.set(e.target.id, e.isIntersecting));
+        update();
+      }, { rootMargin: "-10% 0px -60% 0px", threshold: [0, 0.1, 0.5, 1] });
+      sections.forEach(s => io.observe(s));
+    }
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+  })();
+
+</script>
+
+<!-- Mermaid stack: ESM, pinned. Must be type="module". -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs";
+  import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.2.3/dist/mermaid-layout-elk.esm.min.mjs";
+  mermaid.registerLayoutLoaders(elkLayouts);
+  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", fontFamily: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif', theme: "base", themeVariables: {"fontFamily": "-apple-system, \"Segoe UI\", Helvetica, Arial, sans-serif", "fontSize": "13px", "primaryColor": "#dcefee", "primaryBorderColor": "#0a6b6f", "primaryTextColor": "#15202b", "secondaryColor": "#e1e7ee", "tertiaryColor": "#eaeef3", "lineColor": "#15202b", "textColor": "#15202b", "noteBkgColor": "#fbf3e4", "noteBorderColor": "#b7791f", "noteTextColor": "#15202b", "actorBkg": "#dcefee", "actorBorder": "#0a6b6f", "actorTextColor": "#15202b", "actorLineColor": "#5a6675", "signalColor": "#15202b", "signalTextColor": "#15202b", "labelBoxBkgColor": "#e1e7ee", "labelBoxBorderColor": "#5a6675", "labelTextColor": "#15202b", "loopTextColor": "#15202b", "activationBorderColor": "#0a6b6f", "activationBkgColor": "#c3e3e2", "sequenceNumberColor": "#ffffff"}, sequence: { useMaxWidth: true, actorFontWeight: 600, messageFontSize: 13, actorFontSize: 14, width: 130, height: 30, boxMargin: 5, messageMargin: 14, mirrorActors: false, wrap: false, actorMargin: 40 } });
+  await mermaid.run();
+</script>
+</body>
+</html>

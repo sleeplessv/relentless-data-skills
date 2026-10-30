@@ -1,0 +1,157 @@
+flowchart LR
+  candidate_to_spec["candidate-to-spec"]
+  dbt_runner["dbt-runner"]
+  dlt_bootstrap["dlt-bootstrap"]
+  fabric_lineage_dag["fabric-lineage-dag"]
+  gh_weekly_report["gh-weekly-report"]
+  implement_feature["implement-feature"]
+  implement_ticket["implement-ticket"]
+  metabase["metabase"]
+  orchestrator_mode["orchestrator-mode"]
+  prefect["prefect"]
+  qualify_delegation["qualify-delegation"]
+  review_pbi_diff["review-pbi-diff"]
+  ship["ship"]
+  smart_git_commit["smart-git-commit"]
+  snowman["snowman"]
+  statusline["statusline"]
+  student_mode["student-mode"]
+  visual_report["visual-report"]
+  lint_skill["lint_skill.py"]
+  sync_registry["sync_registry.py"]
+  skill_versions["skill_versions.py"]
+  check_doc_urls["check_doc_urls.py"]
+  check_sh["check.sh"]
+  statusline_shots["statusline_screenshots.py"]
+  plugin_json["plugin.json (18)"]
+  ci_version["CI skill-version-check"]
+  ci_tests["CI tests"]
+  ci_lint["CI skill-lint"]
+  ci_plugin["CI plugin-validate"]
+  ci_urls["CI doc-url-liveness"]
+  test_candidate_to_spec_commands["test_candidate_to_spec_commands"]
+  test_dbt_runner["test_dbt_runner"]
+  test_dlt_bootstrap["test_dlt_bootstrap"]
+  test_gh_weekly_report["test_gh_weekly_report"]
+  test_lint_skill["test_lint_skill"]
+  test_metabase["test_metabase"]
+  test_review_pbi_diff["test_review_pbi_diff"]
+  test_skill_git_sequences["test_skill_git_sequences"]
+  test_skill_versions["test_skill_versions"]
+  test_snowman["test_snowman"]
+  test_statusline["test_statusline"]
+  test_sync_registry["test_sync_registry"]
+  test_visual_report["test_visual_report"]
+  check_render["check_render.py"]
+  snowman_py["snowman.py"]
+  mb_py["mb.py"]
+  preflight_py["preflight.py"]
+  extract_changes["extract_changes.py"]
+  check_artifact["check_artifact.py"]
+  statusline_sh["statusline.sh"]
+  collect_py["collect.py"]
+  render_py["render.py"]
+  fld_scripts["fabric-lineage-dag/scripts (17)"]
+  html_report["visual/HTML-REPORT.md"]
+  visual_language["visual/VISUAL-LANGUAGE.md"]
+  if_reference["implement/reference.md"]
+  candidate_to_spec --> implement_feature
+  candidate_to_spec --> orchestrator_mode
+  dbt_runner --> ship
+  dlt_bootstrap --> prefect
+  dlt_bootstrap --> ship
+  dlt_bootstrap --> snowman
+  implement_feature --> implement_ticket
+  implement_feature --> orchestrator_mode
+  implement_ticket --> orchestrator_mode
+  ship --> smart_git_commit
+  dbt_runner --> preflight_py
+  metabase --> mb_py
+  review_pbi_diff --> extract_changes
+  review_pbi_diff --> check_artifact
+  gh_weekly_report --> collect_py
+  gh_weekly_report --> render_py
+  fabric_lineage_dag --> fld_scripts
+  statusline --> statusline_sh
+  snowman --> snowman_py
+  visual_report --> check_render
+  visual_report --> html_report
+  visual_report --> visual_language
+  implement_feature --> if_reference
+  test_lint_skill --> lint_skill
+  test_skill_versions --> skill_versions
+  test_sync_registry --> sync_registry
+  test_dbt_runner --> preflight_py
+  test_metabase --> mb_py
+  test_review_pbi_diff --> extract_changes
+  test_review_pbi_diff --> check_artifact
+  test_snowman --> snowman_py
+  test_statusline --> statusline_sh
+  test_visual_report --> check_render
+  test_gh_weekly_report --> collect_py
+  test_gh_weekly_report --> render_py
+  test_dlt_bootstrap --> dlt_bootstrap
+  test_candidate_to_spec_commands --> candidate_to_spec
+  test_candidate_to_spec_commands --> test_skill_git_sequences
+  test_skill_git_sequences --> if_reference
+  test_skill_git_sequences --> ship
+  test_skill_git_sequences --> smart_git_commit
+  ci_version --> skill_versions
+  ci_version --> sync_registry
+  ci_lint --> lint_skill
+  ci_urls --> check_doc_urls
+  ci_tests --> test_candidate_to_spec_commands
+  ci_tests --> test_dbt_runner
+  ci_tests --> test_dlt_bootstrap
+  ci_tests --> test_gh_weekly_report
+  ci_tests --> test_lint_skill
+  ci_tests --> test_metabase
+  ci_tests --> test_review_pbi_diff
+  ci_tests --> test_skill_git_sequences
+  ci_tests --> test_skill_versions
+  ci_tests --> test_snowman
+  ci_tests --> test_statusline
+  ci_tests --> test_sync_registry
+  ci_tests --> test_visual_report
+  check_sh --> lint_skill
+  check_sh --> sync_registry
+  check_sh --> skill_versions
+  check_sh --> check_doc_urls
+  skill_versions --> sync_registry
+  skill_versions --> plugin_json
+  sync_registry --> plugin_json
+  statusline_shots --> statusline_sh
+  lint_skill --> candidate_to_spec
+  lint_skill --> dbt_runner
+  lint_skill --> dlt_bootstrap
+  lint_skill --> fabric_lineage_dag
+  lint_skill --> gh_weekly_report
+  lint_skill --> implement_feature
+  lint_skill --> implement_ticket
+  lint_skill --> metabase
+  lint_skill --> orchestrator_mode
+  lint_skill --> prefect
+  lint_skill --> qualify_delegation
+  lint_skill --> review_pbi_diff
+  lint_skill --> ship
+  lint_skill --> smart_git_commit
+  lint_skill --> snowman
+  lint_skill --> statusline
+  lint_skill --> student_mode
+  lint_skill --> visual_report
+  classDef gSkill fill:#e3efe9,stroke:#0b6e4f,color:#1a1c1e
+  classDef gRoot fill:#e1eaf3,stroke:#30638e,color:#1a1c1e
+  classDef gManifest fill:#f1efe8,stroke:#8a8f98,color:#1a1c1e
+  classDef gCi fill:#ebe4f3,stroke:#7b5ea7,color:#1a1c1e
+  classDef gTest fill:#ededef,stroke:#8a8f98,color:#1a1c1e
+  classDef gScript fill:#fbf0d9,stroke:#edae49,color:#1a1c1e
+  classDef gRef fill:#f8e3e6,stroke:#d1495b,color:#1a1c1e
+  classDef hub stroke-width:3px
+  class candidate_to_spec,dbt_runner,dlt_bootstrap,fabric_lineage_dag,gh_weekly_report,implement_feature,implement_ticket,metabase,orchestrator_mode,prefect,qualify_delegation,review_pbi_diff,ship,smart_git_commit,snowman,statusline,student_mode,visual_report gSkill
+  class lint_skill,sync_registry,skill_versions,check_doc_urls,check_sh,statusline_shots gRoot
+  class plugin_json gManifest
+  class ci_version,ci_tests,ci_lint,ci_plugin,ci_urls gCi
+  class test_candidate_to_spec_commands,test_dbt_runner,test_dlt_bootstrap,test_gh_weekly_report,test_lint_skill,test_metabase,test_review_pbi_diff,test_skill_git_sequences,test_skill_versions,test_snowman,test_statusline,test_sync_registry,test_visual_report gTest
+  class check_render,snowman_py,mb_py,preflight_py,extract_changes,check_artifact,statusline_sh,collect_py,render_py,fld_scripts gScript
+  class html_report,visual_language,if_reference gRef
+  class lint_skill,ci_tests hub

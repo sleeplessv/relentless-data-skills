@@ -1,0 +1,753 @@
+<!-- PROTOTYPE, throwaway. Three structurally different layouts of one report: variant-a.html (Editorial), variant-b.html (Dossier), variant-c.html (Brief). All prototypes are listed in prototypes.html; the floating pill links there. -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How the skills catalogue is built and checked</title>
+<style>
+  :root {
+    --paper: #fcfcfa;
+    --ink: #1a1a1a;
+    --accent: #0b6e4f;
+    --red: #b3261e;
+    --amber: #b7791f;
+    --amber-tint: #fbf3e0;
+    --slate: #6b7280;
+    --rule: #d8d8d2;
+    --rule-soft: #ebebe6;
+    --c1: #0b6e4f; --c2: #30638e; --c3: #7b5ea7; --c4: #edae49; --c5: #d1495b; --c6: #8a8f98;
+    --t1: #e3efe9; --t2: #e1e9f1; --t3: #ede7f5; --t4: #fbf0d8; --t5: #f9e4e7; --t6: #ebecee;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --display: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    /* 1.25 modular scale from 16px */
+    --col: 640px; /* about 72 characters of body text */
+    --s-2: 0.64rem; --s-1: 0.8rem; --s0: 1rem; --s1: 1.25rem; --s2: 1.563rem; --s3: 1.953rem; --s4: 2.441rem;
+  }
+  * { box-sizing: border-box; }
+  html { background: var(--paper); }
+  body {
+    margin: 0; color: var(--ink); background: var(--paper);
+    font: var(--s0)/1.55 var(--body);
+    font-variant-numeric: tabular-nums;
+    -webkit-font-smoothing: antialiased;
+  }
+  main { max-width: 1100px; margin: 0 auto; padding: 3rem 24px 7rem; }
+  .prose { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  h1, h2, h3, .claim, .stat b { font-family: var(--display); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+  h1 { font-size: var(--s3); margin: 0 0 0.75rem; }
+  h2 { font-size: var(--s3); margin: 0 0 1rem; }
+  h3 { font-size: var(--s1); margin: 2rem 0 0.5rem; letter-spacing: -0.01em; }
+  p { margin: 0 0 1rem; }
+  a { color: var(--accent); }
+  code, .id, .mono { font-family: var(--mono); font-size: 0.92em; }
+  small { font-size: var(--s-1); }
+  header { max-width: var(--col); margin: 0 auto; }
+  .kicker { font-size: var(--s-1); color: var(--slate); text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 0.5rem; }
+
+  /* Answer */
+  .answer { border-top: 1px solid var(--ink); padding-top: 1.25rem; margin: 1.5rem auto 0; max-width: var(--col); }
+  .answer .label { font-size: var(--s-1); color: var(--slate); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.75rem; }
+  .claim { font-size: var(--s4); margin: 0 0 1.5rem; }
+  .claim code { font-size: 0.78em; font-weight: 600; letter-spacing: 0; }
+  .stats { display: flex; flex-wrap: wrap; gap: 1rem 2.25rem; margin: 0; padding: 1rem 0 0; border-top: 1px solid var(--rule); list-style: none; }
+  .stat { margin: 0; }
+  .stat b { display: block; font-size: var(--s2); line-height: 1; }
+  .stat span { display: block; font-size: var(--s-1); color: var(--slate); margin-top: 0.3rem; }
+
+  /* Contents */
+  .toc { max-width: var(--col); margin: 2.5rem auto 0; padding-top: 1rem; border-top: 1px solid var(--rule); }
+  .toc .label { font-size: var(--s-1); color: var(--slate); text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
+  .toc ol { columns: 2; column-gap: 2.5rem; margin: 0; padding: 0; list-style: none; counter-reset: toc; }
+  .toc li { counter-increment: toc; break-inside: avoid; padding: 0.2rem 0; }
+  .toc li::before { content: counter(toc) "."; display: inline-block; width: 1.8rem; color: var(--slate); font-variant-numeric: tabular-nums; }
+  .toc a { color: var(--ink); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  /* Sections */
+  section { border-top: 1px solid var(--rule); margin-top: 3.5rem; padding-top: 1.75rem; }
+  section > h2, section > p, section > ol, section > ul, section > dl, section > h3 { max-width: var(--col); margin-left: auto; margin-right: auto; }
+  section > h2 { margin-bottom: 1.25rem; }
+  .takeaways { padding-left: 1.4rem; margin-top: 1.5rem; }
+  .takeaways li { margin-bottom: 0.4rem; }
+  .takeaways-label { font-size: var(--s-1); color: var(--slate); text-transform: uppercase; letter-spacing: 0.08em; margin: 2rem auto 0.4rem; }
+  dl.terms { margin: 1rem auto 1.5rem; font-size: var(--s-1); color: var(--slate); border-left: 2px solid var(--rule); padding-left: 1rem; }
+  dl.terms dt { font-weight: 700; color: var(--ink); display: inline; }
+  dl.terms dd { display: inline; margin: 0; }
+  dl.terms div { margin-bottom: 0.3rem; }
+
+  /* Figures */
+  figure { margin: 2rem auto; width: 100%; max-width: 1100px; }
+  figure.narrow { max-width: var(--col); }
+  figure.scroll .frame { overflow: auto; max-height: 820px; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); }
+  figure.scroll .frame svg { max-width: none; }
+  figcaption { max-width: var(--col); margin: 0.9rem auto 0; font-size: var(--s-1); color: var(--slate); line-height: 1.5; }
+  figcaption b { color: var(--ink); font-weight: 700; }
+  p.sowhat { font-weight: 700; margin-top: 0.4rem; }
+  .chart { width: 100%; min-height: 240px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 0.35rem 1.2rem; font-size: var(--s-1); color: var(--slate); margin: 0.5rem 0 0; padding: 0; list-style: none; }
+  .legend li::before { content: ""; display: inline-block; width: 0.75rem; height: 0.75rem; border-radius: 2px; margin-right: 0.4rem; vertical-align: -1px; border: 1.5px solid var(--sw); background: var(--tint); }
+  .mermaid svg { display: block; margin: 0 auto; }
+
+  /* Tables */
+  .tablewrap { width: 100%; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: var(--s-1); }
+  thead th { position: sticky; top: 0; background: var(--paper); text-align: left; font-weight: 700; padding: 0.5rem 0.6rem; border-bottom: 1.5px solid var(--ink); cursor: pointer; user-select: none; white-space: nowrap; z-index: 1; }
+  thead th .unit { display: block; font-weight: 400; color: var(--slate); font-size: var(--s-2); }
+  thead th::after { content: "\2195"; display: inline-block; margin-left: 0.35rem; color: var(--slate); opacity: 0.45; font-weight: 400; }
+  thead th[aria-sort="ascending"]::after { content: "\2191"; opacity: 1; color: var(--accent); }
+  thead th[aria-sort="descending"]::after { content: "\2193"; opacity: 1; color: var(--accent); }
+  thead th:hover { color: var(--accent); }
+  td { padding: 0.4rem 0.6rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+  td.num, th.num { text-align: right; }
+  thead th.num::after { margin-left: 0.3rem; }
+  tfoot td { border-top: 1.5px solid var(--ink); border-bottom: 0; font-weight: 700; }
+  tr.extra { display: none; }
+  table.open tr.extra { display: table-row; }
+  details.more { max-width: var(--col); margin: 0.6rem auto 0; font-size: var(--s-1); }
+  details.more summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+  details.more p { margin: 0.4rem 0 0; color: var(--slate); }
+
+  /* Matrix */
+  .matrix thead th { cursor: default; }
+  .matrix thead th::after { content: none; }
+  .matrix td.mark { text-align: center; font-size: 1.1rem; line-height: 1; }
+  .matrix .pass { color: var(--accent); }
+  .matrix .fail { color: var(--red); }
+  .matrix .blocked { color: var(--slate); }
+  .matrix tr.tier-defect td:first-child, .matrix tr.tier-soft td:first-child, .matrix tr.tier-env td:first-child { border-left: 3px solid var(--rule); }
+  .matrix tr.tier-defect td:first-child { border-left-color: var(--red); }
+  .matrix tr.tier-env td:first-child { border-left-color: var(--slate); }
+  .matrix tr.tier-soft td:first-child { border-left-color: #e3a9a4; }
+  .matrix tr.sep td { border-bottom: 1.5px solid var(--ink); }
+
+  /* Code excerpt */
+  .codefig { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1.5rem; align-items: start; }
+  pre.code { margin: 0; padding: 0.75rem 0; background: #fff; border-top: 1px solid var(--rule); border-bottom: 1px solid var(--rule); font: 0.8rem/1.55 var(--mono); counter-reset: ln 353; overflow-x: auto; white-space: normal; }
+  pre.code .line { display: block; position: relative; padding: 0 2.6rem 0 0.5rem; white-space: pre; }
+  pre.code .line::before { counter-increment: ln; content: counter(ln); display: inline-block; width: 3ch; margin-right: 1.5ch; text-align: right; color: var(--slate); }
+  pre.code .line.hit { background: var(--amber-tint); }
+  pre.code .mk, .notes .mk { position: absolute; right: 0.5rem; top: 0.2em; }
+  .mk { display: inline-block; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--amber); color: #fff; font: 700 0.7rem/1.25rem var(--body); text-align: center; }
+  .notes { margin: 0; padding: 0; list-style: none; font-size: var(--s-1); }
+  .notes li { position: relative; padding-left: 1.9rem; margin-bottom: 0.7rem; }
+  .notes .mk { left: 0; right: auto; top: 0.1rem; }
+
+  /* Timeline */
+  ol.timeline { list-style: none; margin: 0 auto; padding: 0; max-width: var(--col); position: relative; }
+  ol.timeline::before { content: ""; position: absolute; left: calc(6.5rem + 0.45rem); top: 0.4rem; bottom: 0.4rem; width: 1px; background: var(--rule); }
+  ol.timeline li { display: grid; grid-template-columns: 6.5rem 1rem 1fr; gap: 0 0.75rem; padding: 0.45rem 0; align-items: start; }
+  ol.timeline .t-date { font-size: var(--s-1); color: var(--slate); padding-top: 0.15rem; }
+  ol.timeline .t-dot { width: 0.6rem; height: 0.6rem; border-radius: 50%; background: var(--paper); border: 1.5px solid var(--slate); margin-top: 0.45rem; margin-left: 0.15rem; }
+  ol.timeline .t-body { font-size: var(--s-1); }
+  ol.timeline .t-hash { color: var(--slate); margin-right: 0.3rem; }
+  ol.timeline .t-note { display: block; color: var(--slate); }
+  ol.timeline li.pivot { background: linear-gradient(90deg, transparent 7.7rem, var(--t1) 7.7rem); border-radius: 4px; margin: 0.3rem 0; padding: 0.6rem 0.5rem 0.6rem 0; }
+  ol.timeline li.pivot .t-dot { background: var(--accent); border-color: var(--accent); box-shadow: 0 0 0 3px var(--t1); }
+  ol.timeline li.pivot .t-body { font-size: var(--s0); padding-left: 0.5rem; }
+  ol.timeline li.pivot .t-subj { font-weight: 700; color: var(--accent); }
+  ol.timeline li.pivot .t-hash { color: var(--accent); font-weight: 700; }
+  ol.timeline li.pivot .t-note { color: var(--ink); font-size: var(--s-1); }
+
+  /* Proportion bars */
+  .bars { max-width: var(--col); margin: 0 auto; }
+  .bar-row { display: grid; grid-template-columns: 11rem 1fr; gap: 0 0.75rem; align-items: center; padding: 0.22rem 0; }
+  .bar-label { font-family: var(--mono); font-size: var(--s-1); text-align: right; }
+  .bar-area { display: flex; align-items: center; gap: 0.5rem; }
+  .bar { display: block; height: 1.1rem; background: var(--accent); border-radius: 1px; flex: none; }
+  .bar-val { font-size: var(--s-1); white-space: nowrap; }
+  .bar-val small { color: var(--slate); margin-left: 0.2rem; }
+  .bar-row.other .bar { background: var(--c6); }
+  .bar-row.other .bar-label { color: var(--slate); font-family: var(--body); }
+  .bar-row:first-child .bar { background: var(--accent); }
+
+  /* Limits and method */
+  .method { font-size: var(--s-1); color: var(--slate); }
+  .method code { color: var(--ink); }
+  footer { max-width: var(--col); margin: 3rem auto 0; padding-top: 1rem; border-top: 1px solid var(--rule); font-size: var(--s-1); color: var(--slate); }
+
+  /* Prototype switcher, not part of the design */
+  .switcher { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 0.6rem; background: #000; color: #fff; padding: 0.45rem 0.6rem 0.45rem 0.6rem; border-radius: 999px; font: 600 0.85rem/1 var(--body); box-shadow: 0 2px 10px rgba(0,0,0,0.35); z-index: 50; }
+  .switcher a { color: #fff; text-decoration: none; display: inline-block; width: 1.8rem; height: 1.8rem; line-height: 1.8rem; text-align: center; border-radius: 50%; background: #333; font-size: 1rem; }
+  .switcher a:hover { background: #555; }
+  .switcher span { padding: 0 0.3rem; letter-spacing: 0.01em; }
+
+  @media (max-width: 860px) {
+    .codefig { grid-template-columns: 1fr; }
+    .toc ol { columns: 1; }
+    .claim { font-size: var(--s3); }
+  }
+  @media print {
+    .switcher, .toc { display: none; }
+    figure, table, pre { break-inside: avoid; }
+    section { break-inside: auto; }
+    thead th { position: static; }
+    thead th::after { content: none; }
+    tr.extra { display: table-row; }
+    details.more { display: none; }
+    main { padding: 0; }
+  }
+</style>
+</head>
+<body>
+<main>
+
+<header>
+  <p class="kicker">Explanation. Commit <code>a590a62</code> on main, measured 2026-10-30</p>
+  <h1>How the relentless-data-skills catalogue is built and checked</h1>
+</header>
+
+<div class="answer">
+  <div class="label">The claim this report defends</div>
+  <p class="claim">Every always-loaded SKILL.md fits the 150-line budget that <code>scripts/lint_skill.py</code> enforces in CI (five of 18 sit exactly on it), so the catalogue's weight lives in scripts and references: <code>fabric-lineage-dag</code> alone holds 17 of the 26 script files and 21% of the 17,001 tracked lines.</p>
+  <ul class="stats">
+    <li class="stat"><b>18</b><span>skills under <code>skills/</code></span></li>
+    <li class="stat"><b>2,291</b><span>SKILL.md lines in total</span></li>
+    <li class="stat"><b>150</b><span>line budget per SKILL.md</span></li>
+    <li class="stat"><b>5</b><span>skills exactly on the budget</span></li>
+    <li class="stat"><b>26</b><span>script files, 17 in one skill</span></li>
+    <li class="stat"><b>17,001</b><span>tracked lines across skill folders</span></li>
+    <li class="stat"><b>124</b><span>commits on main since 2026-05-21</span></li>
+    <li class="stat"><b>576</b><span>test functions in 13 files</span></li>
+  </ul>
+</div>
+
+<nav class="toc" aria-label="Contents">
+  <div class="label">Contents</div>
+  <ol>
+    <li><a href="#s1">Eighteen skills, one line budget</a></li>
+    <li><a href="#s2">Commits arrive in two waves</a></li>
+    <li><a href="#s3">Two hubs that are not skills</a></li>
+    <li><a href="#s4">How the render check runs</a></li>
+    <li><a href="#s5">How the render check decides</a></li>
+    <li><a href="#s6">When the render check arrived</a></li>
+    <li><a href="#s7">Where the lines live</a></li>
+    <li><a href="#s8">Limits</a></li>
+  </ol>
+</nav>
+
+<!-- 1 -->
+<section id="s1">
+  <h2>1. Eighteen skills, one line budget</h2>
+  <p>The catalogue is 18 skill folders under <code>skills/</code>. Each folder has a <code>plugin.json</code> manifest that carries the version, a SKILL.md that the agent loads whenever the skill triggers, and, where the skill needs them, <code>references/</code> and <code>scripts/</code> subfolders. Table 1 lists all 18 with the measures this report uses. Click any header to sort.</p>
+  <dl class="terms">
+    <div><dt>Skill.</dt> <dd>An independently versioned bundle of agent instructions and supporting files. Its documentation belongs to the same bundle.</dd></div>
+    <div><dt>Skill update.</dt> <dd>A set of changes delivered together to one skill. Documentation corrections count as updates, even when the skill's behavior stays the same.</dd></div>
+    <div><dt>Skill version.</dt> <dd>The identifier of a skill revision, used to track changes and support updates to installed copies.</dd></div>
+  </dl>
+
+  <figure id="table-1">
+    <div class="tablewrap">
+    <table class="sortable" aria-describedby="cap-t1">
+      <thead><tr>
+        <th data-type="text">skill</th>
+        <th data-type="text" class="num">version</th>
+        <th data-type="num" class="num">SKILL.md<span class="unit">lines</span></th>
+        <th data-type="num" class="num">references/<span class="unit">files</span></th>
+        <th data-type="num" class="num">scripts/<span class="unit">files</span></th>
+        <th data-type="text">DMI</th>
+        <th data-type="num" class="num">commits<span class="unit">count</span></th>
+        <th data-type="num" class="num">tracked<span class="unit">files</span></th>
+        <th data-type="num" class="num">tracked<span class="unit">lines</span></th>
+      </tr></thead>
+      <tbody>
+@@TABLE1@@
+      </tbody>
+      <tfoot>
+@@TABLE1FOOT@@
+      </tfoot>
+    </table>
+    </div>
+    <figcaption id="cap-t1"><b>Table 1.</b> Every skill folder under <code>skills/</code> with its manifest version, the size of its always-loaded SKILL.md, how many files it keeps in <code>references/</code> and <code>scripts/</code>, whether the model may invoke it on its own, how many commits have touched the folder, and the folder's tracked files and lines. Version comes from <code>plugin.json</code>. The line count is <code>wc -l SKILL.md</code>. File counts are <code>git ls-files</code> under each subfolder. DMI is <code>disable-model-invocation: true</code> in the SKILL.md frontmatter. Commits is <code>git log --oneline -- skills/&lt;name&gt; | wc -l</code>, so a commit that touches several skills counts once per skill and the column sums to 210, more than the repo's 124 commits.</figcaption>
+  </figure>
+  <p class="sowhat prose">The SKILL.md column is nearly flat, 56 to 150, while the scripts and commits columns are not. The budget shapes the prompt, not the skill.</p>
+
+  <p><code>scripts/lint_skill.py</code> sets <code>LINE_BUDGET = 150</code> on line 35 and fails any SKILL.md above it with the message "SKILL.md is N lines (budget 150)" on line 160. The CI job <code>skill-lint</code> runs the linter on every push and pull request, and <code>scripts/check.sh</code> runs it locally. The comment on lines 32 to 34 calls the budget "deliberately stricter than the docs' 500-line guidance", so that detail moves into <code>references/</code>. Figure 1 shows how hard that ceiling presses.</p>
+
+  <figure id="figure-1">
+    <div id="vl-budget" class="chart" aria-label="Bar chart of SKILL.md lines per skill"></div>
+    <figcaption><b>Figure 1.</b> The length of each skill's SKILL.md, sorted descending, with a reference line at 150, the <code>LINE_BUDGET</code> constant in <code>scripts/lint_skill.py</code> (line 35). A bar that touches the line is at the limit, not over it. Bars in green sit exactly on the budget; the linter fails any SKILL.md above it, and the <code>skill-lint</code> CI job runs the linter on every push and pull request.</figcaption>
+  </figure>
+  <p class="sowhat prose">Five skills sit exactly on the budget and two more are within three lines of it. The ceiling is load-bearing, not nominal.</p>
+
+  <p>The mean is 127.3 lines and the shortest SKILL.md is 56 lines, visual-report. Only three skills are under 90 lines, fabric-lineage-dag (89), statusline (64) and visual-report (56), and each of the three keeps a <code>scripts/</code> folder. The linter also decides who may invoke a skill. A skill whose files contain a command that acts on shared state, such as <code>gh pr merge</code> or <code>git push</code>, must set <code>disable-model-invocation: true</code> or be allow-listed with a reason. Eight of the 18 skills carry the flag.</p>
+
+  <p class="takeaways-label">Takeaways</p>
+  <ol class="takeaways">
+    <li>All 18 SKILL.md files are at or under the 150-line budget, five sit exactly on it, and the mean is 127 lines. The linter that enforces the budget runs on every push and pull request.</li>
+    <li>Eight of 18 skills carry <code>disable-model-invocation: true</code>. The linter forces it onto any skill whose files run a shared-state command such as <code>git push</code> or <code>gh pr merge</code>.</li>
+  </ol>
+</section>
+
+<!-- 2 -->
+<section id="s2">
+  <h2>2. Commits arrive in two waves</h2>
+  <p>The repo has 124 commits on <code>main</code>, 5 of them merge commits, from 2026-05-21 ("feat: initial prefect-skill") to 2026-10-29 ("fix(orchestrator-mode) ... (#110)"). Figure 2 counts them by author month.</p>
+
+  <figure id="figure-2">
+    <div id="vl-commits" class="chart" aria-label="Line chart of commits per month"></div>
+    <figcaption><b>Figure 2.</b> Commits on <code>main</code> by author month, from the first commit (2026-05-21) to the last (2026-10-29). Measured with <code>git log --date=format:%Y-%m --pretty=%ad | sort | uniq -c</code>. The count includes the 5 merge commits. The x-axis has six points and the y-axis spans 4 to 37.</figcaption>
+  </figure>
+  <p class="sowhat prose">Activity comes in two waves, June (37) and September to October (59), with a quiet July and August (24).</p>
+
+  <p>June is the month after the first skill landed. The second wave carries the render check, which section 6 dates to 2026-10-03. By folder, orchestrator-mode (25 commits), snowman (23) and implement-ticket (22) have been touched most, and qualify-delegation (1) least.</p>
+
+  <p class="takeaways-label">Takeaways</p>
+  <ol class="takeaways">
+    <li>The repo's 124 commits arrive in two waves, June (37) and September to October (59). orchestrator-mode (25), snowman (23) and implement-ticket (22) are the most-touched skill folders.</li>
+  </ol>
+</section>
+
+<!-- 3 -->
+<section id="s3">
+  <h2>3. Two hubs that are not skills</h2>
+  <p>Figure 3 draws what names, runs, imports or reads what, left to right from the CI jobs and tests through the linter to the skills and their files. It has 56 nodes and 84 directed edges: the 18 skills, 6 root scripts, the 18 <code>plugin.json</code> manifests as one node, 5 CI jobs, 13 test files, 10 skill-owned script nodes (fabric-lineage-dag's 17 scripts collapsed into one) and 3 reference files that something outside their own skill reads.</p>
+
+  <figure id="figure-3" class="scroll">
+    <div class="frame">
+    <pre class="mermaid">
+---
+config:
+  layout: elk
+  elk:
+    nodePlacementStrategy: NETWORK_SIMPLEX
+  flowchart:
+    useMaxWidth: false
+---
+flowchart LR
+  classDef skill fill:#e3efe9,stroke:#0b6e4f,color:#1a1a1a
+  classDef root fill:#e1e9f1,stroke:#30638e,color:#1a1a1a
+  classDef ci fill:#ede7f5,stroke:#7b5ea7,color:#1a1a1a
+  classDef test fill:#fbf0d8,stroke:#edae49,color:#1a1a1a
+  classDef sscript fill:#f9e4e7,stroke:#d1495b,color:#1a1a1a
+  classDef ref fill:#ebecee,stroke:#8a8f98,color:#1a1a1a
+  classDef manifest fill:#ffffff,stroke:#1a1a1a,stroke-dasharray:4 2,color:#1a1a1a
+@@DAG@@
+    </pre>
+    </div>
+    <ul class="legend" aria-label="Node groups">
+      <li style="--sw:#0b6e4f;--tint:#e3efe9">skill (18)</li>
+      <li style="--sw:#30638e;--tint:#e1e9f1">root script (6)</li>
+      <li style="--sw:#1a1a1a;--tint:#fff">manifest (1 node, 18 files)</li>
+      <li style="--sw:#7b5ea7;--tint:#ede7f5">CI job (5)</li>
+      <li style="--sw:#edae49;--tint:#fbf0d8">test file (13)</li>
+      <li style="--sw:#d1495b;--tint:#f9e4e7">skill-owned script (10)</li>
+      <li style="--sw:#8a8f98;--tint:#ebecee">reference read from outside (3)</li>
+    </ul>
+    <figcaption><b>Figure 3.</b> Dependencies among the 18 skills, the root scripts, the manifests, the CI jobs, the test files, the skill-owned scripts and three reference files: 56 nodes and 84 edges. An edge A to B means A names, runs, imports or reads B. Skill-to-skill edges come from a grep of SKILL.md and <code>references/</code> only. Test edges come from each test module's import or file-path constants. CI edges come from <code>ci.yml</code>. The fan-out from <code>lint_skill.py</code> exists because the linter reads every <code>skills/*/SKILL.md</code>. The graph is 2,774 by 1,912 px at natural size, larger than the frame, so scroll inside the frame to pan. The frame opens on <code>lint_skill.py</code>; node fills follow the legend above.</figcaption>
+  </figure>
+  <p class="sowhat prose">The graph has two hubs that are not skills: <code>scripts/lint_skill.py</code> (degree 21) and the CI <code>tests</code> job (degree 13).</p>
+
+  <p>Among skills, orchestrator-mode is the most depended on, with in-degree 3 from other skills plus the linter. visual-report is wired only to its own script, its two references, the linter and one test. Three README-only mentions are left out of the edge count: smart-git-commit to ship, implement-ticket to implement-feature, and candidate-to-spec to implement-feature. The <code>plugin-validate</code> CI job runs <code>claude plugin validate .</code>, which is not a repo script, so it has no outgoing edge. Table 2 lists every node with its degree.</p>
+
+  <figure id="table-2">
+    <div class="tablewrap">
+    <table class="sortable" data-collapse="20" id="nodes" aria-describedby="cap-t2">
+      <thead><tr>
+        <th data-type="text">id</th>
+        <th data-type="text">label</th>
+        <th data-type="text">group</th>
+        <th data-type="num" class="num">degree<span class="unit">in + out</span></th>
+      </tr></thead>
+      <tbody>
+@@TABLE2@@
+      </tbody>
+    </table>
+    </div>
+    <details class="more" data-for="nodes">
+      <summary>36 more rows hidden. Show all 56 nodes.</summary>
+      <p>Sorting applies to all 56 rows. When you hide the extra rows again, the first 20 of the sorted order stay visible.</p>
+    </details>
+    <figcaption id="cap-t2"><b>Table 2.</b> The 56 nodes of Figure 3 with their id, label, group and total degree (in plus out). The first 20 rows are shown; the summary above opens the remaining 36. Degree counts the 84 edges of Figure 3 and nothing else, so a node with degree 0 (<code>ci_plugin</code>) is in the graph but has no edge.</figcaption>
+  </figure>
+  <p class="sowhat prose">Eight nodes have degree 5 or more, and only two of them, implement-feature and ship, are skills.</p>
+</section>
+
+<!-- 4 -->
+<section id="s4">
+  <h2>4. How the render check runs</h2>
+  <p>The visual-report skill verifies a report with <code>check_render.py</code>, 985 lines, invoked as <code>uv run --no-project --with playwright python &lt;skill-dir&gt;/scripts/check_render.py &lt;report.html&gt;</code>. It opens the report in headless Chromium through Playwright and prints PASS, FAIL or BLOCKED. Figure 4 follows one run from the agent's command to the verdict line.</p>
+
+  <figure id="figure-4">
+    <pre class="mermaid">
+---
+config:
+  themeVariables:
+    actorBkg: "#e1e9f1"
+    actorBorder: "#30638e"
+    actorTextColor: "#1a1a1a"
+    actorLineColor: "#9aa3ad"
+    signalColor: "#1a1a1a"
+    signalTextColor: "#1a1a1a"
+    noteBkgColor: "#fbf3e0"
+    noteBorderColor: "#b7791f"
+    noteTextColor: "#1a1a1a"
+    activationBkgColor: "#e3efe9"
+    activationBorderColor: "#0b6e4f"
+    labelBoxBkgColor: "#f2f2ee"
+    labelBoxBorderColor: "#6b7280"
+    labelTextColor: "#1a1a1a"
+    loopTextColor: "#1a1a1a"
+    sequenceNumberColor: "#ffffff"
+  sequence:
+    useMaxWidth: true
+    mirrorActors: false
+    actorMargin: 40
+    messageMargin: 28
+    boxMargin: 6
+---
+sequenceDiagram
+  autonumber
+  participant A as Agent
+  participant S as check_render.py
+  participant C as Chromium
+  participant N as CDNs
+  participant R as Report file
+  A->>+S: run check_render.py REPORT.html --timeout 20
+  S->>R: read_source(report)
+  R-->>S: HTML text
+  alt OSError
+    S-->>A: FAIL, "cannot read the report" (exit 1)
+  end
+  S->>S: import playwright, start 160 s watchdog
+  alt ImportError
+    S-->>A: BLOCKED, "playwright is not importable" (exit 2)
+  end
+  S->>+C: launch headless browser
+  alt no browser
+    S-->>A: BLOCKED, "no browser could launch" (exit 2)
+  end
+  S->>C: new_page 1280x900, install window.__vrCheck
+  S->>C: goto file://REPORT.html, wait for load (30 s)
+  C->>N: GET scripts and modules
+  N-->>C: responses, recorded by Net
+  S->>C: settle() until Mermaid is quiet for 2000 ms (max 20 s)
+  C-->>S: facts() before reveal
+  S->>C: reveal() tabs, toggles and details
+  C-->>S: facts() after reveal
+  Note over S: diagram_status() per diagram
+  S->>C: images(), module text, screenshots()
+  S->>C: probe(module, source, n) for suspect diagrams (15 s each)
+  C-->>S: Mermaid error text, or env when the module never loaded
+  alt a request failed and no remote host answered
+    S->>C: fetch cdn.jsdelivr.net/npm/mermaid@11/package.json (5 s)
+    C->>N: probe request
+    N-->>C: reachable or not
+    C-->>S: network_ok
+  end
+  Note over S: request_problem() per failed or pending request
+  S->>C: browser.close() (10 s cap)
+  deactivate C
+  alt a __vrCheck call took over 10 s
+    S-->>A: FAIL, hung
+  else the check passed 140 s
+    S-->>A: BLOCKED, incomplete
+  end
+  Note over S: emit(): assign_lines, verdict(), problems(), JSON
+  S-->>-A: PASS, FAIL or BLOCKED (exit 0, 1 or 2)
+    </pre>
+    <figcaption><b>Figure 4.</b> One run of the render check from the agent's command to the verdict line, with five participants: Agent, Script (<code>check_render.py</code>), Chromium (headless, via Playwright), CDNs (<code>cdn.tailwindcss.com</code>, <code>cdn.jsdelivr.net</code> and the other hosts in <code>CDN_HOSTS</code>) and the Report file. Solid arrows are calls the script makes. Dashed returns carry facts the script reads. <code>alt</code> boxes are the branches that end in BLOCKED or FAIL before the normal path completes. Timings are the constants at the top of the file: <code>LOAD_TIMEOUT_S</code> 30, <code>QUIET_MS</code> 2000, <code>CALL_TIMEOUT_S</code> 10, <code>PROBE_TIMEOUT_S</code> 15, default <code>--timeout</code> 20, overall limit 30 + 20 + 90 = 140 s, watchdog 160 s.</figcaption>
+  </figure>
+  <p class="sowhat prose">The script never trusts the console. It reads the rendered DOM twice, re-renders suspect diagrams offscreen, and asks a known-good CDN URL whether the network is to blame before it lets an unrendered diagram count as a defect.</p>
+
+  <p>The two DOM reads bracket a reveal step. The first <code>facts()</code> snapshot records the diagrams as the page first shows them. Then <code>__vrCheck.reveal()</code> opens tabs, toggles and <code>&lt;details&gt;</code> as a reader would, the script waits for Mermaid to settle again, and the second snapshot records what appeared. A diagram that is still hidden after the reveal is listed as <code>unverified</code>, not judged. For up to 20 diagrams whose status is error, empty or lazy, or ok but drawn while hidden, the script re-renders the source offscreen with the page's own Mermaid module and attaches Mermaid's error text, or sets <code>env</code> when the probe shows the module never loaded.</p>
+</section>
+
+<!-- 5 -->
+<section id="s5">
+  <h2>5. How the render check decides</h2>
+  <p><code>verdict()</code> is 22 lines, lines 354 to 375 of <code>check_render.py</code>. Figure 5 shows the whole function with five markers on the lines that carry the decision.</p>
+
+  <figure id="figure-5">
+    <div class="codefig">
+      <pre class="code" aria-label="verdict() from check_render.py, lines 354 to 375"><span class="line">def verdict(result):</span>
+<span class="line">    """Proof of a defect beats an environment problem, which beats softer evidence.</span>
+<span class="line"></span>
+<span class="line">    An error diagram, a 404, or a broken image is a defect whatever else went</span>
+<span class="line">    wrong. An unreachable CDN explains unrendered diagrams and script errors,</span>
+<span class="line">    so those count only when the network was fine.</span>
+<span class="line">    """</span>
+<span class="line hit">    if result.get("blocked"):<i class="mk">1</i></span>
+<span class="line">        return BLOCKED</span>
+<span class="line">    diagrams = result.get("diagrams", [])</span>
+<span class="line">    requests = result.get("requests", [])</span>
+<span class="line hit">    if (any(d["status"] in DRAWN_BAD and not d.get("env") for d in diagrams)<i class="mk">2</i></span>
+<span class="line">            or any(r["kind"] == "defect" for r in requests)</span>
+<span class="line hit">            or result.get("broken_images") or result.get("hung")):<i class="mk">3</i></span>
+<span class="line">        return FAIL</span>
+<span class="line hit">    if (any(r["kind"] == "blocked" for r in requests)<i class="mk">4</i></span>
+<span class="line hit">            or any(d.get("env") for d in diagrams) or result.get("incomplete")):</span>
+<span class="line">        return BLOCKED</span>
+<span class="line hit">    if (any(d["status"] in NOT_DRAWN for d in diagrams)<i class="mk">5</i></span>
+<span class="line">            or result.get("page_errors") or result.get("console_errors")):</span>
+<span class="line">        return FAIL</span>
+<span class="line">    return PASS</span></pre>
+      <ol class="notes" aria-label="Marker notes">
+        <li><i class="mk">1</i><b>Line 361.</b> <code>result["blocked"]</code> is set only when the check could not run at all (no Playwright, no browser, the script itself crashed), so it short-circuits everything else.</li>
+        <li><i class="mk">2</i><b>Line 365.</b> <code>DRAWN_BAD</code> is <code>{"error", "empty", "illegible", "clipped"}</code>, statuses where Mermaid ran and drew something wrong. That is proof of a defect unless the probe marked the diagram <code>env</code> (its module never loaded).</li>
+        <li><i class="mk">3</i><b>Line 367.</b> A broken image or a frozen tab (<code>hung</code>) is a FAIL on its own, with no network excuse.</li>
+        <li><i class="mk">4</i><b>Lines 369 to 370.</b> A request classified "blocked" (a CDN host unreachable or answering 5xx), an <code>env</code>-flagged diagram, or a timed-out check means the page is unverified, so BLOCKED beats the softer FAILs below.</li>
+        <li><i class="mk">5</i><b>Line 372.</b> <code>NOT_DRAWN</code> is <code>{"unrendered", "rendering"}</code>. Together with page and console errors these count only once lines 369 to 370 have ruled out a network explanation.</li>
+      </ol>
+    </div>
+    <figcaption><b>Figure 5.</b> Lines 354 to 375 of <code>skills/visual-report/scripts/check_render.py</code>, the whole <code>verdict()</code> function (22 lines), with the five decisive lines tinted and numbered. The four <code>if</code> blocks are a precedence ladder. The first one that matches wins, so a defect in the page outranks an environment problem, and an environment problem outranks the softer evidence of unrendered blocks and console errors. Supporting constants on lines 50 to 75: <code>EXIT = {PASS: 0, FAIL: 1, BLOCKED: 2}</code>, <code>MIN_LABEL_PX = 6</code> (below this a diagram is illegible), <code>SMALL_LABEL_PX = 9</code> (warn), <code>TINY_PX = 24</code> (a speck).</figcaption>
+  </figure>
+  <p class="sowhat prose">The ordering is the design. An unreachable CDN explains an unrendered diagram, so the script refuses to call that a page defect.</p>
+
+  <p>Figure 6 lists the conditions the module docstring names (lines 2 to 25) and the verdict each produces on its own.</p>
+
+  <figure id="figure-6">
+    <div class="tablewrap">
+    <table class="matrix" aria-describedby="cap-f6">
+      <thead><tr>
+        <th class="num" data-type="num">#</th>
+        <th data-type="text">condition (docstring wording)</th>
+        <th data-type="text">status or field in <code>result</code></th>
+        <th data-type="text" style="text-align:center">PASS</th>
+        <th data-type="text" style="text-align:center">FAIL</th>
+        <th data-type="text" style="text-align:center">BLOCKED</th>
+        <th data-type="text">tier</th>
+      </tr></thead>
+      <tbody>
+        <tr class="tier-defect"><td class="num">1</td><td>Diagram is Mermaid's error diagram</td><td class="id">status: error</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-defect"><td class="num">2</td><td>Diagram collapsed to a speck or shows no labels</td><td class="id">status: empty</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-defect"><td class="num">3</td><td>Diagram shrunk until labels are unreadable (under 6 px)</td><td class="id">status: illegible</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-defect"><td class="num">4</td><td>Diagram cut off by an <code>overflow: hidden</code> box</td><td class="id">status: clipped</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-defect"><td class="num">5</td><td>Broken image</td><td class="id">broken_images non-empty</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-defect"><td class="num">6</td><td>Resource answers 404, or a non-CDN host does not exist while others loaded</td><td class="id">requests[].kind == "defect"</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-defect sep"><td class="num">7</td><td>Page freezes its tab (a query takes over 10 s)</td><td class="id">hung set</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>defect</td></tr>
+        <tr class="tier-env"><td class="num">10</td><td>No Playwright import, or no browser could launch</td><td class="id">blocked set</td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9679;</td><td>environment</td></tr>
+        <tr class="tier-env"><td class="num">11</td><td>A CDN host unreachable or answering HTTP 5xx</td><td class="id">requests[].kind == "blocked", or diagram env</td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9679;</td><td>environment</td></tr>
+        <tr class="tier-env sep"><td class="num">12</td><td>Check did not finish within 140 s (or watchdog at 160 s)</td><td class="id">incomplete set</td><td class="mark"></td><td class="mark"></td><td class="mark blocked">&#9679;</td><td>environment</td></tr>
+        <tr class="tier-soft"><td class="num">8</td><td>Diagram never rendered or still rendering (network fine)</td><td class="id">status: unrendered or rendering</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>soft</td></tr>
+        <tr class="tier-soft sep"><td class="num">9</td><td>Page error or console error (network fine)</td><td class="id">page_errors, console_errors</td><td class="mark"></td><td class="mark fail">&#9679;</td><td class="mark"></td><td>soft</td></tr>
+        <tr><td class="num">13</td><td>Diagram still hidden after reveal (listed, not judged)</td><td class="id">unverified</td><td class="mark pass">&#9679;</td><td class="mark"></td><td class="mark"></td><td>note</td></tr>
+        <tr><td class="num">14</td><td>None of the above</td><td></td><td class="mark pass">&#9679;</td><td class="mark"></td><td class="mark"></td><td></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <figcaption id="cap-f6"><b>Figure 6.</b> The conditions named in the script's module docstring (lines 2 to 25) as rows, the three verdicts as columns. A filled cell is the verdict that condition produces on its own. Rows are ordered as the ladder in Figure 5 evaluates them, with the docstring's row numbers kept. When several conditions hold at once, the ladder applies: any FAIL in the defect tier (rows 1 to 7) beats BLOCKED, and BLOCKED beats the soft FAIL tier (rows 8 to 9). Exit codes: PASS 0, FAIL 1, BLOCKED 2.</figcaption>
+  </figure>
+  <p class="sowhat prose">Only three rows end in BLOCKED, and all three are the environment's fault. That is why SKILL.md says "BLOCKED means unverified, not passing".</p>
+
+  <p>Row 8 becomes BLOCKED, not FAIL, when row 11 also holds. That is the point of the ladder: an unrendered diagram next to an unreachable CDN is a fact about the network, and the script says so instead of blaming the page.</p>
+
+  <p class="takeaways-label">Takeaways</p>
+  <ol class="takeaways">
+    <li><code>verdict()</code> decides in 22 lines with a fixed precedence. A drawn defect, 404, broken image or frozen tab is FAIL. An unreachable CDN, missing browser or timed-out check is BLOCKED. An unrendered block or console error is FAIL only when the network was fine.</li>
+  </ol>
+</section>
+
+<!-- 6 -->
+<section id="s6">
+  <h2>6. When the render check arrived</h2>
+  <p>The visual-report folder has 12 commits in all, so Figure 7 is its whole history. The skill arrived on 2026-06-09 and the next nine commits are prose and style passes, most of them across the whole catalogue.</p>
+
+  <figure id="figure-7" class="narrow">
+    <ol class="timeline">
+@@TIMELINE@@
+    </ol>
+    <figcaption><b>Figure 7.</b> Every commit on <code>main</code> that touched <code>skills/visual-report/</code>, oldest first, from <code>git log -12 --date=short --pretty='%h %ad %s' -- skills/visual-report</code>. The accented entry is 088a29f, which added <code>check_render.py</code> (985 lines) and <code>tests/test_visual_report.py</code> (345 lines) in a pull request that also gave review-pbi-diff and ship their own prove-it-works checks. Everything before it is prose and style passes.</figcaption>
+  </figure>
+  <p class="sowhat prose">The render check arrived four months after the skill, in one pull request of 2,605 insertions, and the one commit since has touched config only.</p>
+
+  <p>That one pull request is also where the skill's tests come from. <code>tests/test_visual_report.py</code> holds 49 of the repo's 576 test functions, and the CI <code>tests</code> job runs them on Python 3.9 and 3.13 with the standard library only.</p>
+
+  <p class="takeaways-label">Takeaways</p>
+  <ol class="takeaways">
+    <li>The render check reached visual-report on 2026-10-03, four months after the skill, in one pull request that added 985 lines of checker and 345 lines of tests. The folder's 12-commit history is otherwise docs passes.</li>
+  </ol>
+</section>
+
+<!-- 7 -->
+<section id="s7">
+  <h2>7. Where the lines live</h2>
+  <p>Table 1 gave every folder's tracked lines. Figure 8 ranks the ten largest as shares of the 17,001-line catalogue, counting every git-tracked file: SKILL.md, README, <code>plugin.json</code>, references, scripts and assets.</p>
+
+  <figure id="figure-8">
+    <div class="bars" role="img" aria-label="Proportion bars of tracked lines per skill folder, top ten">
+@@BARS@@
+    </div>
+    <figcaption><b>Figure 8.</b> The ten largest skill folders by lines across every git-tracked file, as a share of the 17,001-line catalogue, plus the other eight folders as one grey bar. Each bar's length is the folder's share of that total, and the number at its end is the folder's line count with its share. The top five together are 60.5% of all tracked lines, and the remaining 8 skills share 13.4%.</figcaption>
+  </figure>
+  <p class="sowhat prose">Line count follows scripts, not prose. The four largest folders are the four with the most script code, while the most-committed skill, orchestrator-mode with 25 commits, is only 306 lines.</p>
+
+  <p>This is the claim at the top of the report in one picture. fabric-lineage-dag's SKILL.md is 89 lines, well under the budget, and its folder is 3,635 lines because its 17 scripts live there. The budget keeps the prompt short and lets the folder grow where the work is.</p>
+
+  <p class="takeaways-label">Takeaways</p>
+  <ol class="takeaways">
+    <li>Script code, not prompt text, is where the catalogue's bulk lives. fabric-lineage-dag's 17 scripts make its folder 3,635 lines, 21% of the 17,001 tracked lines, with an 89-line SKILL.md.</li>
+  </ol>
+</section>
+
+<!-- 8 -->
+<section id="s8">
+  <h2>8. Limits</h2>
+  <ol class="takeaways">
+    <li>Commit counts include the 5 merge commits, and a commit that touches several skill folders is counted once per folder, so Table 1's commits column sums to 210, not 124.</li>
+    <li>Skill-to-skill and test-to-skill edges in Figure 3 are grep- and import-based. A skill name that appears in prose counts as an edge, and nothing here verifies that the dependency is exercised at run time.</li>
+    <li>"Tracked lines" counts every git-tracked file in a folder with <code>wc -l</code>, including README and <code>plugin.json</code>, and treats binary assets (statusline's screenshots) as zero or a few lines.</li>
+    <li>The sequence in Figure 4 was read from the source, not traced from a live run. No report was rendered to produce this content, and the CI job list reflects <code>ci.yml</code> at commit a590a62 only.</li>
+  </ol>
+  <h3>Method</h3>
+  <ul class="method">
+    <li>Table 1: <code>jq .version skills/&lt;s&gt;/plugin.json</code>; <code>wc -l skills/&lt;s&gt;/SKILL.md</code>; <code>git ls-files skills/&lt;s&gt;/references | wc -l</code>; <code>git ls-files skills/&lt;s&gt;/scripts | wc -l</code>; a frontmatter grep for <code>disable-model-invocation: true</code>; <code>git log --oneline -- skills/&lt;s&gt; | wc -l</code>.</li>
+    <li>Figure 2: <code>git log --date=format:%Y-%m --pretty=%ad | sort | uniq -c</code>.</li>
+    <li>Figure 7: <code>git log -12 --date=short --pretty='%h %ad %s' -- skills/visual-report</code> and <code>git log --diff-filter=A -- skills/visual-report/scripts/check_render.py</code>.</li>
+    <li>Figure 8: <code>git ls-files skills/&lt;s&gt; | xargs wc -l</code>.</li>
+    <li>Budget: <code>grep -n LINE_BUDGET scripts/lint_skill.py</code> gives line 35.</li>
+  </ul>
+</section>
+
+<footer>relentless-data-skills at commit a590a62, measured 2026-10-30. Vega-Lite 6.5.0 draws Figures 1 and 2; Mermaid 11.17.2 with ELK 0.2.3 draws Figures 3 and 4; the rest is HTML and CSS.</footer>
+
+</main>
+
+<nav class="switcher" aria-label="Prototype navigation">
+  <a href="prototypes.html" target="_top" style="width:auto;padding:0 0.8rem;border-radius:999px">&larr; All prototypes</a>
+</nav>
+
+<script>
+
+  // Click-to-sort on every column of every .sortable table.
+  function sortTable(table, col, th) {
+    const dir = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+    table.querySelectorAll("thead th").forEach((h) => h.setAttribute("aria-sort", "none"));
+    th.setAttribute("aria-sort", dir);
+    const tbody = table.tBodies[0];
+    const rows = Array.from(tbody.rows);
+    const numeric = th.dataset.type === "num";
+    const key = (r) => {
+      const v = r.cells[col].textContent.trim();
+      return numeric ? parseFloat(v.replace(/,/g, "")) || 0 : v.toLowerCase();
+    };
+    rows.sort((a, b) => {
+      const ka = key(a), kb = key(b);
+      const c = numeric ? ka - kb : ka.localeCompare(kb);
+      return dir === "ascending" ? c : -c;
+    });
+    rows.forEach((r) => tbody.appendChild(r));
+    const keep = parseInt(table.dataset.collapse || "0", 10);
+    if (keep) rows.forEach((r, i) => r.classList.toggle("extra", i >= keep));
+  }
+  document.querySelectorAll("table.sortable").forEach((table) => {
+    table.querySelectorAll("thead th").forEach((th, i) => {
+      th.setAttribute("aria-sort", "none");
+      th.tabIndex = 0;
+      const go = () => sortTable(table, i, th);
+      th.addEventListener("click", go);
+      th.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
+    });
+  });
+  // The <details> under Table 2 reveals rows 21 to 56.
+  document.querySelectorAll("details.more").forEach((d) => {
+    const table = document.getElementById(d.dataset.for);
+    const summary = d.querySelector("summary");
+    const closed = summary.textContent;
+    d.addEventListener("toggle", () => {
+      table.classList.toggle("open", d.open);
+      summary.textContent = d.open ? "All 56 nodes shown. Hide 36 rows." : closed;
+    });
+  });
+</script>
+
+<!-- Vega stack: classic scripts, order matters (vega -> vega-lite -> vega-embed) -->
+<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@6.5.0/build/vega-lite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@7.3.0/build/vega-embed.min.js"></script>
+<script>
+  const VL_CONFIG = {
+    font: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+    mark: { color: "#0b6e4f" },                       // accent for single-colour marks
+    range: { category: ["#0b6e4f", "#d1495b", "#edae49", "#30638e", "#8a8f98"] }, // optional: series colours
+    axis: { labelColor: "#59636e", titleColor: "#1f2328", gridColor: "#eaeef2" },
+    view: { stroke: null }
+  };
+  const VL_OPTS = { renderer: "svg", actions: false };
+
+  const budgetData = [{"skill": "implement-ticket", "lines": 150}, {"skill": "metabase", "lines": 150}, {"skill": "prefect", "lines": 150}, {"skill": "review-pbi-diff", "lines": 150}, {"skill": "student-mode", "lines": 150}, {"skill": "ship", "lines": 148}, {"skill": "orchestrator-mode", "lines": 147}, {"skill": "snowman", "lines": 143}, {"skill": "implement-feature", "lines": 142}, {"skill": "dbt-runner", "lines": 134}, {"skill": "dlt-bootstrap", "lines": 133}, {"skill": "candidate-to-spec", "lines": 129}, {"skill": "qualify-delegation", "lines": 123}, {"skill": "gh-weekly-report", "lines": 119}, {"skill": "smart-git-commit", "lines": 114}, {"skill": "fabric-lineage-dag", "lines": 89}, {"skill": "statusline", "lines": 64}, {"skill": "visual-report", "lines": 56}];
+
+  vegaEmbed("#vl-budget", {
+    $schema: "https://vega.github.io/schema/vega-lite/v6.json",
+    width: "container", height: 430,
+    padding: { left: 5, right: 20, top: 5, bottom: 5 },
+    layer: [
+      {
+        data: { values: [{ v: 150 }] },
+        mark: { type: "rule", color: "#1a1a1a", strokeWidth: 1.25, strokeDash: [5, 3] },
+        encoding: { x: { field: "v", type: "quantitative" } }
+      },
+      {
+        data: { values: budgetData },
+        mark: { type: "bar", height: { band: 0.7 } },
+        encoding: {
+          y: { field: "skill", type: "nominal", sort: "-x", title: null, axis: { labelFont: "ui-monospace, Menlo, Consolas, monospace", labelFontSize: 12, ticks: false, domain: false, labelPadding: 8 } },
+          x: { field: "lines", type: "quantitative", title: "SKILL.md lines", scale: { domain: [0, 168] }, axis: { values: [0, 30, 60, 90, 120, 150], grid: true, domain: false } },
+          color: { condition: { test: "datum.lines == 150", value: "#0b6e4f" }, value: "#8a8f98" }
+        }
+      },
+      {
+        data: { values: budgetData },
+        mark: { type: "text", align: "left", baseline: "middle", dx: 5, fontSize: 11, color: "#1a1a1a", font: "ui-monospace, Menlo, Consolas, monospace" },
+        encoding: {
+          y: { field: "skill", type: "nominal", sort: "-x" },
+          x: { field: "lines", type: "quantitative" },
+          text: { field: "lines" }
+        }
+      },
+      {
+        data: { values: [{ v: 150, label: "LINE_BUDGET = 150 (scripts/lint_skill.py:35)" }] },
+        mark: { type: "text", align: "right", baseline: "bottom", dx: -6, dy: -4, fontSize: 11, fontWeight: "bold", color: "#1a1a1a" },
+        encoding: { x: { field: "v", type: "quantitative" }, y: { value: 0 }, text: { field: "label" } }
+      }
+    ],
+    config: VL_CONFIG
+  }, VL_OPTS);
+
+  const commitData = [{"month": "2026-05", "commits": 4}, {"month": "2026-06", "commits": 37}, {"month": "2026-07", "commits": 14}, {"month": "2026-08", "commits": 10}, {"month": "2026-09", "commits": 23}, {"month": "2026-10", "commits": 36}];
+
+  vegaEmbed("#vl-commits", {
+    $schema: "https://vega.github.io/schema/vega-lite/v6.json",
+    width: "container", height: 280,
+    padding: { left: 5, right: 20, top: 10, bottom: 5 },
+    data: { values: commitData },
+    layer: [
+      {
+        mark: { type: "line", strokeWidth: 2, point: { size: 70, filled: true } },
+        encoding: {
+          x: { field: "month", type: "ordinal", title: "Author month", axis: { labelAngle: 0, labelFontSize: 12, domain: false, ticks: false } },
+          y: { field: "commits", type: "quantitative", title: "Commits on main", scale: { domain: [0, 40] }, axis: { tickCount: 5, domain: false } }
+        }
+      },
+      {
+        mark: { type: "text", dy: -14, fontSize: 12, fontWeight: "bold", color: "#1a1a1a" },
+        encoding: {
+          x: { field: "month", type: "ordinal" },
+          y: { field: "commits", type: "quantitative" },
+          text: { field: "commits" }
+        }
+      }
+    ],
+    config: VL_CONFIG
+  }, VL_OPTS);
+</script>
+
+<!-- Mermaid stack: ESM, pinned. Must be type="module". -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs";
+  import elkLayouts from "https://cdn.jsdelivr.net/npm/@mermaid-js/layout-elk@0.2.3/dist/mermaid-layout-elk.esm.min.mjs";
+  mermaid.registerLayoutLoaders(elkLayouts);
+  mermaid.initialize({ startOnLoad: false, securityLevel: "strict", fontFamily: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif', fontSize: 13 });
+  await mermaid.run();
+  // Open the DAG frame on its busiest node instead of the empty top-left corner.
+  const frame = document.querySelector("#figure-3 .frame");
+  const hub = frame && frame.querySelector('[id*="flowchart-lint_skill-"]');
+  if (frame && hub) {
+    const fr = frame.getBoundingClientRect(), hr = hub.getBoundingClientRect();
+    frame.scrollLeft += (hr.left + hr.width / 2) - (fr.left + fr.width / 2);
+    frame.scrollTop += (hr.top + hr.height / 2) - (fr.top + fr.height / 2);
+  }
+</script>
+</body>
+</html>

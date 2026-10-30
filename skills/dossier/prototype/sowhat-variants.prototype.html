@@ -1,0 +1,744 @@
+<!doctype html>
+<!--
+  Dossier scaffold. Copy this file, then fill it in.
+  - Never edit the locked block (between dossier:locked:begin and dossier:locked:end).
+    check_render.py compares it with this file and fails a report whose block differs.
+  - Per-report geometry (column widths, one-off sizes keyed to a figure id) goes in the
+    report block only.
+  - Open assets/gallery.html for a worked example of each family before writing one. The
+    four hand-built families have none: see references/HTML-REPORT.md.
+  - Replace every [bracketed placeholder]. Delete the optional parts you do not use.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE [Report title]</title>
+<style>
+/* dossier:locked:begin v3 */
+  /* ===== Tokens: Navy & coral. Every pair below is checked by scripts/check_contrast.py. ===== */
+  :root {
+    --paper: #ffffff;
+    --surface: #f4f7f7;        /* sidebar, takeaways, so-what, DAG canvas, stats */
+    --ink: #102542;            /* text and structure */
+    --muted: #5f5348;          /* captions how-to-read, labels; lightest text colour allowed */
+    --on-ink: #ffffff;         /* text on navy: current TOC item, marker numerals, badges */
+    --line: #e1e7e7;
+    --line-2: #d3dcdc;
+    --rule: #7b8786;           /* DAG edges and node borders */
+    --hover: #e6ecec;          /* sidebar link hover */
+    --coral: #f87060;          /* fill only, ink text on it */
+    --coral-text: #c2493a;     /* coral as text, on white only */
+    --coral-line: #d95646;     /* coral as line, bullet or series */
+    --coral-soft: #fff1ed;     /* coral tint: DAG focus, key timeline row, row hover */
+    --coral-border: #f6cfc6;   /* border of a coral-tinted row */
+    --th-bg: #edf1f1;
+    --bar: #dce4e3;            /* in-cell bars */
+    --zebra: #f7f9f9;
+    --code-fg: #24514e;        /* code family: teal */
+    --code-pill: #cdd7d6;
+    --code-bg: #eef3f3;
+    --code-gutter: #e2eaea;
+    --code-gutter-fg: #4a5755;
+    --code-mark: #e3e9f2;      /* annotated line: slate tint */
+    --code-mark-gutter: #d5deeb;
+    --red: #a3123a; --red-soft: #fbe7ec; --red-text: #8c0f32;          /* problems only */
+    --amber: #b7791f; --amber-soft: #fcf2dd; --amber-text: #714800;    /* callouts only */
+    --taupe: #8a7766; --sage: #4f7f7c;
+    /* chart series, in order */
+    --series-1: #102542; --series-2: #d95646; --series-3: #4f7f7c; --series-4: #8a7766;
+    /* DAG badge slots: dag_svg.py gives each node type a slot, tag-6 is the outline badge */
+    --tag-1: #102542; --tag-2: #4f7f7c; --tag-3: #1a759f; --tag-4: #5f5348; --tag-5: #24514e; --tag-6: #4a5755;
+    /* diff colours: GitHub light theme, inside diffs only */
+    --gh-fg: #1f2328; --gh-num: #57606a;
+    --gh-add: #e6ffec; --gh-add-num: #ccffd8; --gh-add-word: #abf2bc; --gh-add-sign: #1a7f37;
+    --gh-del: #ffebe9; --gh-del-num: #ffd7d5; --gh-del-word: #ff818266; --gh-del-sign: #d1242f;
+    --gh-hunk: #ddf4ff; --gh-hunk-fg: #57606a;
+    --shadow: 0 1px 2px rgba(16, 37, 66, 0.05), 0 4px 14px rgba(16, 37, 66, 0.06);
+
+    --display: "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+    --body: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --s-2: 0.72rem; --s-1: 0.833rem; --s0: 1rem; --s1: 1.25rem; --s2: 1.563rem; --s3: 1.953rem; --s4: 2.441rem;
+    --sidebar: 248px;
+    --sticky: 2.75rem;
+    --radius: 8px;
+  }
+  /* dossier:pairs
+     text     ink             paper               body text, matrix PASS mark
+     text     muted           paper               captions how-to-read, byline, legend, axis labels, lead unit
+     text     coral-text      paper               figure and section numbers, so-what and answer labels, lead number
+     text     ink             surface             takeaways, so-what, sidebar text
+     text     muted           surface             sidebar meta and figure list, stat labels
+     text     ink             hover               sidebar link on hover
+     text     on-ink          ink                 current section title, marker numerals
+     text     coral           ink                 current section number
+     text     ink             th-bg               table header, DAG group count
+     text     ink             zebra               zebra row text
+     text     muted           zebra               muted text on a zebra row
+     text     ink             bar                 cell text over an in-cell bar
+     text     ink             coral               highlighted cell numeral, key timeline code, focus badge
+     text     ink             coral-soft          row hover, key timeline row, DAG focus name
+     text     muted           coral-soft          key timeline note, DAG focus caption
+     decor    coral-border    coral-soft          key timeline row border
+     text     code-fg         code-pill           inline code
+     text     code-fg         code-bg             code panel text, diff context text
+     text     code-gutter-fg  code-gutter         code gutter numbers
+     text     code-fg         code-mark           code on an annotated line
+     text     ink             code-mark-gutter    gutter number on an annotated line
+     graphic  ink             code-mark           annotation marker on the slate tint
+     graphic  ink             code-bg             annotation marker on the code panel
+     graphic  ink             gh-add              annotation marker on an added line
+     graphic  ink             gh-del              annotation marker on a removed line
+     text     red             paper               problem text, matrix FAIL mark
+     text     red-text        red-soft            problem callout text
+     graphic  red             red-soft            problem callout border
+     text     amber-text      amber-soft          note callout text
+     graphic  amber           amber-soft          note callout border
+     graphic  ink             paper               answer rules
+     graphic  rule            paper               DAG edges, legend group swatch
+     graphic  rule            surface             DAG edges and node borders on the canvas
+     graphic  coral-line      surface             DAG focus border on the canvas
+     graphic  coral-line      paper               bullets, link underline, coral bar
+     graphic  series-1        paper               chart series 1
+     graphic  series-2        paper               chart series 2
+     graphic  series-3        paper               chart series 3
+     graphic  series-4        paper               chart series 4
+     graphic  sage            paper               sage as a series or fill
+     graphic  taupe           paper               taupe "other" bar
+     text     on-ink          tag-1               DAG badge, slot 1
+     text     on-ink          tag-2               DAG badge, slot 2
+     text     on-ink          tag-3               DAG badge, slot 3
+     text     on-ink          tag-4               DAG badge, slot 4
+     text     on-ink          tag-5               DAG badge, slot 5
+     text     tag-6           paper               DAG outline badge, slot 6
+     text     gh-fg           gh-add              diff added text
+     text     gh-fg           gh-add-word         diff added word
+     text     gh-add-sign     gh-add              diff + sign
+     text     gh-num          gh-add-num          diff added line number
+     text     gh-fg           gh-del              diff removed text
+     text     gh-fg           gh-del-word/gh-del  diff removed word
+     text     gh-del-sign     gh-del              diff - sign
+     text     gh-num          gh-del-num          diff removed line number
+     text     gh-hunk-fg      gh-hunk             diff hunk header
+     decor    line            paper               table rules
+     decor    line-2          paper               dividers
+  */
+  * { box-sizing: border-box; }
+  html { scroll-padding-top: 3.5rem; }
+  body { margin: 0; background: var(--paper); color: var(--ink); font-family: var(--body); font-size: var(--s0); line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--coral-line); text-underline-offset: 2px; }
+  code { font-family: var(--mono); font-size: 0.85em; background: var(--code-pill); color: var(--code-fg); padding: 0.08em 0.4em; border-radius: 4px; font-weight: 500; white-space: nowrap; }
+  b, strong { font-weight: 650; }
+  h1, h2, h3 { font-family: var(--display); letter-spacing: -0.02em; margin: 0; }
+  .num, .tnum { font-variant-numeric: tabular-nums; }
+  .eyebrow { font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 700; }
+
+  /* ---------- sidebar: numbered contents, current section as a navy pill ---------- */
+  .side { position: fixed; top: 0; left: 0; bottom: 0; width: var(--sidebar); padding: 1.75rem 1.1rem 2rem; background: var(--surface); overflow-y: auto; }
+  .side .brand { font-variant-caps: all-small-caps; letter-spacing: 0.07em; font-size: 1.05rem; font-weight: 700; line-height: 1.25; margin: 0 0.3rem 0.4rem; }
+  .side .meta { font-size: var(--s-2); color: var(--muted); line-height: 1.45; margin: 0 0.3rem 1.4rem; }
+  .side .meta code { font-size: 0.95em; }
+  .toc { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line-2); }
+  .toc li { border-bottom: 1px solid var(--line-2); }
+  .toc a { display: grid; grid-template-columns: 1.7rem 1fr; gap: 0.35rem; padding: 0.5rem 0.55rem; margin: 2px 0; color: var(--ink); font-size: var(--s-1); line-height: 1.3; text-decoration: none; border-radius: 6px; }
+  .toc a .n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: var(--s-2); font-weight: 700; padding-top: 0.1rem; }
+  .toc a:hover { background: var(--hover); }
+  .toc a.current { background: var(--ink); color: var(--on-ink); font-weight: 600; }
+  .toc a.current .n { color: var(--coral); }
+  .side .visuals { margin: 1.5rem 0.3rem 0; font-size: var(--s-2); }
+  .side .visuals dt { font-variant-caps: all-small-caps; letter-spacing: 0.08em; font-weight: 700; font-size: var(--s-1); color: var(--ink); margin: 0.7rem 0 0.2rem; }
+  .side .visuals dd { margin: 0; }
+  .side .visuals dd a { color: var(--muted); display: block; padding: 0.1rem 0; text-decoration: none; line-height: 1.35; }
+  .side .visuals dd a:hover { color: var(--ink); text-decoration: underline; }
+  .toc-inline { display: none; }
+
+  /* ---------- content ---------- */
+  .content { margin-left: var(--sidebar); padding: 2.5rem 3rem 3rem; max-width: calc(var(--sidebar) + 1140px); }
+  .masthead { margin-bottom: 1.75rem; }
+  .masthead .kicker { color: var(--coral-text); margin: 0 0 0.6rem; }
+  .masthead h1 { font-size: var(--s4); line-height: 1.08; font-weight: 750; max-width: 22ch; }
+  .masthead .byline { font-size: var(--s-1); color: var(--muted); margin: 0.75rem 0 0; }
+
+  /* answer: the claim between full-width navy rules; an optional .lead number on its left */
+  .answer { display: flex; align-items: center; gap: 1rem 2rem; margin: 0 0 3rem; padding: 1.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+  .answer:has(+ .stats) { margin-bottom: 1.25rem; }
+  .answer .lead { flex: none; text-align: center; }
+  .answer .lead .n { font: 800 5.5rem/0.9 var(--display); letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
+  .answer .lead .key { color: var(--coral-text); }
+  .answer .lead .u { display: block; font-size: var(--s-1); color: var(--muted); margin-top: 0.4rem; font-weight: 600; }
+  .answer .text { flex: 1 1 auto; min-width: 0; }
+  .answer .label { color: var(--coral-text); margin: 0 0 0.5rem; }
+  .answer .claim { font-family: var(--display); font-size: 1.4rem; line-height: 1.28; letter-spacing: -0.015em; font-weight: 650; margin: 0; max-width: 38em; }
+  .answer .claim code { font-size: 0.72em; }
+  .answer .rest { margin: 0.6rem 0 0; max-width: 44em; }
+  /* optional stats row under the answer box */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin: 0 0 3rem; }
+  .stat { background: var(--surface); border-radius: var(--radius); padding: 0.9rem 1.15rem 1rem; }
+  .stat .v { font-family: var(--display); font-size: var(--s3); color: var(--ink); font-weight: 750; letter-spacing: -0.03em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .stat .v small { font-size: 0.5em; font-weight: 600; color: var(--muted); letter-spacing: 0; }
+  .stat .l { font-size: var(--s-1); color: var(--muted); margin-top: 0.45rem; line-height: 1.35; }
+
+  section.sec { margin: 0 0 3.25rem; }
+  h2.sec-head { position: sticky; top: 0; z-index: 5; background: var(--paper); border-bottom: 1px solid var(--line-2); font-size: 1.15rem; font-weight: 700; letter-spacing: -0.01em; padding: 0; margin: 0 0 1.1rem; display: flex; gap: 0.75rem; align-items: center; height: var(--sticky); }
+  h2.sec-head .n { color: var(--coral-text); font-variant-numeric: tabular-nums; font-size: 0.95rem; }
+  h2.sec-head .count { margin-left: auto; font-weight: 600; color: var(--muted); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.08em; }
+  .prose { max-width: 68ch; }
+  .prose p { margin: 0 0 0.85rem; }
+  ul.points { margin: 0 0 0.9rem; padding: 0; list-style: none; max-width: 68ch; }
+  ul.points li { position: relative; padding-left: 1.1rem; margin: 0 0 0.35rem; }
+  ul.points li::before { content: ""; position: absolute; left: 0.1rem; top: 0.62em; width: 0.4rem; height: 0.4rem; border-radius: 50%; background: var(--coral-line); }
+
+  /* ---------- figure rows: visual left, caption and so-what right; wide rows put both
+     under the visual, side by side on the same 68/32 columns ---------- */
+  .fig { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 1rem 2rem; margin: 1.4rem 0 1.9rem; align-items: start; }
+  .fig.wide { grid-template-columns: minmax(0, 1fr); }
+  .fig .visual { min-width: 0; }
+  .fig .margin { font-size: var(--s-1); line-height: 1.5; }
+  .fig.wide .margin { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 0 2rem; align-items: start; }
+  .fig.wide .sowhat { margin-top: 0; }
+  .fig.wide .caption { max-width: 72ch; }
+  .caption { margin: 0; color: var(--ink); }
+  .caption .figno { font-weight: 750; color: var(--coral-text); }
+  .caption .how { color: var(--muted); }
+  .sowhat { margin: 0.8rem 0 0; padding: 0.65rem 0.85rem 0.7rem; background: var(--surface); border-radius: 6px; color: var(--ink); font-size: var(--s-1); line-height: 1.45; font-weight: 500; }
+  .sowhat .lbl, .dag-notes h3 { display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--coral-text); font-weight: 750; margin-bottom: 0.2rem; font-family: var(--body); }
+  .figframe { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
+  .figframe.table { padding: 0.25rem 0.85rem 0.6rem; }
+  .figframe.scroll { overflow-x: auto; }
+  .chart { width: 100%; min-height: 200px; }
+  .chart.vega-embed { display: block; }
+  .chart.vega-embed svg { display: block; }
+
+  /* DAG notes: three blocks of bullets under a DAG, in place of the margin column */
+  .dag-notes { display: grid; grid-template-columns: 1.1fr 1fr 1fr; gap: 0.9rem; margin-top: 0.9rem; font-size: var(--s-1); line-height: 1.45; }
+  .dag-notes > div { background: var(--surface); border-radius: 6px; padding: 0.65rem 0.85rem 0.7rem; }
+  .dag-notes .cap { background: transparent; padding: 0.65rem 0 0; }
+  .dag-notes h3 { font-size: var(--s-2); }
+  .dag-notes .cap h3 { color: var(--coral-text); }
+  .dag-notes ul { margin: 0; padding: 0; list-style: none; }
+  .dag-notes li { position: relative; padding-left: 0.95rem; margin: 0 0 0.25rem; }
+  .dag-notes li::before { content: ""; position: absolute; left: 0.05rem; top: 0.6em; width: 0.35rem; height: 0.35rem; border-radius: 50%; background: var(--coral-line); }
+  .dag-notes .cap li { color: var(--muted); }
+  .dag-notes .cap li::before { background: var(--muted); }
+
+  /* takeaways */
+  .takeaways { margin: 1.1rem 0 0; padding: 0.85rem 1.1rem 0.9rem; border-radius: var(--radius); background: var(--surface); list-style: none; max-width: 72ch; }
+  .takeaways::before { content: "Takeaways"; display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; font-weight: 750; margin-bottom: 0.4rem; }
+  .takeaways li { margin: 0 0 0.4rem; padding-left: 1.1rem; position: relative; }
+  .takeaways li::before { content: ""; position: absolute; left: 0.05rem; top: 0.55em; width: 0.5rem; height: 0.5rem; border-radius: 50%; background: var(--coral); }
+  .takeaways li:last-child { margin-bottom: 0; }
+
+  /* callouts: amber note, crimson problem. Full border, never a side strip. */
+  .callout { max-width: 68ch; margin: 0.4rem 0 1rem; padding: 0.6rem 0.9rem; border-radius: 6px; font-size: var(--s-1); line-height: 1.45; }
+  .callout b { font-weight: 750; }
+  .callout.note { background: var(--amber-soft); border: 1px solid var(--amber); color: var(--amber-text); }
+  .callout.problem { background: var(--red-soft); border: 1px solid var(--red); color: var(--red-text); }
+  .callout.problem b::before { content: "\2715\00a0"; }
+
+  /* ---------- tables ---------- */
+  table.data { border-collapse: collapse; width: 100%; font-size: var(--s-1); line-height: 1.3; }
+  table.data th, table.data td { padding: 0.38rem 0.55rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  table.data th { position: sticky; top: var(--sticky); z-index: 3; background: var(--th-bg); color: var(--ink); border-bottom: 1px solid var(--ink); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.05em; font-weight: 750; line-height: 1.25; vertical-align: bottom; }
+  table.data th:first-child { border-radius: 6px 0 0 0; }
+  table.data th:last-child { border-radius: 0 6px 0 0; }
+  table.data th.txt, table.data td.txt, table.data td.id { text-align: left; }
+  table.data th.num, table.data td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  table.data td.id { font-family: var(--mono); font-size: 0.88em; white-space: nowrap; }
+  table.data td.txt { overflow-wrap: break-word; }
+  table.data td code { font-size: 0.84em; white-space: normal; }
+  .dag-notes code, .caption code { white-space: normal; }
+  table.data td.id code { background: none; padding: 0; color: var(--ink); }
+  /* in-cell bar behind a bold numeral; set --w to the value's share; .key marks the highlighted cells in coral */
+  table.data td.bar { padding: 0.2rem 0.55rem; }
+  table.data td.bar .cbar { position: relative; display: block; padding: 0.16rem 0.4rem; border-radius: 3px; z-index: 0; font-weight: 650; }
+  table.data td.bar .cbar::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: var(--w); background: var(--bar); border-radius: 3px; z-index: -1; }
+  table.data td.bar.key .cbar { color: var(--ink); font-weight: 800; }
+  table.data td.bar.key .cbar::before { background: var(--coral); }
+  table.data tfoot td { border-top: 1px solid var(--ink); border-bottom: 0; font-weight: 650; }
+  table.data tbody tr:nth-child(even) td { background: var(--zebra); }
+  table.data tbody tr:hover td { background: var(--coral-soft); }
+  table.sortable th { cursor: pointer; user-select: none; padding-right: 1.3rem; position: sticky; }
+  table.sortable th::after { content: "\2195"; position: absolute; right: 0.3rem; bottom: 0.4rem; color: var(--muted); font-size: 0.9em; }
+  table.sortable th[aria-sort="ascending"]::after { content: "\2191"; color: var(--ink); }
+  table.sortable th[aria-sort="descending"]::after { content: "\2193"; color: var(--ink); }
+  table.sortable th[aria-sort] { text-decoration: underline; text-underline-offset: 3px; }
+  details.more { margin: 0.5rem 0 0; font-size: var(--s-1); }
+  details.more summary { cursor: pointer; color: var(--ink); font-weight: 650; list-style: none; padding: 0.3rem 0; }
+  details.more summary::before { content: "+ "; color: var(--coral-text); }
+  details.more[open] summary::before { content: "\2013 "; }
+  details.more summary .when-open { display: none; }
+  details.more[open] summary .when-open { display: inline; }
+  details.more[open] summary .when-closed { display: none; }
+
+  /* comparison matrix: symbol and colour, never colour alone */
+  table.matrix th.mark, table.matrix td.mark { text-align: center; width: 4.6rem; }
+  table.matrix td.mark { font-size: 1rem; line-height: 1; padding-top: 0.45rem; font-weight: 700; }
+  table.matrix td.mark.pass { color: var(--ink); }
+  table.matrix td.mark.fail { color: var(--red); }
+  table.matrix td.mark.blocked { color: var(--muted); }
+  table.matrix td.mark .mark-note { display: block; font-size: 0.62rem; color: var(--muted); margin-top: 0.15rem; font-weight: 500; }
+  table.matrix td.tier { white-space: nowrap; color: var(--muted); font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.05em; padding-top: 0.5rem; }
+  table.matrix tr[data-first="1"] td { border-top: 1px solid var(--line-2); }
+  table.matrix tr.tier-defect td.tier { color: var(--red); font-weight: 700; }
+
+  /* ---------- annotated code: tinted panel, line-number gutter, navy markers ---------- */
+  /* Start the gutter at the real line: <pre class="code" style="counter-reset: ln N">, N = first line - 1. */
+  pre.code { margin: 0; padding: 0.6rem 0; font-family: var(--mono); font-size: 0.8rem; line-height: 1.65; counter-reset: ln; overflow-x: auto; background: var(--code-bg); color: var(--code-fg); border: 1px solid var(--code-pill); border-radius: var(--radius); }
+  pre.code code { white-space: normal; background: none; padding: 0; font-size: inherit; display: block; color: inherit; font-weight: 450; }
+  pre.code .l { display: block; position: relative; padding: 0 3.2rem 0 4.3rem; white-space: pre; }
+  pre.code .l::before { counter-increment: ln; content: counter(ln); position: absolute; left: 0; top: 0; bottom: 0; width: 3.3rem; padding-right: 0.6rem; text-align: right; color: var(--code-gutter-fg); background: var(--code-gutter); font-variant-numeric: tabular-nums; font-size: 0.9em; }
+  pre.code .l.mark { background: var(--code-mark); }
+  pre.code .l.mark::before { color: var(--ink); font-weight: 800; background: var(--code-mark-gutter); }
+  pre.code .l.mark::after { content: attr(data-m); position: absolute; right: 0.6rem; top: 0.14rem; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--ink); color: var(--on-ink); font-size: 0.7rem; font-weight: 800; text-align: center; line-height: 1.25rem; font-family: var(--body); }
+  /* diff: same panel and markers, two line-number columns, GitHub light diff colours (inside diffs only) */
+  pre.code.diff .l { display: grid; grid-template-columns: 3rem 3rem 1.4rem minmax(0, 1fr); padding: 0 3.2rem 0 0; white-space: normal; }
+  pre.code.diff .l::before { content: none; }
+  pre.code.diff .o, pre.code.diff .n { text-align: right; padding-right: 0.55rem; background: var(--code-gutter); color: var(--code-gutter-fg); font-size: 0.9em; font-variant-numeric: tabular-nums; }
+  pre.code.diff .sg { text-align: center; user-select: none; font-weight: 700; }
+  pre.code.diff .t { white-space: pre-wrap; overflow-wrap: anywhere; padding-right: 0.4rem; }
+  pre.code.diff .l.add { background: var(--gh-add); color: var(--gh-fg); }
+  pre.code.diff .l.add .o, pre.code.diff .l.add .n { background: var(--gh-add-num); color: var(--gh-num); }
+  pre.code.diff .l.add .sg { color: var(--gh-add-sign); }
+  pre.code.diff .l.add .w { background: var(--gh-add-word); border-radius: 3px; }
+  pre.code.diff .l.del { background: var(--gh-del); color: var(--gh-fg); }
+  pre.code.diff .l.del .o, pre.code.diff .l.del .n { background: var(--gh-del-num); color: var(--gh-num); }
+  pre.code.diff .l.del .sg { color: var(--gh-del-sign); }
+  pre.code.diff .l.del .w { background: var(--gh-del-word); border-radius: 3px; }
+  pre.code.diff .l.hunk { background: var(--gh-hunk); color: var(--gh-hunk-fg); }
+  pre.code.diff .l.hunk .o, pre.code.diff .l.hunk .n { background: var(--gh-hunk); }
+  pre.code.diff .l.hunk .t { padding: 0.15rem 0; }
+  ol.markers { list-style: none; margin: 1rem 0 0; padding: 0; font-size: var(--s-1); display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem 1.5rem; }
+  ol.markers li { position: relative; padding-left: 1.9rem; line-height: 1.45; }
+  ol.markers li .k { position: absolute; left: 0; top: 0.05rem; width: 1.25rem; height: 1.25rem; border-radius: 50%; background: var(--ink); color: var(--on-ink); font-size: 0.7rem; font-weight: 800; text-align: center; line-height: 1.25rem; }
+  ol.markers li .ln { font-family: var(--mono); color: var(--muted); font-size: 0.85em; font-weight: 600; }
+
+  /* ---------- timeline ---------- */
+  ol.timeline { list-style: none; margin: 0; padding: 0.25rem 0; font-size: var(--s-1); position: relative; }
+  ol.timeline::before { content: ""; position: absolute; left: calc(1.6rem + 6.4rem + 0.5rem - 1px + 0.4rem); top: 0.8rem; bottom: 0.8rem; width: 2px; background: var(--line-2); }
+  ol.timeline li { display: grid; grid-template-columns: 1.6rem 6.4rem 1rem 1fr; gap: 0 0.5rem; align-items: start; padding: 0.32rem 0.4rem; position: relative; border-radius: 6px; }
+  ol.timeline .tl-n { color: var(--muted); font-variant-numeric: tabular-nums; font-size: var(--s-2); padding-top: 0.15rem; }
+  ol.timeline .tl-date { font-variant-numeric: tabular-nums; color: var(--muted); }
+  ol.timeline .tl-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--ink); border: 2px solid var(--paper); box-shadow: 0 0 0 1px var(--ink); margin: 0.38rem 0 0 -0.05rem; position: relative; z-index: 1; }
+  ol.timeline .tl-body { line-height: 1.4; }
+  ol.timeline .tl-body code { font-size: 0.86em; }
+  ol.timeline .tl-note { display: block; color: var(--muted); font-size: var(--s-2); }
+  ol.timeline li.key { background: var(--coral-soft); border: 1px solid var(--coral-border); }
+  ol.timeline li.key .tl-dot { background: var(--coral); width: 14px; height: 14px; margin: 0.25rem 0 0 -0.18rem; box-shadow: 0 0 0 1.5px var(--coral-line); }
+  ol.timeline li.key .tl-date, ol.timeline li.key .tl-n { color: var(--ink); font-weight: 750; }
+  ol.timeline li.key .tl-body { font-weight: 650; }
+  ol.timeline li.key .tl-note { color: var(--muted); font-weight: 500; }
+  ol.timeline li.key .tl-body code { background: var(--coral); color: var(--ink); font-weight: 700; }
+
+  /* ---------- proportion bars ---------- */
+  .bars { padding: 0.75rem 1.1rem; }
+  .bar-row { display: grid; grid-template-columns: 11rem 1fr; gap: 0.75rem; align-items: center; padding: 0.22rem 0; font-size: var(--s-1); }
+  .bar-label { font-family: var(--mono); font-size: 0.78rem; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
+  .bar-fill { height: 1rem; background: var(--ink); border-radius: 0 3px 3px 0; flex: 0 0 auto; }
+  .bar-row:first-child .bar-fill { background: var(--coral-line); }
+  .bar-row.other .bar-fill { background: var(--taupe); }
+  .bar-row.other .bar-label { color: var(--muted); font-family: var(--body); }
+  .bar-num { font-variant-numeric: tabular-nums; white-space: nowrap; font-size: var(--s-1); }
+  .bar-num b { font-weight: 750; color: var(--ink); }
+  .bar-sub { color: var(--muted); font-size: var(--s-2); }
+
+  /* ---------- limits ---------- */
+  ol.limits { margin: 0; padding-left: 1.4rem; max-width: 68ch; }
+  ol.limits li { margin-bottom: 0.45rem; }
+  ol.limits li::marker { color: var(--coral-text); font-weight: 700; }
+
+  /* ---------- DAG: static SVG from scripts/dag_svg.py, tag-badge nodes on a tinted canvas ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; font-size: var(--s-2); color: var(--muted); margin: 0.7rem 0 0; }
+  .legend .k { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legend .tgk { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; padding: 1px 5px; border-radius: 2.5px; line-height: 1.35; color: var(--on-ink); }
+  .legend .grpk { display: inline-block; width: 1.6rem; height: 0.9rem; border: 1px dashed var(--rule); border-radius: 3px; background: var(--paper); }
+  .figframe.dag-frame { background: var(--surface); padding: 0.9rem 0.6rem; container-type: inline-size; }
+  .dag-frame svg.dag { display: block; width: 100%; height: auto; margin: 0 auto; overflow: visible; }
+  .dag-frame svg.dag-tb { display: none; }
+  @container (max-width: 979px) { .dag-frame svg.dag-lr { display: none; } .dag-frame svg.dag-tb { display: block; } }
+  svg.dag .edges path { fill: none; stroke: var(--rule); stroke-width: 1.5; }
+  svg.dag .arrow { fill: var(--rule); }
+  svg.dag .box { fill: var(--paper); stroke: var(--rule); stroke-width: 1; }
+  svg.dag .group .box { stroke-dasharray: 4 2; }
+  svg.dag .focus .box { fill: var(--coral-soft); stroke: var(--coral-line); stroke-width: 2; }
+  svg.dag text.tg { font-family: var(--mono); font-size: 9.5px; font-weight: 700; letter-spacing: 0.05em; fill: var(--on-ink); }
+  svg.dag text.nm { font-family: var(--body); font-size: 12.5px; font-weight: 600; fill: var(--ink); }
+  svg.dag text.cp { font-family: var(--mono); font-size: 10.5px; fill: var(--muted); }
+  svg.dag .cnt { fill: var(--th-bg); stroke: var(--rule); stroke-width: 1; }
+  svg.dag text.cn { font-family: var(--mono); font-size: 11px; font-weight: 700; fill: var(--ink); }
+  /* badge slots: class tag-N on the node group (svg) or the legend key (.tgk) */
+  svg.dag .tag-1 rect.tag, .legend .tgk.tag-1 { fill: var(--tag-1); background: var(--tag-1); }
+  svg.dag .tag-2 rect.tag, .legend .tgk.tag-2 { fill: var(--tag-2); background: var(--tag-2); }
+  svg.dag .tag-3 rect.tag, .legend .tgk.tag-3 { fill: var(--tag-3); background: var(--tag-3); }
+  svg.dag .tag-4 rect.tag, .legend .tgk.tag-4 { fill: var(--tag-4); background: var(--tag-4); }
+  svg.dag .tag-5 rect.tag, .legend .tgk.tag-5 { fill: var(--tag-5); background: var(--tag-5); }
+  svg.dag .tag-6 rect.tag { fill: var(--paper); stroke: var(--tag-6); stroke-width: 1; }
+  svg.dag .tag-6 text.tg { fill: var(--tag-6); }
+  .legend .tgk.tag-6 { background: var(--paper); color: var(--tag-6); box-shadow: inset 0 0 0 1px var(--tag-6); }
+  svg.dag g.focus rect.tag, .legend .tgk.focus { fill: var(--coral); background: var(--coral); stroke: none; }
+  svg.dag g.focus text.tg, .legend .tgk.focus { fill: var(--ink); color: var(--ink); box-shadow: none; }
+
+  /* ---------- sequence diagram (Mermaid) ---------- */
+  pre.mermaid { margin: 0; font-family: var(--mono); font-size: 0.75rem; color: var(--muted); }
+  pre.mermaid svg { display: block; margin: 0 auto; }
+
+  @media (max-width: 1100px) {
+    .side { display: none; }
+    .content { margin-left: 0; padding: 2rem 2rem 3rem; }
+    .toc-inline { display: block; margin: 0 0 2rem; background: var(--surface); border-radius: var(--radius); padding: 0.75rem 1rem; }
+    .toc-inline ol { margin: 0; padding-left: 1.6rem; columns: 2; column-gap: 2rem; font-size: var(--s-1); }
+    .toc-inline li { break-inside: avoid; margin-bottom: 0.2rem; }
+    .toc-inline li::marker { color: var(--coral-text); font-weight: 700; }
+  }
+  @media (max-width: 900px) {
+    .content { padding: 1.5rem 1rem 3rem; }
+    .fig { grid-template-columns: minmax(0, 1fr); }
+    .fig.wide .margin { grid-template-columns: minmax(0, 1fr); }
+    .fig.wide .sowhat { margin-top: 0.8rem; }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    ol.markers { grid-template-columns: 1fr; }
+    .dag-notes { grid-template-columns: 1fr 1fr; }
+    .dag-notes .cap { grid-column: 1 / -1; }
+    table.matrix th.mark, table.matrix td.mark { width: 3.6rem; }
+    table.matrix th, table.matrix td { padding-left: 0.35rem; padding-right: 0.35rem; }
+  }
+  @media (max-width: 560px) {
+    .answer { flex-direction: column; align-items: flex-start; }
+    .answer .lead { text-align: left; }
+    .answer .lead .n { font-size: 4rem; }
+    .answer .claim { font-size: 1.2rem; }
+  }
+  @media print {
+    .side, details.more { display: none !important; }
+    body { background: var(--paper); }
+    .content { margin-left: 0; padding: 0; max-width: none; }
+    .toc-inline { display: block; }
+    .fig, .figframe, table.data, pre.code, ol.timeline { break-inside: avoid; page-break-inside: avoid; }
+    .figframe { box-shadow: none; }
+    h2.sec-head { position: static; }
+    table.data th { position: static; }
+    table.data tbody[hidden] { display: table-row-group !important; }
+    .figframe.scroll { overflow: visible; }
+  }
+/* dossier:locked:end */
+/* dossier:report:begin */
+  /* Per-report geometry only: column widths and one-off sizes keyed to a table or figure id.
+     Example: #table-1 { table-layout: fixed; } #table-1 col.c-name { width: 30%; } */
+  /* ===== PROTOTYPE: so-what treatments, keyed on html[data-variant] ===== */
+  #table-3 th:nth-child(4), #table-3 th:nth-child(6) { width: 22%; }
+  .sowhat .big { display: none; }
+  .sowhat .claim, .sowhat .rest { display: inline; }
+  .sowhat em { font-style: normal; }
+  [data-variant="A"] .sowhat .rest::before { content: " "; }
+
+  /* B: margin answer: the so-what leads the margin as a small answer box */
+  [data-variant="B"] .fig .margin { display: flex; flex-direction: column; }
+  [data-variant="B"] .sowhat { order: -1; margin: 0 0 1rem; padding: 0.9rem 0 1rem; background: none; border-radius: 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
+  [data-variant="B"] .sowhat .big { display: block; margin: 0.15rem 0 0.5rem; }
+  [data-variant="B"] .sowhat .big .n { display: block; font: 800 3.4rem/0.9 var(--display); letter-spacing: -0.05em; color: var(--coral-text); font-variant-numeric: tabular-nums; }
+  [data-variant="B"] .sowhat .big .u { display: block; color: var(--muted); font-weight: 600; margin-top: 0.3rem; }
+  [data-variant="B"] .sowhat .claim { display: block; font-family: var(--display); font-size: 1.12rem; line-height: 1.3; font-weight: 650; letter-spacing: -0.01em; }
+  [data-variant="B"] .sowhat .rest { display: block; margin-top: 0.45rem; font-weight: 400; }
+
+  /* C: headline band: a mini answer box above each figure, caption alone in the margin */
+  [data-variant="C"] .fig { grid-template-areas: "so so" "vis cap"; }
+  [data-variant="C"] .fig .margin { display: contents; }
+  [data-variant="C"] .fig .visual { grid-area: vis; }
+  [data-variant="C"] .fig .caption { grid-area: cap; }
+  [data-variant="C"] .sowhat { grid-area: so; display: flex; align-items: center; gap: 0.5rem 1.75rem; margin: 0.6rem 0 0; padding: 1rem 0; background: none; border-radius: 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); font-size: var(--s0); }
+  [data-variant="C"] .sowhat .big { display: block; flex: none; text-align: center; min-width: 7.5rem; }
+  [data-variant="C"] .sowhat .big .n { display: block; font: 800 3.6rem/0.9 var(--display); letter-spacing: -0.05em; color: var(--coral-text); font-variant-numeric: tabular-nums; }
+  [data-variant="C"] .sowhat .big .u { display: block; font-size: var(--s-2); color: var(--muted); font-weight: 600; margin-top: 0.35rem; }
+  [data-variant="C"] .sowhat .txt { flex: 1 1 auto; }
+  [data-variant="C"] .sowhat .claim { display: block; font-family: var(--display); font-size: 1.25rem; line-height: 1.28; font-weight: 650; letter-spacing: -0.015em; max-width: 38em; }
+  [data-variant="C"] .sowhat .rest { display: block; margin-top: 0.4rem; font-weight: 400; max-width: 60em; }
+
+  /* D: ink card: the so-what inverts to navy, number in coral, still in the margin */
+  [data-variant="D"] .sowhat { margin-top: 1rem; padding: 1rem 1.1rem 1.1rem; background: var(--ink); color: var(--on-ink); border-radius: var(--radius); }
+  [data-variant="D"] .sowhat .lbl { color: var(--coral); }
+  [data-variant="D"] .sowhat .big { display: flex; align-items: baseline; gap: 0.6rem; margin: 0.2rem 0 0.55rem; }
+  [data-variant="D"] .sowhat .big .n { font: 800 2.9rem/0.9 var(--display); letter-spacing: -0.05em; color: var(--coral); font-variant-numeric: tabular-nums; }
+  [data-variant="D"] .sowhat .big .u { font-size: var(--s-2); font-weight: 600; }
+  [data-variant="D"] .sowhat .claim { display: block; font-family: var(--display); font-size: 1.08rem; line-height: 1.3; font-weight: 650; }
+  [data-variant="D"] .sowhat .rest { display: block; margin-top: 0.45rem; font-weight: 400; }
+
+  /* E: pull quote: no box, no number; the claim is set large and leads the margin */
+  [data-variant="E"] .fig .margin { display: flex; flex-direction: column; }
+  [data-variant="E"] .sowhat { order: -1; margin: 0 0 1rem; padding: 0; background: none; font-size: var(--s0); }
+  [data-variant="E"] .sowhat .claim { display: block; font-family: var(--display); font-size: 1.45rem; line-height: 1.22; font-weight: 700; letter-spacing: -0.02em; }
+  [data-variant="E"] .sowhat .claim em { font-style: normal; color: var(--coral-text); }
+  [data-variant="E"] .sowhat .rest { display: block; margin-top: 0.5rem; font-size: var(--s-1); font-weight: 400; }
+  [data-variant="E"] .caption { padding-top: 0.8rem; border-top: 1px solid var(--line-2); }
+
+  @media (max-width: 900px) {
+    [data-variant="C"] .fig { grid-template-areas: "so" "vis" "cap"; }
+  }
+
+  /* switcher: not part of the design */
+  #proto-bar { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 0.5rem; padding: 0.35rem 0.45rem; background: #111; color: #fff; border-radius: 999px; box-shadow: 0 6px 24px rgba(0,0,0,0.35); font: 600 13px/1 var(--body); }
+  #proto-bar button { all: unset; cursor: pointer; width: 28px; height: 28px; border-radius: 50%; text-align: center; line-height: 28px; background: #333; }
+  #proto-bar button:hover { background: #555; }
+  #pb-label { min-width: 15rem; text-align: center; }
+/* dossier:report:end */
+</style>
+</head>
+<body>
+
+<aside class="side" aria-label="Contents">
+  <p class="brand">Cost per tenant</p>
+  <p class="meta">PROTOTYPE: so-what treatments. Data from the cost dossier screenshot.</p>
+  <ol class="toc" id="toc">
+    <li><a href="#s1"><span class="n">01</span><span>Cost by tenant size</span></a></li>
+    <li><a href="#s2"><span class="n">02</span><span>Limits</span></a></li>
+  </ol>
+</aside>
+
+<main class="content">
+  <header class="masthead">
+    <p class="kicker eyebrow">Report &middot; Snowflake cost &middot; prototype</p>
+    <h1>What a tenant costs us each month</h1>
+    <p class="byline">PROTOTYPE of so-what treatments. Flip variants with the bar at the bottom or the arrow keys.</p>
+  </header>
+
+  <section class="answer" aria-label="Answer">
+    <div class="lead"><div class="n"><span class="key">$22.50</span></div><span class="u">per pipelined tenant per month</span></div>
+    <div class="text">
+      <p class="label eyebrow">Answer</p>
+      <p class="claim">An average active tenant costs $22.50 a month, but the 110 largest carry 82% of the bill.</p>
+      <p class="rest">Cost per tenant has risen five- to sevenfold since August in every size bucket.</p>
+    </div>
+  </section>
+
+  <section class="sec" id="s1">
+    <h2 class="sec-head"><span class="n">01</span><span>Cost by tenant size</span><span class="count">Table 3, Figure 7</span></h2>
+    <div class="prose">
+      <p>Snowflake does not meter cost per tenant. The script splits transform, reporting and storage dollars by each size bucket's share of raw rows (A-21, Low confidence). Of 2,311 registered tenants, 1,254 are pipelined, 1,100 of them active. Table 3 covers those 1,100.</p>
+    </div>
+
+    <div class="fig" id="table-3-fig">
+      <div class="visual">
+        <div class="figframe table">
+          <table class="data" id="table-3">
+            <thead><tr><th class="txt">Size</th><th class="txt">Raw rows per tenant</th><th class="num">Tenants</th><th class="num">Share of rows</th><th class="num">$ per month</th><th class="num">$ per tenant per month</th></tr></thead>
+            <tbody>
+              <tr><td class="txt">Small</td><td class="txt">under 291k</td><td class="num">550</td><td class="num bar"><span class="cbar" style="--w:1.6%">1.6%</span></td><td class="num">395</td><td class="num bar"><span class="cbar" style="--w:0.4%">0.72</span></td></tr>
+              <tr><td class="txt">Medium</td><td class="txt">291k to 3.3M</td><td class="num">440</td><td class="num bar"><span class="cbar" style="--w:16.3%">16.3%</span></td><td class="num">4,025</td><td class="num bar"><span class="cbar" style="--w:5%">9.15</span></td></tr>
+              <tr class="hl"><td class="txt">Large</td><td class="txt">over 3.3M</td><td class="num">110</td><td class="num bar key"><span class="cbar" style="--w:82.1%">82.1%</span></td><td class="num">20,331</td><td class="num bar key"><span class="cbar" style="--w:100%">184.83</span></td></tr>
+            </tbody>
+            <tfoot><tr><td class="txt">All pipelined active</td><td></td><td class="num">1,100</td><td class="num">100%</td><td class="num">24,751</td><td class="num">22.50</td></tr></tfoot>
+          </table>
+        </div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Table 3.</span> Allocated monthly cost by tenant size. <span class="how">Buckets split at the 50th (291k rows) and 90th (3.3M rows) percentile of raw rows per tenant. Coral marks Large. The allocation covers $24,751 of the $30,477 total.</span></p>
+        <div class="sowhat" data-n="257&times;" data-u="Large vs Small, per tenant">
+          <span class="lbl">So what</span>
+          <span class="claim">A Large tenant is allocated 257 times what a Small one is.</span>
+          <span class="rest">110 tenants hold 82% of rows and so get $20,331 a month.</span>
+        </div>
+      </div>
+    </div>
+
+    <ul class="points">
+      <li>Figure 7 repeats Table 3's split for each Monday week. Each week's transform, reporting and storage dollars go to buckets by their share of the rows that existed that week, dated by the source <code>CREATED_AT</code>.</li>
+      <li>Buckets stay fixed at today's 550, 440 and 110 tenants, so the lines show cost, not tenants changing bucket.</li>
+    </ul>
+
+    <div class="fig" id="fig-7">
+      <div class="visual">
+        <div class="figframe"><div class="chart" id="chart-7"></div></div>
+      </div>
+      <div class="margin">
+        <p class="caption"><span class="figno">Figure 7.</span> Allocated cost per tenant per month by size bucket, as weekly values, 2026-08-03 to 2026-10-28. <span class="how">Each panel has its own dollar scale. The hollow point is the three-day week to 10-28. Coral marks Large.</span></p>
+        <div class="sowhat" data-n="5.5&times;" data-u="Large tenant, Aug to Oct">
+          <span class="lbl">So what</span>
+          <span class="claim">A Large tenant went from $39 to $213 a month in twelve weeks.</span>
+          <span class="rest">All three buckets climb in the same weeks as transform in Figure 5; the 08-24 jump is query acceleration (Figure 4, event 5).</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" id="s2">
+    <h2 class="sec-head"><span class="n">02</span><span>Limits</span></h2>
+    <ol class="limits"><li>Prototype. Numbers copied from a screenshot; the weekly series between labelled points is approximate.</li></ol>
+  </section>
+</main>
+
+<div id="proto-bar" aria-label="Prototype variant switcher">
+  <button id="pb-prev" aria-label="Previous variant">&larr;</button>
+  <span id="pb-label"></span>
+  <button id="pb-next" aria-label="Next variant">&rarr;</button>
+</div>
+
+
+<!-- ===== Library block: pinned, cdn.jsdelivr.net only. Delete a library's tags when no figure uses it. ===== -->
+<!-- Vega stack: classic scripts, order matters (vega, vega-lite, vega-embed). -->
+<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@6.5.0/build/vega-lite.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@7.3.0/build/vega-embed.min.js"></script>
+<script>
+  // Colours come from the CSS tokens, so the stylesheet stays the one palette source.
+  const TOKEN = (name) => getComputedStyle(document.documentElement).getPropertyValue("--" + name).trim();
+  const VL_CONFIG = {
+    font: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+    mark: { color: TOKEN("series-1") },
+    range: { category: [TOKEN("series-1"), TOKEN("series-2"), TOKEN("series-3"), TOKEN("series-4")] },
+    axis: { labelColor: TOKEN("muted"), titleColor: TOKEN("ink"), gridColor: TOKEN("line"), domainColor: TOKEN("rule"), tickColor: TOKEN("rule"), labelFontSize: 11.5, titleFontSize: 11.5 },
+    view: { stroke: null }
+  };
+  const VL_OPTS = { renderer: "svg", actions: false };
+  // dossier:charts - one [selector, spec] pair per chart. Inline data, "width": "container".
+  const CHARTS = [
+    ["#chart-7", {"$schema": "https://vega.github.io/schema/vega-lite/v6.json", "data": {"values": [{"bucket": "Small", "week": "2026-08-06", "v": 0.11, "lab": "$0.11", "partial": false}, {"bucket": "Small", "week": "2026-08-13", "v": 0.12, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-08-20", "v": 0.115, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-08-27", "v": 0.27, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-09-03", "v": 0.25, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-09-10", "v": 0.34, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-09-17", "v": 0.31, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-09-24", "v": 0.35, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-10-01", "v": 0.53, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-10-08", "v": 0.52, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-10-15", "v": 0.66, "lab": "", "partial": false}, {"bucket": "Small", "week": "2026-10-22", "v": 0.81, "lab": "$0.81", "partial": false}, {"bucket": "Small", "week": "2026-10-26", "v": 0.82, "lab": "", "partial": true}, {"bucket": "Medium", "week": "2026-08-06", "v": 1.82, "lab": "$1.82", "partial": false}, {"bucket": "Medium", "week": "2026-08-13", "v": 1.95, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-08-20", "v": 1.85, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-08-27", "v": 4.3, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-09-03", "v": 3.9, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-09-10", "v": 5.2, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-09-17", "v": 4.6, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-09-24", "v": 5.1, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-10-01", "v": 7.4, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-10-08", "v": 7.0, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-10-15", "v": 8.9, "lab": "", "partial": false}, {"bucket": "Medium", "week": "2026-10-22", "v": 10.53, "lab": "$10.53", "partial": false}, {"bucket": "Medium", "week": "2026-10-26", "v": 10.5, "lab": "", "partial": true}, {"bucket": "Large", "week": "2026-08-06", "v": 39, "lab": "$39", "partial": false}, {"bucket": "Large", "week": "2026-08-13", "v": 42, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-08-20", "v": 40, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-08-27", "v": 91, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-09-03", "v": 83, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-09-10", "v": 108, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-09-17", "v": 97, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-09-24", "v": 106, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-10-01", "v": 153, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-10-08", "v": 146, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-10-15", "v": 182, "lab": "", "partial": false}, {"bucket": "Large", "week": "2026-10-22", "v": 213, "lab": "$213", "partial": false}, {"bucket": "Large", "week": "2026-10-26", "v": 212, "lab": "", "partial": true}]}, "facet": {"row": {"field": "bucket", "sort": ["Small", "Medium", "Large"], "header": {"title": null, "labelAngle": 0, "labelAlign": "left", "labelFontWeight": 700, "labelFontSize": 11.5}}}, "resolve": {"scale": {"y": "independent"}}, "spacing": 14, "spec": {"width": 520, "height": 92, "encoding": {"x": {"field": "week", "type": "temporal", "title": null, "axis": {"format": "%d %b", "tickCount": "week"}}, "y": {"field": "v", "type": "quantitative", "title": "$ / tenant / month", "axis": {"tickCount": 3}}, "color": {"field": "bucket", "type": "nominal", "legend": null, "scale": {"domain": ["Small", "Medium", "Large"], "range": ["#102542", "#102542", "#d95646"]}}}, "layer": [{"mark": {"type": "line", "strokeWidth": 2}}, {"mark": {"type": "point", "filled": true, "size": 22}, "transform": [{"filter": "!datum.partial"}]}, {"mark": {"type": "point", "filled": false, "size": 40, "strokeWidth": 1.5}, "transform": [{"filter": "datum.partial"}]}, {"mark": {"type": "text", "dy": -10, "fontWeight": 700, "fontSize": 11}, "encoding": {"text": {"field": "lab"}, "color": {"value": "#102542"}}, "transform": [{"filter": "datum.lab != '' && datum.week != '2026-08-06'"}]}, {"mark": {"type": "text", "dy": -10, "align": "left", "dx": 2, "fontWeight": 700, "fontSize": 11}, "encoding": {"text": {"field": "lab"}, "color": {"value": "#102542"}}, "transform": [{"filter": "datum.lab != '' && datum.week == '2026-08-06'"}]}]}}]
+  ];
+  window.__vegaDone = Promise.all(CHARTS.map(([sel, spec]) => {
+    spec.config = Object.assign({}, VL_CONFIG, spec.config || {});
+    return vegaEmbed(sel, spec, VL_OPTS);
+  }));
+</script>
+
+<script>
+  // ---- click-to-sort on every column of every table.sortable ----
+  (function () {
+    function cellKey(td, type) {
+      if (td.dataset.v !== undefined) {
+        return type === "num" ? parseFloat(td.dataset.v) : td.dataset.v;
+      }
+      const t = td.textContent.trim();
+      if (type === "num") { const v = parseFloat(t.replace(/,/g, "")); return isNaN(v) ? -Infinity : v; }
+      return t.toLowerCase();
+    }
+    function sortTable(table, idx, th) {
+      const ths = table.querySelectorAll("thead th");
+      const dir = th.getAttribute("aria-sort") === "ascending" ? "descending" : "ascending";
+      ths.forEach(h => h.removeAttribute("aria-sort"));
+      th.setAttribute("aria-sort", dir);
+      const type = th.dataset.type || "txt";
+      const rows = Array.from(table.querySelectorAll("tbody tr"));
+      const sign = dir === "ascending" ? 1 : -1;
+      rows.sort((a, b) => {
+        const ka = cellKey(a.cells[idx], type), kb = cellKey(b.cells[idx], type);
+        return (ka < kb ? -1 : ka > kb ? 1 : 0) * sign;
+      });
+      const bodies = table.querySelectorAll("tbody");
+      const show = parseInt(table.dataset.show || "0", 10);
+      if (show && bodies.length === 2) {
+        rows.forEach((r, k) => (k < show ? bodies[0] : bodies[1]).appendChild(r));
+      } else {
+        rows.forEach(r => bodies[0].appendChild(r));
+      }
+    }
+    document.querySelectorAll("table.sortable").forEach(table => {
+      table.querySelectorAll("thead th").forEach((th, idx) => {
+        th.setAttribute("tabindex", "0");
+        th.setAttribute("title", "Sort by " + th.textContent.trim());
+        th.addEventListener("click", () => sortTable(table, idx, th));
+        th.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); sortTable(table, idx, th); } });
+      });
+    });
+    // ---- details.more toggles the hidden tbody it names ----
+    document.querySelectorAll("details.more[data-target]").forEach(d => {
+      const target = document.getElementById(d.dataset.target);
+      d.addEventListener("toggle", () => { target.hidden = !d.open; });
+    });
+  })();
+
+  // ---- current section in the sidebar ----
+  (function () {
+    const links = Array.from(document.querySelectorAll("#toc a"));
+    const byId = {};
+    links.forEach(a => { byId[a.getAttribute("href").slice(1)] = a; });
+    const sections = Array.from(document.querySelectorAll("section.sec"));
+    const visible = new Map();
+    function update() {
+      let best = null;
+      const atBottom = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 2;
+      if (atBottom) best = sections[sections.length - 1];
+      for (const s of sections) {
+        if (best) break;
+        const r = s.getBoundingClientRect();
+        if (r.top <= 120 && r.bottom > 120) { best = s; break; }
+      }
+      if (!best) {
+        for (const s of sections) { if (visible.get(s.id)) { best = s; break; } }
+      }
+      links.forEach(a => a.classList.remove("current"));
+      if (best && byId[best.id]) byId[best.id].classList.add("current");
+    }
+    if ("IntersectionObserver" in window) {
+      const io = new IntersectionObserver(entries => {
+        entries.forEach(e => visible.set(e.target.id, e.isIntersecting));
+        update();
+      }, { rootMargin: "-10% 0px -60% 0px", threshold: [0, 0.1, 0.5, 1] });
+      sections.forEach(s => io.observe(s));
+    }
+    window.addEventListener("scroll", update, { passive: true });
+    update();
+  })();
+</script>
+
+<!-- Mermaid, sequence diagrams only: ESM, pinned, must be type="module". -->
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs";
+  const t = (name) => getComputedStyle(document.documentElement).getPropertyValue("--" + name).trim();
+  mermaid.initialize({
+    startOnLoad: false, securityLevel: "strict", theme: "base",
+    fontFamily: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif',
+    themeVariables: {
+      fontFamily: '-apple-system, "Segoe UI", Helvetica, Arial, sans-serif', fontSize: "13px",
+      primaryColor: t("paper"), primaryBorderColor: t("ink"), primaryTextColor: t("ink"),
+      secondaryColor: t("th-bg"), tertiaryColor: t("paper"), lineColor: t("rule"), textColor: t("ink"),
+      noteBkgColor: t("amber-soft"), noteBorderColor: t("amber"), noteTextColor: t("ink"),
+      actorBkg: t("th-bg"), actorBorder: t("ink"), actorTextColor: t("ink"), actorLineColor: t("rule"),
+      signalColor: t("ink"), signalTextColor: t("ink"),
+      labelBoxBkgColor: t("th-bg"), labelBoxBorderColor: t("rule"), labelTextColor: t("ink"), loopTextColor: t("ink"),
+      activationBorderColor: t("coral-line"), activationBkgColor: t("coral-soft"), sequenceNumberColor: t("on-ink")
+    },
+    // Below 1000px wrap message text so the diagram is not scaled down to unreadable text.
+    sequence: { useMaxWidth: true, actorFontWeight: 600, messageFontSize: 13, actorFontSize: 14, width: 130, height: 30, boxMargin: 5, messageMargin: 14, mirrorActors: false, wrap: window.innerWidth < 1000, actorMargin: 40 }
+  });
+  // Run last: run() replaces each pre.mermaid's text with an SVG. Hide tabs only after it returns.
+  await mermaid.run();
+</script>
+<script>
+  // ---- PROTOTYPE: variant switcher (?variant=A..E, arrow keys) ----
+  (function () {
+    const V = [["A", "Current"], ["B", "Margin answer"], ["C", "Headline band"], ["D", "Ink card"], ["E", "Pull quote"]];
+    document.querySelectorAll(".sowhat").forEach(s => {
+      const big = document.createElement("span");
+      big.className = "big";
+      big.innerHTML = '<span class="n">' + s.dataset.n + '</span><span class="u">' + s.dataset.u + "</span>";
+      const txt = document.createElement("span");
+      txt.className = "txt";
+      s.querySelectorAll(".lbl, .claim, .rest").forEach(e => txt.appendChild(e));
+      s.append(big, txt);
+      // E: colour the number inside the claim
+      const c = s.querySelector(".claim");
+      c.innerHTML = c.innerHTML.replace(/(257 times|\$39 to \$213)/, "<em>$1</em>");
+    });
+    function set(k) {
+      document.documentElement.dataset.variant = k;
+      const i = V.findIndex(v => v[0] === k);
+      document.getElementById("pb-label").textContent = k + " (" + V[i][1] + ")  " + (i + 1) + "/" + V.length;
+      const u = new URL(location.href); u.searchParams.set("variant", k); history.replaceState(null, "", u);
+      window.dispatchEvent(new Event("resize"));
+    }
+    function step(d) {
+      const i = V.findIndex(v => v[0] === document.documentElement.dataset.variant);
+      set(V[(i + d + V.length) % V.length][0]);
+    }
+    const q = new URLSearchParams(location.search).get("variant");
+    set(V.some(v => v[0] === q) ? q : "A");
+    document.getElementById("pb-prev").onclick = () => step(-1);
+    document.getElementById("pb-next").onclick = () => step(1);
+    document.addEventListener("keydown", e => {
+      if (e.target.closest("input, textarea, [contenteditable]")) return;
+      if (e.key === "ArrowLeft") step(-1);
+      if (e.key === "ArrowRight") step(1);
+    });
+  })();
+</script>
+</body>
+</html>

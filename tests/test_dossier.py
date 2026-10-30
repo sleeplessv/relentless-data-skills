@@ -453,6 +453,14 @@ class TestResourceUrls(unittest.TestCase):
             "https://esm.sh/thing@1",
         ])
 
+    def test_hints_that_load_nothing_are_not_resources(self):
+        html = ('<link rel="preconnect" href="https://cdn.jsdelivr.net">'
+                '<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">'
+                '<link rel="Preconnect stylesheet" href="https://fonts.example/a.css">'
+                '<link href="https://fonts.example/b.css">')
+        self.assertEqual(check_render.resource_urls(html),
+                         ["https://fonts.example/a.css", "https://fonts.example/b.css"])
+
 
 class TestUrlProblem(unittest.TestCase):
     def test_pinned_jsdelivr_package_passes(self):
@@ -614,6 +622,11 @@ class TestStructure(unittest.TestCase):
         late = dossier(findings=stats + FINDINGS)
         self.assertIn("right after the answer box", self.problems(late))
 
+    def test_a_nested_list_in_a_finding_is_not_another_finding(self):
+        nested = FINDINGS.replace("</a></li></ol>",
+                                  "</a><ul><li>a</li><li>b</li><li>c</li></ul></li></ol>")
+        self.assertEqual(self.problems(dossier(findings=nested)), "")
+
     def test_no_limits_section_fails(self):
         self.assertIn("Limits", self.problems(dossier(limits="")))
 
@@ -667,6 +680,13 @@ class TestStructure(unittest.TestCase):
         items = "".join(f"<li>{' '.join(['word'] * 10)}</li>" for _ in range(7))
         html = dossier(section(1, "How the check runs", f"<p>Intro<ul>{items}</ul>" + figure(1)))
         self.assertEqual(self.warnings(html), "")
+
+    def test_any_block_start_closes_an_unclosed_paragraph(self):
+        words = " ".join(["word"] * 40)
+        for tag in ("aside", "h4", "blockquote", "header"):
+            html = dossier(section(1, "How the check runs",
+                                   f"<p>{words}<{tag}>{words}</{tag}>" + figure(1)))
+            self.assertEqual(self.warnings(html), "", tag)
 
     def test_section_without_a_figure_warns(self):
         html = dossier(section(1, "How the check runs", "<p>Prose only.</p>"))
@@ -890,6 +910,18 @@ class TestStripWarnings(unittest.TestCase):
 
 
 class TestSourceChecks(unittest.TestCase):
+    def test_a_vega_data_url_fails(self):
+        for spec in ('{"data": {"url": "rows.csv"}}', "{data: {format: {type: 'csv'}, url: 'x/rows.csv'}}",
+                     '{"data": {"url": "https://vega.github.io/data/cars.json"}}'):
+            page = dossier().replace("</main>", f"</main><script>vegaEmbed('#c', {spec});</script>")
+            self.assertIn("data URL", " | ".join(check_render.source_checks(page, None, "s")[0]), spec)
+
+    def test_inline_vega_data_passes(self):
+        for spec in ('{"data": {"values": [{"url": "rows.csv"}]}}',
+                     '{"data": {"url": "data:text/csv,a%0A1"}}'):
+            page = dossier().replace("</main>", f"</main><script>vegaEmbed('#c', {spec});</script>")
+            self.assertEqual(check_render.source_checks(page, None, "s")[0], [], spec)
+
     def test_combines_structure_hosts_libraries_and_the_locked_block(self):
         page = dossier().replace("<main>", LOCKED + '<script src="https://unpkg.com/x@1.0.0"></script>'
                                  '<script src="https://cdn.jsdelivr.net/npm/@mermaid-js/'

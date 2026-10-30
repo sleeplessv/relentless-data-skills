@@ -15,6 +15,18 @@ diagram:
 It also fails on broken images, resources that answer 404 or name a host that
 does not exist, page and console errors, and a page that freezes its tab.
 
+For a dossier it adds, from the source: a structure pass (answer box with a
+claim, Limits as the last section, every figure and table numbered in order
+with a caption, Mermaid used for sequence diagrams only, DAG node count), the
+allowed hosts (cdn.jsdelivr.net) with exact x.y.z pins, and the locked
+stylesheet block, hashed against the skill's assets/scaffold.html. From the
+rendered page: Vega charts drawn (it waits on window.__vegaDone), static-SVG
+DAGs legible and unclipped, and no figure frame, table or page wider than its
+box at 768, 1200, 1280 and 1440 px. Warnings cover the softer house rules:
+long paragraphs, sections with no figure, tables over 20 visible rows,
+headings not in sentence case, slop words, red or amber category fills, side
+strips, small diagram text, and libraries outside the scaffold's block.
+
 Prints JSON, then a final PASS, FAIL, or BLOCKED line. Exit codes:
   0  PASS     every check ran and passed
   1  FAIL     the page has a defect; fix it and rerun
@@ -27,15 +39,18 @@ page's own reveal is not exercised.
 
 Writes to --shots (default: <report-stem>-check/ beside the report), replacing
 earlier shots: page-<k>.png, the page in viewport-height slices with hidden
-diagrams opened, and diagram-<n>.png per diagram. Read them to judge
-legibility and the hand-built CSS/SVG visuals; the script cannot.
+diagrams opened, diagram-<n>.png per Mermaid diagram, chart-<n>.png per Vega
+chart and dag-<n>.png per DAG drawing. Read them all: the script cannot tell
+whether a chart or a DAG shows what its caption says (the JSON's "review").
 
 Usage:
   uv run --no-project --with playwright python check_render.py REPORT.html [--shots DIR]
+      [--scaffold assets/scaffold.html]
 """
 
 import argparse
 import asyncio
+import hashlib
 import html as htmllib
 import json
 import os
@@ -56,18 +71,26 @@ CALL_TIMEOUT_S = 10   # a page that cannot answer a query this fast has a frozen
 PROBE_TIMEOUT_S = 15  # one offscreen re-render of a diagram's source
 MIN_LABEL_PX = 6      # labels shrunk below this are unreadable: FAIL
 SMALL_LABEL_PX = 9    # below this, warn that the diagram is shrunk to fit
+SMALL_TEXT_PX = 10    # extra viewports: diagram text below this is hard to read on a tablet
 TINY_PX = 24          # a diagram rendered narrower or shorter than this is a speck
 CLIP_SLACK_PX = 2
 MAX_SLICES = 40
 MAX_PROBES = 20
-# Hosts the skill's scaffold loads from. A network failure on one of these is
-# the environment's fault; on any other host it is a bad URL in the page.
-CDN_HOSTS = {"cdn.tailwindcss.com", "cdn.jsdelivr.net", "fastly.jsdelivr.net",
-             "unpkg.com", "esm.sh", "cdnjs.cloudflare.com"}
-NETWORK_PROBE_URL = "https://cdn.jsdelivr.net/npm/mermaid@11/package.json"
+# The only hosts a dossier may load from: the scaffold's library block is on
+# jsdelivr (fastly. is its mirror). Any other host fails the structure pass, and
+# a network failure on it is a bad URL in the page, not the environment.
+CDN_HOSTS = {"cdn.jsdelivr.net", "fastly.jsdelivr.net"}
+# The scaffold's pinned library block. Another package, or another version,
+# is a warning: the gallery and its footguns were proven at these versions.
+LIBRARIES = {"mermaid": "11.17.2", "vega": "6.4.0", "vega-lite": "6.5.0", "vega-embed": "7.3.0"}
+NETWORK_PROBE_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/package.json"
 INSTALL_HINT = "uv run --no-project --with playwright playwright install chromium"
+REVIEW = ("This check proves structure and that things drew, not that they are right. Open every "
+          "screenshot: chart-<n>.png for each Vega chart (axes, values, colours against its "
+          "caption), dag-<n>.png for each DAG (arrows meet their nodes, names readable), "
+          "diagram-<n>.png for each sequence diagram, and page-<k>.png for every hand-built visual.")
 # Statuses for which Mermaid ran and drew something wrong: proof of a defect.
-DRAWN_BAD = {"error", "empty", "illegible", "clipped"}
+DRAWN_BAD = {"error", "empty", "illegible", "clipped", "spill"}
 # Statuses for which nothing was drawn: a defect, unless the network is to blame.
 NOT_DRAWN = {"unrendered", "rendering"}
 # Elements whose content never becomes live page elements.
@@ -360,10 +383,12 @@ def verdict(result):
     """
     if result.get("blocked"):
         return BLOCKED
-    diagrams = result.get("diagrams", [])
+    diagrams = (result.get("diagrams", []) + result.get("charts", [])
+                + result.get("dags", []))
     requests = result.get("requests", [])
     if (any(d["status"] in DRAWN_BAD and not d.get("env") for d in diagrams)
             or any(r["kind"] == "defect" for r in requests)
+            or result.get("structure") or result.get("layout")
             or result.get("broken_images") or result.get("hung")):
         return FAIL
     if (any(r["kind"] == "blocked" for r in requests)
@@ -373,6 +398,528 @@ def verdict(result):
             or result.get("page_errors") or result.get("console_errors")):
         return FAIL
     return PASS
+
+
+LOCKED_RE = re.compile(r"/\*\s*dossier:locked:begin\s+(\S+)\s*\*/(.*?)/\*\s*dossier:locked:end\s*\*/",
+                       re.S)
+
+
+def _locked(html):
+    """(version, normalised text) of the locked stylesheet block, or None."""
+    m = LOCKED_RE.search(html or "")
+    if not m:
+        return None
+    text = "\n".join(ln.rstrip() for ln in m.group(2).replace("\r\n", "\n").split("\n"))
+    return m.group(1), text.strip("\n")
+
+
+def locked_block(html):
+    """The locked block's text with line endings and trailing spaces normalised."""
+    found = _locked(html)
+    return found[1] if found else None
+
+
+def locked_problem(report_html, scaffold_html):
+    """Why the report's locked block is not the scaffold's, or None when it is.
+
+    Compared by sha256 at check time, so a palette change needs only a
+    scaffold edit.
+    """
+    mine, theirs = _locked(report_html), _locked(scaffold_html)
+    if theirs is None:
+        return "the scaffold has no locked block to compare against"
+    if mine is None:
+        return ("the page has no locked block (/* dossier:locked:begin " + theirs[0]
+                + " */ ... /* dossier:locked:end */); copy the stylesheet from assets/scaffold.html")
+    if mine[0] != theirs[0]:
+        return (f"the page's locked block is {mine[0]}, the scaffold's is {theirs[0]}; "
+                "copy the locked block from assets/scaffold.html again")
+    digest = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()  # noqa: E731
+    if digest(mine[1]) != digest(theirs[1]):
+        return ("the locked block differs from the scaffold's; put per-report CSS in the "
+                "dossier:report block and restore the locked block from assets/scaffold.html")
+    return None
+
+
+RESOURCE_ATTRS = {"script": "src", "img": "src", "iframe": "src", "source": "src",
+                  "video": "src", "audio": "src", "embed": "src", "link": "href"}
+JS_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']""")
+NPM_PATH = re.compile(r"^/npm/((?:@[^/@]+/)?[^/@]+)(?:@([^/]*))?")
+PINNED = re.compile(r"^\d+\.\d+\.\d+$")
+
+
+def strip_js_comments(text):
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"(?m)^\s*//.*$", "", text)
+
+
+class Resources(HTMLParser):
+    """Collect resource URLs (src/href) and JS import specifiers in document order."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.urls, self._script = [], None
+
+    def handle_starttag(self, tag, attrs):
+        a = dict(attrs)
+        if tag in RESOURCE_ATTRS and a.get(RESOURCE_ATTRS[tag]):
+            self.urls.append(a[RESOURCE_ATTRS[tag]].strip())
+        if tag == "script" and not a.get("src"):
+            self._script = []
+
+    def handle_endtag(self, tag):
+        if tag == "script" and self._script is not None:
+            self.urls += JS_IMPORT.findall(strip_js_comments("".join(self._script)))
+            self._script = None
+
+    def handle_data(self, data):
+        if self._script is not None:
+            self._script.append(data)
+
+
+def resource_urls(html):
+    """Remote URLs the page loads: src/href of resources and JS imports, in order."""
+    parser = Resources()
+    parser.feed(html)
+    parser.close()
+    return [u for u in parser.urls if urlsplit(u).scheme in ("http", "https")]
+
+
+def npm_package(url):
+    """(package, version or None) for a jsdelivr /npm/ URL, else None."""
+    parts = urlsplit(url)
+    m = NPM_PATH.match(parts.path) if parts.hostname in CDN_HOSTS else None
+    return (m.group(1), m.group(2)) if m else None
+
+
+def url_problem(url):
+    """Why a resource URL breaks the house rules (host, pin), or None."""
+    parts = urlsplit(url)
+    if parts.scheme not in ("http", "https"):
+        return None
+    if parts.hostname not in CDN_HOSTS:
+        return (f"{url}: {parts.hostname} is not an allowed host; load libraries from "
+                "cdn.jsdelivr.net as the scaffold's library block does, and inline everything else")
+    pkg = npm_package(url)
+    if not pkg or not PINNED.match(pkg[1] or ""):
+        return f"{url}: the version is not pinned; name an exact x.y.z version"
+    return None
+
+
+def library_warnings(urls):
+    """Packages outside the scaffold's library block, or at another version."""
+    out = []
+    for url in urls:
+        pkg = npm_package(url)
+        if not pkg or not PINNED.match(pkg[1] or ""):
+            continue  # url_problem reports it
+        name, version = pkg
+        if name not in LIBRARIES:
+            out.append(f"{name}@{version} is not in the scaffold's library block "
+                       f"({', '.join(f'{k}@{v}' for k, v in LIBRARIES.items())})")
+        elif version != LIBRARIES[name]:
+            out.append(f"{name}@{version} differs from the scaffold's pin {name}@{LIBRARIES[name]}")
+    return counted(out)
+
+
+# ---------------------------------------------------------------------------
+# Structure pass: the house rules a page's source can prove or disprove.
+
+VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+        "source", "track", "wbr"}
+FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
+MAX_PARAGRAPH_WORDS = 60
+MAX_VISIBLE_ROWS = 20
+TOC_FROM_SECTIONS = 4
+DAG_SOFT_NODES = 11   # more drawn nodes than this: warn, merge sibling sets
+DAG_MAX_NODES = 15    # more than this (16 and up): fail
+NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg", "template", "noscript"}
+# AI vocabulary that leaks in from source material: references/WRITING.md "Banned words"
+# ("landscape" is banned only when abstract, which a regex cannot tell, so it is left out).
+SLOP = re.compile(r"\b(additionally|crucial(?:ly)?|delv(?:e|es|ed|ing)|enduring|"
+                  r"enhanc(?:e|es|ed|ing)|foster(?:s|ed|ing)?|garner(?:s|ed|ing)?|interplay|"
+                  r"intricate(?:ly)?|leverag(?:e|es|ed|ing)|pivotal|robust(?:ly|ness)?|"
+                  r"seamless(?:ly)?|showcas(?:e|es|ed|ing)|tapestry|testament|"
+                  r"underscor(?:e|es|ed|ing)|utili[sz](?:e|es|ed|ing)|vibrant)\b", re.I)
+
+
+class Node:
+    def __init__(self, tag, attrs, line, parent=None):
+        self.tag, self.attrs, self.line, self.parent = tag, attrs, line, parent
+        self.classes = set((attrs.get("class") or "").split())
+        self.children = []   # Node or str
+
+    def walk(self):
+        for c in self.children:
+            if isinstance(c, Node):
+                yield c
+                yield from c.walk()
+
+    def find(self, pred):
+        return [n for n in self.walk() if pred(n)]
+
+    def ancestors(self):
+        a = self.parent
+        while a is not None:
+            yield a
+            a = a.parent
+
+    def text(self, skip=lambda n: False):
+        out = []
+        for c in self.children:
+            if isinstance(c, str):
+                out.append(c)
+            elif not skip(c):
+                out.append(c.text(skip))
+        return "".join(out)
+
+
+class Tree(HTMLParser):
+    """A forgiving DOM: end tags close the nearest open match; strays are ignored."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = self.cur = Node("#root", {}, 1)
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "p" and self.cur.tag == "p":
+            self.cur = self.cur.parent   # <p> cannot nest
+        node = Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur)
+        self.cur.children.append(node)
+        if tag not in VOID:
+            self.cur = node
+
+    def handle_startendtag(self, tag, attrs):
+        self.cur.children.append(Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur))
+
+    def handle_endtag(self, tag):
+        for a in [self.cur, *self.cur.ancestors()]:
+            if a.tag == tag:
+                self.cur = a.parent
+                return
+
+    def handle_data(self, data):
+        self.cur.children.append(data)
+
+
+def parse_tree(html):
+    t = Tree()
+    t.feed(html)
+    t.close()
+    return t.root
+
+
+def words(text):
+    return text.split()
+
+
+def norm(text):
+    return " ".join(text.split())
+
+
+def figure_of(node):
+    """('Figure'|'Table', n) for a figure container, else None."""
+    m = FIGURE_ID.match(node.attrs.get("id", ""))
+    if not m:
+        return None
+    return ("Figure", int(m.group(1))) if m.group(1) else ("Table", int(m.group(2)))
+
+
+def in_figure(node):
+    return any(figure_of(a) for a in node.ancestors())
+
+
+def hidden(node):
+    for a in [node, *node.ancestors()]:
+        if "hidden" in a.attrs or re.search(r"display\s*:\s*none", a.attrs.get("style", "")):
+            return True
+        if a.tag == "details" and "open" not in a.attrs and a is not node:
+            return True
+    return False
+
+
+def heading_title(h2):
+    """An h2's own words, without the section number and the figure count spans."""
+    return norm(h2.text(skip=lambda n: bool(n.classes & {"n", "count"})))
+
+
+def case_problem(title):
+    """'all caps' or 'Title Case' when a heading is not in sentence case."""
+    ws = re.findall(r"[A-Za-z][A-Za-z'’-]*", title)
+    if len(ws) >= 2 and all(w.isupper() for w in ws):
+        return "all caps"
+    long = [w for w in ws[1:] if len(w) >= 4 and not w.isupper()]
+    caps = [w for w in long if w[0].isupper()]
+    if len(caps) >= 2 and 2 * len(caps) > len(long):
+        return "Title Case"
+    return None
+
+
+def mermaid_kind(source):
+    """The diagram keyword of a Mermaid source (after front matter and %% comments)."""
+    lines = [ln.strip() for ln in source.splitlines()]
+    lines = [ln for ln in lines if ln]
+    if lines and lines[0] == "---":
+        end = next((i for i, ln in enumerate(lines[1:], 1) if ln == "---"), 0)
+        lines = lines[end + 1:]
+    for ln in lines:
+        if not ln.startswith("%%"):
+            return ln.split()[0]
+    return None
+
+
+def structure(html):
+    """(problems, warnings) from the page source: answer box, Limits, figure
+    numbering and captions, Mermaid use, DAG size, and the prose warnings."""
+    root = parse_tree(html)
+    problems, warnings = [], []
+
+    answers = root.find(lambda n: n.tag == "section" and "answer" in n.classes)
+    if not answers:
+        problems.append('no answer box: add <section class="answer"> with the claim in a '
+                        '.claim paragraph at the top')
+    elif not answers[0].find(lambda n: "claim" in n.classes):
+        problems.append("the answer box has no .claim: state the one claim the dossier defends")
+
+    secs = root.find(lambda n: n.tag == "section" and "sec" in n.classes)
+    titled = []
+    for s in secs:
+        h2 = next(iter(s.find(lambda n: n.tag == "h2")), None)
+        titled.append((s, h2, heading_title(h2) if h2 else ""))
+    limits = [i for i, (_, _, t) in enumerate(titled) if t.lower() == "limits"]
+    if not limits:
+        problems.append('no Limits section: end with <section class="sec"> headed "Limits", '
+                        'even when it says "None"')
+    elif limits[-1] != len(titled) - 1:
+        problems.append("the Limits section is not the last section")
+
+    figures = root.find(figure_of)
+    counters = {"Figure": [], "Table": []}
+    for f in figures:
+        kind, n = figure_of(f)
+        counters[kind].append(n)
+        want = f"{kind} {n}."
+        nos = [x for c in f.find(lambda x: "caption" in x.classes)
+               for x in c.find(lambda x: "figno" in x.classes)]
+        got = norm(nos[0].text()) if nos else ""
+        if got != want:
+            problems.append(f'{kind} {n} (id="{f.attrs["id"]}", line {f.line}) needs a caption '
+                            f'whose .figno reads "{want}"' + (f'; it reads "{got}"' if got else ""))
+        # A DAG figure carries its so-what in .dag-notes under an h3 "So what".
+        dag_so = any(norm(h.text()).lower() == "so what"
+                     for d in f.find(lambda x: "dag-notes" in x.classes)
+                     for h in d.find(lambda x: x.tag == "h3"))
+        if not dag_so and not f.find(lambda x: "sowhat" in x.classes):
+            warnings.append(f'{kind} {n} has no "So what" box (.sowhat .lbl)')
+    for kind, nums in counters.items():
+        for i, n in enumerate(nums, 1):
+            if n != i:
+                problems.append(f"{kind} {n} comes where {kind} {i} should: number "
+                                f"{kind.lower()}s in the order they appear")
+                break
+
+    kinds = ("chart", "mermaid", "dag-frame", "figframe")
+    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds)
+                        or (n.tag == "svg" and "dag" in n.classes))
+    loose = {}
+    for v in visuals:
+        if in_figure(v) or any(a in visuals for a in v.ancestors()):
+            continue
+        what = "a table" if v.tag == "table" else "a ." + next((k for k in kinds if k in v.classes), "dag")
+        loose.setdefault(what, []).append(str(v.line))
+    for what, lines in loose.items():
+        problems.append(f"{what} at line {', '.join(lines)} has no numbered caption: put it in a "
+                        'figure (id="fig-N" or id="table-N-fig") with .caption .figno')
+
+    for b in mermaid_blocks(html):
+        kind = mermaid_kind(b["source"])
+        if kind and kind != "sequenceDiagram":
+            problems.append(f"the Mermaid diagram at line {b['line']} is a {kind}; Mermaid is for "
+                            "sequence diagrams only, so draw graphs and flows with scripts/dag_svg.py")
+
+    frames = root.find(lambda n: "dag-frame" in n.classes)
+    frames += [s for s in root.find(lambda n: n.tag == "svg" and "dag" in n.classes)
+               if not any(a in frames for a in s.ancestors())]
+    for fr in frames:
+        svgs = [fr] if fr.tag == "svg" else fr.find(lambda n: n.tag == "svg" and "dag" in n.classes)
+        count = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
+        where_ = next(("%s %d" % figure_of(a) for a in fr.ancestors() if figure_of(a)),
+                      f"the DAG at line {fr.line}")
+        if count > DAG_MAX_NODES:
+            problems.append(f"{where_} draws {count} nodes; the cap is {DAG_MAX_NODES}. Merge "
+                            "sibling sets into group nodes or draw a neighbourhood")
+        elif count > DAG_SOFT_NODES:
+            warnings.append(f"{where_} draws {count} nodes; aim for {DAG_SOFT_NODES} or fewer by "
+                            "merging sibling sets into group nodes")
+
+    if len(secs) >= TOC_FROM_SECTIONS:
+        if not root.find(lambda n: n.attrs.get("id") == "toc"):
+            warnings.append(f"{len(secs)} sections and no table of contents (#toc in .side)")
+        elif not root.find(lambda n: "toc-inline" in n.classes):
+            warnings.append("no .toc-inline: below 1100px the sidebar contents are hidden")
+
+    for s, h2, title in titled:
+        if title and title.lower() != "limits" and not s.find(figure_of):
+            warnings.append(f'section "{title}" has no figure or table')
+        case = case_problem(title)
+        if case:
+            warnings.append(f'heading "{title}" is in {case}; use sentence case')
+
+    for p in root.find(lambda n: n.tag == "p"):
+        n = len(words(p.text()))
+        if n > MAX_PARAGRAPH_WORDS:
+            warnings.append(f"the paragraph at line {p.line} has {n} words; keep paragraphs to "
+                            f"{MAX_PARAGRAPH_WORDS} or split them into bullets")
+
+    for t in root.find(lambda n: n.tag == "table"):
+        rows = [r for r in t.find(lambda n: n.tag == "tr")
+                if r.find(lambda n: n.tag == "td") and not hidden(r)]
+        if len(rows) > MAX_VISIBLE_ROWS:
+            warnings.append(f"the table at line {t.line} shows {len(rows)} visible rows; show "
+                            f"{MAX_VISIBLE_ROWS} and put the rest behind details.more")
+
+    body = next(iter(root.find(lambda n: n.tag == "body")), root)
+    slop = {}
+    for m in SLOP.finditer(body.text(skip=lambda n: n.tag in NOT_PROSE)):
+        slop[m.group(1).lower()] = slop.get(m.group(1).lower(), 0) + 1
+    for w, n in slop.items():
+        warnings.append(f'the word "{w}" appears {n} time(s); replace it with a plain word')
+    return problems, warnings
+
+
+SCAFFOLD = Path(__file__).resolve().parent.parent / "assets" / "scaffold.html"
+
+
+def source_checks(html, scaffold_html, scaffold_path):
+    """(problems, warnings, unverified) from the page source alone: the
+    structure pass, allowed hosts and pins, the library block, the locked block."""
+    problems, warnings = structure(html)
+    urls = resource_urls(html)
+    problems += counted([p for p in map(url_problem, urls) if p])
+    warnings += library_warnings(urls)
+    if scaffold_html is None:
+        return problems, warnings, [f"locked block not compared: no scaffold at {scaffold_path}"]
+    locked = locked_problem(html, scaffold_html)
+    if locked:
+        problems.append(locked)
+    return problems, warnings, []
+
+
+# ---------------------------------------------------------------------------
+# Rendered facts beyond Mermaid: Vega charts, static-SVG DAGs, layout, colour.
+
+VIEWPORTS = (768, 1200, 1440)   # extra widths, checked for overflow and small text only
+ALARM_TOKENS = ("--red", "--amber")   # the soft tints sit too close to coral-soft to tell apart
+COLOUR_SLACK = 20               # rgb distance under which two colours count as the same
+STRIP_PX = 3                    # a left border this thick, with thin other sides, is a side strip
+
+
+def chart_status(fact):
+    """Classify one Vega chart (.chart filled by vegaEmbed): (status, problem)."""
+    if not fact.get("visible"):
+        return "hidden", None
+    if fact.get("error"):
+        return "error", f"vegaEmbed failed: {fact['error']}"
+    if not fact.get("svg"):
+        return "unrendered", ("Vega never drew it (no svg.marks); check the library block and "
+                              "that the spec is passed to vegaEmbed")
+    if fact.get("width", 0) < TINY_PX or fact.get("height", 0) < TINY_PX:
+        return "empty", f"it renders as a {fact.get('width', 0)}x{fact.get('height', 0)} px speck"
+    if not fact.get("marks"):
+        return "empty", "Vega drew the frame but no marks; check the data and the encoding fields"
+    return "ok", None
+
+
+def dag_status(fact):
+    """Classify one static-SVG DAG drawing: (status, problem, warning)."""
+    if not fact.get("visible"):
+        return "hidden", None, None   # the other orientation (LR/TB) is the one on show
+    if fact.get("spills"):
+        names = ", ".join(fact["spills"][:5])
+        return "spill", f"node text runs out of its box: {names}; shorten the name or widen the node", None
+    w, h = fact.get("width", 0), fact.get("height", 0)
+    vw, vh = fact.get("visible_width", w), fact.get("visible_height", h)
+    if w - vw > CLIP_SLACK_PX or h - vh > CLIP_SLACK_PX:
+        return "clipped", f"an overflow:hidden ancestor cuts it off; only {vw}x{vh} of {w}x{h} px is visible", None
+    if fact.get("natural_width") and fact.get("font_px"):
+        px = fact["font_px"] * w / fact["natural_width"]
+        if px < MIN_LABEL_PX:
+            return "illegible", f"it is scaled until node names are about {px:.0f}px tall; split it or use TB", None
+        if px < SMALL_LABEL_PX:
+            return "ok", None, f"node names are scaled to about {px:.0f}px; merge nodes or lay it out top-down"
+    return "ok", None, None
+
+
+def viewport_findings(facts):
+    """(problems, warnings) from the extra-viewport pass.
+
+    kind "page": the page scrolls sideways; "frame": a figure frame, table or
+    DAG is wider than its box; "code": a code block scrolls; "text": rendered
+    diagram text size in px.
+    """
+    problems, warnings = [], []
+    for f in facts:
+        at = f"at {f['viewport']}px"
+        if f["kind"] == "text":
+            if f["px"] < SMALL_TEXT_PX:
+                warnings.append(f"{f['label']} text renders at about {f['px']:.1f}px {at}; "
+                                "split the diagram or shorten its labels")
+        elif f.get("excess", 0) <= CLIP_SLACK_PX:
+            continue
+        elif f["kind"] == "page":
+            problems.append(f"the page scrolls sideways by {f['excess']}px {at}")
+        elif f["kind"] == "code":
+            warnings.append(f"{f['label']} scrolls sideways by {f['excess']}px {at}")
+        else:
+            problems.append(f"{f['label']} is {f['excess']}px wider than its frame {at}; "
+                            "narrow its columns in the dossier:report block")
+    return counted(problems), counted(warnings)
+
+
+def parse_colour(text):
+    """(r, g, b) from #rgb, #rrggbb, rgb() or rgba(); None if transparent or unknown."""
+    text = (text or "").strip().lower()
+    m = re.match(r"^#([0-9a-f]{3}|[0-9a-f]{6})$", text)
+    if m:
+        h = m.group(1)
+        h = "".join(c * 2 for c in h) if len(h) == 3 else h
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    m = re.match(r"^rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)(?:\s*[,/]\s*([\d.]+%?))?\s*\)$", text)
+    if not m:
+        return None
+    if m.group(4) is not None and float(m.group(4).rstrip("%")) == 0:
+        return None
+    return tuple(round(float(m.group(i))) for i in (1, 2, 3))
+
+
+def colour_warnings(facts, alarms):
+    """Red or amber used as a category fill (DAG node, bar, chart mark, tag).
+
+    `alarms` maps token names (--red, --amber, ...) to the page's values; a
+    page without them is not checked.
+    """
+    refs = [(name, parse_colour(v)) for name, v in alarms.items() if parse_colour(v)]
+    out = []
+    for f in facts:
+        c = parse_colour(f.get("colour"))
+        if not c:
+            continue
+        for name, ref in refs:
+            if sum((a - b) ** 2 for a, b in zip(c, ref)) ** 0.5 <= COLOUR_SLACK:
+                out.append(f"{f['label']} is filled with {name}; red is for problems and amber "
+                           "for callouts only, so use a series colour")
+                break
+    return counted(out)
+
+
+def strip_warnings(facts):
+    """Decorative side strips: a thick left border on a box with thin other sides."""
+    out = []
+    for f in facts:
+        others = max(f.get("right", 0), f.get("top", 0), f.get("bottom", 0))
+        if f.get("left", 0) >= STRIP_PX and f["left"] > others + 1:
+            out.append(f"{f['label']} has a {f['left']:.0f}px left border, a decorative side strip; remove it")
+    return counted(out)
 
 
 def page_slices(total, step, limit=MAX_SLICES):
@@ -406,6 +953,12 @@ def problems(result):
         if d["status"] in DRAWN_BAD | NOT_DRAWN or d.get("env"):
             text = f"{where(d)}: {d.get('problem') or d['status']}"
             out.append(text + (f": {d['error']}" if d.get("error") else ""))
+    for kind in ("charts", "dags"):
+        for d in result.get(kind, []):
+            if d["status"] in DRAWN_BAD | NOT_DRAWN:
+                out.append(f"{kind[:-1]} {d['n']} ({d['label']}): {d.get('problem') or d['status']}")
+    out += result.get("structure", [])
+    out += result.get("layout", [])
     out += [r["why"] for r in result.get("requests", [])]
     out += [f"broken image: {src}" for src in result.get("broken_images", [])]
     out += [f"page error: {e}" for e in result.get("page_errors", [])]
@@ -643,6 +1196,124 @@ INIT_JS = r"""
       if (temp) temp.remove();
     }
   };
+
+  // ---- Dossier facts: Vega charts, static-SVG DAGs, layout, colour. ----
+  const figLabel = el => {
+    for (let a = el; a; a = a.parentElement) {
+      const m = /^(?:fig-(\d+)|table-(\d+)-fig)$/.exec(a.id || '');
+      if (m) return m[1] ? 'Figure ' + m[1] : 'Table ' + m[2];
+    }
+    return null;
+  };
+  const describe = el => figLabel(el) || (el.id ? '#' + el.id
+    : el.tagName.toLowerCase() + (el.classList.length ? '.' + [...el.classList].join('.') : ''));
+  const median = xs => { xs = xs.filter(x => x > 0).sort((a, b) => a - b); return xs.length ? xs[xs.length >> 1] : null; };
+
+  vr.vegaWait = async ms => {
+    if (!window.__vegaDone) return { present: false };
+    let timer;
+    try {
+      await Promise.race([window.__vegaDone, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`window.__vegaDone did not settle within ${ms} ms`)), ms); })]);
+      return { present: true };
+    } catch (e) {
+      return { present: true, error: String((e && e.message) || e).slice(0, 300) };
+    } finally { clearTimeout(timer); }
+  };
+
+  vr.charts = () => [...document.querySelectorAll('.chart')].map((el, i) => {
+    el.dataset.vrChart = String(i + 1);
+    const svg = el.querySelector('svg.marks') || el.querySelector('svg');
+    const r = (svg || el).getBoundingClientRect();
+    return { label: describe(el), visible: visible(el), svg: !!svg,
+             marks: svg ? svg.querySelectorAll('g.role-mark path, g.role-mark line, g.role-mark rect, g.role-mark text, g.role-mark circle').length : 0,
+             width: Math.round(r.width), height: Math.round(r.height) };
+  });
+
+  vr.dags = () => [...document.querySelectorAll('svg.dag')].map((svg, i) => {
+    svg.dataset.vrDag = String(i + 1);
+    const r = svg.getBoundingClientRect();
+    const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    const f = { label: describe(svg) + (svg.classList.contains('dag-tb') ? ' (TB)' : svg.classList.contains('dag-lr') ? ' (LR)' : ''),
+                visible: visible(svg) && r.width > 0, width: Math.round(r.width), height: Math.round(r.height),
+                natural_width: vb.length === 4 ? Math.round(vb[2]) : 0, font_px: null, spills: [],
+                visible_width: 0, visible_height: 0 };
+    if (!f.visible) return f;
+    [f.visible_width, f.visible_height] = visibleBox(svg);
+    f.font_px = median([...svg.querySelectorAll('text.nm')].map(t => parseFloat(getComputedStyle(t).fontSize)));
+    for (const g of svg.querySelectorAll('g.dn')) {
+      const box = g.querySelector('rect.box');
+      if (!box) continue;
+      const b = box.getBBox();
+      for (const t of g.querySelectorAll('text')) {
+        const tb = t.getBBox();
+        if (tb.width && (tb.x < b.x - 1 || tb.x + tb.width > b.x + b.width + 1)) {
+          f.spills.push(t.textContent.trim().slice(0, 60));
+        }
+      }
+    }
+    return f;
+  });
+
+  // Overflow and rendered text size at the current viewport width.
+  vr.layout = () => {
+    const out = [], de = document.documentElement, worst = new Map();
+    if (de.scrollWidth > de.clientWidth + 1) out.push({ kind: 'page', label: 'the page', excess: de.scrollWidth - de.clientWidth });
+    for (const el of document.querySelectorAll('.figframe, .dag-frame, table, pre.code')) {
+      if (!visible(el) || el.closest('details:not([open])')) continue;
+      // A table past its parent's border: out of the frame, not just into its padding.
+      const p = el.parentElement, pr = p.getBoundingClientRect(), r = el.getBoundingClientRect();
+      const spill = r.right - (pr.right - parseFloat(getComputedStyle(p).borderRightWidth));
+      const excess = Math.round(Math.max(el.scrollWidth - el.clientWidth, el.tagName === 'TABLE' ? spill : 0));
+      if (excess <= 0) continue;
+      const kind = el.matches('pre.code') ? 'code' : 'frame', key = kind + describe(el);
+      if (!worst.has(key) || worst.get(key).excess < excess) worst.set(key, { kind, label: describe(el), excess });
+    }
+    out.push(...worst.values());
+    for (const svg of document.querySelectorAll('svg.dag')) {
+      const r = svg.getBoundingClientRect();
+      const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+      const font = median([...svg.querySelectorAll('text.nm')].map(t => parseFloat(getComputedStyle(t).fontSize)));
+      if (visible(svg) && r.width > 0 && vb[2] && font) out.push({ kind: 'text', label: describe(svg) + ' DAG', px: Math.round(font * r.width / vb[2] * 10) / 10 });
+    }
+    return out;
+  };
+
+  // Fills of category marks: DAG nodes and tags, bars, legend keys, chart marks.
+  vr.colours = tokens => {
+    const root = getComputedStyle(document.documentElement);
+    const alarms = {};
+    for (const t of tokens) { const v = root.getPropertyValue(t).trim(); if (v) alarms[t] = v; }
+    const facts = [];
+    const sel = 'svg.dag rect, svg.dag path.box, .bar-fill, td.bar, .cbar, .tgk, .legend .k > span, .chart svg g.role-mark > *';
+    const clear = c => !c || c === 'transparent' || /^rgba\(.*,\s*0\)$/.test(c);
+    for (const el of document.querySelectorAll(sel)) {
+      if (el.closest('.callout, .problem, .diff')) continue;
+      const cs = getComputedStyle(el);
+      let colour = el instanceof SVGElement ? cs.fill : cs.backgroundColor;
+      // an in-cell bar (td.bar .cbar) paints its fill on ::before
+      if (!(el instanceof SVGElement) && clear(colour)) colour = getComputedStyle(el, '::before').backgroundColor;
+      facts.push({ label: describe(el) + ' ' + (el.classList[0] || el.tagName.toLowerCase()), colour });
+    }
+    return { alarms, facts };
+  };
+
+  // Boxes with a thick left border only: decorative side strips.
+  vr.strips = () => {
+    const out = [];
+    for (const el of document.querySelectorAll('main *, .content *, body > section *')) {
+      if (el.closest('pre, table, svg')) continue;
+      const cs = getComputedStyle(el);
+      if (cs.borderLeftStyle === 'none' || /rgba\(0, 0, 0, 0\)|transparent/.test(cs.borderLeftColor)) continue;
+      const w = s => cs[`border${s}Style`] === 'none' ? 0 : parseFloat(cs[`border${s}Width`]) || 0;
+      const f = { label: describe(el), left: w('Left'), right: w('Right'), top: w('Top'), bottom: w('Bottom') };
+      if (f.left >= 3) out.push(f);
+    }
+    return out;
+  };
+
+  vr.forcedCaps = () => [...document.querySelectorAll('h2.sec-head, h2')]
+    .filter(h => getComputedStyle(h).textTransform === 'uppercase').length;
 })();
 """
 
@@ -743,7 +1414,8 @@ async def settle(q, budget, quiet_ms, since):
 async def screenshots(page, q, shots, diagrams, result):
     """Page slices and one shot per diagram; earlier shots are removed first."""
     shots.mkdir(parents=True, exist_ok=True)
-    for old in [*shots.glob("page*.png"), *shots.glob("diagram-*.png")]:
+    for old in [*shots.glob("page*.png"), *shots.glob("diagram-*.png"),
+                *shots.glob("chart-*.png"), *shots.glob("dag-*.png")]:
         old.unlink()
     height = await q.call("() => document.documentElement.scrollHeight")
     bands = page_slices(height, VIEWPORT["height"])
@@ -769,6 +1441,82 @@ async def screenshots(page, q, shots, diagrams, result):
             result["screenshots"].append(str(path))
         except Exception as exc:
             result["warnings"].append(f"{where(d)}: no screenshot ({first_line(exc)})")
+    for kind, attr in (("chart", "data-vr-chart"), ("dag", "data-vr-dag")):
+        for d in result.get(kind + "s", []):
+            if d["status"] == "hidden":
+                continue
+            path = shots / f"{kind}-{d['n']}.png"
+            try:
+                loc = page.locator(f"[{attr}='{d['n']}']")
+                await asyncio.wait_for(loc.screenshot(path=str(path), timeout=3000), 6)
+                result["screenshots"].append(str(path))
+            except Exception as exc:
+                result["warnings"].append(f"{kind} {d['n']} ({d['label']}): no screenshot ({first_line(exc)})")
+
+
+async def dossier_facts(page, q, timeout, result):
+    """Vega charts, static-SVG DAGs, colour and side-strip facts at the main viewport."""
+    vega = await q.call("(ms) => window.__vrCheck.vegaWait(ms)", timeout * 1000, timeout=timeout + 5)
+    charts = await q.call("() => window.__vrCheck.charts()")
+    if charts and not vega["present"]:
+        result["warnings"].append("the page has .chart elements but sets no window.__vegaDone; "
+                                  "charts were read without waiting for vegaEmbed")
+    for n, f in enumerate(charts, 1):
+        if vega.get("error") and not f["svg"]:
+            f["error"] = vega["error"]
+        status, problem = chart_status(f)
+        d = {"n": n, "label": f["label"], "status": status, "size": f"{f['width']}x{f['height']}"}
+        if problem:
+            d["problem"] = problem
+        result["charts"].append(d)
+    for n, f in enumerate(await q.call("() => window.__vrCheck.dags()"), 1):
+        status, problem, warning = dag_status(f)
+        d = {"n": n, "label": f["label"], "status": status, "size": f"{f['width']}x{f['height']}"}
+        if problem:
+            d["problem"] = problem
+        if warning:
+            result["warnings"].append(f"dag {n} ({f['label']}): {warning}")
+        result["dags"].append(d)
+    found = await q.call("(t) => window.__vrCheck.colours(t)", list(ALARM_TOKENS))
+    result["warnings"] += colour_warnings(found["facts"], found["alarms"])
+    result["warnings"] += strip_warnings(await q.call("() => window.__vrCheck.strips()"))
+    if await q.call("() => window.__vrCheck.forcedCaps()"):
+        result["warnings"].append("h2 headings are forced to capitals with text-transform: "
+                                  "uppercase; headings are sentence case")
+
+
+async def viewport_pass(browser, report, q, timeout, result):
+    """Overflow and small text at the main width (already-loaded page) and at
+    each of VIEWPORTS. Each extra width gets a fresh page loaded at that width,
+    not a resize: pages size things at load time (Mermaid's wrap setting reads
+    window.innerWidth), so a resized page measures what no reader sees."""
+    facts = [dict(f, viewport=VIEWPORT["width"])
+             for f in await q.call("() => window.__vrCheck.layout()")
+             if f["kind"] != "text"]   # main-width DAG text is judged by dag_status
+    for width in VIEWPORTS:
+        page = await browser.new_page(viewport={"width": width, "height": VIEWPORT["height"]})
+        try:
+            await page.add_init_script(INIT_JS)
+            await page.goto(report.as_uri(), wait_until="load", timeout=LOAD_TIMEOUT_S * 1000)
+            vq = Page(page, await page.context.new_cdp_session(page), {})
+            await settle(vq, min(timeout, 10), QUIET_MS, time.monotonic())
+            await vq.call("(ms) => window.__vrCheck.vegaWait(ms)", 5000, timeout=8)
+            if await vq.call("() => window.__vrCheck.reveal()"):
+                await asyncio.sleep(0.3)
+                await settle(vq, 5, 500, time.monotonic())
+            facts += [dict(f, viewport=width) for f in await vq.call("() => window.__vrCheck.layout()")]
+            for n, f in enumerate(await vq.call("() => window.__vrCheck.facts()"), 1):
+                px = label_px(f) if f["visible"] and f["holds"] == "svg" else None
+                if px is not None:
+                    facts.append({"viewport": width, "kind": "text", "label": f"diagram {n}",
+                                  "px": round(px, 1)})
+        except Exception as exc:
+            result["warnings"].append(f"the {width}px pass did not finish ({first_line(exc)})")
+        finally:
+            await page.close()
+    problems, warnings = viewport_findings(facts)
+    result["layout"] += problems
+    result["warnings"] += warnings
 
 
 def ignored(msg):
@@ -853,6 +1601,7 @@ async def inspect_page(browser, report, shots, timeout, result):
             d["unverified"] = "still hidden after the checker opened its containers"
         result["diagrams"].append(d)
 
+    await dossier_facts(page, q, timeout, result)
     images = await q.call("() => window.__vrCheck.images()")
     scripts = await q.call("() => [...document.querySelectorAll('script[type=module]')].map(s => s.textContent)")
     await screenshots(page, q, shots, result["diagrams"], result)
@@ -873,6 +1622,7 @@ async def inspect_page(browser, report, shots, timeout, result):
         explain(d, out)
         if d.get("warning"):
             result["warnings"].append(f"diagram {d['n']}: {d.pop('warning')}")
+    await viewport_pass(browser, report, q, timeout, result)
 
     # Nothing remote answered, yet some host was unreachable: a typo in the
     # page, or no network at all? Ask a known-good host to tell them apart.
@@ -921,9 +1671,10 @@ def emit(result, html, hard=False):
     for d in result["diagrams"]:
         for k in [k for k in d if k.startswith("_") or k in ("source", "text", "hidden_when_drawn", "unverified")]:
             del d[k]
-    result["unverified"] = unverified
+    result["unverified"] = result.get("unverified", []) + unverified
     result["verdict"] = verdict(result)
     result["problems"] = problems(result) if result["verdict"] != PASS else []
+    result["review"] = REVIEW
     print(json.dumps(result, indent=1))
     print(result["verdict"], flush=True)
     if hard:
@@ -936,19 +1687,31 @@ def main():
     ap.add_argument("report", help="the report HTML file")
     ap.add_argument("--shots", help="screenshot directory")
     ap.add_argument("--timeout", type=int, default=20,
-                    help="seconds to wait for Mermaid after load (default 20)")
+                    help="seconds to wait for Mermaid and Vega after load (default 20)")
+    ap.add_argument("--scaffold", default=str(SCAFFOLD),
+                    help="scaffold whose locked block the page must match (default: the skill's "
+                         "assets/scaffold.html)")
     args = ap.parse_args()
 
     report = Path(args.report).resolve()
     shots = Path(args.shots) if args.shots else report.with_name(report.stem + "-check")
-    result = {"report": str(report), "diagrams": [], "requests": [], "broken_images": [],
+    result = {"report": str(report), "structure": [], "diagrams": [], "charts": [], "dags": [],
+              "layout": [], "requests": [], "broken_images": [],
               "page_errors": [], "console_errors": [], "hung": None, "blocked": None,
-              "incomplete": None, "warnings": [], "screenshots": []}
+              "incomplete": None, "warnings": [], "unverified": [], "screenshots": []}
     try:
         html = read_source(report)
     except OSError as exc:
         result["page_errors"].append(f"cannot read the report: {exc}")
         emit(result, "")
+    try:
+        scaffold = read_source(args.scaffold)
+    except OSError:
+        scaffold = None
+    found, warned, unverified = source_checks(html, scaffold, args.scaffold)
+    result["structure"] += found
+    result["warnings"] += warned
+    result["unverified"] += unverified
 
     try:
         from playwright.async_api import async_playwright
@@ -960,7 +1723,7 @@ def main():
         )
         emit(result, html)
 
-    limit = LOAD_TIMEOUT_S + args.timeout + 90
+    limit = LOAD_TIMEOUT_S + 2 * args.timeout + 110   # Mermaid settle, Vega wait, viewport pass
 
     def give_up():  # last resort if even cancelling the check hangs
         result["incomplete"] = f"the check was stopped after {limit + 20} s"

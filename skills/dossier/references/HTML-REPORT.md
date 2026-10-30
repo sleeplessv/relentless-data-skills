@@ -1,138 +1,294 @@
-# HTML Report Format
+# Building a dossier from the scaffold
 
-The report is a single self-contained HTML file. Tailwind and Mermaid both come from CDNs. Mermaid handles graph-shaped relationships reliably; hand-built divs and inline SVG handle the more editorial visuals (mass diagrams, cross-sections, collapses). This file is the **build recipes**, *how* to construct each pattern. For *which* pattern to pick (and the rule to mix them, not default to Mermaid), see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
+How to fill `assets/scaffold.html`: the page skeleton, the figure row, a recipe per visual
+family, the pinned libraries, and interactivity. Which family to pick is in
+[VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md); the words that go in each slot are in
+[WRITING.md](WRITING.md). For every recipe, the matching example in `assets/gallery.html` is the
+reference markup: find it by the class named here and copy it.
 
-## Scaffold
+## The two stylesheet blocks
 
-```html
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <title>{{report title}}</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script type="module">
-      import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-      mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "strict" });
-    </script>
-    <style>
-      /* Headings: tight, heavy grotesque sans; system stack only, no web font. */
-      .display {                      /* main title / h1 */
-        font-family: "Helvetica Neue", Arial, system-ui, sans-serif;
-        font-weight: 800;
-        letter-spacing: -0.03em;
-      }
-      .subhead {                      /* section headings / h2 */
-        font-family: "Helvetica Neue", Arial, system-ui, sans-serif;
-        font-weight: 700;
-        letter-spacing: -0.02em;
-      }
-      /* small custom layer for what Tailwind doesn't cover cleanly:
-         dashed seam lines, hand-drawn arrow heads, collapse keyframes. */
-      .seam { stroke-dasharray: 4 4; }
-      .accent { stroke: #4f46e5; }
-      .warn { stroke: #dc2626; }
-      .collapse { transition: max-height 0.4s ease, opacity 0.3s ease; overflow: hidden; }
-    </style>
-  </head>
-  <body class="bg-stone-50 text-slate-900 font-sans">
-    <main class="max-w-5xl mx-auto px-6 py-12 space-y-12">
-      <header>...</header>
-      <section class="space-y-10">...</section>
-    </main>
-    <!-- inline vanilla JS only, for collapse/toggle interactions -->
-    <script>/* no external libs beyond Tailwind + Mermaid */</script>
-  </body>
-</html>
+The scaffold's `<style>` holds two marked blocks:
+
+```css
+/* dossier:locked:begin v1 */  ...  /* dossier:locked:end */
+/* dossier:report:begin */     ...  /* dossier:report:end */
 ```
 
-## Header
+- The **locked block** holds the tokens, type scale and every pattern class. The render check
+  compares it with the skill's own scaffold and fails the dossier on any difference.
+- The **report block** holds this dossier's geometry only: column widths for a named table
+  (`#table-2 col.c-id { width: 29%; }`), `table-layout: fixed`, and narrow-screen overrides inside
+  `@media (max-width: 900px)`. It holds no colours, fonts or new components.
 
-Title, date, and a compact legend mapping the visual vocabulary you actually use (solid box = X, dashed line = seam, red = warning/leak, thick band = the consolidated thing). No throat-clearing intro paragraph. Go straight into the content.
+If a figure seems to need a new class or colour, pick a different family or simplify the figure.
 
-The top-level title gets `.display` paired with a tight line-height (`leading-[1.05]`). Example: `<h1 class="display text-5xl leading-[1.05]">…</h1>`.
+## Page skeleton
 
-## Section card
+The scaffold already holds each part below in this order, with placeholders:
 
-The visuals carry the weight. Prose is sparse and plain. Each major idea is one `<section>` or `<article>`:
+1. **Sidebar** `aside.side`: `.brand` (the title), `.meta` (commit or date), `ol.toc#toc` with one
+   `li > a[href="#sN"]` per section (`span.n` "01", then the heading text), then `dl.visuals`
+   listing every table and figure by number and short name. The current section turns into a
+   navy pill with a coral number as the reader scrolls; the scaffold's script does this.
+2. **Masthead** `header.masthead`: `.kicker.eyebrow`, `h1`, `.byline` (source and date).
+3. **Answer box** `section.answer` with `.label.eyebrow` "Answer" and `p.claim`.
+4. **Stats row** (optional) `.stats` with up to four `.stat` (`.v` value, `.l` label). Delete the
+   whole element when unused.
+5. **Inline contents** `nav.toc-inline`, the same list without numbers; shown below 1100px.
+6. **Sections** `section.sec#sN`, each opening with
+   `h2.sec-head` > `span.n` (two digits), `span` (heading), `span.count` (the figures and tables
+   it holds, such as "Figures 5 and 6").
+7. **Limits**, the last `section.sec`, heading text exactly "Limits", body `ol.limits`.
 
-- **Title.** Short, names the idea. Every section heading gets `.subhead` (e.g. `<h2 class="subhead text-2xl">…</h2>`), so the document reads as one type system.
-- **Badge row** (optional). Status or category tags. Pick a small palette: emerald for "strong/done," amber for "watch/in-progress," slate for "neutral/speculative."
-- **The visual.** The centerpiece. Pick the pattern that fits (below). Before/after pairs sit side by side in two columns.
-- **One sentence of framing.** What the visual shows. Not a paragraph.
-- **Takeaways.** A few bullets, each a short phrase rather than a sentence, so the row reads as chips.
-- **ADR callout** (if applicable). One line in an amber-tinted box (_"follows ADR-0012"_).
+Delete the sidebar and inline contents when the dossier has fewer than four sections.
 
-## Diagram patterns
+## Figure row
 
-Build recipes for each pattern. For *when* to pick each, and the rule to mix them rather than default to Mermaid, see [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md).
-
-### Mermaid graph
-
-A Mermaid `flowchart`, `graph`, or `sequenceDiagram`. Wrap it in a Tailwind card so it doesn't feel parachuted in. Use `classDef` to colour the edges that matter (accent indigo, red for the problem path).
-
-Quote any node label containing parentheses, colons, or HTML (`A["Store (cache)"]`). Unquoted, they break the parse and the diagram renders as an error blob instead of failing loudly.
+Every figure and table sits in a `.fig` row: the visual on the left, the caption and "So what"
+box in a margin column on the right. `.fig.wide` stacks them, for anything that needs the full
+width: DAGs, timelines, diffs, sequence diagrams, wide tables.
 
 ```html
-<div class="rounded-lg border border-slate-200 bg-white p-4">
-  <pre class="mermaid">
-    flowchart LR
-      A[Intake] --> B[Validate]
-      B --> C[Store]
-      C -.problem.-> D[External call]
-      classDef problem stroke:#dc2626,stroke-width:2px;
-      class C,D problem
-  </pre>
+<div class="fig" id="fig-3">
+  <div class="visual"><div class="figframe">…</div></div>
+  <div class="margin">
+    <p class="caption"><span class="figno">Figure 3.</span> What it shows.
+      <span class="how">How to read it, in one to three sentences.</span></p>
+    <p class="sowhat"><span class="lbl">So what</span>The conclusion.</p>
+  </div>
 </div>
 ```
 
-### Hand-built boxes-and-arrows
+- Figure ids are `fig-N`; table rows use `id="table-N-fig"` on the row and `id="table-N"` on the
+  `<table>`. Number figures and tables in the order they appear.
+- Add each to `dl.visuals` in the sidebar.
+- Put a short `ul.points` list before a figure when the section needs context; see
+  [WRITING.md](WRITING.md#text-around-figures).
 
-Things as `<div>`s with borders and labels; arrows as inline SVG `<line>`/`<path>` positioned absolutely over a `relative` container. One element reads as thick and dominant with greyed-out internals.
+## Recipes
 
-### Cross-section
+### Data table
 
-Stack horizontal bands (`h-12 border-l-4`) for the layers a request/call/process traverses. Before: many thin layers; after: one thick band with the consolidated responsibility.
+```html
+<div class="figframe table">
+  <table class="data sortable" id="table-1" data-show="20">
+    <thead><tr><th class="txt" data-type="txt">Skill</th><th class="num" data-type="num">Lines</th></tr></thead>
+    <tbody>…first 20 rows…</tbody>
+    <tbody id="t1-rest" hidden>…the rest…</tbody>
+  </table>
+  <details class="more" data-target="t1-rest">
+    <summary><span class="when-closed">Show 36 more rows</span><span class="when-open">Show fewer</span></summary>
+  </details>
+</div>
+```
 
-### Mass diagram
-
-Two rectangles per item: one for surface area, one for what's behind it. Shallow: surface nearly as tall as substance. Deep: surface short, substance tall.
-
-### Collapse
-
-Before: a tree of nested boxes. After: the same tree collapsed into one box with the now-internal pieces faded inside. A CSS `max-height` transition on a `.collapse` element, triggered by an inline-JS toggle, lets the reader play it.
+- Units go in the header ("Lines", "Size (KB)"), not in the cells.
+- Numbers: `td.num`, right-aligned, tabular, thousands separators. Identifiers: `td.id`
+  (monospace). Free text: `td.txt`.
+- The header sticks under the section heading. Keep the table out of any `overflow-x: auto`
+  wrapper (including `.figframe.scroll`); that kills the sticky header. Fit a wide table with
+  report-block geometry instead.
+- Show 20 rows. Put the rest in a second, hidden `tbody` behind `details.more`, whose summary
+  states the hidden count. `data-show` keeps the split when the reader sorts. Over 200 rows,
+  link a data file instead.
+- To make a number column stand out, put a bold numeral over an in-cell bar:
+  `<td class="num bar"><span class="cbar" style="--w: 64%">96</span></td>`, with `--w` the
+  value's share of the scale. Add the `key` class (`td.bar.key`) to the cells to single out, such
+  as those at the limit; their bars turn coral.
 
 ### Comparison matrix
 
-A styled `<table>`: options as columns, criteria as rows, cells as compact verdict chips (emerald/amber/red dots or ✓/△/✗) rather than sentences. Tint or bold the winning column.
+A `table.data.matrix`. Each `td.mark` holds a symbol and a class, never colour alone: `●` with
+`pass`, `✕` with `fail`, `◆` with `blocked`. The caption's reading points name each symbol.
+`span.mark-note` adds a two-word qualifier under a mark.
 
-### Timeline
+### Axis chart
 
-A horizontal spine (`border-t-2`) with positioned event markers, or a vertical `border-l-2` list with offset cards. The pivotal event gets the accent colour; everything else stays slate.
+A `<div id="vl-name" class="chart"></div>` inside a `.figframe`. In the scaffold's Vega script,
+add one `["#vl-name", spec]` pair to the `CHARTS` array, with a Vega-Lite v6 spec that has inline
+`data.values` and `width: "container"`. The scaffold merges `VL_CONFIG` (the four series colours
+and muted axes) into each spec, embeds it with `VL_OPTS`, and sets `window.__vegaDone` to the
+promise of all the embeds. Take any colour in a spec from a token, `TOKEN("coral-line")`, never
+a hex value.
+
+- Inline data only; no `url` data.
+- A dashed rule marks a budget or threshold; say so in the caption.
+- The render check confirms marks were drawn. Only the screenshot shows whether the chart reads.
 
 ### Proportion bars
 
-Plain `<div>` bars sized with inline `style="width: 64%"`, value labelled at the end of each bar. No chart libraries; if the data needs axes and gridlines, simplify the message instead.
+`.figframe.bars` holding one `.bar-row` per item: `.bar-label`, then `.bar-track` with
+`.bar-fill` (`style="width: 64%"`, scaled to the largest value) and `.bar-num` (the value in `b`,
+then `.bar-sub` for a share or unit). The first row's bar is coral; the rest are ink. An "other"
+row takes the `other` class (taupe).
+
+### DAG
+
+Write the graph as JSON and run the generator:
+
+```bash
+python3 <skill-dir>/scripts/dag_svg.py graph.json --out dag.html   # "-" reads stdin
+```
+
+`<skill-dir>` is the skill's directory. Without `--out` the fragment goes to stdout. Exit codes:
+
+- 0: fragment written. Warnings go to stderr; above 11 nodes it names the sibling sets you can
+  merge. Treat a warning as a fault to fix.
+- 1: invalid input, reason on stderr: 16 or more nodes, more than six tags, a cycle, an edge to
+  an unknown node, or a duplicate id.
+- 2: usage error.
+
+```json
+{
+  "nodes": [
+    {"id": "lint", "name": "lint_skill.py", "tag": "SCR", "caption": ["scripts/", "degree 21"]},
+    {"id": "dossier", "name": "dossier", "tag": "SKL", "caption": "skills/ · degree 4"}
+  ],
+  "edges": [["dossier", "lint"]],
+  "groups": [{"id": "rest", "name": "other skills", "tag": "SKL", "caption": "skills/",
+              "members": ["a", "b", "c"]}],
+  "focus": "dossier",
+  "legend": {"SKL": "skill", "SCR": "root script"},
+  "label": "Two-hop neighbourhood of the dossier skill",
+  "total_nodes": 56
+}
+```
+
+- `tag` is a node type of one to four letters or digits (`SKL`, `CI`), drawn as a badge. Use
+  six types at most. `legend` labels each one, and its order sets the badge slots, `tag-1` to
+  `tag-6`. Slot 6 is the outline badge.
+- `caption` is the second line, a string or a list joined with " · ".
+- `groups` collapse their `members` into one dashed node with a count chip, and move their edges
+  to it. `group_count` on a node draws the same chip for a node you merged yourself. Merge
+  siblings that share a parent and say nothing alone.
+- `focus` (or `subject`) is the one subject node; it gets the coral tint.
+- `rank` per node is optional, a lower bound; the script ranks by longest path.
+- `label` is the SVG's accessible name. `total_nodes` is the size of the full graph. `id`
+  optionally names the arrow-marker ids (`fig-3`); the default is a hash of the graph.
+
+The output is a `div.figframe.dag-frame` holding a left-to-right and a top-to-bottom SVG, then
+the `p.legend` naming each badge, the subject and the dashed group box. Paste it into the
+`.visual` of a `.fig.wide` row, between `<!-- generated: … -->` and
+`<!-- end generated: dag_svg.py -->` comments that record the command. The frame shows the
+left-to-right drawing when it is at least 980px wide and the top-to-bottom one below that.
+Replace the margin column with `div.dag-notes`, three blocks of bullets: `.cap` (caption, then
+"N of M nodes drawn" and what was merged), "How to read" and "So what". Put every node in a data
+table when nodes were cut.
+
+### Sequence diagram
+
+A `pre.mermaid` inside `.figframe.seq` in a `.fig.wide` row, with up to about 12 messages.
+
+- Give each actor a short id and its display name: `participant CR as check_render.py`.
+- Write `;` and `#` in message text as Mermaid entity codes (`#59;`, `#35;`). A parse error makes
+  Mermaid draw an error diagram, with no console message.
+- Use `alt` and `loop` boxes for branches; name the condition.
+- The scaffold's module script initialises Mermaid with the sequence theme and runs it last.
+
+### Timeline
+
+`ol.timeline` in its own `.fig.wide` row, never beside another figure. Each `li` holds
+`.tl-n`, `.tl-date`, `.tl-dot`, `.tl-body` and an optional `.tl-note`. Give the one key event
+`li.key`; everything else stays plain.
+
+### Annotated code excerpt
+
+```html
+<pre class="code" style="counter-reset: ln 353"><code><span class="l">def verdict(facts):</span>
+<span class="l mark" data-m="1">    if facts.blocked:</span>
+…</code></pre>
+<ol class="markers">
+  <li><span class="k">1</span><span class="ln">355</span> What this line does.</li>
+</ol>
+```
+
+- Set `counter-reset: ln N` with N one less than the first source line, so the gutter matches
+  the file.
+- `l mark` with `data-m` puts the navy numbered marker in the right margin and the slate tint on
+  the line. `ol.markers` under the panel explains each marker, with its line number.
+- Copy the source verbatim, one `span.l` per line, HTML-escaped. No highlighting library.
+- Up to about 25 lines; cut to the lines the markers discuss.
+
+### Diff
+
+Generate the rows from a unified diff; word-level highlights by hand are error-prone:
+
+```bash
+git show <rev> -- <file> | python3 <skill-dir>/scripts/diff_html.py - \
+  --lines 35-49 --note 'old:36=Before.' --note 'new:39=After: run `check_render.py`.' \
+  --out diff.html
+diff -u old.md new.md | python3 <skill-dir>/scripts/diff_html.py -
+```
+
+The input is any unified diff (`git diff`, `git show`, `diff -u`), as a file or `-` for stdin.
+
+- `--path FILE` picks one file when the diff covers several, as in `+++ b/FILE`. Required then.
+- `--lines FIRST-LAST` keeps new-file lines FIRST to LAST and the removals between them, and
+  rewrites the hunk headers to match. The header text after `@@` stays git's own.
+- `--note SIDE:LINE=TEXT` puts a numbered marker on line LINE of the `old` or `new` file, with
+  TEXT in the notes list. Markers are numbered from the top; `backticks` in TEXT become `code`.
+  Repeat it for each marker.
+- `--out FILE` writes the fragment there instead of stdout.
+
+Exit codes: 0 fragment written, 1 invalid input (reason on stderr), 2 usage error.
+
+The output is a `pre.code.diff` (GitHub's red and green, old and new line numbers, changed words
+tinted darker) followed by the `ol.markers` list. Paste it into the `.visual` of a `.fig.wide`
+row, between `<!-- generated: … -->` and `<!-- end generated: diff_html.py -->` comments that
+record the command. The caption's reading points say red is removed, green is added, and which
+column numbers which file.
+
+### Boxes-and-arrows, cross-section, mass diagram, collapse
+
+Hand-built HTML boxes and inline SVG inside a `.figframe`. Copy the gallery's example of the
+family and change the content.
+
+- Colour SVG with `var(--token)` from [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md#colour-roles).
+- Text inside a box fits the box at 768px; the screenshot is the only check.
+- A collapse shows the before and after states side by side, or toggles between them with
+  inline JS.
+
+### Callouts
+
+```html
+<p class="callout note"><b>Note.</b> This flow follows ADR-0012.</p>
+<p class="callout problem"><b>Problem.</b> The cache never expires.</p>
+```
+
+The scaffold prefixes "Problem." with ✕. Use a note for an ADR citation or an aside, and a
+problem for a defect the dossier found.
+
+## Libraries
+
+The scaffold pins every library on `cdn.jsdelivr.net`; the render check fails any other host and
+any unpinned version.
+
+| Library | Version | Loaded as |
+|---|---|---|
+| Mermaid | 11.17.2, `dist/mermaid.esm.min.mjs` | ES module |
+| Vega | 6.4.0 | classic script |
+| Vega-Lite | 6.5.0 | classic script |
+| Vega-Embed | 7.3.0 | classic script, after the two above |
+
+- Mermaid runs with `startOnLoad: false` and `securityLevel: "strict"`; `await mermaid.run()` is
+  the last line of the module script.
+- Vega embeds use `renderer: "svg"` and `actions: false`.
+- Delete a library's script tags when the dossier has no figure that uses it.
 
 ## Interactivity
 
-Allowed, kept minimal and self-contained:
+Inline vanilla JS only. The scaffold already wires click-to-sort on `table.sortable`, the
+`details.more` row toggle, and the current-section tracker.
 
-- **CSS only** for motion where possible: keyframes, `transition`, `:hover`/`:target` reveals.
-- **Inline vanilla JS** for collapsibles, tabs, and before-to-after toggles. No frameworks, no extra CDN libraries beyond Tailwind + Mermaid, to keep the output self-contained.
-
-If an interaction needs a library, it doesn't belong in this report.
-
-### Mermaid inside hidden containers
-
-Mermaid measures every label as it draws, so a diagram must be drawn while it is laid out. `<details>` and the `.collapse` max-height toggle keep their content laid out, so the scaffold's `startOnLoad: true` draws them correctly. Tabs and toggles that hide panels (`hidden`, Tailwind `hidden`, `display:none`) need the order reversed: panels start visible, Mermaid draws every diagram, and only then does the script hide the inactive panels. Replace the scaffold's module script with:
+A tab or toggle that hides panels with `hidden` or `display: none` must let Mermaid draw first.
+Leave every panel visible in the markup, run Mermaid, then hide the inactive panels:
 
 ```html
 <script type="module">
-  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
-  mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict" });
-  await mermaid.run();   // draw every diagram while every panel is visible
-  showTab("before");     // then hide the inactive panels
+  // after mermaid.initialize(...) in the scaffold's module script
+  await mermaid.run();
+  showTab("before");
 </script>
 <script>
   function showTab(id) {
@@ -141,19 +297,5 @@ Mermaid measures every label as it draws, so a diagram must be drawn while it is
 </script>
 ```
 
-Each panel is a `<div data-tab="before">`, with no `hidden` in the markup; buttons call `showTab(...)`. The render check opens hidden panels the way a reader would, so a diagram drawn while hidden fails it as an error diagram or a speck.
-
-## Style guidance
-
-This is the house style. Apply it, don't reinvent per report.
-
-- Lean editorial, not corporate-dashboard. Generous whitespace.
-- **Headings are a tight, heavy grotesque sans, never serif.** Apply `.display` to the top-level title (with `leading-[1.05]`) and `.subhead` to every section heading, so the whole document reads as one type system. Both classes use a system font stack only: no `font-serif`, no Google Fonts or other web fonts unless the user explicitly asks, which would break self-containment. This governs titles and headings only; body text, small uppercase eyebrow labels, and monospace code labels are unaffected.
-- Color sparingly: one accent (indigo or emerald) plus red for problems/warnings and amber for callouts. Resist a rainbow.
-- Keep diagrams ~320px tall so before/after pairs sit side by side without scrolling.
-- Use `text-xs uppercase tracking-wider` for labels inside diagrams. They should read as schematic, not as UI chrome.
-- Static by default; the only motion is the CSS/inline-JS interactivity above.
-
-## Tone
-
-Plain English, concise, and direct: state each point as a claim, not a hedge. If a sentence could be a bullet, make it a bullet. If a bullet could be cut, cut it. When the report is about a domain with its own vocabulary (a project's `GLOSSARY.md` or older `CONTEXT.md`, an ADR's terms), use that vocabulary exactly; don't drift into synonyms.
+The render check opens hidden panels the way a reader would, so a diagram drawn while hidden
+fails it.

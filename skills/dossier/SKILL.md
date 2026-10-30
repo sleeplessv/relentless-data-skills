@@ -1,56 +1,134 @@
 ---
 name: dossier
-description: Produce a single self-contained HTML visual report, an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG. Use when the user wants a visual report, an explainer, a single-file HTML writeup of a system/process/findings, or asks to visualize or diagram something as a shareable document.
+description: Produce a dossier, one self-contained HTML document with an answer box, numbered figures and tables, and a fixed house style, checked in a headless browser. Use when the user wants a visual report, an explainer, a writeup, or a diagram of a system, process, findings or decision as one shareable document, not an interactive dashboard or a single chart.
 metadata:
   author: sleeplessv
 ---
 
 # Dossier
 
-Turn a subject (a system, a process, research findings, a decision) into a single self-contained HTML document that **carries its meaning in visuals**, not paragraphs. Tailwind and Mermaid come from CDNs; hand-built CSS/SVG handles the editorial visuals Mermaid can't.
+A dossier explains one subject (a system, a process, findings, a decision) in a single HTML file.
+It opens with the claim it defends and carries the argument in numbered figures and tables.
+Every dossier looks the same: same palette, type, components and page shape. Consistency from
+document to document outranks every local preference, so you fill a fixed scaffold and never
+restyle it.
 
-[VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) names the diagram patterns and is the single source for **which** pattern to pick for a given idea. The full scaffold, diagram **build recipes**, interactivity rules, and house style live in [HTML-REPORT.md](references/HTML-REPORT.md).
+`<skill-dir>` is this skill's directory. Its files:
 
-## Process
+| File | Read it when |
+|---|---|
+| `assets/scaffold.html` | You start the dossier. Copy it; it is the whole stylesheet, page shell and scripts |
+| `assets/gallery.html` | Before you build any figure. One worked example of every visual family |
+| [references/VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) | You pick a visual family for an idea, or a colour for a mark |
+| [references/HTML-REPORT.md](references/HTML-REPORT.md) | You build a figure, table, DAG, code excerpt or chart in the scaffold |
+| [references/WRITING.md](references/WRITING.md) | Before you write any prose: answer box, captions, bullets, headings |
 
-Report on the subject you were given, at the scope asked. If exploring surfaces a bug, a stale doc, or a design problem, note it in the report; don't go fix it.
+Report on the subject at the scope asked. If exploring surfaces a bug, a stale doc or a design
+problem, record it in the dossier; leave the fix to the user.
 
-### 1. Explore
+## 1. Explore
 
-Find the subject and where its substance lives, then gather from there:
+Find where the subject's substance lives and gather from there:
 
-- **About the codebase?** Walk it with Explore subagents (`subagent_type=Explore`), one per independent area when the codebase has several; the writing stays with you. Don't dump files into the report; extract the structure worth drawing.
-- **Already in the conversation?** The analysis is done (a finished design discussion, a debugging session, a research summary). Organize what's there; don't re-investigate.
-- **Pointed at sources?** Read the named docs/URLs.
+- **Codebase.** Walk it with Explore subagents (`subagent_type=Explore`), one per independent area.
+  You keep the writing. Extract the structure worth drawing, not file dumps.
+- **Already in the conversation.** The analysis is done. Organise what is there.
+- **Named sources.** Read the docs or URLs the user pointed at.
 
-If you're in a repo, read `docs/adr/`. ADRs record decisions the report should reflect, and it should not contradict them silently. Stop exploring once you can draw the thing; over-exploring a subject that's already settled wastes the run.
+In a repo, read `GLOSSARY.md` and `docs/adr/`. Use the glossary's terms exactly, and reflect ADR
+decisions rather than contradicting them silently. Note the commit or date you measured at; the
+byline states it. Stop exploring once you can draw each idea and source each number.
 
-### 2. Visualize
+## 2. Write
 
-Write one self-contained HTML file and open it.
+1. Resolve the writing skills and read the prose rules, as
+   [WRITING.md](references/WRITING.md#before-you-write) describes.
+2. Copy `<skill-dir>/assets/scaffold.html` to the output path. Default to
+   `${TMPDIR:-/tmp}/<slug>-<YYYYMMDD-HHMM>.html`; write elsewhere when the user names a
+   destination or says to keep or commit it.
+3. Open `<skill-dir>/assets/gallery.html` and read the families you plan to use.
+4. List the ideas. Give each one a section and pick its visual family with the decision tree in
+   [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md#picking-a-family).
+5. Build each figure from its recipe in [HTML-REPORT.md](references/HTML-REPORT.md), copying the
+   gallery's markup and classes.
+6. Print the absolute path and open it (`open` on macOS, `xdg-open` on Linux, `start` on
+   Windows). In a headless session, print the path and say it could not be opened.
 
-- **Where:** default to the OS temp dir. Resolve `$TMPDIR`, fall back to `/tmp` (or `%TEMP%` on Windows), at `<tmpdir>/<slug>-<timestamp>.html`. If the user names a destination ("save to `docs/`") or says "keep/commit it," write there instead. Either way, **print the absolute path and open it** (`open` on macOS, `xdg-open` on Linux, `start` on Windows). If opening fails (headless/SSH session), just print the path and say so.
-- **Self-contained:** one file, no build step, portable. The only dependencies are the Tailwind CDN and the Mermaid ESM import, so it renders fully only with network access. Light interactivity (collapsible sections, before/after toggles, CSS animations) is allowed via **inline vanilla JS only**, no extra libraries; a Mermaid diagram inside a tab or toggle follows the Interactivity recipe in [HTML-REPORT.md](references/HTML-REPORT.md). "Self-contained" throughout this skill means exactly this.
-- **Visual-first:** every major idea earns a visual, and the report runs as long as the subject has ideas. A five-idea subject gets five visuals, not twelve sections propped up by an intro, a recap, and a conclusion. To pick the pattern that fits each idea, consult the "Picking between them" decision tree in [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md); don't default to a Mermaid flowchart for everything. Once you've chosen a pattern, get its build recipe in [HTML-REPORT.md](references/HTML-REPORT.md). If a section needs a paragraph to be understood, redraw the visual.
-- **House style:** the editorial aesthetic in [HTML-REPORT.md](references/HTML-REPORT.md) is the style, lean, not corporate-dashboard. Apply it; don't invent a new look per report.
-- **Verify:** a Mermaid syntax error never fails loudly; it renders as an error blob, with nothing on the console, in a page you never see. Re-read every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML), then render the page headlessly (`<skill-dir>` is this skill's directory):
+The step is done when every idea has a numbered figure or table and the output contract holds.
 
-  ```bash
-  uv run --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
-  ```
+### Output contract
 
-  It judges what a reader sees: it waits for Mermaid to finish, opens tabs, toggles, and `<details>`, and ends `PASS`, `FAIL`, or `BLOCKED`.
+- **Answer box** at the top, holding the one claim the dossier defends. Explainers have one too.
+- **Contents** in the sidebar when the dossier has four or more sections; the scaffold shows it
+  inline below 1100px.
+- **Numbered figures and tables**, on separate counters ("Figure 3", "Table 2"), numbered in the
+  order they appear. Each has a caption and a "So what" box. Prose cites them by number.
+- **Takeaways** as a short list of sentences, where a section needs them.
+- **Limits** as the last section, always: unverified diagrams, numbers not re-checked, gaps in
+  exploration. It says "None" when there are none.
+- A stats row of up to four headline numbers under the answer box is optional.
+- Light theme only. Readable down to 768px. The scaffold's print stylesheet stays.
 
-  - `FAIL`: fix every line under `problems` (each failing diagram comes with its source line and Mermaid's error) and rerun.
-  - `BLOCKED` means unverified, not passing: the environment kept the check from running. Apply the fix it prints, or hand the report over saying its render is unchecked.
-  - `PASS`: read every screenshot it lists. `diagram-<n>.png` shows each diagram for legibility; `page-<k>.png` slices the page by viewport height, and is the only check on your hand-built CSS/SVG visuals (overlapping labels, arrows that miss their target, text spilling out of boxes). Fix what you see and rerun. Resolve each `warnings` entry, and name each `unverified` diagram when you hand over.
+### House rules
 
-  Verify is done at `PASS`, with every screenshot read and every warning resolved.
+- Edit only the marked per-report block of the stylesheet, and only for geometry (column widths,
+  narrow-screen overrides). The locked block between `dossier:locked:begin` and
+  `dossier:locked:end` stays byte-for-byte; the render check fails any change.
+- Colour comes only from the scaffold's tokens. Red marks problems, always with ✕ and the word
+  "Problem". Amber marks callouts. GitHub's red and green appear only on the lines of a diff.
+  Category fills use the four chart series. Token roles are in
+  [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md#colour-roles).
+- Borders are full or absent. Boxes, nodes and callouts carry no side strip, and titles carry no
+  accent rule beneath them.
+- Every text and background pair meets WCAG AA. Captions use the muted token, never light grey.
+- Code sits in the teal code family on a light panel with a line-number gutter. Annotations are
+  navy numbered markers on a slate tint, so only real diff lines look like a diff.
+- DAGs come from `scripts/dag_svg.py` as static SVG, about 11 nodes or fewer. Mermaid draws
+  sequence diagrams only, up to about 12 messages each.
+- Prose stays short: bullets around DAGs and figures, one-sentence captions with one to three
+  reading points, sentence-case headings. The rules and the banned words are in
+  [WRITING.md](references/WRITING.md).
 
-**Cite ADRs (if applicable).** When the report depicts something governed by an existing ADR, cite it in an amber callout (_"this flow follows ADR-0012"_) so a reader can trace *why it's built this way* to the decision record. Only when an ADR genuinely governs what's drawn; never staple an ADR callout onto every diagram.
+**Cite ADRs.** When a figure depicts something an ADR governs, cite it in an amber callout
+("This flow follows ADR-0012"). Only where an ADR governs what is drawn.
 
-### 3. Grill loop
+## 3. Verify
 
-After the file is written, hand it over in one sentence: what the report covers and where it is. Then interview the user relentlessly about what the report gets wrong or underweights, whether that's a section, a diagram pattern choice, or the emphasis, until it says what they mean. Ask the questions one at a time, as plain prose, and give your recommended answer with each. If a question can be answered by re-reading the sources or codebase, do that instead of asking. Iterate on the same file after each answer, rerunning the render check; stop when the user has nothing left to change.
+Render the page headlessly:
 
-**Propose an ADR (if applicable).** If the grilling surfaces a load-bearing decision nobody had recorded, where the visualization made a design choice explicit and a future reader would wonder "why this way?", offer to draft one: _"Want me to record this as an ADR?"_ Only when it clears three tests: it's hard to reverse, it's surprising without context, and it's the result of a real trade-off. Skip ephemeral or self-evident reasons.
+```bash
+uv run --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
+```
+
+It prints JSON, then a final line and exit code: `PASS` (0), `FAIL` (1) or `BLOCKED` (2).
+Screenshots go to `<report-stem>-check/` beside the report (`--shots DIR` to change it).
+
+- `FAIL`: fix every entry under `problems` and rerun. Structure faults fail like render faults:
+  no answer box, Limits missing or not last, a figure without a numbered caption or out of
+  order, a Mermaid diagram that is not a sequence diagram, a DAG of 16 or more nodes, a changed
+  locked block, a script host other than `cdn.jsdelivr.net` or an unpinned version, and a page
+  or figure wider than its frame at 768, 1200, 1280 or 1440px.
+- `BLOCKED`: unverified, not passing. The environment kept the check from running (no Playwright
+  or Chromium, a CDN unreachable). Apply the fix it prints, or hand the dossier over and say its
+  render is unchecked.
+- `PASS`: open and read every screenshot it lists. The script cannot judge Vega charts,
+  `dag_svg.py` output or hand-built SVG by eye: check each chart has its marks, axes and labels,
+  each DAG's text sits inside its boxes, and nothing overlaps or spills. Fix what you see and
+  rerun. Resolve every `warnings` entry: a heading not in sentence case, a DAG of 12 to 15
+  nodes, a code block that scrolls sideways inside `pre.code`, a figure without "So what", small
+  text, a paragraph over 60 words, banned words, colour misuse. Name every `unverified` entry at
+  handover; a missing scaffold leaves the locked block unverified, not blocked.
+
+Verify is done at `PASS` with every screenshot read and every warning resolved or named.
+
+## 4. Grill loop
+
+Hand the dossier over in one sentence: what it covers and where it is. Then interview the user
+relentlessly about what it gets wrong or underweights (a section, a family choice, the emphasis)
+until it says what they mean. Ask one question at a time, in plain prose, with your recommended
+answer. Answer from the sources yourself when you can. Edit the same file after each answer and
+rerun the check. Stop when the user has nothing left to change.
+
+**Propose an ADR.** If the grilling surfaces a load-bearing decision nobody recorded, offer to
+draft one ("Want me to record this as an ADR?"). Only when it is hard to reverse, surprising
+without context, and the result of a real trade-off.

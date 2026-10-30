@@ -7,7 +7,7 @@ metadata:
 
 # Fabric lineage DAG
 
-The main thread **coordinates**: it fixes the contract, fans out five extractors in parallel, applies their shared `lineage_common.py` patches, then dispatches merge, render, copy pass, and publishes. Every dispatched agent gets the scratchpad path, `--repo`, the id contract below, and the reference file for its step. Scripts run from the run's own copy in `<scratch>/scripts/` (made in Step 1) with `python3` (stdlib) and the render step with Node. `<skill-dir>` is the installed skill: agents read it and never edit it; every script patch lands in `<scratch>/scripts/` and is logged in `<scratch>/patches.md` for the user to upstream.
+The main thread **coordinates**: it fixes the contract, fans out five extractors in parallel, applies their shared `lineage_common.py` patches, then dispatches merge, render, copy pass, and publishes. Every dispatched agent gets the scratchpad path, `--repo`, the id contract below, and the reference file for its step. Scripts run from the run's own copy in `<scratch>/scripts/` (made in Step 1) with `uv run --python 3.13 --no-project` (stdlib; plain `python3` works if it is 3.13 or newer) and the render step with Node. `<skill-dir>` is the installed skill: agents read it and never edit it; every script patch lands in `<scratch>/scripts/` and is logged in `<scratch>/patches.md` for the user to upstream.
 
 **Input:** a Fabric workspace exported to Git (`*.DataPipeline`, `*.Notebook`, `*.Lakehouse`, `*.SemanticModel`, `*.Report` folders with `.platform` files). **Output:** `lineage.html` published as an artifact, plus `validation-report.md` in the scratchpad.
 
@@ -49,7 +49,7 @@ Dispatch five agents at once, each with [`references/extractors.md`](references/
 5. semantic model + reports → `extract_semantic.py`
 
 ```bash
-python3 <scratch>/scripts/extract_<name>.py --repo <repo> --out <scratch> --config <scratch>/lineage.config.json
+uv run --python 3.13 --no-project <scratch>/scripts/extract_<name>.py --repo <repo> --out <scratch> --config <scratch>/lineage.config.json
 ```
 
 Each agent runs its script, reads the printed stats, spot-checks ten nodes against the repo, fixes misses in its own extractor script, and returns a one-line coverage summary: `found / parsed / partial` with reasons (runtime table lists, missing files, unresolved GUIDs), plus a patch list: the diff it applied to its script, any proposed `lineage_common.py` diff, and any config key it needs (the main thread owns `lineage.config.json`).
@@ -61,7 +61,7 @@ Done when: all five `extract-*.json` files exist and reflect every applied share
 One dispatch with [`references/validation.md`](references/validation.md):
 
 ```bash
-python3 <scratch>/scripts/merge_graph.py --out <scratch> --config <scratch>/lineage.config.json --coverage <scratch>/coverage.txt [--alias semantic.dataset-<guid>=semantic.<Model>]
+uv run --python 3.13 --no-project <scratch>/scripts/merge_graph.py --out <scratch> --config <scratch>/lineage.config.json --coverage <scratch>/coverage.txt [--alias semantic.dataset-<guid>=semantic.<Model>]
 ```
 
 `--config` is the same file the extractors used, so fork rules (`forkNamePattern`, `forkDirPattern`, `notebooks.forkDirs`, `notebooks.forkNamePrefixes`) are defined once.

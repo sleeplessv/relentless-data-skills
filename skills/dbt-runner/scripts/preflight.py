@@ -2,7 +2,7 @@
 """dbt-runner preflight — static environment checks before the first dbt
 command of a session.
 
-Standard library only, Python 3.9+. The default run is fully static (no
+Standard library only, Python 3.13+. The default run is fully static (no
 network, sandbox-safe): it verifies the things that make dbt fail before any
 model runs — env vars, the private key file, package state, the
 profile/target, and that `<runner> --version` (the context file's `runner`)

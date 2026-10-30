@@ -36,7 +36,7 @@ Write one self-contained HTML file and open it.
 - **Verify:** a Mermaid syntax error never fails loudly; it renders as an error blob, with nothing on the console, in a page you never see. Re-read every Mermaid block for the known footguns (quote labels containing parentheses, colons, or HTML), then render the page headlessly (`<skill-dir>` is this skill's directory):
 
   ```bash
-  uv run --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
+  uv run --python 3.13 --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
   ```
 
   It judges what a reader sees: it waits for Mermaid to finish, opens tabs, toggles, and `<details>`, and ends `PASS`, `FAIL`, or `BLOCKED`.

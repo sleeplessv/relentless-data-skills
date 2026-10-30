@@ -32,8 +32,10 @@ relies on the worktree fallback above.
 ## Preflight, once per session, before the first dbt command
 
 ```bash
-python3 <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>
+uv run --python 3.13 --no-project <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>
 ```
+
+Without `uv`, plain `python3` works if it is 3.13 or newer.
 
 Static checks only (sandbox-safe, no network): required env vars set, the
 private key file exists, `dbt_packages/` present with a clean
@@ -116,7 +118,7 @@ Escalation ladder, in order, no skipping:
    the verbatim string, with causes ranked by prior.
 2. If the signature looks like connection/auth and the static preflight
    passes, run the live check:
-   `python3 <skill-dir>/scripts/preflight.py --connect` (outside the
+   `uv run --python 3.13 --no-project <skill-dir>/scripts/preflight.py --connect` (outside the
    sandbox). It runs `<runner> debug`; if its output says it fell back to
    bare `dbt`, record `runner` first (rule 1).
 3. If the context file says `engine: v2` (legacy: `fusion`), also check

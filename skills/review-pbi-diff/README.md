@@ -54,7 +54,7 @@ developer's branch.
 - A repo using the **PBIP format** (`*.Report` / `*.SemanticModel` folders
   with `definition/` JSON + TMDL). The extractor matches these paths at any
   depth. `.pbix` binaries are out of scope.
-- `python3` and `git` on PATH.
+- `uv` and `git` on PATH. The scripts run under `uv run --python 3.13 --no-project`; plain `python3` works as a fallback if it is 3.13 or newer.
 - Optional but rewarded: repo docs for metric definitions, requirements, and
   naming/DAX standards. The spec check and convention checks use them when
   present and degrade gracefully when absent.

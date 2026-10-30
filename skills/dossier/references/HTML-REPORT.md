@@ -337,7 +337,8 @@ Each of these is a problem, and any problem makes the verdict `FAIL`:
 
 - No answer box, or Limits missing or not the last section.
 - A figure or table without a numbered caption, or numbered out of order.
-- A "So what" with no `.claim`, more than one `em` in the claim, or placed after its caption.
+- A "So what" with no `.claim` (or an empty one), more than one `.claim`, more than one `em` in
+  the claim, or placed after its caption.
 - A Mermaid diagram that is not a sequence diagram.
 - A DAG of 16 or more nodes.
 - A changed locked block.
@@ -355,7 +356,8 @@ Each of these is a warning, which the agent resolves or names at handover:
 - A heading not in sentence case.
 - A DAG of 12 to 15 nodes.
 - A code block that scrolls sideways inside `pre.code`.
-- A figure without a "So what", or a "So what" claim over 20 words.
+- A figure without a "So what", a "So what" without its `.lbl`, or a "So what" claim over 20
+  words.
 - Small text, or a paragraph over 60 words.
 - Banned words from [WRITING.md](WRITING.md).
 - Colour misuse: red or amber on a category mark, a side strip on a box.

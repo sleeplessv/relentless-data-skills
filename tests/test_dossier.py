@@ -578,6 +578,27 @@ class TestStructure(unittest.TestCase):
         html = dossier(section(1, "How the check runs", figure(1, sowhat=old)))
         self.assertIn("no .claim", self.problems(html))
 
+    def test_an_empty_so_what_claim_fails(self):
+        empty = SOWHAT.replace("It costs <em>4 times</em> more.", "  ")
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=empty)))
+        self.assertIn("no .claim", self.problems(html))
+
+    def test_a_so_what_with_two_claims_fails(self):
+        two = SOWHAT.replace('<p class="rest">', '<p class="claim">Again.</p><p class="rest">')
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=two)))
+        self.assertIn("2 .claim", self.problems(html))
+
+    def test_a_so_what_without_its_label_warns(self):
+        bare = SOWHAT.replace('<p class="lbl">So what</p>', "")
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=bare)))
+        self.assertEqual(self.problems(html), "")
+        self.assertIn("no .lbl", self.warnings(html))
+
+    def test_a_wrapped_so_what_after_its_caption_fails(self):
+        html = dossier(section(1, "How the check runs",
+                               figure(1, sowhat=f"<div>{SOWHAT}</div>", after=True)))
+        self.assertIn("after its caption", self.problems(html))
+
     def test_a_so_what_after_its_caption_fails(self):
         html = dossier(section(1, "How the check runs", figure(1, after=True)))
         self.assertIn("after its caption", self.problems(html))

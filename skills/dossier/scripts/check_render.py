@@ -665,25 +665,32 @@ def mermaid_kind(source):
     return None
 
 
-def sowhat_faults(so, where):
-    """(problems, warnings) for a .sowhat, which must be a pull quote: a short
-    .claim with at most one <em>, placed before the caption."""
+def sowhat_faults(so, where, fig):
+    """(problems, warnings) for a .sowhat in figure `fig`, which must be a pull
+    quote: a .lbl, then one short .claim with at most one <em>, placed before
+    the caption."""
     problems, warnings = [], []
-    sibs = [c for c in so.parent.children if isinstance(c, Node)]
-    if any("caption" in c.classes for c in sibs[:sibs.index(so)]):
+    order = fig.find(lambda x: x is so or "caption" in x.classes)
+    if any("caption" in c.classes for c in order[:order.index(so)]):
         problems.append(f'{where}\'s "So what" comes after its caption; put .sowhat first in .margin')
-    claim = next(iter(so.find(lambda x: "claim" in x.classes)), None)
-    if claim is None:
+    if not so.find(lambda x: "lbl" in x.classes):
+        warnings.append(f'{where}\'s "So what" has no .lbl: start it with <p class="lbl">So what</p>')
+    claims = so.find(lambda x: "claim" in x.classes)
+    if len(claims) > 1:
+        problems.append(f'{where}\'s "So what" has {len(claims)} .claim; keep one and move the '
+                        "rest to .rest")
+    if not claims or not claims[0].text().strip():
         problems.append(f'{where}\'s "So what" has no .claim: state the conclusion in '
                         '<p class="claim">')
         return problems, warnings
-    ems = len(claim.find(lambda x: x.tag == "em"))
-    if ems > 1:
-        problems.append(f'{where}\'s "So what" claim has {ems} <em>; mark one key figure at most')
-    words = len(claim.text().split())
-    if words > MAX_CLAIM_WORDS:
-        warnings.append(f'{where}\'s "So what" claim has {words} words; keep it to '
-                        f"{MAX_CLAIM_WORDS} and move the detail to .rest")
+    for claim in claims:
+        ems = len(claim.find(lambda x: x.tag == "em"))
+        if ems > 1:
+            problems.append(f'{where}\'s "So what" claim has {ems} <em>; mark one key figure at most')
+        words = len(claim.text().split())
+        if words > MAX_CLAIM_WORDS:
+            warnings.append(f'{where}\'s "So what" claim has {words} words; keep it to '
+                            f"{MAX_CLAIM_WORDS} and move the detail to .rest")
     return problems, warnings
 
 
@@ -732,7 +739,7 @@ def structure(html):
         if not dag_so and not sowhats:
             warnings.append(f'{kind} {n} has no "So what" (.sowhat with .lbl and .claim)')
         for so in sowhats:
-            p, w = sowhat_faults(so, f"{kind} {n}")
+            p, w = sowhat_faults(so, f"{kind} {n}", f)
             problems += p
             warnings += w
     for kind, nums in counters.items():

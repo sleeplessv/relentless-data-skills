@@ -281,6 +281,18 @@ class TestSize(unittest.TestCase):
         with self.assertRaises(dag_svg.GraphError):
             dag_svg.load(g)
 
+    def test_unused_legend_types_do_not_take_a_badge_slot(self):
+        g = graph(["x", "y"], [("x", "y")])
+        g["nodes"][0]["tag"] = "A"
+        g["nodes"][1]["tag"] = "G"
+        g["legend"] = {t: f"type {t}" for t in "ABCDEF"}
+        loaded = dag_svg.load(g)
+        self.assertEqual(loaded["slots"]["A"], 1)
+        self.assertEqual(loaded["slots"]["G"], 2)
+        self.assertTrue(all(1 <= s <= dag_svg.SLOTS for s in loaded["slots"].values()))
+        self.assertEqual([t for t, _ in loaded["legend"]], ["A", "G"])
+        self.assertNotIn("tag-7", dag_svg.render(loaded))
+
 
 class TestGroups(unittest.TestCase):
     def test_members_collapse_into_one_counted_node_that_takes_their_edges(self):
@@ -299,6 +311,14 @@ class TestGroups(unittest.TestCase):
                        {"id": "g2", "name": "g2", "tag": "SKL", "members": ["b", "c"]}]
         with self.assertRaises(dag_svg.GraphError):
             dag_svg.load(g)
+
+    def test_a_group_listing_an_earlier_group_is_an_error(self):
+        g = graph(["a", "b", "c"], [("a", "c")])
+        g["groups"] = [{"id": "g1", "name": "g1", "tag": "SKL", "members": ["a", "b"]},
+                       {"id": "g2", "name": "g2", "tag": "SKL", "members": ["g1", "c"]}]
+        with self.assertRaises(dag_svg.GraphError) as cm:
+            dag_svg.load(g)
+        self.assertIn("node g1 is a group; groups cannot nest", str(cm.exception))
 
 
 def run_cli(argv, stdin=""):
@@ -340,6 +360,15 @@ class TestCli(unittest.TestCase):
         self.assertEqual((code, out), (1, ""))
         self.assertIn("cycle", err)
         self.assertEqual(run_cli(["-"], stdin="{not json")[0], 1)
+
+    def test_nested_groups_exit_1_without_a_traceback(self):
+        g = graph(["a", "b", "c"], [("a", "c")])
+        g["groups"] = [{"id": "g1", "name": "g1", "tag": "SKL", "members": ["a", "b"]},
+                       {"id": "g2", "name": "g2", "tag": "SKL", "members": ["g1", "c"]}]
+        code, out, err = run_cli(["-"], stdin=json.dumps(g))
+        self.assertEqual((code, out), (1, ""))
+        self.assertIn("groups cannot nest", err)
+        self.assertNotIn("Traceback", err)
 
     def test_missing_argument_exits_2(self):
         self.assertEqual(run_cli([])[0], 2)

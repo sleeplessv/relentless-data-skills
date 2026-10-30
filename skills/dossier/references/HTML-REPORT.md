@@ -158,11 +158,11 @@ python3 <skill-dir>/scripts/dag_svg.py graph.json --out dag.html   # "-" reads s
 
 - `tag` is a node type of one to four letters or digits (`SKL`, `CI`), drawn as a badge. Use
   six types at most. `legend` labels each one, and its order sets the badge slots, `tag-1` to
-  `tag-6`. Slot 6 is the outline badge.
+  `tag-6`, for the types nodes use. Slot 6 is the outline badge.
 - `caption` is the second line, a string or a list joined with " · ".
 - `groups` collapse their `members` into one dashed node with a count chip, and move their edges
-  to it. `group_count` on a node draws the same chip for a node you merged yourself. Merge
-  siblings that share a parent and say nothing alone.
+  to it; a member cannot be another group. `group_count` on a node draws the same chip for a
+  node you merged yourself. Merge siblings that share a parent and say nothing alone.
 - `focus` (or `subject`) is the one subject node; it gets the coral tint.
 - `rank` per node is optional, a lower bound; the script ranks by longest path.
 - `label` is the SVG's accessible name. `total_nodes` is the size of the full graph. `id`

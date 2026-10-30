@@ -149,7 +149,7 @@ def load(data):
             raise GraphError(f"edges[{i}]: {a} points at itself")
         edges.append((a, b))
 
-    owner = {}
+    owner, group_ids = {}, set()
     for gi, grp in enumerate(data.get("groups") or []):
         members = grp.get("members") if isinstance(grp, dict) else None
         if not isinstance(members, list) or len(members) < 2:
@@ -160,6 +160,8 @@ def load(data):
         for m in members:
             if m not in known:
                 raise GraphError(f"groups[{gi}]: unknown member {m!r}")
+            if m in group_ids:
+                raise GraphError(f"node {m} is a group; groups cannot nest")
             if m in owner:
                 raise GraphError(f"node {m} is in two groups")
             owner[m] = gnode["id"]
@@ -167,6 +169,7 @@ def load(data):
         nodes.insert(first, gnode)
         ids.insert(first, gnode["id"])
         known.add(gnode["id"])
+        group_ids.add(gnode["id"])
     if owner:
         nodes = [n for n in nodes if n["id"] not in owner]
         moved = [(owner.get(a, a), owner.get(b, b)) for a, b in edges]
@@ -192,14 +195,13 @@ def load(data):
     legend_in = data.get("legend") or {}
     if not isinstance(legend_in, dict):
         raise GraphError("legend must be an object of tag: label")
+    used = {n["tag"] for n in nodes}
     slots, legend = {}, []
     for tag, label in list((str(t).upper(), str(l)) for t, l in legend_in.items()) + \
             [(n["tag"], n["tag"]) for n in nodes]:
-        if tag not in slots:
+        if tag in used and tag not in slots:
             slots[tag] = len(slots) + 1
             legend.append((tag, label))
-    used = {n["tag"] for n in nodes}
-    legend = [(t, l) for t, l in legend if t in used]
     if len(used) > SLOTS:
         raise GraphError(f"{len(used)} node types; the scaffold has {SLOTS} badge colours. "
                          "Merge types or drop the rarest.")

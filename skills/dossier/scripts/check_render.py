@@ -61,6 +61,8 @@ from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from dag_svg import MAX_NODES, WARN_ABOVE  # ships beside this script in scripts/
+
 PASS, FAIL, BLOCKED = "PASS", "FAIL", "BLOCKED"
 EXIT = {PASS: 0, FAIL: 1, BLOCKED: 2}
 VIEWPORT = {"width": 1280, "height": 900}
@@ -412,12 +414,6 @@ def locked_version_and_text(html):
     return m.group(1), text.strip("\n")
 
 
-def locked_block(html):
-    """The locked block's text with line endings and trailing spaces normalised."""
-    found = locked_version_and_text(html)
-    return found[1] if found else None
-
-
 def locked_problem(report_html, scaffold_html):
     """Why the report's locked block is not the scaffold's, or None when it is.
 
@@ -532,9 +528,6 @@ FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
 MAX_PARAGRAPH_WORDS = 60
 MAX_VISIBLE_ROWS = 20
 TOC_FROM_SECTIONS = 4
-# Same names and values as dag_svg.py's caps (tests/test_dossier.py asserts they match).
-WARN_ABOVE = 11       # more drawn DAG nodes than this: warn, merge sibling sets
-MAX_NODES = 15        # more drawn DAG nodes than this (16 and up): fail
 NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg", "template", "noscript"}
 # AI vocabulary that leaks in from source material: references/WRITING.md "Banned words"
 # ("landscape" is banned only when abstract, which a regex cannot tell, so it is left out).

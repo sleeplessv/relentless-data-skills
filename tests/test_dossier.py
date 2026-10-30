@@ -359,7 +359,7 @@ LOCKED = ("<style>\n/* dossier:locked:begin v1 */\n:root { --ink: #102542; }\n"
 
 class TestLockedBlock(unittest.TestCase):
     def test_extracts_the_text_between_the_markers(self):
-        self.assertEqual(check_render.locked_block(LOCKED),
+        self.assertEqual(check_render.locked_version_and_text(LOCKED)[1],
                          ":root { --ink: #102542; }\n.fig { display: grid; }")
 
     def test_identical_block_passes(self):
@@ -742,7 +742,8 @@ class TestSourceChecks(unittest.TestCase):
     def test_the_skill_ships_a_scaffold_with_a_locked_block(self):
         if not check_render.SCAFFOLD.exists():
             self.skipTest("assets/scaffold.html not written yet")
-        self.assertIsNotNone(check_render.locked_block(check_render.read_source(check_render.SCAFFOLD)))
+        self.assertIsNotNone(
+            check_render.locked_version_and_text(check_render.read_source(check_render.SCAFFOLD)))
 
 
 class TestPinsMatchTheScaffold(unittest.TestCase):
@@ -767,14 +768,6 @@ class TestPinsMatchTheScaffold(unittest.TestCase):
     def test_network_probe_uses_the_mermaid_pin(self):
         self.assertIn("mermaid@" + check_render.LIBRARIES["mermaid"] + "/",
                       check_render.NETWORK_PROBE_URL)
-
-
-class TestDagCapsMatch(unittest.TestCase):
-    """dag_svg.py refuses and check_render.py fails at the same DAG size."""
-
-    def test_caps_are_equal(self):
-        self.assertEqual(check_render.WARN_ABOVE, dag_svg.WARN_ABOVE)
-        self.assertEqual(check_render.MAX_NODES, dag_svg.MAX_NODES)
 
 
 @unittest.skipUnless(importlib.util.find_spec("playwright"), "needs Playwright and Chromium")

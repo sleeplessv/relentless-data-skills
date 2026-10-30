@@ -21,7 +21,7 @@ restyle it.
 | `assets/gallery.html` | Before you build any figure. A worked example of every family except the four hand-built ones |
 | [references/VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) | You pick a visual family for an idea, or a colour for a mark |
 | [references/HTML-REPORT.md](references/HTML-REPORT.md) | You build a figure, table, DAG, code excerpt or chart in the scaffold |
-| [references/WRITING.md](references/WRITING.md) | Before you write any prose: answer box, captions, bullets, headings |
+| [references/WRITING.md](references/WRITING.md) | Before you write any prose: answer box, key findings, captions, bullets, headings |
 
 Report on the subject at the scope asked. If exploring surfaces a bug, a stale doc or a design
 problem, record it in the dossier; leave the fix to the user.
@@ -53,7 +53,9 @@ byline states it. Stop exploring once you can draw each idea and source each num
 5. Build each figure from its recipe in [HTML-REPORT.md](references/HTML-REPORT.md), copying the
    gallery's markup and classes. The hand-built families (boxes-and-arrows, cross-section, mass
    diagram, collapse) have no gallery example; build them as their recipe says.
-6. Print the absolute path and open it (`open` on macOS, `xdg-open` on Linux, `start` on
+6. Write the key findings last, from the finished sections, as
+   [WRITING.md](references/WRITING.md#key-findings) says.
+7. Print the absolute path and open it (`open` on macOS, `xdg-open` on Linux, `start` on
    Windows). In a headless session, print the path and say it could not be opened.
 
 The step is done when every idea has a numbered figure or table and the output contract holds.
@@ -61,6 +63,8 @@ The step is done when every idea has a numbered figure or table and the output c
 ### Output contract
 
 - **Answer box** at the top, holding the one claim the dossier defends. Explainers have one too.
+- **Key findings** directly under the answer box: three to five numbered one-sentence findings,
+  in report order, each linking to its section.
 - **Contents** in the sidebar when the dossier has four or more sections; the scaffold shows it
   inline below 1100px.
 - **Numbered figures and tables**, on separate counters ("Figure 3", "Table 2"), numbered in the

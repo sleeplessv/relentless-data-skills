@@ -13,7 +13,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How the relentless-data-skills catalogue is built and checked</title>
 <style>
-/* dossier:locked:begin v4 */
+/* dossier:locked:begin v5 */
   /* ===== Tokens: Navy & coral. Every pair below is checked by scripts/check_contrast.py. ===== */
   :root {
     --paper: #ffffff;
@@ -64,8 +64,8 @@
   }
   /* dossier:pairs
      text     ink             paper               body text, so-what claim, matrix PASS mark
-     text     muted           paper               captions how-to-read, byline, legend, axis labels, lead unit
-     text     coral-text      paper               figure and section numbers, so-what and answer labels, lead number, so-what key figure
+     text     muted           paper               captions how-to-read, byline, legend, axis labels, lead unit, key-finding section refs
+     text     coral-text      paper               figure, section and key-finding numbers, so-what, answer and findings labels, lead number, so-what key figure
      text     ink             surface             takeaways, sidebar text
      text     muted           surface             sidebar meta and figure list, stat labels
      text     ink             hover               sidebar link on hover
@@ -160,7 +160,7 @@
 
   /* answer: the claim between full-width navy rules; an optional .lead number on its left */
   .answer { display: flex; align-items: center; gap: 1rem 2rem; margin: 0 0 3rem; padding: 1.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
-  .answer:has(+ .stats) { margin-bottom: 1.25rem; }
+  .answer:has(+ .findings, + .stats) { margin-bottom: 1.25rem; }
   .answer .lead { flex: none; text-align: center; }
   .answer .lead .n { font: 800 5.5rem/0.9 var(--display); letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
   .answer .lead .key { color: var(--coral-text); }
@@ -170,6 +170,17 @@
   .answer .claim { font-family: var(--display); font-size: 1.4rem; line-height: 1.28; letter-spacing: -0.015em; font-weight: 650; margin: 0; max-width: 38em; }
   .answer .claim code { font-size: 0.72em; }
   .answer .rest { margin: 0.6rem 0 0; max-width: 44em; }
+  /* key findings: 3 to 5 numbered one-line findings under the answer, each linking to its section */
+  .findings { margin: 0 0 3rem; }
+  .findings:has(+ .stats) { margin-bottom: 1.5rem; }
+  .findings .label { color: var(--coral-text); margin: 0 0 0.55rem; }
+  .findings ol { list-style: none; margin: 0; padding: 0; counter-reset: finding; max-width: 62rem; }
+  .findings li { counter-increment: finding; display: grid; grid-template-columns: 1.9rem 1fr; gap: 0.5rem; padding: 0.5rem 0; border-bottom: 1px solid var(--line-2); line-height: 1.45; }
+  .findings li:first-child { border-top: 1px solid var(--line-2); }
+  .findings li::before { content: counter(finding, decimal-leading-zero); color: var(--coral-text); font-weight: 750; font-size: var(--s-1); font-variant-numeric: tabular-nums; padding-top: 0.12rem; }
+  .findings a { color: var(--ink); text-decoration: none; }
+  .findings a:hover { text-decoration: underline; text-decoration-color: var(--coral-line); }
+  .findings .ref { color: var(--muted); font-size: var(--s-2); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; margin-left: 0.35rem; }
   /* optional stats row under the answer box */
   .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0.75rem; margin: 0 0 3rem; }
   .stat { background: var(--surface); border-radius: var(--radius); padding: 0.9rem 1.15rem 1rem; }
@@ -494,6 +505,16 @@
       <p class="claim">Every SKILL.md fits the 150-line budget that <code>scripts/lint_skill.py</code> enforces in CI, and five of 18 sit exactly on it.</p>
       <p class="rest">The bulk is in scripts. <code>fabric-lineage-dag</code> holds 17 of the 26 script files and 21% of the 17,001 tracked lines.</p>
     </div>
+  </section>
+  <section class="findings" aria-label="Key findings">
+    <p class="label eyebrow">Key findings</p>
+    <ol>
+      <li><a href="#s2">Five of 18 SKILL.md files sit exactly on the 150-line budget, and two more are within 3 lines of it.<span class="ref">&sect;02</span></a></li>
+      <li><a href="#s3">Work came in two waves, 37 commits in June and 59 in September and October.<span class="ref">&sect;03</span></a></li>
+      <li><a href="#s4">Eight nodes in the dependency graph have degree 5 or more, and only three of them are skills.<span class="ref">&sect;04</span></a></li>
+      <li><a href="#s6">The render check ends in BLOCKED on only three conditions, and the environment causes all three.<span class="ref">&sect;06</span></a></li>
+      <li><a href="#s8">Size follows script code: <code>fabric-lineage-dag</code> holds 21% of the 17,001 tracked lines, while <code>orchestrator-mode</code> has the most commits (25) and 306 lines.<span class="ref">&sect;08</span></a></li>
+    </ol>
   </section>
   <div class="stats" aria-label="Headline numbers">
     <div class="stat"><div class="v">18</div><div class="l">skill folders, 8 with DMI set</div></div>

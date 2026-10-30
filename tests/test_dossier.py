@@ -485,14 +485,25 @@ def section(n, title, body):
 LIMITS = section(9, "Limits", '<ol class="limits"><li>None.</li></ol>')
 
 
+def findings(*targets):
+    items = "".join(f'<li><a href="#{t}">Finding {t} costs 3 hours.</a></li>'
+                    for t in targets)
+    return (f'<section class="findings" aria-label="Key findings"><p class="label eyebrow">'
+            f'Key findings</p><ol>{items}</ol></section>')
+
+
+FINDINGS = findings("s1", "s1", "s9")   # s1 and Limits are in every test dossier
+
+
 def dossier(*sections, toc=True, answer='<section class="answer"><p class="claim">The check '
-            'fails bad pages.</p></section>', limits=LIMITS):
+            'fails bad pages.</p></section>', findings=FINDINGS, limits=LIMITS):
     side = ('<aside class="side"><ol class="toc" id="toc"></ol></aside>'
             '<nav class="toc-inline"></nav>') if toc else ""
     if not sections:
         sections = (section(1, "How the check runs", "<p>Short prose.</p>" + figure(1)),
                     section(2, "What the table holds", figure(1, "table")))
-    return f"<html><body>{side}<main>{answer}\n{''.join(sections)}{limits}</main></body></html>"
+    return (f"<html><body>{side}<main>{answer}{findings}\n{''.join(sections)}{limits}"
+            "</main></body></html>")
 
 
 def dag(nodes):
@@ -519,6 +530,30 @@ class TestStructure(unittest.TestCase):
         self.assertIn("answer box", self.problems(dossier(answer="")))
         no_claim = '<section class="answer"><p>Hello.</p></section>'
         self.assertIn("claim", self.problems(dossier(answer=no_claim)))
+
+    def test_no_key_findings_fails(self):
+        self.assertIn("key findings", self.problems(dossier(findings="")))
+
+    def test_key_findings_need_three_to_five_items(self):
+        for n in (3, 5):
+            self.assertEqual(self.problems(dossier(findings=findings(*["s1"] * n))), "", n)
+        for n in (2, 6):
+            self.assertIn(f"{n} findings", self.problems(dossier(findings=findings(*["s1"] * n))), n)
+
+    def test_a_finding_must_link_to_a_section(self):
+        found = self.problems(dossier(findings=findings("s1", "s2", "s7")))
+        self.assertIn('"#s7"', found)
+        found = self.problems(dossier(findings=findings("s1", "s2", "fig-1")))
+        self.assertIn('"#fig-1"', found)
+        unlinked = FINDINGS.replace('<a href="#s9">', "").replace("</a></li></ol>", "</li></ol>")
+        self.assertIn("link", self.problems(dossier(findings=unlinked)))
+
+    def test_key_findings_must_follow_the_answer_box(self):
+        stats = '<div class="stats"><div class="stat">1</div></div>'
+        ok = dossier(findings=FINDINGS + stats)
+        self.assertEqual(self.problems(ok), "")
+        late = dossier(findings=stats + FINDINGS)
+        self.assertIn("right after the answer box", self.problems(late))
 
     def test_no_limits_section_fails(self):
         self.assertIn("Limits", self.problems(dossier(limits="")))

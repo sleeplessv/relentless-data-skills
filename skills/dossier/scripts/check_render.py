@@ -16,7 +16,8 @@ It also fails on broken images, resources that answer 404 or name a host that
 does not exist, page and console errors, and a page that freezes its tab.
 
 For a dossier it adds, from the source: a structure pass (answer box with a
-claim, Limits as the last section, every figure and table numbered in order
+claim, then 3 to 5 key findings each linking to a section, Limits as the
+last section, every figure and table numbered in order
 with a caption, each "So what" a .claim with at most one <em> placed before
 the caption, Mermaid used for sequence diagrams only, DAG node count), the
 allowed hosts (cdn.jsdelivr.net) with exact x.y.z pins, and the locked
@@ -533,6 +534,7 @@ P_CLOSERS = {"p", "div", "ul", "ol", "table", "figure", "section", "h2", "h3", "
 MAX_PARAGRAPH_WORDS = 60
 MAX_CLAIM_WORDS = 20   # a "So what" claim is set large; longer ones crowd the margin
 MAX_VISIBLE_ROWS = 20
+MIN_FINDINGS, MAX_FINDINGS = 3, 5   # the key findings under the answer box
 TOC_FROM_SECTIONS = 4
 NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg", "template", "noscript"}
 # AI vocabulary that leaks in from source material: references/WRITING.md "Banned words"
@@ -694,8 +696,32 @@ def sowhat_faults(so, where, fig):
     return problems, warnings
 
 
+def findings_faults(box, answers, sec_ids):
+    """Problems with the key-findings box: placed right after the answer box,
+    with 3 to 5 findings, each linking to the id of a section.sec."""
+    problems = []
+    sibs = [c for c in box.parent.children if isinstance(c, Node)]
+    at = sibs.index(box)
+    if not at or sibs[at - 1] not in answers:
+        problems.append("the key findings box is not right after the answer box; move "
+                        '<section class="findings"> up to follow section.answer, before .stats')
+    items = box.find(lambda n: n.tag == "li")
+    if not MIN_FINDINGS <= len(items) <= MAX_FINDINGS:
+        problems.append(f"the key findings box lists {len(items)} findings; give {MIN_FINDINGS} "
+                        f"to {MAX_FINDINGS}, one sentence each")
+    for i, li in enumerate(items, 1):
+        link = next(iter(li.find(lambda n: n.tag == "a")), None)
+        href = link.attrs.get("href", "") if link else ""
+        if link is None:
+            problems.append(f'key finding {i} has no link; wrap it in <a href="#sN"> to its section')
+        elif not href.startswith("#") or href[1:] not in sec_ids:
+            problems.append(f'key finding {i} links to "{href}", which is not the id of a '
+                            "section.sec; link it to the section that holds the evidence")
+    return problems
+
+
 def structure(html):
-    """(problems, warnings) from the page source: answer box, Limits, figure
+    """(problems, warnings) from the page source: answer box, key findings, Limits, figure
     numbering and captions, Mermaid use, DAG size, and the prose warnings."""
     root = parse_tree(html)
     problems, warnings = [], []
@@ -708,6 +734,13 @@ def structure(html):
         problems.append("the answer box has no .claim: state the one claim the dossier defends")
 
     secs = root.find(lambda n: n.tag == "section" and "sec" in n.classes)
+    findings = root.find(lambda n: n.tag == "section" and "findings" in n.classes)
+    if not findings:
+        problems.append('no key findings: add <section class="findings"> right after the answer '
+                        "box, an <ol> of 3 to 5 one-sentence findings, each linking to its section")
+    else:
+        problems += findings_faults(findings[0], answers, {s.attrs.get("id") for s in secs})
+
     titled = []
     for s in secs:
         h2 = next(iter(s.find(lambda n: n.tag == "h2")), None)

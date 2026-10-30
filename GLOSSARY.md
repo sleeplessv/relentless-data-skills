@@ -29,6 +29,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Session edits**: the lines Claude added and removed during one Claude Code session, whatever branch they landed on. Distinct from the branch diff.
 - **Dossier**: a single self-contained HTML document that explains one system, process, finding or decision through numbered figures and tables, in the house style every dossier shares. _Avoid_: visual report, explainer, writeup (as names for the document).
 - **Answer box**: the box at the top of a dossier stating the one claim the dossier defends. Every dossier has one, explainers included. _Avoid_: summary, TL;DR, verdict box.
+- **Key findings**: the numbered list of three to five one-sentence findings directly under the answer box, each linking to the section that holds its evidence. _Avoid_: insights summary, highlights, executive summary.
 - **Figure**: a numbered visual in a dossier, with a "So what" pull quote above its caption. Tables follow the same rule on their own counter ("Table 2"). _Avoid_: chart (for the general case), diagram (for the general case).
 - **Caption**: the text beside a figure: one sentence on what it shows, then one to three points on how to read it. It never states the conclusion. _Avoid_: description, legend.
 - **"So what" pull quote**: the conclusion the reader should draw from one figure alone, labelled "So what" and set large above the figure's caption, with its one key figure in coral. _Avoid_: so-what box, takeaway (takeaways are the section-level list).

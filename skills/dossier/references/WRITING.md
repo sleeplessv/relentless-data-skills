@@ -40,6 +40,14 @@ normal weight. Add the lead number when one figure carries the answer ("0/18", "
 unit label of a few words saying what it counts. Leave it out when the answer is qualitative or
 no single number sums it up.
 
+### Key findings
+
+Three to five findings, one sentence each, in the order their sections appear. Each states a
+concrete result with the number that makes it true ("Five of 18 SKILL.md files sit exactly on
+the 150-line budget"), never the section's topic ("The 150-line budget"). Together they are what
+a reader keeps after reading only the top of the page, so pick the findings that carry the
+answer, not one per section. Link each to the section holding its evidence.
+
 ### Masthead
 
 The kicker names the kind of dossier and the subject. The byline states where every number
@@ -111,7 +119,7 @@ update every reference in prose, captions and the sidebar list.
 ## Length
 
 A dossier the size of the gallery (eight sections, nine figures, two tables) runs to about
-1,100 words of prose, counting the answer, stats labels, prose, bullets, captions, "So what"
+1,100 words of prose, counting the answer, key findings, stats labels, prose, bullets, captions, "So what"
 claims, takeaways, code markers and Limits. Tables, code and timelines do not count. If a section
 needs a paragraph to be understood, redraw its figure instead.
 

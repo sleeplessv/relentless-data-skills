@@ -13,11 +13,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>How the relentless-data-skills catalogue is built and checked</title>
 <style>
-/* dossier:locked:begin v3 */
+/* dossier:locked:begin v4 */
   /* ===== Tokens: Navy & coral. Every pair below is checked by scripts/check_contrast.py. ===== */
   :root {
     --paper: #ffffff;
-    --surface: #f4f7f7;        /* sidebar, takeaways, so-what, DAG canvas, stats */
+    --surface: #f4f7f7;        /* sidebar, takeaways, DAG canvas, stats */
     --ink: #102542;            /* text and structure */
     --muted: #5f5348;          /* captions how-to-read, labels; lightest text colour allowed */
     --on-ink: #ffffff;         /* text on navy: current TOC item, marker numerals, badges */
@@ -63,10 +63,10 @@
     --radius: 8px;
   }
   /* dossier:pairs
-     text     ink             paper               body text, matrix PASS mark
+     text     ink             paper               body text, so-what claim, matrix PASS mark
      text     muted           paper               captions how-to-read, byline, legend, axis labels, lead unit
-     text     coral-text      paper               figure and section numbers, so-what and answer labels, lead number
-     text     ink             surface             takeaways, so-what, sidebar text
+     text     coral-text      paper               figure and section numbers, so-what and answer labels, lead number, so-what key figure
+     text     ink             surface             takeaways, sidebar text
      text     muted           surface             sidebar meta and figure list, stat labels
      text     ink             hover               sidebar link on hover
      text     on-ink          ink                 current section title, marker numerals
@@ -187,20 +187,26 @@
   ul.points li { position: relative; padding-left: 1.1rem; margin: 0 0 0.35rem; }
   ul.points li::before { content: ""; position: absolute; left: 0.1rem; top: 0.62em; width: 0.4rem; height: 0.4rem; border-radius: 50%; background: var(--coral-line); }
 
-  /* ---------- figure rows: visual left, caption and so-what right; wide rows put both
-     under the visual, side by side on the same 68/32 columns ---------- */
+  /* ---------- figure rows: visual left, so-what then caption right; wide rows put both
+     under the visual, so-what in the left column and caption in the right ---------- */
   .fig { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 1rem 2rem; margin: 1.4rem 0 1.9rem; align-items: start; }
   .fig.wide { grid-template-columns: minmax(0, 1fr); }
   .fig .visual { min-width: 0; }
   .fig .margin { font-size: var(--s-1); line-height: 1.5; }
   .fig.wide .margin { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 0 2rem; align-items: start; }
-  .fig.wide .sowhat { margin-top: 0; }
   .fig.wide .caption { max-width: 72ch; }
   .caption { margin: 0; color: var(--ink); }
   .caption .figno { font-weight: 750; color: var(--coral-text); }
   .caption .how { color: var(--muted); }
-  .sowhat { margin: 0.8rem 0 0; padding: 0.65rem 0.85rem 0.7rem; background: var(--surface); border-radius: 6px; color: var(--ink); font-size: var(--s-1); line-height: 1.45; font-weight: 500; }
-  .sowhat .lbl, .dag-notes h3 { display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--coral-text); font-weight: 750; margin-bottom: 0.2rem; font-family: var(--body); }
+  /* so-what: a pull quote leading the margin, no box; the one key figure in .claim em is coral */
+  .sowhat { margin: 0 0 1rem; color: var(--ink); font-size: var(--s0); }
+  .sowhat .lbl, .dag-notes h3 { display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--coral-text); font-weight: 750; margin: 0 0 0.2rem; font-family: var(--body); }
+  .sowhat .claim { margin: 0; font-family: var(--display); font-size: 1.2rem; line-height: 1.28; font-weight: 650; letter-spacing: -0.015em; }
+  .sowhat .claim em { font-style: normal; color: var(--coral-text); }
+  .sowhat .claim code { font-size: 0.72em; }
+  .sowhat .rest { margin: 0.5rem 0 0; font-size: var(--s-1); line-height: 1.5; }
+  .sowhat + .caption { padding-top: 0.8rem; border-top: 1px solid var(--line-2); }
+  .fig.wide .sowhat + .caption { padding-top: 0; border-top: 0; }
   .figframe { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
   .figframe.table { padding: 0.25rem 0.85rem 0.6rem; }
   .figframe.scroll { overflow-x: auto; }
@@ -393,7 +399,7 @@
     .content { padding: 1.5rem 1rem 3rem; }
     .fig { grid-template-columns: minmax(0, 1fr); }
     .fig.wide .margin { grid-template-columns: minmax(0, 1fr); }
-    .fig.wide .sowhat { margin-top: 0.8rem; }
+    .fig.wide .sowhat + .caption { padding-top: 0.8rem; border-top: 1px solid var(--line-2); }
     .stats { grid-template-columns: repeat(2, 1fr); }
     ol.markers { grid-template-columns: 1fr; }
     .dag-notes { grid-template-columns: 1fr 1fr; }
@@ -406,6 +412,7 @@
     .answer .lead { text-align: left; }
     .answer .lead .n { font-size: 4rem; }
     .answer .claim { font-size: 1.2rem; }
+    .sowhat .claim { font-size: 1.1rem; }
   }
   @media print {
     .side, details.more { display: none !important; }
@@ -556,8 +563,12 @@
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">The budget caps the prompt, <em>not the skill</em>.</p>
+          <p class="rest">Folder size comes from scripts.</p>
+        </div>
         <p class="caption"><span class="figno">Table 1.</span> Every skill folder with its version, SKILL.md length, file counts, commits and tracked size. <span class="how">Each bar is that SKILL.md's share of the 150-line budget. Coral cells sit exactly on it. DMI means <code>disable-model-invocation: true</code>. A commit that touches several skills counts once per skill, so Commits sums to 210, not 124. Click a header to sort.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>The budget caps the prompt, not the skill. Folder size comes from scripts.</p>
       </div>
     </div>
 
@@ -579,8 +590,12 @@
         <div class="figframe"><div id="vl-bar" class="chart"></div></div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim"><em>Five skills</em> are at the 150-line limit, and two more are within 3 lines of it.</p>
+          <p class="rest">The budget binds.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 1.</span> SKILL.md length per skill, longest first. <span class="how">The dashed line is the 150-line budget. Coral bars sit exactly on it. Mean 127.3 lines, minimum 56 (visual-report).</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>Five skills are at the limit and two more are within 3 lines of it. The budget binds.</p>
       </div>
     </div>
   </section>
@@ -597,8 +612,11 @@
         <div class="figframe"><div id="vl-line" class="chart"></div></div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">Work came in <em>two waves</em>, June (37) and September to October (59).</p>
+        </div>
         <p class="caption"><span class="figno">Figure 2.</span> Commits on <code>main</code> per month. <span class="how">Counted with <code>git log</code>, merges included. Total 124.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>Work came in two waves, June (37) and September to October (59).</p>
       </div>
     </div>
 
@@ -730,8 +748,12 @@
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim"><em>Eight nodes</em> have degree 5 or more.</p>
+          <p class="rest">Only three of them are skills.</p>
+        </div>
         <p class="caption"><span class="figno">Table 2.</span> All 56 graph nodes, highest degree first. <span class="how">Degree is in-edges plus out-edges. The first 20 rows show. Open the control under the table for the rest.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>Eight nodes have degree 5 or more. Only three of them are skills.</p>
       </div>
     </div>
   </section>
@@ -775,8 +797,11 @@ sequenceDiagram
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">An unrendered diagram counts as a defect only <em>after a CDN probe</em> clears the network.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 4.</span> One run of <code>check_render.py</code>, from the agent's command to the verdict. <span class="how">Solid arrows are calls. Dashed arrows are replies. Each <code>alt</code> box runs only when its condition holds. The script's 17 steps are condensed to 12 messages.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>An unrendered diagram counts as a defect only after a CDN probe clears the network.</p>
       </div>
     </div>
   </section>
@@ -801,8 +826,12 @@ sequenceDiagram
         </ol>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">A network fault <em>never</em> becomes a page defect.</p>
+          <p class="rest">The order of the checks in <code>verdict()</code> is the design.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 5.</span> <code>verdict()</code>, lines 354 to 375 of <code>skills/visual-report/scripts/check_render.py</code>. <span class="how">Line numbers match the source. Numbered markers point to the notes under the code.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>The order is the design. A network fault never becomes a page defect.</p>
       </div>
     </div>
 
@@ -830,8 +859,11 @@ sequenceDiagram
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">Only <em>three</em> conditions end in BLOCKED, and the environment causes all three.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 6.</span> Each condition from the script's docstring and the verdict it gives on its own. <span class="how">&#10005; is FAIL, &#9670; is BLOCKED and &#9679; is PASS. When several conditions hold, the order in Figure 5 decides.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>Only three conditions end in BLOCKED, and the environment causes all three.</p>
       </div>
     </div>
 
@@ -867,8 +899,11 @@ sequenceDiagram
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">The check arrived <em>four months</em> after the skill, in one pull request.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 7.</span> Every commit that touched <code>skills/visual-report/</code>, oldest first. <span class="how">The highlighted entry, 088a29f, added <code>check_render.py</code> and <code>tests/test_visual_report.py</code>.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>The check arrived four months after the skill, in one pull request.</p>
       </div>
     </div>
 
@@ -879,8 +914,11 @@ sequenceDiagram
 <!-- end generated: diff_html.py -->
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">One line of judgement became a command with <em>three outcomes</em>.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 8.</span> The Verify step of <code>skills/visual-report/SKILL.md</code>, before and after commit 088a29f. <span class="how">Red lines were removed, green lines added. The darker tint marks the changed words. The left column numbers the old file, the right column the new.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>One line of judgement became a command with three outcomes.</p>
       </div>
     </div>
   </section>
@@ -909,8 +947,12 @@ sequenceDiagram
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">Size follows <em>script code</em>, not commits.</p>
+          <p class="rest">orchestrator-mode has the most commits (25) but only 306 lines.</p>
+        </div>
         <p class="caption"><span class="figno">Figure 9.</span> The ten largest skill folders by tracked lines. <span class="how">Bars are scaled to the largest folder. Each label gives the share, then the line count. The other eight skills share 13.4%.</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>Size follows script code. orchestrator-mode has the most commits (25) but only 306 lines.</p>
       </div>
     </div>
 

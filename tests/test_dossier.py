@@ -460,14 +460,21 @@ class TestLibraryWarnings(unittest.TestCase):
         self.assertIn("11.17.2", found[0])
 
 
-def figure(n, kind="fig", body='<div class="figframe">x</div>', caption=None, sowhat=True):
+SOWHAT = ('<div class="sowhat"><p class="lbl">So what</p><p class="claim">It costs '
+          '<em>4 times</em> more.</p><p class="rest">Detail.</p></div>')
+
+
+def figure(n, kind="fig", body='<div class="figframe">x</div>', caption=None, sowhat=SOWHAT,
+           after=False):
     fid = f"fig-{n}" if kind == "fig" else f"table-{n}-fig"
     label = caption if caption is not None else (
         f"Figure {n}." if kind == "fig" else f"Table {n}.")
-    so = '<p class="sowhat"><span class="lbl">So what</span>It matters.</p>' if sowhat else ""
-    return (f'<div class="fig" id="{fid}"><div class="visual">{body}</div><div class="margin">'
-            f'<p class="caption"><span class="figno">{label}</span> What it shows. '
-            f'<span class="how">How to read it.</span></p>{so}</div></div>')
+    so = sowhat or ""
+    cap = (f'<p class="caption"><span class="figno">{label}</span> What it shows. '
+           f'<span class="how">How to read it.</span></p>')
+    margin = cap + so if after else so + cap
+    return (f'<div class="fig" id="{fid}"><div class="visual">{body}</div>'
+            f'<div class="margin">{margin}</div></div>')
 
 
 def section(n, title, body):
@@ -565,6 +572,48 @@ class TestStructure(unittest.TestCase):
     def test_figure_without_a_so_what_warns(self):
         html = dossier(section(1, "How the check runs", figure(1, sowhat=False)))
         self.assertIn("So what", self.warnings(html))
+
+    def test_a_so_what_without_a_claim_fails(self):
+        old = '<p class="sowhat"><span class="lbl">So what</span>It matters.</p>'
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=old)))
+        self.assertIn("no .claim", self.problems(html))
+
+    def test_an_empty_so_what_claim_fails(self):
+        empty = SOWHAT.replace("It costs <em>4 times</em> more.", "  ")
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=empty)))
+        self.assertIn("no .claim", self.problems(html))
+
+    def test_a_so_what_with_two_claims_fails(self):
+        two = SOWHAT.replace('<p class="rest">', '<p class="claim">Again.</p><p class="rest">')
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=two)))
+        self.assertIn("2 .claim", self.problems(html))
+
+    def test_a_so_what_without_its_label_warns(self):
+        bare = SOWHAT.replace('<p class="lbl">So what</p>', "")
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=bare)))
+        self.assertEqual(self.problems(html), "")
+        self.assertIn("no .lbl", self.warnings(html))
+
+    def test_a_wrapped_so_what_after_its_caption_fails(self):
+        html = dossier(section(1, "How the check runs",
+                               figure(1, sowhat=f"<div>{SOWHAT}</div>", after=True)))
+        self.assertIn("after its caption", self.problems(html))
+
+    def test_a_so_what_after_its_caption_fails(self):
+        html = dossier(section(1, "How the check runs", figure(1, after=True)))
+        self.assertIn("after its caption", self.problems(html))
+
+    def test_a_so_what_claim_with_two_key_figures_fails(self):
+        two = SOWHAT.replace("more.", "more, <em>2</em> times.")
+        html = dossier(section(1, "How the check runs", figure(1, sowhat=two)))
+        self.assertIn("2 <em>", self.problems(html))
+
+    def test_a_long_so_what_claim_warns(self):
+        claim = lambda n: SOWHAT.replace("It costs <em>4 times</em> more.", " ".join(["w"] * n))  # noqa: E731
+        ok = dossier(section(1, "How the check runs", figure(1, sowhat=claim(20))))
+        self.assertEqual(self.check(ok), ([], []))
+        long = dossier(section(1, "How the check runs", figure(1, sowhat=claim(21))))
+        self.assertIn("21 words", self.warnings(long))
 
     def test_dag_notes_with_a_so_what_heading_count_as_the_so_what(self):
         notes = ('<div class="dag-notes"><div><h3>So what</h3><ul><li>It matters.</li></ul>'

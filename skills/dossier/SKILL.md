@@ -64,7 +64,8 @@ The step is done when every idea has a numbered figure or table and the output c
 - **Contents** in the sidebar when the dossier has four or more sections; the scaffold shows it
   inline below 1100px.
 - **Numbered figures and tables**, on separate counters ("Figure 3", "Table 2"), numbered in the
-  order they appear. Each has a caption and a "So what" box. Prose cites them by number.
+  order they appear. Each has a "So what" pull quote above its caption. Prose cites them by
+  number.
 - **Takeaways** as a short list of sentences, where a section needs them.
 - **Limits** as the last section, always: unverified diagrams, numbers not re-checked, gaps in
   exploration. It says "None" when there are none.
@@ -81,8 +82,9 @@ The step is done when every idea has a numbered figure or table and the output c
   "Problem". Amber marks callouts. GitHub's red and green appear only on the lines of a diff.
   Category fills use the four chart series. Token roles are in
   [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md#colour-roles).
-- Descriptions follow one pattern down the page: beside the visual in a side row, or under a
-  wide visual with the "So what" box beside the caption. A figure goes wide only when it is
+- Descriptions follow one pattern down the page: the "So what" pull quote leads, then the
+  caption. Both sit beside the visual in a side row, or under a wide visual with the pull quote
+  in the left column and the caption in the right. A figure goes wide only when it is
   unreadable in the left column. The rule is in
   [HTML-REPORT.md](references/HTML-REPORT.md#figure-row).
 - Borders are full or absent. Boxes, nodes and callouts carry no side strip, and titles carry no

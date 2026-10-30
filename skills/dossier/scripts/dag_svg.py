@@ -192,7 +192,7 @@ def load(data):
     if cycle:
         raise GraphError("the graph has a cycle: " + " -> ".join(cycle))
 
-    focus = data.get("focus", data.get("subject"))
+    focus = data.get("focus")
     if focus is not None and focus not in order:
         focus = owner.get(focus, focus)
         if focus not in order:

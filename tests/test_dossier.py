@@ -18,6 +18,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import types
 import unittest
 from pathlib import Path
 
@@ -282,6 +283,39 @@ class TestRequestProblem(unittest.TestCase):
                          "blocked")
 
 
+class FakeResponse:
+    """The parts of a Playwright response that Net reads."""
+
+    def __init__(self, url, status=200, resource_type="fetch"):
+        self.url, self.status = url, status
+        self.request = types.SimpleNamespace(url=url, resource_type=resource_type)
+
+
+class TestNet(unittest.TestCase):
+    def test_a_response_from_another_host_is_a_defect(self):
+        net = check_render.Net()
+        for url in ("https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js",
+                    "https://fastly.jsdelivr.net/npm/x@1.0.0/x.js",
+                    "https://data.example.com/rows.json", "http://api.example.org/x?y=1",
+                    "file:///tmp/report.html", "data:text/plain,hi"):
+            net._response(FakeResponse(url))
+        self.assertEqual([r["url"] for r in net.offhost],
+                         ["https://data.example.com/rows.json", "http://api.example.org/x?y=1"])
+        self.assertEqual(check_render.verdict(result(requests=net.offhost)), FAIL)
+
+    def test_a_url_fetched_twice_is_one_defect(self):
+        net = check_render.Net()
+        for _ in range(3):
+            net._response(FakeResponse("https://data.example.com/rows.json"))
+        self.assertEqual(len(net.offhost), 1)
+
+    def test_the_checkers_own_requests_do_not_count(self):
+        net = check_render.Net()
+        net.frozen = True
+        net._response(FakeResponse("https://data.example.com/rows.json"))
+        self.assertEqual(net.offhost, [])
+
+
 class TestVerdict(unittest.TestCase):
     blocked_cdn = {"url": "https://cdn.jsdelivr.net/m.mjs", "kind": "blocked", "why": "x"}
     defect = {"url": "https://cdn.jsdelivr.net/x.png", "kind": "defect", "why": "x"}
@@ -531,6 +565,31 @@ class TestStructure(unittest.TestCase):
         no_claim = '<section class="answer"><p>Hello.</p></section>'
         self.assertIn("claim", self.problems(dossier(answer=no_claim)))
 
+    def test_an_empty_answer_claim_fails(self):
+        empty = '<section class="answer"><p class="claim">  </p></section>'
+        self.assertIn("no .claim", self.problems(dossier(answer=empty)))
+
+    def test_an_unfilled_scaffold_fails(self):
+        found = self.problems(check_render.read_source(check_render.SCAFFOLD))
+        self.assertIn('"[Report title]"', found)
+
+    def test_a_placeholder_left_in_the_text_fails(self):
+        html = dossier(section(1, "How the check runs", "<p>[Two to four short sentences.]</p>"
+                               + figure(1)))
+        self.assertIn("placeholder", self.problems(html))
+        short = dossier(section(1, "How the check runs", "<p>See [1] and [Note].</p>" + figure(1)))
+        self.assertEqual(self.problems(short), "")
+
+    def test_the_gallery_has_no_structure_problems(self):
+        gallery = REPO_ROOT / "skills" / "dossier" / "assets" / "gallery.html"
+        self.assertEqual(self.check(check_render.read_source(gallery))[0], [])
+
+    def test_a_placeholder_left_in_the_title_fails(self):
+        gallery = REPO_ROOT / "skills" / "dossier" / "assets" / "gallery.html"
+        html = re.sub(r"<title>[^<]*</title>", "<title>[Report title]</title>",
+                      check_render.read_source(gallery), count=1)
+        self.assertIn('"[Report title]"', self.problems(html))
+
     def test_no_key_findings_fails(self):
         self.assertIn("key findings", self.problems(dossier(findings="")))
 
@@ -573,6 +632,15 @@ class TestStructure(unittest.TestCase):
                      '<pre class="mermaid">sequenceDiagram</pre>', dag(3)):
             html = dossier(section(1, "How the check runs", body + figure(1)))
             self.assertIn("no numbered caption", self.problems(html), body)
+
+    def test_template_and_noscript_content_is_ignored_like_mermaid_blocks(self):
+        for tag in ("template", "noscript"):
+            loose = f'<{tag}><table><tr><td>1</td></tr></table><div class="chart"></div></{tag}>'
+            html = dossier(section(1, "How the check runs", loose + figure(1)))
+            self.assertEqual(self.problems(html), "", tag)
+            boxed = dossier(answer=f'<{tag}><section class="answer"><p class="claim">x</p>'
+                            f"</section></{tag}>")
+            self.assertIn("no answer box", self.problems(boxed), tag)
 
     def test_figures_out_of_numeric_order_fail(self):
         html = dossier(section(1, "How the check runs", figure(2) + figure(1)))
@@ -868,6 +936,23 @@ class TestPinsMatchTheScaffold(unittest.TestCase):
     def test_network_probe_uses_the_mermaid_pin(self):
         self.assertIn("mermaid@" + check_render.LIBRARIES["mermaid"] + "/",
                       check_render.NETWORK_PROBE_URL)
+
+
+class TestCommandLine(unittest.TestCase):
+    """The script end to end; a structure fault fails with or without a browser."""
+
+    def test_a_page_without_an_answer_box_fails(self):
+        script = REPO_ROOT / "skills" / "dossier" / "scripts" / "check_render.py"
+        with tempfile.TemporaryDirectory() as tmp:
+            page = Path(tmp) / "report.html"
+            page.write_text(dossier(answer=""), encoding="utf-8")
+            run = subprocess.run([sys.executable, str(script), str(page),
+                                  "--shots", str(Path(tmp) / "shots")],
+                                 capture_output=True, text=True, timeout=400)
+        report, _, last = run.stdout.rstrip().rpartition("\n")
+        self.assertEqual(last, "FAIL", run.stdout[-3000:] + run.stderr[-3000:])
+        self.assertEqual(run.returncode, 1)
+        self.assertIn("no answer box", " | ".join(json.loads(report)["problems"]))
 
 
 @unittest.skipUnless(importlib.util.find_spec("playwright"), "needs Playwright and Chromium")

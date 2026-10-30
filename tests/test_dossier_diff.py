@@ -105,6 +105,16 @@ class TestRows(unittest.TestCase):
             ("ctx nonl", "", "", "No newline at end of file"),
         ])
 
+    def test_only_a_newline_ends_a_line(self):
+        # Form feed and the other separators str.splitlines() honours are text.
+        diff = "@@ -1,2 +1,2 @@\r\n-a\x0cb\r\n+a\x0cc\r\n ctx\x1dend\u2028\r\n"
+        rows = row_texts(diff_html.render(diff))
+        self.assertEqual([(c, o, n, t) for c, o, n, _, t in rows], [
+            ("hunk", "", "", "@@ -1,2 +1,2 @@"),
+            ("del", "1", "", "a\x0cb"),
+            ("add", "", "1", "a\x0cc"),
+            ("ctx", "2", "2", "ctx\x1dend\u2028"),
+        ])
 
 TWO_FILES = """\
 commit 0123456789abcdef

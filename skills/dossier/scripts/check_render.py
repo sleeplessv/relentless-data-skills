@@ -124,59 +124,12 @@ def read_source(path):
     return data.decode("cp1252", "replace")
 
 
-class MermaidBlocks(HTMLParser):
-    """Collect each live `class="mermaid"` element's source text and start line.
-
-    Skips markup the browser never turns into page elements: <template> and
-    <noscript> content, <textarea> and <title> text, and comments.
-    """
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.blocks = []
-        self._tag = None    # tag of the open Mermaid block
-        self._depth = 0
-        self._inert = None  # [tag, depth] of the inert element being skipped
-
-    def handle_starttag(self, tag, attrs):
-        if self._inert:
-            if tag == self._inert[0]:
-                self._inert[1] += 1
-            return
-        if tag in INERT:
-            self._inert = [tag, 1]
-            return
-        if self._tag is not None:
-            if tag == self._tag:
-                self._depth += 1
-            return
-        classes = (dict(attrs).get("class") or "").split()
-        if "mermaid" in classes:
-            self._tag, self._depth = tag, 1
-            self.blocks.append({"line": self.getpos()[0], "source": ""})
-
-    def handle_endtag(self, tag):
-        if self._inert:
-            if tag == self._inert[0]:
-                self._inert[1] -= 1
-                if not self._inert[1]:
-                    self._inert = None
-            return
-        if self._tag is not None and tag == self._tag:
-            self._depth -= 1
-            if self._depth == 0:
-                self._tag = None
-
-    def handle_data(self, data):
-        if self._tag is not None and not self._inert:
-            self.blocks[-1]["source"] += data
-
-
 def mermaid_blocks(html):
-    parser = MermaidBlocks()
-    parser.feed(html)
-    parser.close()
-    return parser.blocks
+    """Each live `class="mermaid"` element's source text and start line (Tree skips
+    inert content and comments); a block nested in another counts once."""
+    return [{"line": n.line, "source": n.text()}
+            for n in parse_tree(html).find(lambda n: "mermaid" in n.classes)
+            if not any("mermaid" in a.classes for a in n.ancestors())]
 
 
 def locate(text, lines):
@@ -253,7 +206,7 @@ def scale_of(fact):
     ratios = []
     if fact.get("natural_width"):
         ratios.append(fact["width"] / fact["natural_width"])
-    if fact.get("natural_height") and fact.get("holds") != "iframe":
+    if fact.get("natural_height"):
         ratios.append(fact["height"] / fact["natural_height"])
     return round(min(ratios), 2) if ratios else None
 
@@ -453,36 +406,16 @@ NPM_PATH = re.compile(r"^/npm/((?:@[^/@]+/)?[^/@]+)(?:@([^/]*))?")
 PINNED = re.compile(r"^\d+\.\d+\.\d+$")
 
 
-class Resources(HTMLParser):
-    """Collect resource URLs (src/href) and JS import specifiers in document order."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.urls, self._script = [], None
-
-    def handle_starttag(self, tag, attrs):
-        a = dict(attrs)
-        if tag in RESOURCE_ATTRS and a.get(RESOURCE_ATTRS[tag]):
-            self.urls.append(a[RESOURCE_ATTRS[tag]].strip())
-        if tag == "script" and not a.get("src"):
-            self._script = []
-
-    def handle_endtag(self, tag):
-        if tag == "script" and self._script is not None:
-            self.urls += JS_IMPORT.findall(strip_js_comments("".join(self._script)))
-            self._script = None
-
-    def handle_data(self, data):
-        if self._script is not None:
-            self._script.append(data)
-
-
 def resource_urls(html):
     """Remote URLs the page loads: src/href of resources and JS imports, in order."""
-    parser = Resources()
-    parser.feed(html)
-    parser.close()
-    return [u for u in parser.urls if urlsplit(u).scheme in ("http", "https")]
+    urls = []
+    for n in parse_tree(html).walk():
+        attr = RESOURCE_ATTRS.get(n.tag)
+        if attr and n.attrs.get(attr):
+            urls.append(n.attrs[attr].strip())
+        if n.tag == "script" and not n.attrs.get("src"):
+            urls += JS_IMPORT.findall(strip_js_comments(n.text()))
+    return [u for u in urls if urlsplit(u).scheme in ("http", "https")]
 
 
 def npm_package(url):
@@ -536,7 +469,7 @@ MAX_CLAIM_WORDS = 20   # a "So what" claim is set large; longer ones crowd the m
 MAX_VISIBLE_ROWS = 20
 MIN_FINDINGS, MAX_FINDINGS = 3, 5   # the key findings under the answer box
 TOC_FROM_SECTIONS = 4
-NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg", "template", "noscript"}
+NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg"}
 # AI vocabulary that leaks in from source material: references/WRITING.md "Banned words"
 # ("landscape" is banned only when abstract, which a regex cannot tell, so it is left out).
 SLOP = re.compile(r"\b(additionally|crucial(?:ly)?|delv(?:e|es|ed|ing)|enduring|"
@@ -545,12 +478,17 @@ SLOP = re.compile(r"\b(additionally|crucial(?:ly)?|delv(?:e|es|ed|ing)|enduring|
                   r"seamless(?:ly)?|showcas(?:e|es|ed|ing)|tapestry|testament|"
                   r"underscor(?:e|es|ed|ing)|utili[sz](?:e|es|ed|ing)|vibrant)\b", re.I)
 
+# A scaffold placeholder such as "[Report title]": capitalised and long enough
+# that a citation like [1] or a short [Note] is not one.
+PLACEHOLDER = re.compile(r"\[[A-Z][^\]\n]{6,}\]")
+
 
 class Node:
     def __init__(self, tag, attrs, line, parent=None):
         self.tag, self.attrs, self.line, self.parent = tag, attrs, line, parent
         self.classes = set((attrs.get("class") or "").split())
         self.children = []   # Node or str
+        self.raw = ""        # an INERT element's text, kept out of text()
 
     def walk(self):
         for c in self.children:
@@ -578,31 +516,53 @@ class Node:
 
 
 class Tree(HTMLParser):
-    """A forgiving DOM: end tags close the nearest open match; strays are ignored."""
+    """A forgiving DOM: end tags close the nearest open match; strays are ignored.
+
+    An INERT element is kept, but not its content: the browser never turns
+    <template> or <noscript> markup, or <textarea> and <title> text, into page elements.
+    Its text goes to the node's raw instead.
+    """
 
     def __init__(self):
         super().__init__(convert_charrefs=True)
         self.root = self.cur = Node("#root", {}, 1)
+        self._inert = None  # [tag, depth, node] of the inert element being skipped
 
     def handle_starttag(self, tag, attrs):
+        if self._inert:
+            if tag == self._inert[0]:
+                self._inert[1] += 1
+            return
         if self.cur.tag == "p" and tag in P_CLOSERS:
             self.cur = self.cur.parent   # a block start closes the paragraph
         node = Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur)
         self.cur.children.append(node)
-        if tag not in VOID:
+        if tag in INERT:
+            self._inert = [tag, 1, node]
+        elif tag not in VOID:
             self.cur = node
 
     def handle_startendtag(self, tag, attrs):
-        self.cur.children.append(Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur))
+        if not self._inert:
+            self.cur.children.append(Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur))
 
     def handle_endtag(self, tag):
+        if self._inert:
+            if tag == self._inert[0]:
+                self._inert[1] -= 1
+                if not self._inert[1]:
+                    self._inert = None
+            return
         for a in [self.cur, *self.cur.ancestors()]:
             if a.tag == tag:
                 self.cur = a.parent
                 return
 
     def handle_data(self, data):
-        self.cur.children.append(data)
+        if self._inert:
+            self._inert[2].raw += data
+        else:
+            self.cur.children.append(data)
 
 
 def parse_tree(html):
@@ -730,7 +690,7 @@ def structure(html):
     if not answers:
         problems.append('no answer box: add <section class="answer"> with the claim in a '
                         '.claim paragraph at the top')
-    elif not answers[0].find(lambda n: "claim" in n.classes):
+    elif not any(c.text().strip() for c in answers[0].find(lambda n: "claim" in n.classes)):
         problems.append("the answer box has no .claim: state the one claim the dossier defends")
 
     secs = root.find(lambda n: n.tag == "section" and "sec" in n.classes)
@@ -843,8 +803,15 @@ def structure(html):
                             f"{MAX_VISIBLE_ROWS} and put the rest behind details.more")
 
     body = next(iter(root.find(lambda n: n.tag == "body")), root)
+    prose = body.text(skip=lambda n: n.tag in NOT_PROSE)
+    title = next(iter(root.find(lambda n: n.tag == "title"
+                                and not any(a.tag == "svg" for a in n.ancestors()))), None)
+    left = PLACEHOLDER.findall(title.raw if title else "") + PLACEHOLDER.findall(prose)
+    if left:
+        problems.append(f'{len(left)} scaffold placeholder(s) left in the text, the first '
+                        f'"{left[0]}"; replace each with the real text')
     slop = {}
-    for m in SLOP.finditer(body.text(skip=lambda n: n.tag in NOT_PROSE)):
+    for m in SLOP.finditer(prose):
         slop[m.group(1).lower()] = slop.get(m.group(1).lower(), 0) + 1
     for w, n in slop.items():
         warnings.append(f'the word "{w}" appears {n} time(s); replace it with a plain word')
@@ -1082,22 +1049,19 @@ INIT_JS = r"""
   };
   const parts = el => {
     const svg = el.tagName.toLowerCase() === 'svg' ? el : el.querySelector('svg');
-    const frame = svg ? null : el.querySelector('iframe');
     // Mermaid draws into a temporary div#d<id>; it is replaced on success but
     // left behind when drawing throws.
     const wrapper = !!(svg && svg.parentElement !== el && svg.parentElement
                        && svg.parentElement.id === 'd' + svg.id);
-    return { svg, frame, wrapper };
+    return { svg, wrapper };
   };
   const processed = el => vr.seen.has(el) || el.hasAttribute('data-processed');
   const marked = svg => svg.getAttribute('aria-roledescription') === 'error'
     || !!svg.querySelector('.error-icon, .error-text');
   vr.drawing = el => {
     if (!processed(el)) return false;
-    const { svg, frame, wrapper } = parts(el);
-    if (svg) return wrapper && !svg.getAttribute('aria-roledescription') && !marked(svg);
-    if (frame) return !/^data:/.test(frame.getAttribute('src') || '');
-    return true;
+    const { svg, wrapper } = parts(el);
+    return !svg || (wrapper && !svg.getAttribute('aria-roledescription') && !marked(svg));
   };
   vr.settle = () => ({ drawing: vr.containers().filter(vr.drawing).length,
                        quiet: performance.now() - vr.changed });
@@ -1124,23 +1088,14 @@ INIT_JS = r"""
     }
     return [Math.max(0, Math.round(right - left)), Math.max(0, Math.round(bottom - top)), contained];
   };
-  // securityLevel "sandbox" puts the drawing in a data: URL iframe.
-  const frameSvg = frame => {
-    const m = /^data:text\/html[^,]*;base64,(.*)$/.exec(frame.getAttribute('src') || '');
-    if (!m) return null;
-    const bytes = Uint8Array.from(atob(m[1]), c => c.charCodeAt(0));
-    return new DOMParser().parseFromString(new TextDecoder().decode(bytes), 'text/html')
-      .querySelector('svg');
-  };
-
   vr.facts = () => vr.containers().map(el => {
     if (!el.dataset.vrCheck) el.dataset.vrCheck = String(++vr.ids);
     const rec = vr.seen.get(el);
-    const { svg, frame, wrapper } = parts(el);
-    const raw = !svg && !frame;
+    const { svg, wrapper } = parts(el);
+    const raw = !svg;
     const f = {
       id: el.dataset.vrCheck, processed: processed(el), wrapper,
-      holds: svg ? 'svg' : frame ? 'iframe' : (el.textContent.trim() ? 'text' : 'nothing'),
+      holds: svg ? 'svg' : (el.textContent.trim() ? 'text' : 'nothing'),
       source: rec ? rec.html : (raw ? el.innerHTML : null),
       text: rec ? rec.text : (raw ? el.textContent : null),
       hidden_when_drawn: rec ? rec.hidden : null, visible: visible(el),
@@ -1148,28 +1103,27 @@ INIT_JS = r"""
       natural_height: 0, labels: 0, shown_labels: 0, font_px: null, visible_width: 0,
       visible_height: 0, overflows_page: false,
     };
-    const drawn = svg || (frame && frameSvg(frame));
-    if (!drawn) return f;
-    f.role = drawn.getAttribute('aria-roledescription');
-    f.error_marks = marked(drawn);
-    const vb = (drawn.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
+    if (!svg) return f;
+    f.role = svg.getAttribute('aria-roledescription');
+    f.error_marks = marked(svg);
+    const vb = (svg.getAttribute('viewBox') || '').split(/[\s,]+/).map(Number);
     if (vb.length === 4) { f.natural_width = Math.round(vb[2]); f.natural_height = Math.round(vb[3]); }
-    const box = svg || frame, r = box.getBoundingClientRect();
+    const r = svg.getBoundingClientRect();
     f.width = Math.round(r.width);
     f.height = Math.round(r.height);
     let contained;
-    [f.visible_width, f.visible_height, contained] = visibleBox(box);
+    [f.visible_width, f.visible_height, contained] = visibleBox(svg);
     f.overflows_page = !contained && r.right > document.documentElement.clientWidth + 1;
-    const labels = [...drawn.querySelectorAll('text, foreignObject')]
+    const labels = [...svg.querySelectorAll('text, foreignObject')]
       .filter(l => l.textContent.trim());
     f.labels = labels.length;
-    const shown = svg ? labels.filter(l => {
+    const shown = labels.filter(l => {
       const b = l.getBoundingClientRect();
       return b.width >= 1 && b.height >= 1;
-    }) : labels;
+    });
     f.shown_labels = shown.length;
-    const sizes = svg ? shown.map(l => parseFloat(getComputedStyle(l).fontSize))
-      .filter(x => x > 0).sort((a, b) => a - b) : [];
+    const sizes = shown.map(l => parseFloat(getComputedStyle(l).fontSize))
+      .filter(x => x > 0).sort((a, b) => a - b);
     f.font_px = sizes.length ? sizes[sizes.length >> 1] : null;
     return f;
   });
@@ -1417,6 +1371,7 @@ class Net:
         self.failed = []     # (url, failure, status)
         self.reached = False  # some remote server answered
         self.scripts = []    # script URLs that loaded
+        self.offhost = []    # request entries for answers from hosts outside CDN_HOSTS
 
     def attach(self, page):
         page.on("request", self._request)
@@ -1434,6 +1389,15 @@ class Net:
             return
         if resp.url.startswith("http"):
             self.reached = True
+            # The source pass sees only src, href and import; a fetch() or a
+            # Vega data URL reaches its host at run time.
+            host = urlsplit(resp.url).hostname or ""
+            if host not in CDN_HOSTS:
+                if all(r["url"] != resp.url for r in self.offhost):   # one entry per URL
+                    self.offhost.append({"url": resp.url, "kind": "defect", "why": (
+                        f"{resp.url}: {host} is not an allowed host; the page fetched it at "
+                        "run time, so inline the data instead")})
+                return
         if resp.status >= 400:
             self.failed.append((resp.request.url, None, resp.status))
         elif resp.request.resource_type == "script":
@@ -1592,12 +1556,9 @@ async def viewport_pass(browser, report, q, timeout, result):
 
 def ignored(msg):
     """Console messages that are not page defects."""
-    return (msg.type != "error"  # warnings are noise: the Tailwind CDN always warns
+    return (msg.type != "error"  # warnings are noise
             # A failed resource is judged from the request itself.
-            or msg.text.startswith("Failed to load resource")
-            # The checker's own instrumentation, refused by a sandboxed iframe
-            # (Mermaid's securityLevel "sandbox"); a plain browser logs nothing.
-            or msg.text.startswith("Blocked script execution in"))
+            or msg.text.startswith("Failed to load resource"))
 
 
 def first_line(exc):
@@ -1708,6 +1669,7 @@ async def inspect_page(browser, report, shots, timeout, result):
                    catch (e) { return false; } }""", NETWORK_PROBE_URL), 8)
         except Exception:
             network_ok = False
+    result["requests"] += net.offhost
     for url, failure, status in net.failed:
         found = request_problem(url, failure, status, network_ok)
         if found:

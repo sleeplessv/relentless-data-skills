@@ -24,11 +24,11 @@ the PBIP files, the DAX, or an issue tracker.
 Run the bundled extractor, outputting to the scratchpad:
 
 ```bash
-python3 <skill-dir>/scripts/extract_changes.py "<range>" \
+uv run --python 3.13 --no-project <skill-dir>/scripts/extract_changes.py "<range>" \
   --out <scratchpad>/pbi-review --repo <repo-root>
 ```
 
-`<skill-dir>` is this skill's directory. It produces:
+`<skill-dir>` is this skill's directory (without `uv`, plain `python3` 3.13+ works). It produces:
 
 - `<out>/change_model.json`: the structured change model. Everything below
   works from this file, **not** from the raw git diff.
@@ -141,7 +141,7 @@ self-contained HTML file to the scratchpad, then prove it against the change
 model, passing only user-named scratch pages (`REPORT/PAGE` if ambiguous):
 
 ```bash
-python3 <skill-dir>/scripts/check_artifact.py <out>/change_model.json <file.html> [--scratch <page>]...
+uv run --python 3.13 --no-project <skill-dir>/scripts/check_artifact.py <out>/change_model.json <file.html> [--scratch <page>]...
 ```
 
 Fix every problem it lists and rerun until it prints `PASS`. Then publish

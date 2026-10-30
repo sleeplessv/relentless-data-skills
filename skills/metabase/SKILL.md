@@ -15,7 +15,7 @@ So reads run freely, and every mutation captures a **restore point** first.
 
 Check for **`.metabase/context.md`** in the project root.
 
-- **Absent** → run `python3 <skill-dir>/scripts/mb.py bootstrap`. It writes the
+- **Absent** → run `uv run --python 3.13 --no-project <skill-dir>/scripts/mb.py bootstrap`. It writes the
   instance URL, the API key's identity, and the database id→name table, then
   continue.
 - **Present** → load it. It is the source of truth for the instance URL and
@@ -25,7 +25,7 @@ Check for **`.metabase/context.md`** in the project root.
 ## Invocation, always via the wrapper
 
 ```bash
-python3 <skill-dir>/scripts/mb.py <command> [args]
+uv run --python 3.13 --no-project <skill-dir>/scripts/mb.py <command> [args]
 ```
 
 `METABASE_URL` resolves from the process environment, then the `url:`

@@ -8,27 +8,27 @@ Sources are listed at the bottom. When something here is missing or an endpoint
 behaves unexpectedly, **fetch the live docs** rather than guessing. Metabase's
 API is versioned with the app and changes between releases.
 
-`M=<skill-dir>/scripts/mb.py` throughout.
+`M=<skill-dir>/scripts/mb.py` throughout. Without `uv`, plain `python3 $M` works if it is 3.13 or newer.
 
 ## Wrapper commands
 
 | Command | Does |
 | ------- | ---- |
-| `python3 $M bootstrap [--force]` | Write `.metabase/context.md`. Refuses to clobber a file with no generated marker; `--force` keeps a copy first |
-| `python3 $M sql "<SQL>" --db <id> [--limit N]` | Run one **read-only** statement, rows as JSON (default 200-row print cap) |
-| `python3 $M card <id>` | Full card definition JSON |
-| `python3 $M sql-of <id> [--compiled]` | Card's SQL, native verbatim, MBQL compiled. `--compiled` substitutes template tags so the output is runnable |
-| `python3 $M run <id> [--count] [--limit N]` | Execute card. `--count` counts **server-side** where possible, falling back to client-side |
-| `python3 $M deps <id> [--deep]` | Blast radius. `--deep` adds transitive dependents + likely frozen copies |
-| `python3 $M search "<q>" [--model …] [--limit N]` | Find by name |
-| `python3 $M dashboard <id> [--full]` | Dashboard summary: parameters (with type + default), filter wiring, series, tabs |
-| `python3 $M wiring <id>  [--all]` | Audit a dashboard's filter wiring for field ids belonging to another database. Exits 1 on a finding |
-| `python3 $M backup <id…> [--dashboard]` | Write restore point(s) for cards, or dashboards with `--dashboard` |
-| `python3 $M update-card <id> --file f.json` | PUT changed fields (auto restore point) |
-| `python3 $M create-card --file f.json [--allow-root]` | POST a new card; requires `collection_id` unless `--allow-root` |
-| `python3 $M create-dashboard --file f.json [--allow-root]` | POST a new dashboard, then PUT `parameters`/`dashcards` if present |
-| `python3 $M update-dashboard <id> --file f.json [--allow-removal]` | PUT changed fields (auto restore point). Refuses a shorter `dashcards` list without `--allow-removal` |
-| `python3 $M restore <id> --file <rp> [--dashboard] [--force]` | PUT a card (or dashboard) back. Refuses another object's snapshot without `--force` |
+| `uv run --python 3.13 --no-project $M bootstrap [--force]` | Write `.metabase/context.md`. Refuses to clobber a file with no generated marker; `--force` keeps a copy first |
+| `uv run --python 3.13 --no-project $M sql "<SQL>" --db <id> [--limit N]` | Run one **read-only** statement, rows as JSON (default 200-row print cap) |
+| `uv run --python 3.13 --no-project $M card <id>` | Full card definition JSON |
+| `uv run --python 3.13 --no-project $M sql-of <id> [--compiled]` | Card's SQL, native verbatim, MBQL compiled. `--compiled` substitutes template tags so the output is runnable |
+| `uv run --python 3.13 --no-project $M run <id> [--count] [--limit N]` | Execute card. `--count` counts **server-side** where possible, falling back to client-side |
+| `uv run --python 3.13 --no-project $M deps <id> [--deep]` | Blast radius. `--deep` adds transitive dependents + likely frozen copies |
+| `uv run --python 3.13 --no-project $M search "<q>" [--model …] [--limit N]` | Find by name |
+| `uv run --python 3.13 --no-project $M dashboard <id> [--full]` | Dashboard summary: parameters (with type + default), filter wiring, series, tabs |
+| `uv run --python 3.13 --no-project $M wiring <id>  [--all]` | Audit a dashboard's filter wiring for field ids belonging to another database. Exits 1 on a finding |
+| `uv run --python 3.13 --no-project $M backup <id…> [--dashboard]` | Write restore point(s) for cards, or dashboards with `--dashboard` |
+| `uv run --python 3.13 --no-project $M update-card <id> --file f.json` | PUT changed fields (auto restore point) |
+| `uv run --python 3.13 --no-project $M create-card --file f.json [--allow-root]` | POST a new card; requires `collection_id` unless `--allow-root` |
+| `uv run --python 3.13 --no-project $M create-dashboard --file f.json [--allow-root]` | POST a new dashboard, then PUT `parameters`/`dashcards` if present |
+| `uv run --python 3.13 --no-project $M update-dashboard <id> --file f.json [--allow-removal]` | PUT changed fields (auto restore point). Refuses a shorter `dashcards` list without `--allow-removal` |
+| `uv run --python 3.13 --no-project $M restore <id> --file <rp> [--dashboard] [--force]` | PUT a card (or dashboard) back. Refuses another object's snapshot without `--force` |
 
 `update-card` and `restore` share one field set, so anything the wrapper can
 change it can also undo: `dataset_query`, `name`, `description`, `display`,

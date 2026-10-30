@@ -13,7 +13,7 @@ read-only. Use a least-privilege connection and trusted read functions.
 ## Load project context
 
 Find and load `.snowman/context.md` by walking up from the working directory, so
-run the wrapper from inside the project (`cd <project> && python3 ...`), not from
+run the wrapper from inside the project (`cd <project> && uv run --python 3.13 --no-project ...`), not from
 a scratchpad or temp directory, which has no context above it.
 If absent, follow [the bootstrap](references/install.md) before proceeding.
 Queries require context, except bootstrap discovery with `--connection <name>`.
@@ -28,17 +28,18 @@ restriction. Query other databases when the user's question requires them.
 Every SQL query goes through the wrapper:
 
 ```bash
-python3 <skill-dir>/scripts/snowman.py "<SQL>"
+uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py "<SQL>"
 ```
 
-`<skill-dir>` is this skill's directory. Submit one statement per call.
+`<skill-dir>` is this skill's directory; without `uv`, plain `python3` 3.13+ works.
+Submit one statement per call.
 The wrapper appends `DESCRIBE RESULT` to obtain column types in the same session.
 It applies `default_warehouse` from the selected context. If absent, the named
 connection's warehouse setting applies. `--warehouse <name>` overrides both for
 one query or staged script. `USE WAREHOUSE` is blocked.
 
 To shorten repeated calls, set `S=<skill-dir>/scripts/snowman.py` and run
-`python3 "$S" ...`. Never put `python3` or flags in any shell variable: zsh does
+`uv run --python 3.13 --no-project "$S" ...`. Never put `uv`, `python3` or flags in any shell variable: zsh does
 not split `$S` or `$FLAGS`, so the call fails with exit 127 or an argparse usage
 error. Write shell blocks that also run under zsh, with no `declare -A` or other
 bash-only syntax.
@@ -101,7 +102,7 @@ Reuse an already stated target without another confirmation.
 When the user asks for DML or DDL, prepare the SQL and stage it:
 
 ```bash
-python3 <skill-dir>/scripts/snowman.py --stage "<SQL>" --name <purpose-slug>
+uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --stage "<SQL>" --name <purpose-slug>
 ```
 
 Add the chosen `--env` for multi-environment projects. Staging requires context

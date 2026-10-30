@@ -129,8 +129,10 @@ row takes the `other` class (taupe).
 Write the graph as JSON and run the generator:
 
 ```bash
-python3 <skill-dir>/scripts/dag_svg.py graph.json --out dag.html   # "-" reads stdin
+uv run --python 3.13 --no-project <skill-dir>/scripts/dag_svg.py graph.json --out dag.html   # "-" reads stdin
 ```
+
+Without `uv`, plain `python3` works if it is 3.13 or newer; the same holds for `diff_html.py`.
 
 `<skill-dir>` is the skill's directory. Without `--out` the fragment goes to stdout. Exit codes:
 
@@ -216,10 +218,10 @@ A `pre.mermaid` inside `.figframe.seq` in a `.fig.wide` row, with up to about 12
 Generate the rows from a unified diff; word-level highlights by hand are error-prone:
 
 ```bash
-git show <rev> -- <file> | python3 <skill-dir>/scripts/diff_html.py - \
+git show <rev> -- <file> | uv run --python 3.13 --no-project <skill-dir>/scripts/diff_html.py - \
   --lines 35-49 --note 'old:36=Before.' --note 'new:39=After: run `check_render.py`.' \
   --out diff.html
-diff -u old.md new.md | python3 <skill-dir>/scripts/diff_html.py -
+diff -u old.md new.md | uv run --python 3.13 --no-project <skill-dir>/scripts/diff_html.py -
 ```
 
 The input is any unified diff (`git diff`, `git show`, `diff -u`), as a file or `-` for stdin.

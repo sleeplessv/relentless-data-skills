@@ -1,6 +1,6 @@
 {
   "name": "gh-weekly-report",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Create interactive weekly reports of a GitHub user's activity across repositories.",
   "author": {
     "name": "sleeplessv"

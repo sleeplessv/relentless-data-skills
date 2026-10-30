@@ -41,9 +41,11 @@ stated to the user in one line.
 ## Step 2: Collect
 
 ```bash
-python3 <skill-dir>/scripts/collect.py --out <scratchpad>/gh-weekly \
+uv run --python 3.13 --no-project <skill-dir>/scripts/collect.py --out <scratchpad>/gh-weekly \
   [--owner O] [--actor A] [--from YYYY-MM-DD --to YYYY-MM-DD]
 ```
+
+Without `uv`, plain `python3` works if it is 3.13 or newer.
 
 Emits `week.json` with the report week plus the week before, already
 rule-applied: *resolved* means the actor closed it as `completed`
@@ -95,7 +97,7 @@ active repo has a narrative.
 ## Step 4: Render and open
 
 ```bash
-python3 <skill-dir>/scripts/render.py --data <...>/week.json \
+uv run --python 3.13 --no-project <skill-dir>/scripts/render.py --data <...>/week.json \
   --buckets <...>/buckets.json --narratives <...>/narratives.json \
   --out <tmpdir>/gh-week-<iso_week>-<actor>.html
 ```

@@ -1,7 +1,7 @@
 # snowman workflows
 
 Use the playbook matching the request. Run SQL through
-`python3 <skill-dir>/scripts/snowman.py "<SQL>"`. Start from the narrowest known
+`uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py "<SQL>"`. Start from the narrowest known
 scope and inspect saved result artifacts when a preview truncates.
 
 ## Explore objects

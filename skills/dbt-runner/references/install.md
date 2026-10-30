@@ -114,6 +114,6 @@ values when reading.
 ## Done
 
 Confirm the file is written, run the preflight
-(`python3 <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>`),
+(`uv run --python 3.13 --no-project <skill-dir>/scripts/preflight.py --project-root <dbt-project-root>`),
 then proceed with the user's
 original request.

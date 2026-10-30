@@ -36,7 +36,7 @@ Coverage & gaps panel that states what the graph had to guess or skip.
 
 - A Fabric Git export: `*.DataPipeline`, `*.Notebook`, `*.Lakehouse`,
   `*.SemanticModel`, `*.Report` folders with `.platform` files.
-- `python3` on PATH for the extractors and merge (standard library only).
+- `uv` on PATH for the extractors and merge (standard library only; they run under `uv run --python 3.13 --no-project`). Plain `python3` works as a fallback if it is 3.13 or newer.
 - Node for the render step: `npm install` in `scripts/render/` pulls dagre,
   d3-selection/zoom/transition, esbuild and Playwright.
 - A repo map or README naming lakehouses, wrapper notebooks, partner names,

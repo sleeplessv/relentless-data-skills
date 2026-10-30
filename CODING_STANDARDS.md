@@ -47,6 +47,14 @@ Each rule is one statement followed by why it exists or an example. The backgrou
   by a hook, or the change says why prose is enough.**
   Why: raw `snow sql` or `curl` was one Bash call away from bypassing `snowman` and `metabase`.
 
+## Python
+
+- **PY1. Python 3.13 is the floor. Repo tooling (`scripts/`) and tests (`tests/`) use the standard
+  library only; skill scripts document `uv run --python 3.13 --no-project <script>` (adding `--with
+  <pkg>` for third-party packages), with plain `python3` as a fallback that must be 3.13 or newer.**
+  Why: 3.9 reached end of life in October 2025, and `uv` supplies 3.13 without a system install;
+  `--no-project` keeps a stdlib script from syncing the user's project environment.
+
 ## Contracts between skills
 
 - **CT1. A change to a shared contract between skills updates the README's minimum compatible pair and

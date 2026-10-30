@@ -19,7 +19,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Check skill versions and generated registry
         env:
           EVENT_NAME: ${{ github.event_name }}
@@ -37,9 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        # 3.9 = oldest interpreter likely on a user machine (macOS system
-        # python); 3.13 = current. The tests are stdlib-only, so no installs.
-        python-version: ["3.9", "3.13"]
+        # 3.13 = the repo floor (CODING_STANDARDS.md PY1). The tests are
+        # stdlib-only, so no installs.
+        python-version: ["3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -54,7 +54,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Lint SKILL.md files
         run: python scripts/lint_skill.py
 
@@ -81,6 +81,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.13"
       - name: Check skill doc URLs
         run: python scripts/check_doc_urls.py

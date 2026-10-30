@@ -1,6 +1,6 @@
 # Merge + validate
 
-One dispatch after all five extracts exist. `python3 <scratch>/scripts/merge_graph.py --out <scratch> --config <scratch>/lineage.config.json --coverage <scratch>/coverage.txt [--alias old=new]` writes `graph.json`, `graph-compact.json`, `validation-report.md`. Pass the same `--config` the extractors used: merge reads its fork rules from it (`forkNamePattern`, `forkDirPattern`, `notebooks.forkDirs`, `notebooks.forkNamePrefixes`), with `--fork-pattern` / `--fork-dirs` as overrides. The dispatched agent runs it, reads the report, and fixes extractor bugs it reveals before the render step sees the data. It runs and patches only the run's copy in `<scratch>/scripts/`, never `<skill-dir>/scripts/`.
+One dispatch after all five extracts exist. `uv run --python 3.13 --no-project <scratch>/scripts/merge_graph.py --out <scratch> --config <scratch>/lineage.config.json --coverage <scratch>/coverage.txt [--alias old=new]` writes `graph.json`, `graph-compact.json`, `validation-report.md`. Pass the same `--config` the extractors used: merge reads its fork rules from it (`forkNamePattern`, `forkDirPattern`, `notebooks.forkDirs`, `notebooks.forkNamePrefixes`), with `--fork-pattern` / `--fork-dirs` as overrides. The dispatched agent runs it, reads the report, and fixes extractor bugs it reveals before the render step sees the data. It runs and patches only the run's copy in `<scratch>/scripts/`, never `<skill-dir>/scripts/`.
 
 ## Merge rules
 

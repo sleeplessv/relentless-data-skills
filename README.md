@@ -213,8 +213,10 @@ opt-in hook once per clone with `git config core.hooksPath .githooks`.
 After editing a skill's `plugin.json`, run
 `python3 scripts/sync_registry.py --write` to regenerate the catalog.
 
-The root Python validation scripts use only the standard library and require
-no dependency installation. Individual skills can have additional dependencies.
+The root Python validation scripts and tests require Python 3.13 or newer, use
+only the standard library, and require no dependency installation. Without a
+local 3.13, run them with `uv run --python 3.13 --no-project python ...`. Individual skills can have
+additional dependencies.
 
 ### Implementation workflow updates
 

@@ -27,3 +27,11 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Target**: the resolved connection, environment, project root, snowman dir, and `.env` file for one snowman run, produced by `resolve_target`.
 - **Branch diff**: the lines the checked-out branch adds and removes, measured from the point where it split from the default branch to the working tree. It is what the branch's PR would show if everything were committed now. _Avoid_: session lines, PR diff.
 - **Session edits**: the lines Claude added and removed during one Claude Code session, whatever branch they landed on. Distinct from the branch diff.
+- **Dossier**: a single self-contained HTML document that explains one system, process, finding or decision through numbered figures and tables, in the house style every dossier shares. _Avoid_: visual report, explainer, writeup (as names for the document).
+- **Answer box**: the box at the top of a dossier stating the one claim the dossier defends. Every dossier has one, explainers included. _Avoid_: summary, TL;DR, verdict box.
+- **Figure**: a numbered visual in a dossier, with a caption and a so-what box. Tables follow the same rule on their own counter ("Table 2"). _Avoid_: chart (for the general case), diagram (for the general case).
+- **Caption**: the text beside a figure: one sentence on what it shows, then one to three points on how to read it. It never states the conclusion. _Avoid_: description, legend.
+- **So-what box**: the tinted box labelled "So what" beside a figure, holding the conclusion the reader should draw from that figure alone. _Avoid_: takeaway (takeaways are the section-level list).
+- **Limits section**: the closing section of every dossier, listing what it could not establish. It stays when it says "None". _Avoid_: caveats, disclaimers.
+- **Locked block**: the part of the dossier stylesheet (colour tokens, type scale, component styles) that every dossier carries unchanged. A dossier may change only the per-report geometry beside it. _Avoid_: theme, base CSS.
+- **Visual family**: one of the named kinds of figure a dossier draws from, such as a DAG, a timeline or a comparison matrix. _Avoid_: pattern, chart type.

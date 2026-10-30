@@ -68,7 +68,8 @@ The step is done when every idea has a numbered figure or table and the output c
 - **Takeaways** as a short list of sentences, where a section needs them.
 - **Limits** as the last section, always: unverified diagrams, numbers not re-checked, gaps in
   exploration. It says "None" when there are none.
-- A stats row of up to four headline numbers under the answer box is optional.
+- A stats row of up to four headline numbers under the answer box is optional, with or without
+  the answer's lead number.
 - Light theme only. Readable down to 768px. The scaffold's print stylesheet stays.
 
 ### House rules

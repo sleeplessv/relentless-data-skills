@@ -73,7 +73,6 @@ table says which token carries each role.
 | `--amber`, `--amber-soft`, `--amber-text` | `#b7791f`, `#fcf2dd`, `#714800` | Callouts only: `.callout.note`, ADR citations |
 | `--sage`, `--taupe` | `#4f7f7c`, `#8a7766` | Third and fourth chart series; taupe also marks an "other" bucket |
 | `--gh-*` | GitHub light theme | Added, removed and hunk lines inside a diff, nowhere else |
-| `--ans-*` | `#ffffff` bg, `#184e77` border, `#1a759f` label, `#102a3f` text | The answer box only |
 
 DAG node-type badges use six slots, `--tag-1` to `--tag-6`: `#102542`, `#4f7f7c`, `#1a759f`,
 `#5f5348`, `#24514e`, and `#4a5755` as an outline badge on paper. `dag_svg.py` gives each node

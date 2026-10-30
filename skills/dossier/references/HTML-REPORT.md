@@ -50,9 +50,23 @@ Delete the sidebar and inline contents when the dossier has fewer than four sect
 
 ## Figure row
 
-Every figure and table sits in a `.fig` row: the visual on the left, the caption and "So what"
-box in a margin column on the right. `.fig.wide` stacks them, for anything that needs the full
-width: DAGs, timelines, diffs, sequence diagrams, wide tables.
+Every figure and table sits in a `.fig` row, in one of two layouts. Both share the page's
+68/32 column split, so visuals line up down the page and the right-hand column is always
+the reader's place for the description.
+
+- **Side row** (`.fig`), the default: the visual in the left column, the caption and "So
+  what" box stacked in the right. Consecutive side rows read as one column of visuals with
+  their descriptions beside them.
+- **Wide row** (`.fig.wide`): the visual spans both columns, then the caption sits under it
+  in the left column and the "So what" box beside the caption in the right. Use it when the
+  visual would be unreadable squeezed into the left column: DAGs, timelines, diffs, sequence
+  diagrams, wide tables, and charts with many marks along the x axis, such as a daily series
+  over months or more than about 30 bars.
+
+Pick the layout per figure from that test alone, never for variety. Keep the markup
+identical in both layouts (`.visual`, then `.margin` holding the caption and "So what") and
+never move the caption or "So what" box elsewhere or override the `.fig` grid in the report
+block. A DAG's `div.dag-notes` replaces the margin and already spans the width.
 
 ```html
 <div class="fig" id="fig-3">

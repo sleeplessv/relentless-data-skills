@@ -15,7 +15,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>[Report title]</title>
 <style>
-/* dossier:locked:begin v2 */
+/* dossier:locked:begin v3 */
   /* ===== Tokens: Navy & coral. Every pair below is checked by scripts/check_contrast.py. ===== */
   :root {
     --paper: #ffffff;
@@ -189,12 +189,14 @@
   ul.points li { position: relative; padding-left: 1.1rem; margin: 0 0 0.35rem; }
   ul.points li::before { content: ""; position: absolute; left: 0.1rem; top: 0.62em; width: 0.4rem; height: 0.4rem; border-radius: 50%; background: var(--coral-line); }
 
-  /* ---------- figure rows: visual left, caption and so-what right ---------- */
+  /* ---------- figure rows: visual left, caption and so-what right; wide rows put both
+     under the visual, side by side on the same 68/32 columns ---------- */
   .fig { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 1rem 2rem; margin: 1.4rem 0 1.9rem; align-items: start; }
   .fig.wide { grid-template-columns: minmax(0, 1fr); }
   .fig .visual { min-width: 0; }
   .fig .margin { font-size: var(--s-1); line-height: 1.5; }
-  .fig.wide .margin { max-width: 72ch; }
+  .fig.wide .margin { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 0 2rem; align-items: start; }
+  .fig.wide .sowhat { margin-top: 0; }
   .caption { margin: 0; color: var(--ink); }
   .caption .figno { font-weight: 750; color: var(--coral-text); }
   .caption .how { color: var(--muted); }
@@ -391,6 +393,8 @@
   @media (max-width: 900px) {
     .content { padding: 1.5rem 1rem 3rem; }
     .fig { grid-template-columns: minmax(0, 1fr); }
+    .fig.wide .margin { grid-template-columns: minmax(0, 1fr); }
+    .fig.wide .sowhat { margin-top: 0.8rem; }
     .stats { grid-template-columns: repeat(2, 1fr); }
     ol.markers { grid-template-columns: 1fr; }
     .dag-notes { grid-template-columns: 1fr 1fr; }

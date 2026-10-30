@@ -18,7 +18,7 @@ restyle it.
 | File | Read it when |
 |---|---|
 | `assets/scaffold.html` | You start the dossier. Copy it; it is the whole stylesheet, page shell and scripts |
-| `assets/gallery.html` | Before you build any figure. One worked example of every visual family |
+| `assets/gallery.html` | Before you build any figure. A worked example of every family except the four hand-built ones |
 | [references/VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md) | You pick a visual family for an idea, or a colour for a mark |
 | [references/HTML-REPORT.md](references/HTML-REPORT.md) | You build a figure, table, DAG, code excerpt or chart in the scaffold |
 | [references/WRITING.md](references/WRITING.md) | Before you write any prose: answer box, captions, bullets, headings |
@@ -30,8 +30,9 @@ problem, record it in the dossier; leave the fix to the user.
 
 Find where the subject's substance lives and gather from there:
 
-- **Codebase.** Walk it with Explore subagents (`subagent_type=Explore`), one per independent area.
-  You keep the writing. Extract the structure worth drawing, not file dumps.
+- **Codebase.** Walk it with up to three Explore subagents (`subagent_type=Explore`), one per
+  truly independent area; explore inline when the areas overlap. The cap keeps a casual request
+  cheap. You keep the writing. Extract the structure worth drawing, not file dumps.
 - **Already in the conversation.** The analysis is done. Organise what is there.
 - **Named sources.** Read the docs or URLs the user pointed at.
 
@@ -50,7 +51,8 @@ byline states it. Stop exploring once you can draw each idea and source each num
 4. List the ideas. Give each one a section and pick its visual family with the decision tree in
    [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md#picking-a-family).
 5. Build each figure from its recipe in [HTML-REPORT.md](references/HTML-REPORT.md), copying the
-   gallery's markup and classes.
+   gallery's markup and classes. The hand-built families (boxes-and-arrows, cross-section, mass
+   diagram, collapse) have no gallery example; build them as their recipe says.
 6. Print the absolute path and open it (`open` on macOS, `xdg-open` on Linux, `start` on
    Windows). In a headless session, print the path and say it could not be opened.
 
@@ -100,24 +102,21 @@ Render the page headlessly:
 uv run --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
 ```
 
-It prints JSON, then a final line and exit code: `PASS` (0), `FAIL` (1) or `BLOCKED` (2).
-Screenshots go to `<report-stem>-check/` beside the report (`--shots DIR` to change it).
+If `uv` is missing, run `python3 <skill-dir>/scripts/check_render.py <report.html>` with an
+interpreter that has Playwright installed; if there is none, report `BLOCKED`.
 
-- `FAIL`: fix every entry under `problems` and rerun. Structure faults fail like render faults:
-  no answer box, Limits missing or not last, a figure without a numbered caption or out of
-  order, a Mermaid diagram that is not a sequence diagram, a DAG of 16 or more nodes, a changed
-  locked block, a script host other than `cdn.jsdelivr.net` or an unpinned version, and a page
-  or figure wider than its frame at 768, 1200, 1280 or 1440px.
-- `BLOCKED`: unverified, not passing. The environment kept the check from running (no Playwright
-  or Chromium, a CDN unreachable). Apply the fix it prints, or hand the dossier over and say its
-  render is unchecked.
-- `PASS`: open and read every screenshot it lists. The script cannot judge Vega charts,
-  `dag_svg.py` output or hand-built SVG by eye: check each chart has its marks, axes and labels,
-  each DAG's text sits inside its boxes, and nothing overlaps or spills. Fix what you see and
-  rerun. Resolve every `warnings` entry: a heading not in sentence case, a DAG of 12 to 15
-  nodes, a code block that scrolls sideways inside `pre.code`, a figure without "So what", small
-  text, a paragraph over 60 words, banned words, colour misuse. Name every `unverified` entry at
-  handover; a missing scaffold leaves the locked block unverified, not blocked.
+It prints JSON, then the verdict as its last line. Screenshots go to `<report-stem>-check/`.
+
+- `FAIL` (exit 1): fix every entry under `problems` and rerun.
+- `BLOCKED` (exit 2): unverified, not passing; the environment kept the check from running.
+  Apply the fix it prints, or hand the dossier over and say its render is unchecked.
+- `PASS` (exit 0): structure holds and everything drew, but the script does not judge meaning.
+  Read every screenshot it lists: each chart has its marks, axes and labels, each DAG's text sits
+  inside its boxes, nothing overlaps or spills. Fix what you see and rerun. Resolve every
+  `warnings` entry and name every `unverified` entry at handover.
+
+Every problem and warning the check reports is listed in
+[HTML-REPORT.md](references/HTML-REPORT.md#the-render-check).
 
 Verify is done at `PASS` with every screenshot read and every warning resolved or named.
 

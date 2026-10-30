@@ -13,6 +13,8 @@ interface: SKILL.md tells the agent what PASS, FAIL, and BLOCKED mean.
 from __future__ import annotations
 
 import importlib.util
+import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -23,6 +25,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "skills" / "dossier" / "scripts"))
 
 import check_render  # noqa: E402
+import dag_svg  # noqa: E402
 
 PASS, FAIL, BLOCKED = check_render.PASS, check_render.FAIL, check_render.BLOCKED
 
@@ -742,6 +745,38 @@ class TestSourceChecks(unittest.TestCase):
         self.assertIsNotNone(check_render.locked_block(check_render.read_source(check_render.SCAFFOLD)))
 
 
+class TestPinsMatchTheScaffold(unittest.TestCase):
+    """check_render's LIBRARIES is a copy of the scaffold's library block; they must not drift."""
+
+    URL = re.compile(r"""(?:<script[^>]*\bsrc|\bimport\b[^"'\n]*\bfrom)\s*=?\s*["']([^"']+)["']""")
+    NPM = re.compile(r"/npm/((?:@[^/@]+/)?[^/@]+)@([^/]+)/")
+
+    def test_scaffold_urls_are_exactly_the_libraries(self):
+        if not check_render.SCAFFOLD.exists():
+            self.skipTest("assets/scaffold.html not written yet")
+        html = check_render.SCAFFOLD.read_text(encoding="utf-8")
+        urls = self.URL.findall(html)
+        self.assertTrue(urls, "no <script src> or import URL found in the scaffold")
+        pins = {}
+        for url in urls:
+            m = self.NPM.search(url)
+            self.assertIsNotNone(m, url)
+            pins[m.group(1)] = m.group(2)
+        self.assertEqual(pins, check_render.LIBRARIES)
+
+    def test_network_probe_uses_the_mermaid_pin(self):
+        self.assertIn("mermaid@" + check_render.LIBRARIES["mermaid"] + "/",
+                      check_render.NETWORK_PROBE_URL)
+
+
+class TestDagCapsMatch(unittest.TestCase):
+    """dag_svg.py refuses and check_render.py fails at the same DAG size."""
+
+    def test_caps_are_equal(self):
+        self.assertEqual(check_render.WARN_ABOVE, dag_svg.WARN_ABOVE)
+        self.assertEqual(check_render.MAX_NODES, dag_svg.MAX_NODES)
+
+
 @unittest.skipUnless(importlib.util.find_spec("playwright"), "needs Playwright and Chromium")
 class TestGalleryRenders(unittest.TestCase):
     """The shipped gallery is the render fixture: it must PASS the full check."""
@@ -756,7 +791,13 @@ class TestGalleryRenders(unittest.TestCase):
                                  capture_output=True, text=True, timeout=400)
         if run.returncode == 2:
             self.skipTest("BLOCKED (no browser or no network): " + run.stdout[-300:])
+        report, _, last = run.stdout.rstrip().rpartition("\n")
+        self.assertEqual(last, "PASS", run.stdout[-3000:])
         self.assertEqual(run.returncode, 0, run.stdout[-3000:])
+        result = json.loads(report)
+        self.assertEqual(result["verdict"], "PASS")
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["warnings"], [])
 
 
 @unittest.skipUnless(importlib.util.find_spec("playwright"), "needs Playwright and Chromium")

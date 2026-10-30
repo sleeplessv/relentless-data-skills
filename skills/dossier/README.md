@@ -73,8 +73,9 @@ one shareable document.
   rules.
 - `assets/scaffold.html`: the page every dossier starts from: locked stylesheet, page shell,
   pinned library block, sort, toggle and current-section scripts, print stylesheet.
-- `assets/gallery.html`: one worked example of every visual family; also the render-check
-  fixture.
+- `assets/gallery.html`: worked examples of nine families (data table, axis chart, proportion
+  bars, DAG, sequence diagram, timeline, comparison matrix, annotated code, diff); also the
+  render-check fixture. The four hand-built shapes have no example yet.
 - `references/VISUAL-LANGUAGE.md`: the visual families, how to pick one, colour roles and size
   limits.
 - `references/HTML-REPORT.md`: how to fill the scaffold, a recipe per family, the libraries and

@@ -1,10 +1,11 @@
 # Building a dossier from the scaffold
 
 How to fill `assets/scaffold.html`: the page skeleton, the figure row, a recipe per visual
-family, the pinned libraries, and interactivity. Which family to pick is in
-[VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md); the words that go in each slot are in
-[WRITING.md](WRITING.md). For every recipe, the matching example in `assets/gallery.html` is the
-reference markup: find it by the class named here and copy it.
+family, the pinned libraries, interactivity, and what the render check reports. Which family to
+pick is in [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md); the words that go in each slot are in
+[WRITING.md](WRITING.md). `assets/gallery.html` holds a worked example of every family except the
+four hand-built ones: that example is the reference markup, so find it by the class named here
+and copy it. The hand-built families have no example; their recipe says how to build them.
 
 ## The two stylesheet blocks
 
@@ -241,8 +242,10 @@ column numbers which file.
 
 ### Boxes-and-arrows, cross-section, mass diagram, collapse
 
-Hand-built HTML boxes and inline SVG inside a `.figframe`. Copy the gallery's example of the
-family and change the content.
+Hand-built HTML boxes and inline SVG inside a `.figframe`. The gallery has no example of these
+four. Build the figure from the scaffold's tokens and classes (`.figframe`, `.fig`, the callouts)
+to the family's description in [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md#families), then run the
+render check and read its page screenshots.
 
 - Colour SVG with `var(--token)` from [VISUAL-LANGUAGE.md](VISUAL-LANGUAGE.md#colour-roles).
 - Text inside a box fits the box at 768px; the screenshot is the only check.
@@ -299,3 +302,33 @@ Leave every panel visible in the markup, run Mermaid, then hide the inactive pan
 
 The render check opens hidden panels the way a reader would, so a diagram drawn while hidden
 fails it.
+
+## The render check
+
+`scripts/check_render.py` renders the page in headless Chromium at 768, 1200, 1280 and 1440px and
+prints JSON, then the verdict. `--shots DIR` moves the screenshots from `<report-stem>-check/`.
+
+Each of these is a problem, and any problem makes the verdict `FAIL`:
+
+- No answer box, or Limits missing or not the last section.
+- A figure or table without a numbered caption, or numbered out of order.
+- A Mermaid diagram that is not a sequence diagram.
+- A DAG of 16 or more nodes.
+- A changed locked block.
+- A script host other than `cdn.jsdelivr.net`, or a version that is not an exact x.y.z pin.
+- A page or figure wider than its frame at any of the four widths.
+- A diagram, chart or DAG that drew wrong: a parse error, empty, clipped or illegible.
+
+`BLOCKED` means the environment kept the check from running: no Playwright or Chromium, or the
+CDN unreachable. A missing scaffold leaves the locked block unverified, not blocked.
+
+Each of these is a warning, which the agent resolves or names at handover:
+
+- A heading not in sentence case.
+- A DAG of 12 to 15 nodes.
+- A code block that scrolls sideways inside `pre.code`.
+- A figure without a "So what" box.
+- Small text, or a paragraph over 60 words.
+- Banned words from [WRITING.md](WRITING.md).
+- Colour misuse: red or amber on a category mark, a side strip on a box.
+- A library outside the scaffold's block, or at another version.

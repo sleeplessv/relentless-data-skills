@@ -1,9 +1,11 @@
 # Visual language
 
 The named visual families a dossier draws from, how to pick one, and which colour token plays
-which role. Build recipes are in [HTML-REPORT.md](HTML-REPORT.md); a worked example of each
-family is in `assets/gallery.html`. Reach for a family below before inventing a shape, and call
-each family by its name here.
+which role. Build recipes are in [HTML-REPORT.md](HTML-REPORT.md). `assets/gallery.html` has a
+worked example of the first nine families below; the four hand-built ones (boxes-and-arrows,
+cross-section, mass diagram, collapse) have none, so build them from the scaffold's tokens and
+classes to the description here and run the render check. Reach for a family below before
+inventing a shape, and call each family by its name here.
 
 ## Families
 

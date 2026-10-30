@@ -19,7 +19,7 @@ For a dossier it adds, from the source: a structure pass (answer box with a
 claim, Limits as the last section, every figure and table numbered in order
 with a caption, Mermaid used for sequence diagrams only, DAG node count), the
 allowed hosts (cdn.jsdelivr.net) with exact x.y.z pins, and the locked
-stylesheet block, hashed against the skill's assets/scaffold.html. From the
+stylesheet block, compared with the skill's assets/scaffold.html. From the
 rendered page: Vega charts drawn (it waits on window.__vegaDone), static-SVG
 DAGs legible and unclipped, and no figure frame, table or page wider than its
 box at 768, 1200, 1280 and 1440 px. Warnings cover the softer house rules:
@@ -50,7 +50,6 @@ Usage:
 
 import argparse
 import asyncio
-import hashlib
 import html as htmllib
 import json
 import os
@@ -65,7 +64,7 @@ from urllib.parse import unquote, urlsplit
 PASS, FAIL, BLOCKED = "PASS", "FAIL", "BLOCKED"
 EXIT = {PASS: 0, FAIL: 1, BLOCKED: 2}
 VIEWPORT = {"width": 1280, "height": 900}
-LOAD_TIMEOUT_S = 30   # for the page's load event; Mermaid's startOnLoad waits for it
+LOAD_TIMEOUT_S = 30   # for the page's load event; the scaffold runs Mermaid itself (startOnLoad: false)
 QUIET_MS = 2000       # Mermaid's output must sit unchanged this long before it is read
 CALL_TIMEOUT_S = 10   # a page that cannot answer a query this fast has a frozen tab
 PROBE_TIMEOUT_S = 15  # one offscreen re-render of a diagram's source
@@ -83,7 +82,7 @@ CDN_HOSTS = {"cdn.jsdelivr.net", "fastly.jsdelivr.net"}
 # The scaffold's pinned library block. Another package, or another version,
 # is a warning: the gallery and its footguns were proven at these versions.
 LIBRARIES = {"mermaid": "11.17.2", "vega": "6.4.0", "vega-lite": "6.5.0", "vega-embed": "7.3.0"}
-NETWORK_PROBE_URL = "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/package.json"
+NETWORK_PROBE_URL = f"https://cdn.jsdelivr.net/npm/mermaid@{LIBRARIES['mermaid']}/package.json"
 INSTALL_HINT = "uv run --no-project --with playwright playwright install chromium"
 REVIEW = ("This check proves structure and that things drew, not that they are right. Open every "
           "screenshot: chart-<n>.png for each Vega chart (axes, values, colours against its "
@@ -404,7 +403,7 @@ LOCKED_RE = re.compile(r"/\*\s*dossier:locked:begin\s+(\S+)\s*\*/(.*?)/\*\s*doss
                        re.S)
 
 
-def _locked(html):
+def locked_version_and_text(html):
     """(version, normalised text) of the locked stylesheet block, or None."""
     m = LOCKED_RE.search(html or "")
     if not m:
@@ -415,27 +414,29 @@ def _locked(html):
 
 def locked_block(html):
     """The locked block's text with line endings and trailing spaces normalised."""
-    found = _locked(html)
+    found = locked_version_and_text(html)
     return found[1] if found else None
 
 
 def locked_problem(report_html, scaffold_html):
     """Why the report's locked block is not the scaffold's, or None when it is.
 
-    Compared by sha256 at check time, so a palette change needs only a
-    scaffold edit.
+    Compared with the scaffold at check time, so a palette change needs only
+    a scaffold edit.
     """
-    mine, theirs = _locked(report_html), _locked(scaffold_html)
-    if theirs is None:
+    report_locked = locked_version_and_text(report_html)
+    scaffold_locked = locked_version_and_text(scaffold_html)
+    if scaffold_locked is None:
         return "the scaffold has no locked block to compare against"
-    if mine is None:
-        return ("the page has no locked block (/* dossier:locked:begin " + theirs[0]
+    scaffold_version, scaffold_text = scaffold_locked
+    if report_locked is None:
+        return ("the page has no locked block (/* dossier:locked:begin " + scaffold_version
                 + " */ ... /* dossier:locked:end */); copy the stylesheet from assets/scaffold.html")
-    if mine[0] != theirs[0]:
-        return (f"the page's locked block is {mine[0]}, the scaffold's is {theirs[0]}; "
+    report_version, report_text = report_locked
+    if report_version != scaffold_version:
+        return (f"the page's locked block is {report_version}, the scaffold's is {scaffold_version}; "
                 "copy the locked block from assets/scaffold.html again")
-    digest = lambda t: hashlib.sha256(t.encode("utf-8")).hexdigest()  # noqa: E731
-    if digest(mine[1]) != digest(theirs[1]):
+    if report_text != scaffold_text:
         return ("the locked block differs from the scaffold's; put per-report CSS in the "
                 "dossier:report block and restore the locked block from assets/scaffold.html")
     return None
@@ -531,8 +532,9 @@ FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
 MAX_PARAGRAPH_WORDS = 60
 MAX_VISIBLE_ROWS = 20
 TOC_FROM_SECTIONS = 4
-DAG_SOFT_NODES = 11   # more drawn nodes than this: warn, merge sibling sets
-DAG_MAX_NODES = 15    # more than this (16 and up): fail
+# Same names and values as dag_svg.py's caps (tests/test_dossier.py asserts they match).
+WARN_ABOVE = 11       # more drawn DAG nodes than this: warn, merge sibling sets
+MAX_NODES = 15        # more drawn DAG nodes than this (16 and up): fail
 NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg", "template", "noscript"}
 # AI vocabulary that leaks in from source material: references/WRITING.md "Banned words"
 # ("landscape" is banned only when abstract, which a regex cannot tell, so it is left out).
@@ -745,11 +747,11 @@ def structure(html):
         count = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
         where_ = next(("%s %d" % figure_of(a) for a in fr.ancestors() if figure_of(a)),
                       f"the DAG at line {fr.line}")
-        if count > DAG_MAX_NODES:
-            problems.append(f"{where_} draws {count} nodes; the cap is {DAG_MAX_NODES}. Merge "
+        if count > MAX_NODES:
+            problems.append(f"{where_} draws {count} nodes; the cap is {MAX_NODES}. Merge "
                             "sibling sets into group nodes or draw a neighbourhood")
-        elif count > DAG_SOFT_NODES:
-            warnings.append(f"{where_} draws {count} nodes; aim for {DAG_SOFT_NODES} or fewer by "
+        elif count > WARN_ABOVE:
+            warnings.append(f"{where_} draws {count} nodes; aim for {WARN_ABOVE} or fewer by "
                             "merging sibling sets into group nodes")
 
     if len(secs) >= TOC_FROM_SECTIONS:

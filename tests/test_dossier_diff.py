@@ -269,6 +269,13 @@ class TestCli(unittest.TestCase):
         self.assertEqual(out, "")
         self.assertIn("several files", err)
 
+    def test_missing_file_exits_1_with_the_reason_on_stderr(self):
+        code, out, err = run_cli(["no-such-file.diff"])
+        self.assertEqual(code, 1)
+        self.assertEqual(out, "")
+        self.assertTrue(err.startswith("diff_html: "), err)
+        self.assertNotIn("Traceback", err)
+
     def test_malformed_note_or_lines_exits_2(self):
         self.assertEqual(run_cli(["-", "--note", "36=no side"], stdin=ONE_HUNK)[0], 2)
         self.assertEqual(run_cli(["-", "--lines", "9"], stdin=ONE_HUNK)[0], 2)

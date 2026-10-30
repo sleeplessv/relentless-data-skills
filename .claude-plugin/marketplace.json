@@ -77,7 +77,7 @@
       "name": "dossier",
       "source": "./skills/dossier",
       "description": "Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style.",
-      "version": "0.2.0",
+      "version": "0.2.1",
       "author": {
         "name": "sleeplessv"
       },

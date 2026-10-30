@@ -99,11 +99,11 @@ The step is done when every idea has a numbered figure or table and the output c
 Render the page headlessly:
 
 ```bash
-uv run --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
+uv run --python 3.13 --no-project --with playwright python <skill-dir>/scripts/check_render.py <report.html>
 ```
 
-If `uv` is missing, run `python3 <skill-dir>/scripts/check_render.py <report.html>` with an
-interpreter that has Playwright installed; if there is none, report `BLOCKED`.
+If `uv` is missing, run `python3 <skill-dir>/scripts/check_render.py <report.html>` with a
+Python 3.13+ interpreter that has Playwright installed; if there is none, report `BLOCKED`.
 
 It prints JSON, then the verdict as its last line. Screenshots go to `<report-stem>-check/`.
 

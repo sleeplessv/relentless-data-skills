@@ -43,11 +43,11 @@ network access for the CDN. With `uv` installed, the command in `SKILL.md` fetch
 into a throwaway environment; install the browser once:
 
 ```bash
-uv run --no-project --with playwright playwright install chromium
+uv run --python 3.13 --no-project --with playwright playwright install chromium
 ```
 
 Without them the check reports `BLOCKED`, and the skill hands the dossier over as unverified
-rather than claiming it rendered. The DAG and diff generators need only Python 3.9 or newer.
+rather than claiming it rendered. The DAG and diff generators need only Python 3.13 or newer.
 
 ## Install
 
@@ -98,8 +98,8 @@ Repo CI lints `SKILL.md` through `scripts/lint_skill.py` and runs the unit tests
 Changing the palette or any locked class means editing `assets/scaffold.html`, then running:
 
 ```bash
-python3 skills/dossier/scripts/check_contrast.py skills/dossier/assets/scaffold.html
-uv run --no-project --with playwright python skills/dossier/scripts/check_render.py skills/dossier/assets/gallery.html
+uv run --python 3.13 --no-project skills/dossier/scripts/check_contrast.py skills/dossier/assets/scaffold.html
+uv run --python 3.13 --no-project --with playwright python skills/dossier/scripts/check_render.py skills/dossier/assets/gallery.html
 ```
 
 The first exits 1 on any pair below AA. The second must end `PASS`. Read its screenshots, since

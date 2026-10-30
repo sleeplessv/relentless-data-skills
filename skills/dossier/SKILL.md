@@ -81,6 +81,10 @@ The step is done when every idea has a numbered figure or table and the output c
   "Problem". Amber marks callouts. GitHub's red and green appear only on the lines of a diff.
   Category fills use the four chart series. Token roles are in
   [VISUAL-LANGUAGE.md](references/VISUAL-LANGUAGE.md#colour-roles).
+- Descriptions follow one pattern down the page: beside the visual in a side row, or under a
+  wide visual with the "So what" box beside the caption. A figure goes wide only when it is
+  unreadable in the left column. The rule is in
+  [HTML-REPORT.md](references/HTML-REPORT.md#figure-row).
 - Borders are full or absent. Boxes, nodes and callouts carry no side strip, and titles carry no
   accent rule beneath them.
 - Every text and background pair meets WCAG AA. Captions use the muted token, never light grey.

@@ -4,29 +4,27 @@ The words in a dossier: what goes in each slot, how long it runs, and which word
 figures carry the argument; the prose points at them. Write little and make each sentence state
 a fact, a number or a conclusion about this subject.
 
-## Before you write
+## Sentences
 
-Resolve the writing skills by locating their installed `SKILL.md` and following symlinks, since
-user-invoked skills are absent from the invocable list:
+Write in the explanation mode: say what the evidence means and which way it points. Switch to
+reference, which only describes, when the user asks for one. These rules apply to every slot:
 
-```bash
-for s in technical-writing unslop; do
-  f=$(find -L "$HOME/.claude/skills" "$HOME/.agents/skills" -path "*/$s/SKILL.md" 2>/dev/null | head -n 1)
-  if [ -n "$f" ]; then readlink -f "$f"; else echo "missing: $s"; fi
-done
-```
+1. Use the short, everyday word, one idea per sentence, and about 25 words at most. Split a
+   sentence that carries two ideas.
+2. Name the actor in the active voice: "the render check fails it", not "it is failed".
+3. Call each thing by its real name (the file, command, table or flag) and keep that one name
+   throughout. Use the project's `GLOSSARY.md` terms exactly when the subject has one. Make every
+   "it" and "this" point at one obvious noun, and repeat the noun when in doubt.
+4. Name the mechanism or the number, not the feeling: "a column rename fails the build", not
+   "schema changes can cause issues". A sentence that could appear unchanged in another dossier
+   says nothing about this subject; cut it.
+5. State facts plainly and replace an adverb with its number: "the build takes 40 s", not "the
+   build runs quickly". Hedge only a claim the Limits section names as unchecked.
+6. Write whole sentences with their articles and verbs, captions and bullets included. Spell out
+   arrows and abbreviations.
 
-The loop uses only `$HOME`, `$s` and `$f`, and always exits 0; a `missing:` line is the signal.
-Read each file it prints before writing any prose. The Diátaxis mode is explanation, or
-reference when the user asks for one.
-
-If either skill is missing, apply this rule instead and say so at handover:
-
-1. Use short, plain words, one idea per sentence, and the active voice.
-2. Make every sentence a fact, number or conclusion specific to this subject; cut the rest.
-3. Use no em dashes and no hedges, and none of the banned words below.
-
-Use the project's `GLOSSARY.md` terms exactly when the subject has one.
+For general prose beyond dossiers, the `technical-writing` and `unslop` skills go further, if
+installed.
 
 ## Slots
 

@@ -42,8 +42,8 @@ byline states it. Stop exploring once you can draw each idea and source each num
 
 ## 2. Write
 
-1. Resolve the writing skills and read the prose rules, as
-   [WRITING.md](references/WRITING.md#before-you-write) describes.
+1. Read the prose rules in [WRITING.md](references/WRITING.md) before writing any
+   prose.
 2. Copy `<skill-dir>/assets/scaffold.html` to the output path. Default to
    `${TMPDIR:-/tmp}/<slug>-<YYYYMMDD-HHMM>.html`; write elsewhere when the user names a
    destination or says to keep or commit it.

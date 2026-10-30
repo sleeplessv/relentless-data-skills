@@ -576,7 +576,7 @@ class TestStructure(unittest.TestCase):
     def test_slop_words_in_prose_warn_but_not_in_code(self):
         prose = dossier(section(1, "How the check runs", "<p>A pivotal step.</p>" + figure(1)))
         self.assertIn('"pivotal"', self.warnings(prose))
-        # references/WRITING.md's list goes beyond unslop's.
+        # SLOP covers more than the common AI-vocabulary words.
         for word in ("leverages", "robust", "seamlessly", "utilize"):
             html = dossier(section(1, "How the check runs", f"<p>It {word} it.</p>" + figure(1)))
             self.assertIn(word, self.warnings(html), word)

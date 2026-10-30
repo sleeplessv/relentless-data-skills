@@ -56,7 +56,10 @@ def parse(text):
     files = []
     rows = None
     old = new = left_old = left_new = 0
-    for line in text.splitlines():
+    # Only "\n" ends a diff line: str.splitlines() also splits on form feeds
+    # and other separators that can sit inside a source line.
+    for line in text.removesuffix("\n").split("\n"):
+        line = line.removesuffix("\r")
         if left_old > 0 or left_new > 0:
             if line.startswith("\\"):
                 # "\ No newline at end of file" describes the line above it

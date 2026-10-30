@@ -53,6 +53,12 @@ class TestLoad(unittest.TestCase):
         with self.assertRaises(dag_svg.GraphError):
             dag_svg.load(graph("aa", []))
 
+    def test_only_the_focus_key_marks_the_subject(self):
+        out = dag_svg.render(dag_svg.load(graph("ab", [("a", "b")], subject="a")))
+        self.assertNotRegex(out, r'<g class="dn [^"]*\bfocus\b')
+        out = dag_svg.render(dag_svg.load(graph("ab", [("a", "b")], focus="a")))
+        self.assertRegex(out, r'<g class="dn [^"]*\bfocus\b')
+
     def test_node_without_a_name_or_tag_is_an_error(self):
         with self.assertRaises(dag_svg.GraphError):
             dag_svg.load({"nodes": [{"id": "a", "tag": "SKL"}], "edges": []})

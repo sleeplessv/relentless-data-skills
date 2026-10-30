@@ -100,6 +100,10 @@ class TestParseTokens(unittest.TestCase):
             "--c: rgb(0,0,0,40%); }</style>")
         self.assertEqual(tokens, {"a": "#102542", "b": "#ff818266", "c": "#00000066"})
 
+    def test_a_malformed_rgb_number_is_not_a_colour(self):
+        tokens = check_contrast.parse_tokens("<style>:root { --a: rgb(1.2.3, 0, 0); }</style>")
+        self.assertNotIn("a", tokens)
+
     def test_an_unsupported_colour_function_is_an_error(self):
         with self.assertRaisesRegex(ValueError, "--a"):
             check_contrast.parse_tokens("<style>:root { --a: oklch(0.5 0.1 200); }</style>")

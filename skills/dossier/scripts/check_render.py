@@ -406,6 +406,8 @@ NPM_PATH = re.compile(r"^/npm/((?:@[^/@]+/)?[^/@]+)(?:@([^/]*))?")
 PINNED = re.compile(r"^\d+\.\d+\.\d+$")
 HINT_RELS = {"preconnect", "dns-prefetch"}   # <link> hints that load nothing
 # A Vega data source read from a URL: `data: {url: ...}`, keys quoted or not.
+# shortcut: allows one level of nested braces before url, so a url after a deeper
+# object (format: {parse: {...}}) is missed; the browser pass still catches remote hosts.
 VEGA_DATA_URL = re.compile(r"""\bdata["']?\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?\burl["']?\s*:\s*["']([^"']*)["']""")
 
 

@@ -31,7 +31,9 @@ A group's members collapse into one dashed node with a count; their edges move
 to it. Layout is layered and deterministic: rank by longest path from a
 source, order inside a rank by barycentre sweeps, then positions that pull
 each node towards its neighbours. Edges that span several ranks run through
-their own lane. Names and captions are cut with an ellipsis to fit the box.
+their own lane. Each edge into a node gets its own entry point, ordered by
+where it comes from, and its arrowhead ends on the box edge. Names and
+captions are cut with an ellipsis to fit the box.
 
 Exit codes: 0 fragment written (warnings, such as more than 11 nodes, go to
 stderr), 1 the graph is invalid or too big (reason on stderr), 2 usage error.
@@ -50,10 +52,14 @@ from pathlib import Path
 W, H = 200, 46            # node box
 RX = 5
 PAD = 8                   # viewBox margin round the drawing
-GEOMETRY = {              # main = along the ranks, cross = across them
-    "lr": {"main_gap": 26, "cross_gap": 14},
-    "tb": {"main_gap": 44, "cross_gap": 16},
+GEOMETRY = {              # main = along the ranks, cross = across them; cross_scale spreads the rows
+    "lr": {"main_gap": 76, "cross_gap": 14, "cross_scale": 1.35},
+    "tb": {"main_gap": 64, "cross_gap": 16, "cross_scale": 1.0},
 }
+ARROW = 7                 # arrowhead length and width in px, whatever the stroke width
+STANDOFF = 2              # gap between a box and the start of its outgoing edges
+PORT_GAP = 12             # spacing of the entry points of edges into one node
+PORT_MARGIN = 8           # entry points keep this far from the box corners
 WARN_ABOVE = 11           # more nodes than this: warn and suggest groups
 MAX_NODES = 15            # more nodes than this: refuse
 SLOTS = 6                 # badge colour slots in the scaffold: tag-1 .. tag-6
@@ -406,9 +412,22 @@ def layout(g, mode):
                 targets.append(want - o)
             for v, d, o in zip(layer, _isotonic(targets, [weight[v] for v in layer]), offsets):
                 centre[v] = d + o
+    for v in centre:
+        centre[v] *= geo["cross_scale"]
     low = min(centre[v] - size[v] / 2 for v in centre)
     for v in centre:
         centre[v] = round(centre[v] - low, 1)
+
+    # entry points: edges into one node spread along its near side, ordered by where they come from
+    port = {}
+    incoming = {}
+    for ei, (a, b, chain) in enumerate(chains):
+        incoming.setdefault(b, []).append((centre[chain[-2]], ei))
+    for b, arrivals in incoming.items():
+        n = len(arrivals)
+        step = min(PORT_GAP, (cross_size - 2 * PORT_MARGIN) / (n - 1)) if n > 1 else 0
+        for i, (_, ei) in enumerate(sorted(arrivals)):
+            port[ei] = (i - (n - 1) / 2) * step
 
     def main_at(v):
         return item_rank[v] * (main_size + geo["main_gap"])
@@ -422,12 +441,12 @@ def layout(g, mode):
         boxes[v] = point(main_at(v), centre[v] - cross_size / 2)
 
     paths = []
-    for a, b, chain in chains:
-        pts = [(main_at(a) + main_size, centre[a])]       # leave from the far side of a
+    for ei, (a, b, chain) in enumerate(chains):
+        pts = [(main_at(a) + main_size + STANDOFF, centre[a])]   # leave from the far side of a
         for d in chain[1:-1]:
             pts.append((main_at(d), centre[d]))
             pts.append((main_at(d) + main_size, centre[d]))
-        pts.append((main_at(b) - 2, centre[b]))           # stop short: the arrowhead ends here
+        pts.append((main_at(b) - ARROW, round(centre[b] + port[ei], 1)))  # the arrowhead fills the rest
         d = "M" + _xy(point(*pts[0]))
         for i in range(1, len(pts)):
             (m0, c0), (m1, c1) = pts[i - 1], pts[i]
@@ -524,8 +543,11 @@ def _svg(g, mode):
     return (f'<svg class="dag dag-{mode}" viewBox="{_f(vx)} {_f(vy)} {_f(vw)} {_f(vh)}" '
             f'width="{vw:.0f}" style="max-width:{vw:.0f}px" role="img" '
             f'aria-label="{esc(g["label"])}: {count}">'
-            f'<defs><marker id="{mid}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" '
-            f'markerHeight="7" orient="auto-start-reverse"><path class="arrow" d="M0,1 L9,5 L0,9 z"/></marker></defs>'
+            # userSpaceOnUse keeps the head ARROW px at any stroke width; refX=0 puts its base on the
+            # path end, so the tip lands on the box edge and no line shows under it
+            f'<defs><marker id="{mid}" viewBox="0 0 {ARROW} {ARROW}" refX="0" refY="{_f(ARROW / 2)}" '
+            f'markerUnits="userSpaceOnUse" markerWidth="{ARROW}" markerHeight="{ARROW}" orient="auto">'
+            f'<path class="arrow" d="M0,0.6 L{ARROW},{_f(ARROW / 2)} L0,{_f(ARROW - 0.6)} z"/></marker></defs>'
             f'<g class="edges">{edges}</g><g class="nodes">{nodes}</g></svg>')
 
 

@@ -1,6 +1,6 @@
 {
   "name": "dossier",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style.",
   "author": {
     "name": "sleeplessv"

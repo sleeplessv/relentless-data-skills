@@ -77,18 +77,24 @@ A caption has two parts:
    a dashed line, a symbol or a bar length means), the unit, the scale, and any count that
    explains a total.
 
-The caption never states the conclusion; that goes in the "So what" box.
+The caption never states the conclusion; that goes in the "So what".
 
 ### So what
 
-One or two sentences: the conclusion the reader should draw from this figure alone. Specific
-and checkable against the figure ("Five skills are at the limit and two more are within 3 lines
-of it"). Not a restatement of the caption.
+The conclusion the reader should draw from this figure alone, set large as a pull quote above
+the caption. Specific and checkable against the figure. Not a restatement of the caption.
+
+- `.claim` is one sentence of 20 words or fewer, so it reads at display size ("Five skills are
+  at the 150-line limit"). The render check warns above 20.
+- Wrap the one key figure or phrase in `<em>`, which sets it in coral: `<em>Five skills</em>`.
+  One at most, and none when no single figure carries the point.
+- `.rest` is optional: one sentence of supporting detail in normal type ("Two more are within
+  3 lines of it").
 
 ### Takeaways
 
 Up to three sentences in `ul.takeaways` at the end of a section that needs them. Each one is a
-finding, with its number. Skip takeaways when the "So what" boxes already say it.
+finding, with its number. Skip takeaways when the "So what" claims already say it.
 
 ### Limits
 
@@ -106,7 +112,7 @@ update every reference in prose, captions and the sidebar list.
 
 A dossier the size of the gallery (eight sections, nine figures, two tables) runs to about
 1,100 words of prose, counting the answer, stats labels, prose, bullets, captions, "So what"
-boxes, takeaways, code markers and Limits. Tables, code and timelines do not count. If a section
+claims, takeaways, code markers and Limits. Tables, code and timelines do not count. If a section
 needs a paragraph to be understood, redraw its figure instead.
 
 ## Sources

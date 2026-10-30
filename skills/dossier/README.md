@@ -15,12 +15,13 @@ longer resolves.
 - **Write.** Copies the scaffold, picks a visual family per idea (data table, Vega-Lite axis
   chart, proportion bars, static-SVG DAG, sequence diagram, timeline, comparison matrix,
   annotated code, diff, and four hand-built shapes), and fills it with short, sourced prose: an
-  answer box, captions with reading points, "So what" boxes, and a closing Limits section.
+  answer box, captions with reading points, "So what" pull quotes, and a closing Limits section.
 - **Verify.** Renders the page in headless Chromium. The check fails on render faults and on
   structure faults (no answer box, no Limits, an unnumbered or out-of-order figure, a
-  non-sequence Mermaid diagram, a DAG of 16 or more nodes, a changed locked stylesheet, an
-  unpinned or unknown script host, sideways overflow), then the agent reads every screenshot,
-  because the script cannot judge a chart or a hand-built SVG by eye.
+  "So what" with no claim or placed after its caption, a non-sequence Mermaid diagram, a DAG
+  of 16 or more nodes, a changed locked stylesheet, an unpinned or unknown script host,
+  sideways overflow), then the agent reads every screenshot, because the script cannot judge a
+  chart or a hand-built SVG by eye.
 - **Grill loop.** Interviews you about what the dossier gets wrong or underweights, one question
   at a time with a recommended answer, and edits the same file.
 

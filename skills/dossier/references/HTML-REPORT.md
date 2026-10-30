@@ -54,27 +54,32 @@ Every figure and table sits in a `.fig` row, in one of two layouts. Both share t
 68/32 column split, so visuals line up down the page and the right-hand column is always
 the reader's place for the description.
 
-- **Side row** (`.fig`), the default: the visual in the left column, the caption and "So
-  what" box stacked in the right. Consecutive side rows read as one column of visuals with
-  their descriptions beside them.
-- **Wide row** (`.fig.wide`): the visual spans both columns, then the caption sits under it
-  in the left column and the "So what" box beside the caption in the right. Use it when the
+- **Side row** (`.fig`), the default: the visual in the left column; the "So what" pull
+  quote and, under a rule, the caption stacked in the right. Consecutive side rows read as one
+  column of visuals with their descriptions beside them.
+- **Wide row** (`.fig.wide`): the visual spans both columns, then the "So what" pull quote
+  sits under it in the left column and the caption beside it in the right. Use it when the
   visual would be unreadable squeezed into the left column: DAGs, timelines, diffs, sequence
   diagrams, wide tables, and charts with many marks along the x axis, such as a daily series
   over months or more than about 30 bars.
 
 Pick the layout per figure from that test alone, never for variety. Keep the markup
-identical in both layouts (`.visual`, then `.margin` holding the caption and "So what") and
-never move the caption or "So what" box elsewhere or override the `.fig` grid in the report
-block. A DAG's `div.dag-notes` replaces the margin and already spans the width.
+identical in both layouts (`.visual`, then `.margin` holding the "So what", then the
+caption) and never move the caption or "So what" elsewhere or override the `.fig` grid in the
+report block. The "So what" comes first in the source, so the reading order is the visual
+order. A DAG's `div.dag-notes` replaces the margin and already spans the width.
 
 ```html
 <div class="fig" id="fig-3">
   <div class="visual"><div class="figframe">…</div></div>
   <div class="margin">
+    <div class="sowhat">
+      <p class="lbl">So what</p>
+      <p class="claim">The conclusion, with the <em>key figure</em> in coral.</p>
+      <p class="rest">One optional sentence of support.</p>
+    </div>
     <p class="caption"><span class="figno">Figure 3.</span> What it shows.
       <span class="how">How to read it, in one to three sentences.</span></p>
-    <p class="sowhat"><span class="lbl">So what</span>The conclusion.</p>
   </div>
 </div>
 ```
@@ -332,6 +337,7 @@ Each of these is a problem, and any problem makes the verdict `FAIL`:
 
 - No answer box, or Limits missing or not the last section.
 - A figure or table without a numbered caption, or numbered out of order.
+- A "So what" with no `.claim`, more than one `em` in the claim, or placed after its caption.
 - A Mermaid diagram that is not a sequence diagram.
 - A DAG of 16 or more nodes.
 - A changed locked block.
@@ -339,7 +345,7 @@ Each of these is a problem, and any problem makes the verdict `FAIL`:
 - A page or figure wider than its frame at any of the four widths.
 - A diagram, chart or DAG that drew wrong: a parse error, empty, clipped or illegible.
 
-Structure faults (the first six above) come from the source alone, so the script finds them
+Structure faults (the first seven above) come from the source alone, so the script finds them
 without Playwright or Chromium and reports `FAIL`. `BLOCKED` means the source pass was clean but
 the environment kept the render from running: no Playwright or Chromium, or the CDN unreachable.
 A missing scaffold leaves the locked block unverified, not blocked.
@@ -349,7 +355,7 @@ Each of these is a warning, which the agent resolves or names at handover:
 - A heading not in sentence case.
 - A DAG of 12 to 15 nodes.
 - A code block that scrolls sideways inside `pre.code`.
-- A figure without a "So what" box.
+- A figure without a "So what", or a "So what" claim over 20 words.
 - Small text, or a paragraph over 60 words.
 - Banned words from [WRITING.md](WRITING.md).
 - Colour misuse: red or amber on a category mark, a side strip on a box.

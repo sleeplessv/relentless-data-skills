@@ -17,15 +17,17 @@ does not exist, page and console errors, and a page that freezes its tab.
 
 For a dossier it adds, from the source: a structure pass (answer box with a
 claim, Limits as the last section, every figure and table numbered in order
-with a caption, Mermaid used for sequence diagrams only, DAG node count), the
+with a caption, each "So what" a .claim with at most one <em> placed before
+the caption, Mermaid used for sequence diagrams only, DAG node count), the
 allowed hosts (cdn.jsdelivr.net) with exact x.y.z pins, and the locked
 stylesheet block, compared with the skill's assets/scaffold.html. From the
 rendered page: Vega charts drawn (it waits on window.__vegaDone), static-SVG
 DAGs legible and unclipped, and no figure frame, table or page wider than its
 box at 768, 1200, 1280 and 1440 px. Warnings cover the softer house rules:
-long paragraphs, sections with no figure, tables over 20 visible rows,
-headings not in sentence case, slop words, red or amber category fills, side
-strips, small diagram text, and libraries outside the scaffold's block.
+long paragraphs and "So what" claims, sections with no figure, tables over 20
+visible rows, headings not in sentence case, slop words, red or amber category
+fills, side strips, small diagram text, and libraries outside the scaffold's
+block.
 
 Prints JSON, then a final PASS, FAIL, or BLOCKED line. Exit codes:
   0  PASS     every check ran and passed
@@ -529,6 +531,7 @@ FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
 # of the set browsers apply.
 P_CLOSERS = {"p", "div", "ul", "ol", "table", "figure", "section", "h2", "h3", "pre", "details"}
 MAX_PARAGRAPH_WORDS = 60
+MAX_CLAIM_WORDS = 20   # a "So what" claim is set large; longer ones crowd the margin
 MAX_VISIBLE_ROWS = 20
 TOC_FROM_SECTIONS = 4
 NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg", "template", "noscript"}
@@ -662,6 +665,28 @@ def mermaid_kind(source):
     return None
 
 
+def sowhat_faults(so, where):
+    """(problems, warnings) for a .sowhat, which must be a pull quote: a short
+    .claim with at most one <em>, placed before the caption."""
+    problems, warnings = [], []
+    sibs = [c for c in so.parent.children if isinstance(c, Node)]
+    if any("caption" in c.classes for c in sibs[:sibs.index(so)]):
+        problems.append(f'{where}\'s "So what" comes after its caption; put .sowhat first in .margin')
+    claim = next(iter(so.find(lambda x: "claim" in x.classes)), None)
+    if claim is None:
+        problems.append(f'{where}\'s "So what" has no .claim: state the conclusion in '
+                        '<p class="claim">')
+        return problems, warnings
+    ems = len(claim.find(lambda x: x.tag == "em"))
+    if ems > 1:
+        problems.append(f'{where}\'s "So what" claim has {ems} <em>; mark one key figure at most')
+    words = len(claim.text().split())
+    if words > MAX_CLAIM_WORDS:
+        warnings.append(f'{where}\'s "So what" claim has {words} words; keep it to '
+                        f"{MAX_CLAIM_WORDS} and move the detail to .rest")
+    return problems, warnings
+
+
 def structure(html):
     """(problems, warnings) from the page source: answer box, Limits, figure
     numbering and captions, Mermaid use, DAG size, and the prose warnings."""
@@ -703,8 +728,13 @@ def structure(html):
         dag_so = any(norm(h.text()).lower() == "so what"
                      for d in f.find(lambda x: "dag-notes" in x.classes)
                      for h in d.find(lambda x: x.tag == "h3"))
-        if not dag_so and not f.find(lambda x: "sowhat" in x.classes):
-            warnings.append(f'{kind} {n} has no "So what" box (.sowhat .lbl)')
+        sowhats = f.find(lambda x: "sowhat" in x.classes)
+        if not dag_so and not sowhats:
+            warnings.append(f'{kind} {n} has no "So what" (.sowhat with .lbl and .claim)')
+        for so in sowhats:
+            p, w = sowhat_faults(so, f"{kind} {n}")
+            problems += p
+            warnings += w
     for kind, nums in counters.items():
         for i, n in enumerate(nums, 1):
             if n != i:

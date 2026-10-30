@@ -15,11 +15,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>[Report title]</title>
 <style>
-/* dossier:locked:begin v3 */
+/* dossier:locked:begin v4 */
   /* ===== Tokens: Navy & coral. Every pair below is checked by scripts/check_contrast.py. ===== */
   :root {
     --paper: #ffffff;
-    --surface: #f4f7f7;        /* sidebar, takeaways, so-what, DAG canvas, stats */
+    --surface: #f4f7f7;        /* sidebar, takeaways, DAG canvas, stats */
     --ink: #102542;            /* text and structure */
     --muted: #5f5348;          /* captions how-to-read, labels; lightest text colour allowed */
     --on-ink: #ffffff;         /* text on navy: current TOC item, marker numerals, badges */
@@ -65,10 +65,10 @@
     --radius: 8px;
   }
   /* dossier:pairs
-     text     ink             paper               body text, matrix PASS mark
+     text     ink             paper               body text, so-what claim, matrix PASS mark
      text     muted           paper               captions how-to-read, byline, legend, axis labels, lead unit
-     text     coral-text      paper               figure and section numbers, so-what and answer labels, lead number
-     text     ink             surface             takeaways, so-what, sidebar text
+     text     coral-text      paper               figure and section numbers, so-what and answer labels, lead number, so-what key figure
+     text     ink             surface             takeaways, sidebar text
      text     muted           surface             sidebar meta and figure list, stat labels
      text     ink             hover               sidebar link on hover
      text     on-ink          ink                 current section title, marker numerals
@@ -189,20 +189,26 @@
   ul.points li { position: relative; padding-left: 1.1rem; margin: 0 0 0.35rem; }
   ul.points li::before { content: ""; position: absolute; left: 0.1rem; top: 0.62em; width: 0.4rem; height: 0.4rem; border-radius: 50%; background: var(--coral-line); }
 
-  /* ---------- figure rows: visual left, caption and so-what right; wide rows put both
-     under the visual, side by side on the same 68/32 columns ---------- */
+  /* ---------- figure rows: visual left, so-what then caption right; wide rows put both
+     under the visual, so-what in the left column and caption in the right ---------- */
   .fig { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 1rem 2rem; margin: 1.4rem 0 1.9rem; align-items: start; }
   .fig.wide { grid-template-columns: minmax(0, 1fr); }
   .fig .visual { min-width: 0; }
   .fig .margin { font-size: var(--s-1); line-height: 1.5; }
   .fig.wide .margin { display: grid; grid-template-columns: minmax(0, 68fr) minmax(0, 32fr); gap: 0 2rem; align-items: start; }
-  .fig.wide .sowhat { margin-top: 0; }
   .fig.wide .caption { max-width: 72ch; }
   .caption { margin: 0; color: var(--ink); }
   .caption .figno { font-weight: 750; color: var(--coral-text); }
   .caption .how { color: var(--muted); }
-  .sowhat { margin: 0.8rem 0 0; padding: 0.65rem 0.85rem 0.7rem; background: var(--surface); border-radius: 6px; color: var(--ink); font-size: var(--s-1); line-height: 1.45; font-weight: 500; }
-  .sowhat .lbl, .dag-notes h3 { display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--coral-text); font-weight: 750; margin-bottom: 0.2rem; font-family: var(--body); }
+  /* so-what: a pull quote leading the margin, no box; the one key figure in .claim em is coral */
+  .sowhat { margin: 0 0 1rem; color: var(--ink); font-size: var(--s0); }
+  .sowhat .lbl, .dag-notes h3 { display: block; font-size: var(--s-2); text-transform: uppercase; letter-spacing: 0.12em; color: var(--coral-text); font-weight: 750; margin: 0 0 0.2rem; font-family: var(--body); }
+  .sowhat .claim { margin: 0; font-family: var(--display); font-size: 1.45rem; line-height: 1.22; font-weight: 700; letter-spacing: -0.02em; }
+  .sowhat .claim em { font-style: normal; color: var(--coral-text); }
+  .sowhat .claim code { font-size: 0.72em; }
+  .sowhat .rest { margin: 0.5rem 0 0; font-size: var(--s-1); line-height: 1.5; }
+  .sowhat + .caption { padding-top: 0.8rem; border-top: 1px solid var(--line-2); }
+  .fig.wide .sowhat + .caption { padding-top: 0; border-top: 0; }
   .figframe { background: var(--paper); border: 1px solid var(--line); border-radius: var(--radius); padding: 1rem 1.1rem; box-shadow: var(--shadow); }
   .figframe.table { padding: 0.25rem 0.85rem 0.6rem; }
   .figframe.scroll { overflow-x: auto; }
@@ -395,7 +401,7 @@
     .content { padding: 1.5rem 1rem 3rem; }
     .fig { grid-template-columns: minmax(0, 1fr); }
     .fig.wide .margin { grid-template-columns: minmax(0, 1fr); }
-    .fig.wide .sowhat { margin-top: 0.8rem; }
+    .fig.wide .sowhat + .caption { padding-top: 0.8rem; border-top: 1px solid var(--line-2); }
     .stats { grid-template-columns: repeat(2, 1fr); }
     ol.markers { grid-template-columns: 1fr; }
     .dag-notes { grid-template-columns: 1fr 1fr; }
@@ -493,8 +499,13 @@
         </div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">[The conclusion to draw, in one short sentence, with the <em>[key figure]</em> in em.]</p>
+          <!-- Optional: one supporting sentence. Delete if unused. -->
+          <p class="rest">[One sentence of supporting detail.]</p>
+        </div>
         <p class="caption"><span class="figno">Table 1.</span> [What it shows, one sentence.] <span class="how">[How to read it: one to three short points.]</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>[The conclusion to draw.]</p>
       </div>
     </div>
 
@@ -503,8 +514,13 @@
         <div class="figframe"><!-- A figure family from assets/gallery.html: chart, DAG, sequence, code, diff, matrix, timeline, bars. --></div>
       </div>
       <div class="margin">
+        <div class="sowhat">
+          <p class="lbl">So what</p>
+          <p class="claim">[The conclusion to draw, in one short sentence, with the <em>[key figure]</em> in em.]</p>
+          <!-- Optional: one supporting sentence. Delete if unused. -->
+          <p class="rest">[One sentence of supporting detail.]</p>
+        </div>
         <p class="caption"><span class="figno">Figure 1.</span> [What it shows, one sentence.] <span class="how">[How to read it: one to three short points.]</span></p>
-        <p class="sowhat"><span class="lbl">So what</span>[The conclusion to draw.]</p>
       </div>
     </div>
 

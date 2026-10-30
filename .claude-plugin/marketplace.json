@@ -74,6 +74,30 @@
       ]
     },
     {
+      "name": "dossier",
+      "source": "./skills/dossier",
+      "description": "Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/dossier",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "dossier",
+        "visual-report",
+        "html",
+        "report",
+        "diagrams",
+        "svg",
+        "vega-lite",
+        "mermaid",
+        "explainer",
+        "documentation"
+      ]
+    },
+    {
       "name": "fabric-lineage-dag",
       "source": "./skills/fabric-lineage-dag",
       "description": "Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git.",
@@ -378,27 +402,6 @@
         "data-science",
         "pandas",
         "numpy"
-      ]
-    },
-    {
-      "name": "visual-report",
-      "source": "./skills/visual-report",
-      "description": "Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals.",
-      "version": "0.1.3",
-      "author": {
-        "name": "sleeplessv"
-      },
-      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/visual-report",
-      "repository": "https://github.com/sleeplessv/relentless-data-skills",
-      "license": "Apache-2.0",
-      "keywords": [
-        "visual-report",
-        "html",
-        "diagrams",
-        "mermaid",
-        "tailwind",
-        "explainer",
-        "documentation"
       ]
     }
   ]

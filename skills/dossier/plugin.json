@@ -1,0 +1,23 @@
+{
+  "name": "dossier",
+  "version": "0.1.0",
+  "description": "Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/dossier",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "dossier",
+    "visual-report",
+    "html",
+    "report",
+    "diagrams",
+    "svg",
+    "vega-lite",
+    "mermaid",
+    "explainer",
+    "documentation"
+  ]
+}

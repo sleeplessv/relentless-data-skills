@@ -35,6 +35,11 @@ An explainer states what the reader will understand that they did not ("The rend
 on a drawn defect and blocks on an environment fault"). The claim is never a topic or a promise
 ("This report looks at…").
 
+`.claim` holds the claim in one or two sentences; `.rest` holds any qualifying sentences in
+normal weight. Add the lead number when one figure carries the answer ("0/18", "4.2×"), with a
+unit label of a few words saying what it counts. Leave it out when the answer is qualitative or
+no single number sums it up.
+
 ### Masthead
 
 The kicker names the kind of dossier and the subject. The byline states where every number

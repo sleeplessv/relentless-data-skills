@@ -33,7 +33,11 @@ The scaffold already holds each part below in this order, with placeholders:
    listing every table and figure by number and short name. The current section turns into a
    navy pill with a coral number as the reader scrolls; the scaffold's script does this.
 2. **Masthead** `header.masthead`: `.kicker.eyebrow`, `h1`, `.byline` (source and date).
-3. **Answer box** `section.answer` with `.label.eyebrow` "Answer" and `p.claim`.
+3. **Answer box** `section.answer`, framed by full-width navy rules above and below. Inside,
+   an optional `.lead` (`.n` the number, with an optional `span.key` around the part to show in
+   coral; `.u` the unit label), then `.text` with `.label.eyebrow` "Answer", `p.claim` and an
+   optional `p.rest`. Without `.lead` the text starts at the left edge. Below 560px the number
+   stacks above the text.
 4. **Stats row** (optional) `.stats` with up to four `.stat` (`.v` value, `.l` label). Delete the
    whole element when unused.
 5. **Inline contents** `nav.toc-inline`, the same list without numbers; shown below 1100px.

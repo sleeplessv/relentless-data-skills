@@ -138,5 +138,5 @@ fact it stands for.
 Also judge "landscape" by hand. In its abstract sense ("the tooling landscape") it is banned too,
 but a regex cannot tell that use from a literal one, so the check leaves it to you.
 
-Also keep out: em dashes, "serves as" and "stands as" for "is", "not just X but Y", chatbot
-phrases, and generic conclusions ("The future looks bright").
+Also keep out em dashes, "serves as" and "stands as" for "is", and "not just X but Y". Generic
+conclusions fail rule 4 in [Sentences](#sentences).

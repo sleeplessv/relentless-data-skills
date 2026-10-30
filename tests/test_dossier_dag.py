@@ -102,6 +102,12 @@ def lane_runs(d):
     return runs
 
 
+def ends(d):
+    """The first and last points of a path."""
+    pts = re.findall(r"(-?[\d.]+),(-?[\d.]+)", d)
+    return tuple(map(float, pts[0])), tuple(map(float, pts[-1]))
+
+
 class TestLayout(unittest.TestCase):
     def setUp(self):
         self.g = dag_svg.load(ELEVEN)
@@ -126,8 +132,15 @@ class TestLayout(unittest.TestCase):
     def test_lr_puts_each_rank_in_its_own_column_and_tb_in_its_own_row(self):
         lr, tb = dag_svg.layout(self.g, "lr"), dag_svg.layout(self.g, "tb")
         for i, r in lr["ranks"].items():
-            self.assertEqual(lr["boxes"][i][0], r * (dag_svg.W + 26))
-            self.assertEqual(tb["boxes"][i][1], r * (dag_svg.H + 44))
+            self.assertEqual(lr["boxes"][i][0], r * (dag_svg.W + 76))
+            self.assertEqual(tb["boxes"][i][1], r * (dag_svg.H + 64))
+
+    def test_lr_rows_in_one_column_are_spaced_a_third_wider_than_the_minimum(self):
+        lay = dag_svg.layout(self.g, "lr")
+        for r in set(lay["ranks"].values()):
+            ys = sorted(lay["boxes"][i][1] for i, ri in lay["ranks"].items() if ri == r)
+            for y0, y1 in zip(ys, ys[1:]):
+                self.assertGreaterEqual(y1 - y0, round(1.35 * (dag_svg.H + 14), 1) - 0.2, (r, ys))
 
     def test_a_long_edge_runs_in_a_lane_that_misses_every_node(self):
         for mode in ("lr", "tb"):
@@ -143,15 +156,38 @@ class TestLayout(unittest.TestCase):
                                   by - 2 < max(y0, y1) and min(y0, y1) < by + dag_svg.H + 2)
                         self.assertFalse(inside, (mode, d, (bx, by)))
 
-    def test_edges_run_from_the_reader_side_to_just_short_of_the_target(self):
+    def test_edges_run_from_the_reader_side_to_one_arrowhead_short_of_the_target(self):
         lay = dag_svg.layout(self.g, "lr")
         a, b, d = next(p for p in lay["paths"] if p[:2] == ("hub", "subj"))
-        start = tuple(map(float, re.match(r"M(-?[\d.]+),(-?[\d.]+)", d).groups()))
-        end = tuple(map(float, re.findall(r"(-?[\d.]+),(-?[\d.]+)", d)[-1]))
+        start, end = ends(d)
         hx, hy = lay["boxes"]["hub"]
         sx, sy = lay["boxes"]["subj"]
-        self.assertEqual(start, (hx + dag_svg.W, hy + dag_svg.H / 2))
-        self.assertEqual(end, (sx - 2, sy + dag_svg.H / 2))
+        self.assertEqual(start, (hx + dag_svg.W + 2, hy + dag_svg.H / 2))
+        self.assertEqual(end, (sx - dag_svg.ARROW, sy + dag_svg.H / 2))  # the tip lands on the box edge
+
+    def test_edges_into_one_node_end_at_separate_points_on_its_edge(self):
+        for mode in ("lr", "tb"):
+            lay = dag_svg.layout(self.g, mode)
+            for target in ("hub", "r3"):  # three edges into hub, two into r3
+                x, y = lay["boxes"][target]
+                tips = [ends(d)[1] for a, b, d in lay["paths"] if b == target]
+                self.assertEqual(len(set(tips)), len(tips), (mode, target, tips))
+                for tx, ty in tips:
+                    if mode == "lr":
+                        self.assertEqual(tx, x - dag_svg.ARROW)
+                        self.assertTrue(y + 4 <= ty <= y + dag_svg.H - 4, (target, ty))
+                    else:
+                        self.assertEqual(ty, y - dag_svg.ARROW)
+                        self.assertTrue(x + 4 <= tx <= x + dag_svg.W - 4, (target, tx))
+
+    def test_entry_points_keep_inside_the_box_however_many_edges_arrive(self):
+        g = dag_svg.load(graph(["a", "b", "c", "d", "e", "f", "z"],
+                               [(i, "z") for i in "abcdef"]))
+        lay = dag_svg.layout(g, "lr")
+        x, y = lay["boxes"]["z"]
+        tips = [ends(d)[1][1] for a, b, d in lay["paths"]]
+        self.assertEqual(len(set(tips)), 6)
+        self.assertTrue(all(y + 4 <= t <= y + dag_svg.H - 4 for t in tips), tips)
 
     def test_layout_is_deterministic(self):
         self.assertEqual(dag_svg.layout(dag_svg.load(ELEVEN), "lr"), dag_svg.layout(self.g, "lr"))
@@ -206,6 +242,16 @@ class TestRender(unittest.TestCase):
             self.assertEqual(paths, [mid] * 11)
         other = dict(self.data, label="another figure")
         self.assertNotEqual(re.findall(r'<marker id="([^"]+)"', dag_svg.render(dag_svg.load(other))), ids)
+
+    def test_arrowheads_are_a_fixed_size_with_the_base_on_the_path_end(self):
+        for svg in svgs(self.out):
+            marker = re.search(r"<marker\b[^>]*>", svg).group(0)
+            self.assertIn('markerUnits="userSpaceOnUse"', marker)  # not scaled by the stroke width
+            self.assertIn(f'viewBox="0 0 {dag_svg.ARROW} {dag_svg.ARROW}"', marker)
+            self.assertIn(f'markerWidth="{dag_svg.ARROW}" markerHeight="{dag_svg.ARROW}"', marker)
+            self.assertIn('refX="0"', marker)  # the path stops ARROW short, so the tip meets the box
+            tip = re.search(r'<path class="arrow" d="M0,[\d.]+ L([\d.]+),', svg).group(1)
+            self.assertEqual(float(tip), dag_svg.ARROW)
 
     def test_aria_label_states_drawn_of_total(self):
         self.assertIn('role="img" aria-label="Dependency graph: 11 of 56 nodes drawn"', self.out)

@@ -1,4 +1,4 @@
-"""Tests for skills/visual-report/scripts/check_render.py.
+"""Tests for skills/dossier/scripts/check_render.py.
 
 Standard library only. Run from the repo root:
 
@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "skills" / "visual-report" / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "skills" / "dossier" / "scripts"))
 
 import check_render  # noqa: E402
 

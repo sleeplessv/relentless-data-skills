@@ -1,6 +1,6 @@
-# visual-report
+# dossier
 
-The **`visual-report`** agent skill turns a subject (a system, a process,
+The **`dossier`** agent skill turns a subject (a system, a process,
 research findings, a decision) into a **single self-contained HTML document
 that carries its meaning in visuals**, not paragraphs. One file, portable, no
 build step, though Tailwind and Mermaid load from CDNs, so it renders fully
@@ -42,12 +42,12 @@ See the [repo root README](../../README.md) for the general install patterns
 (`npx skills`, Claude Code plugin, manual clone). For this skill specifically:
 
 ```bash
-npx skills add sleeplessv/relentless-data-skills/skills/visual-report
+npx skills add sleeplessv/relentless-data-skills/skills/dossier
 ```
 
 ```text
 /plugin marketplace add sleeplessv/relentless-data-skills
-/plugin install visual-report@relentless-data-skills
+/plugin install dossier@relentless-data-skills
 ```
 
 It activates when you ask for a visual report, an explainer, or a single-file

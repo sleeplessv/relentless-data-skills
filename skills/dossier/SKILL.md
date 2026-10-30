@@ -1,11 +1,11 @@
 ---
-name: visual-report
+name: dossier
 description: Produce a single self-contained HTML visual report, an explainer, writeup, or diagram-heavy document built with Tailwind and Mermaid via CDN plus hand-crafted CSS/SVG. Use when the user wants a visual report, an explainer, a single-file HTML writeup of a system/process/findings, or asks to visualize or diagram something as a shareable document.
 metadata:
   author: sleeplessv
 ---
 
-# Visual Report
+# Dossier
 
 Turn a subject (a system, a process, research findings, a decision) into a single self-contained HTML document that **carries its meaning in visuals**, not paragraphs. Tailwind and Mermaid come from CDNs; hand-built CSS/SVG handles the editorial visuals Mermaid can't.
 

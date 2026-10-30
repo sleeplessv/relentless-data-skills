@@ -13,6 +13,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions. |
+| [`dossier`](skills/dossier/) | Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
 | [`gh-weekly-report`](skills/gh-weekly-report/) | Create interactive weekly reports of a GitHub user's activity across repositories. |
 | [`implement-feature`](skills/implement-feature/) | Implement a feature specification or selected tickets as one verified pull request. |
@@ -27,7 +28,6 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`snowman`](skills/snowman/) | Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution. |
 | [`statusline`](skills/statusline/) | Show the current model, reasoning effort, context window usage, directory, git branch and its diff, and open pull requests in the Claude Code status line. |
 | [`student-mode`](skills/student-mode/) | Write tutorial-grade Python, SQL, and Java for learners instead of production-grade code, for the rest of the session. Python leans on pandas and NumPy for data science coursework. |
-| [`visual-report`](skills/visual-report/) | Create single-file HTML reports that explain systems, processes, findings, or decisions through diagrams and interactive visuals. |
 <!-- skills-table:end -->
 
 This table is generated from each skill's `plugin.json`. Edit there, then

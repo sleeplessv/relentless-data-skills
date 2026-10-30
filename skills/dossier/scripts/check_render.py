@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render a visual-report HTML file in headless Chromium and check what a reader sees.
+"""Render a dossier HTML file in headless Chromium and check what a reader sees.
 
 Mermaid reports most mistakes by drawing an error diagram, with nothing on the
 console, so this check reads the rendered page. It waits until Mermaid has
@@ -79,7 +79,7 @@ FETCH_FAILED = re.compile(
 
 
 # ---------------------------------------------------------------------------
-# Pure logic: no Playwright needed (tests/test_visual_report.py covers it).
+# Pure logic: no Playwright needed (tests/test_dossier.py covers it).
 
 def read_source(path):
     """Decode the report as a browser would: BOM, then <meta charset>, then UTF-8."""

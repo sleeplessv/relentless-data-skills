@@ -404,6 +404,11 @@ RESOURCE_ATTRS = {"script": "src", "img": "src", "iframe": "src", "source": "src
 JS_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']""")
 NPM_PATH = re.compile(r"^/npm/((?:@[^/@]+/)?[^/@]+)(?:@([^/]*))?")
 PINNED = re.compile(r"^\d+\.\d+\.\d+$")
+HINT_RELS = {"preconnect", "dns-prefetch"}   # <link> hints that load nothing
+# A Vega data source read from a URL: `data: {url: ...}`, keys quoted or not.
+# shortcut: allows one level of nested braces before url, so a url after a deeper
+# object (format: {parse: {...}}) is missed; the browser pass still catches remote hosts.
+VEGA_DATA_URL = re.compile(r"""\bdata["']?\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?\burl["']?\s*:\s*["']([^"']*)["']""")
 
 
 def resource_urls(html):
@@ -411,11 +416,22 @@ def resource_urls(html):
     urls = []
     for n in parse_tree(html).walk():
         attr = RESOURCE_ATTRS.get(n.tag)
+        rels = set(n.attrs.get("rel", "").lower().split())
+        if n.tag == "link" and rels and rels <= HINT_RELS:
+            continue
         if attr and n.attrs.get(attr):
             urls.append(n.attrs[attr].strip())
         if n.tag == "script" and not n.attrs.get("src"):
             urls += JS_IMPORT.findall(strip_js_comments(n.text()))
     return [u for u in urls if urlsplit(u).scheme in ("http", "https")]
+
+
+def vega_data_urls(html):
+    """URLs a Vega spec in an inline script loads its data from; data: URIs are inline."""
+    urls = []
+    for n in parse_tree(html).find(lambda n: n.tag == "script" and not n.attrs.get("src")):
+        urls += VEGA_DATA_URL.findall(strip_js_comments(n.text()))
+    return [u for u in urls if not u.startswith("data:")]
 
 
 def npm_package(url):
@@ -461,9 +477,11 @@ def library_warnings(urls):
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
         "source", "track", "wbr"}
 FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
-# Block starts that close an open <p>: the block elements a dossier uses, a subset
-# of the set browsers apply.
-P_CLOSERS = {"p", "div", "ul", "ol", "table", "figure", "section", "h2", "h3", "pre", "details"}
+# Start tags that close an open <p>, as browsers apply them.
+P_CLOSERS = {"address", "article", "aside", "blockquote", "details", "dialog", "div", "dl",
+             "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",
+             "h6", "header", "hgroup", "hr", "main", "menu", "nav", "ol", "p", "pre", "search",
+             "section", "summary", "table", "ul"}
 MAX_PARAGRAPH_WORDS = 60
 MAX_CLAIM_WORDS = 20   # a "So what" claim is set large; longer ones crowd the margin
 MAX_VISIBLE_ROWS = 20
@@ -665,7 +683,7 @@ def findings_faults(box, answers, sec_ids):
     if not at or sibs[at - 1] not in answers:
         problems.append("the key findings box is not right after the answer box; move "
                         '<section class="findings"> up to follow section.answer, before .stats')
-    items = box.find(lambda n: n.tag == "li")
+    items = box.find(lambda n: n.tag == "li" and not any(a.tag == "li" for a in n.ancestors()))
     if not MIN_FINDINGS <= len(items) <= MAX_FINDINGS:
         problems.append(f"the key findings box lists {len(items)} findings; give {MIN_FINDINGS} "
                         f"to {MAX_FINDINGS}, one sentence each")
@@ -827,6 +845,9 @@ def source_checks(html, scaffold_html, scaffold_path):
     problems, warnings = structure(html)
     urls = resource_urls(html)
     problems += counted([p for p in map(url_problem, urls) if p])
+    problems += counted([f'Vega data URL "{u}": the chart reads it at run time, so the dossier breaks '
+                         'away from that file or site; put the rows in data.values instead'
+                         for u in vega_data_urls(html)])
     warnings += library_warnings(urls)
     if scaffold_html is None:
         return problems, warnings, [f"locked block not compared: no scaffold at {scaffold_path}"]
@@ -1696,9 +1717,15 @@ async def inspect_page(browser, report, shots, timeout, result):
 _emitted = threading.Lock()
 
 
-def emit(result, html, hard=False):
+def emit(result, html, incomplete=None):
+    """Print the result and end the process. The watchdog passes incomplete and ends it
+    with os._exit; whichever thread comes second leaves it to the first."""
     if not _emitted.acquire(blocking=False):
-        return
+        if incomplete:
+            return
+        threading.Event().wait()   # the watchdog is emitting and ends the process
+    if incomplete:
+        result["incomplete"] = incomplete
     assign_lines(result["diagrams"], html)
     unverified = [f"{where(d)}: {d['unverified']}" for d in result["diagrams"] if d.get("unverified")]
     for d in result["diagrams"]:
@@ -1710,7 +1737,7 @@ def emit(result, html, hard=False):
     result["review"] = REVIEW
     print(json.dumps(result, indent=1))
     print(result["verdict"], flush=True)
-    if hard:
+    if incomplete:
         os._exit(EXIT[result["verdict"]])
     sys.exit(EXIT[result["verdict"]])
 
@@ -1759,8 +1786,7 @@ def main():
     limit = LOAD_TIMEOUT_S + 2 * args.timeout + 110   # Mermaid settle, Vega wait, viewport pass
 
     def give_up():  # last resort if even cancelling the check hangs
-        result["incomplete"] = f"the check was stopped after {limit + 20} s"
-        emit(result, html, hard=True)
+        emit(result, html, incomplete=f"the check was stopped after {limit + 20} s")
     watchdog = threading.Timer(limit + 20, give_up)
     watchdog.daemon = True
     watchdog.start()

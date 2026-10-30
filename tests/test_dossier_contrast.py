@@ -94,6 +94,20 @@ class TestParseTokens(unittest.TestCase):
         with self.assertRaises(ValueError):
             check_contrast.parse_tokens("<style>body { color: red; }</style>")
 
+    def test_rgb_tokens_are_read_as_hex(self):
+        tokens = check_contrast.parse_tokens(
+            "<style>:root { --a: rgb(16, 37, 66); --b: rgba(255 129 130 / 0.4); "
+            "--c: rgb(0,0,0,40%); }</style>")
+        self.assertEqual(tokens, {"a": "#102542", "b": "#ff818266", "c": "#00000066"})
+
+    def test_a_malformed_rgb_number_is_not_a_colour(self):
+        tokens = check_contrast.parse_tokens("<style>:root { --a: rgb(1.2.3, 0, 0); }</style>")
+        self.assertNotIn("a", tokens)
+
+    def test_an_unsupported_colour_function_is_an_error(self):
+        with self.assertRaisesRegex(ValueError, "--a"):
+            check_contrast.parse_tokens("<style>:root { --a: oklch(0.5 0.1 200); }</style>")
+
 
 PAIRS_CSS = """<style>
 /* dossier:pairs

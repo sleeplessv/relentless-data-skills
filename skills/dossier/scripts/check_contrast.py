@@ -60,6 +60,20 @@ LOCKED_BEGIN = "/* dossier:locked:begin"
 LOCKED_END = "/* dossier:locked:end */"
 _HEX = re.compile(r"^#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$")
 _VAR = re.compile(r"^var\(\s*--([\w-]+)\s*\)$")
+_NUM = r"\s*(\d*\.?\d+%?)\s*"
+_RGB = re.compile(rf"^rgba?\({_NUM}[,\s]{_NUM}[,\s]{_NUM}(?:[,/]{_NUM})?\)$", re.I)
+_COLOUR_FN = re.compile(r"^(?:hsla?|hwb|lab|lch|oklab|oklch|color)\(.*\)$", re.I)
+
+
+def _rgb_hex(m) -> str:
+    """#rrggbb(aa) for an rgb()/rgba() match; channels and alpha may be percentages."""
+    def scale(v, top):
+        return float(v[:-1]) / 100 * top if v.endswith("%") else float(v)
+    out = "#" + "".join(f"{round(min(scale(v, 255), 255)):02x}" for v in m.groups()[:3])
+    alpha = m.group(4)
+    if alpha is not None:
+        out += f"{round(min(scale(alpha, 1), 1) * 255):02x}"
+    return out
 
 
 def _locked(html: str) -> str:
@@ -71,8 +85,9 @@ def _locked(html: str) -> str:
 def parse_tokens(html: str) -> dict:
     """Colour custom properties from the first :root block, locked block first.
 
-    Values are lowercased #hex; var(--x) resolves to x's value; non-colour
-    tokens (fonts, shadows, sizes) are skipped.
+    Values are lowercased #hex; rgb()/rgba() become #hex; var(--x) resolves to
+    x's value; non-colour tokens (fonts, shadows, sizes) are skipped. Another
+    colour function (hsl(), oklch(), ...) is an error rather than a silent skip.
     """
     css = re.sub(r"/\*.*?\*/", "", _locked(html), flags=re.S)
     m = re.search(r":root\s*\{(.*?)\}", css, flags=re.S)
@@ -91,6 +106,10 @@ def parse_tokens(html: str) -> dict:
             value = raw[target].strip()
         if _HEX.match(value):
             tokens[name] = "#" + _norm(value)
+        elif _RGB.match(value):
+            tokens[name] = _rgb_hex(_RGB.match(value))
+        elif _COLOUR_FN.match(value):
+            raise ValueError(f"--{name}: {value} is not supported; write it as #hex or rgb()")
     return tokens
 
 

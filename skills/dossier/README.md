@@ -15,13 +15,15 @@ longer resolves.
 - **Write.** Copies the scaffold, picks a visual family per idea (data table, Vega-Lite axis
   chart, proportion bars, static-SVG DAG, sequence diagram, timeline, comparison matrix,
   annotated code, diff, and four hand-built shapes), and fills it with short, sourced prose: an
-  answer box, captions with reading points, "So what" pull quotes, and a closing Limits section.
+  answer box, key findings, captions with reading points, "So what" pull quotes, and a closing
+  Limits section.
 - **Verify.** Renders the page in headless Chromium. The check fails on render faults and on
-  structure faults (no answer box, no Limits, an unnumbered or out-of-order figure, a
-  "So what" with no claim or placed after its caption, a non-sequence Mermaid diagram, a DAG
-  of 16 or more nodes, a changed locked stylesheet, an unpinned or unknown script host,
-  sideways overflow), then the agent reads every screenshot, because the script cannot judge a
-  chart or a hand-built SVG by eye.
+  structure faults (no answer box, missing or misplaced key findings, a finding not linked to
+  a section, no Limits, an unnumbered or out-of-order figure, a "So what" with no claim or
+  placed after its caption, a non-sequence Mermaid diagram, a DAG of 16 or more nodes, a
+  changed locked stylesheet, an unpinned or unknown script host, sideways overflow), then the
+  agent reads every screenshot, because the script cannot judge a chart or a hand-built SVG by
+  eye.
 - **Grill loop.** Interviews you about what the dossier gets wrong or underweights, one question
   at a time with a recommended answer, and edits the same file.
 
@@ -81,8 +83,8 @@ one shareable document.
   limits.
 - `references/HTML-REPORT.md`: how to fill the scaffold, a recipe per family, the libraries and
   their footguns.
-- `references/WRITING.md`: the prose rules: answer box, captions, "So what", headings, length,
-  banned words.
+- `references/WRITING.md`: the prose rules: answer box, key findings, captions, "So what",
+  headings, length, banned words.
 - `scripts/check_render.py`: the headless render and structure check (`PASS`, `FAIL`,
   `BLOCKED`).
 - `scripts/dag_svg.py`: turns a graph in JSON into two static SVGs (wide and narrow layouts).

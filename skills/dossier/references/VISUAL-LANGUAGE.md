@@ -64,7 +64,7 @@ table says which token carries each role.
 | `--line`, `--line-2` | `#e1e7e7`, `#d3dcdc` | Table rules and dividers |
 | `--rule` | `#7b8786` | DAG edges and node borders |
 | `--coral` | `#f87060` | Fill only, with ink text on it: the at-limit bar, the key timeline dot, the current section number |
-| `--coral-text` | `#c2493a` | Coral as text on white: figure and section numbers, small labels, the key figure in a "So what" claim |
+| `--coral-text` | `#c2493a` | Coral as text on white: figure, section and key-finding numbers, small labels, the key figure in a "So what" claim |
 | `--coral-line` | `#d95646` | Coral as a line, bullet or the second chart series |
 | `--coral-soft` | `#fff1ed` | Coral tint: the DAG focus node, the key timeline row, row hover |
 | `--code-*` | teal family, `--code-fg` `#24514e` on `--code-bg` `#eef3f3` | Code panels, gutters and inline `code` |

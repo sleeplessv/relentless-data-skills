@@ -38,13 +38,18 @@ The scaffold already holds each part below in this order, with placeholders:
    coral; `.u` the unit label), then `.text` with `.label.eyebrow` "Answer", `p.claim` and an
    optional `p.rest`. Without `.lead` the text starts at the left edge. Below 560px the number
    stacks above the text.
-4. **Stats row** (optional) `.stats` with up to four `.stat` (`.v` value, `.l` label). Delete the
+4. **Key findings** `section.findings[aria-label="Key findings"]`, directly after the answer box:
+   `.label.eyebrow` "Key findings", then an `ol` of three to five `li`, each one `a[href="#sN"]`
+   to the section holding the evidence, ending in `span.ref` ("§04"). The list numbers
+   itself 01 to 05 in coral. It is a `section` without the `sec` class, so it never counts as a
+   section.
+5. **Stats row** (optional) `.stats` with up to four `.stat` (`.v` value, `.l` label). Delete the
    whole element when unused.
-5. **Inline contents** `nav.toc-inline`, the same list without numbers; shown below 1100px.
-6. **Sections** `section.sec#sN`, each opening with
+6. **Inline contents** `nav.toc-inline`, the same list without numbers; shown below 1100px.
+7. **Sections** `section.sec#sN`, each opening with
    `h2.sec-head` > `span.n` (two digits), `span` (heading), `span.count` (the figures and tables
    it holds, such as "Figures 5 and 6").
-7. **Limits**, the last `section.sec`, heading text exactly "Limits", body `ol.limits`.
+8. **Limits**, the last `section.sec`, heading text exactly "Limits", body `ol.limits`.
 
 Delete the sidebar and inline contents when the dossier has fewer than four sections.
 
@@ -336,6 +341,8 @@ prints JSON, then the verdict. `--shots DIR` moves the screenshots from `<report
 Each of these is a problem, and any problem makes the verdict `FAIL`:
 
 - No answer box, or Limits missing or not the last section.
+- No key findings box, one not directly after the answer box, fewer than three or more than five
+  findings, or a finding whose link is not the id of a `section.sec`.
 - A figure or table without a numbered caption, or numbered out of order.
 - A "So what" with no `.claim` (or an empty one), more than one `.claim`, more than one `em` in
   the claim, or placed after its caption.
@@ -346,7 +353,7 @@ Each of these is a problem, and any problem makes the verdict `FAIL`:
 - A page or figure wider than its frame at any of the four widths.
 - A diagram, chart or DAG that drew wrong: a parse error, empty, clipped or illegible.
 
-Structure faults (the first seven above) come from the source alone, so the script finds them
+Structure faults (the first eight above) come from the source alone, so the script finds them
 without Playwright or Chromium and reports `FAIL`. `BLOCKED` means the source pass was clean but
 the environment kept the render from running: no Playwright or Chromium, or the CDN unreachable.
 A missing scaffold leaves the locked block unverified, not blocked.

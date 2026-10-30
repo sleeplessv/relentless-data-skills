@@ -29,16 +29,18 @@ strips, small diagram text, and libraries outside the scaffold's block.
 
 Prints JSON, then a final PASS, FAIL, or BLOCKED line. Exit codes:
   0  PASS     every check ran and passed
-  1  FAIL     the page has a defect; fix it and rerun
+  1  FAIL     the page has a defect; fix it and rerun. Structure faults come
+              from the source alone, so they FAIL even with no browser
   2  BLOCKED  the environment kept the check from running (no Playwright or
-              browser, a CDN unreachable); the page is unverified, not passing
+              browser, a CDN unreachable) and the source pass found no
+              structure fault; the page is unverified, not passing
 
 A diagram the page draws only when its hidden container is shown is listed
 under "unverified": its source is rendered offscreen to catch errors, but the
 page's own reveal is not exercised.
 
-Writes to --shots (default: <report-stem>-check/ beside the report), replacing
-earlier shots: page-<k>.png, the page in viewport-height slices with hidden
+Writes to --shots (default: <report-stem>-check/ beside the report), first
+removing earlier shots of these names and leaving other files: page-<k>.png, the page in viewport-height slices with hidden
 diagrams opened, diagram-<n>.png per Mermaid diagram, chart-<n>.png per Vega
 chart and dag-<n>.png per DAG drawing. Read them all: the script cannot tell
 whether a chart or a DAG shows what its caption says (the JSON's "review").
@@ -523,7 +525,8 @@ def library_warnings(urls):
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
         "source", "track", "wbr"}
 FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
-# Block starts that close an open <p>, as browsers do.
+# Block starts that close an open <p>: the block elements a dossier uses, a subset
+# of the set browsers apply.
 P_CLOSERS = {"p", "div", "ul", "ol", "table", "figure", "section", "h2", "h3", "pre", "details"}
 MAX_PARAGRAPH_WORDS = 60
 MAX_VISIBLE_ROWS = 20

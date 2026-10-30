@@ -11,8 +11,8 @@ list the notes under the diff (`ol.markers`).
     git show <rev> -- <file> | python3 diff_html.py - [--lines FIRST-LAST]
         [--note old:LINE=TEXT] [--note new:LINE=TEXT] [--path FILE] [--out FILE]
 
-Exit codes: 0 fragment written, 1 the diff or a note does not fit (reason on
-stderr), 2 usage error. Standard library only.
+Exit codes: 0 fragment written, 1 the input cannot be read or the diff or a
+note does not fit (reason on stderr), 2 usage error. Standard library only.
 """
 from __future__ import annotations
 

@@ -46,8 +46,8 @@ into a throwaway environment; install the browser once:
 uv run --python 3.13 --no-project --with playwright playwright install chromium
 ```
 
-Without them the check reports `BLOCKED`, and the skill hands the dossier over as unverified
-rather than claiming it rendered. The DAG and diff generators need only Python 3.13 or newer.
+Without them the check still fails on structure faults; with none, it reports `BLOCKED`, and
+the skill hands the dossier over as unverified rather than claiming it rendered. The DAG and diff generators need only Python 3.13 or newer.
 
 ## Install
 

@@ -104,12 +104,14 @@ uv run --python 3.13 --no-project --with playwright python <skill-dir>/scripts/c
 ```
 
 If `uv` is missing, run `python3 <skill-dir>/scripts/check_render.py <report.html>` with a
-Python 3.13+ interpreter that has Playwright installed; if there is none, report `BLOCKED`.
+Python 3.13+ interpreter, with Playwright if one has it. Run it even without Playwright: the
+structure pass needs no browser, so a `FAIL` there still comes through.
 
 It prints JSON, then the verdict as its last line. Screenshots go to `<report-stem>-check/`.
 
 - `FAIL` (exit 1): fix every entry under `problems` and rerun.
-- `BLOCKED` (exit 2): unverified, not passing; the environment kept the check from running.
+- `BLOCKED` (exit 2): unverified, not passing; the source pass was clean, but the environment
+  kept the render from running.
   Apply the fix it prints, or hand the dossier over and say its render is unchecked.
 - `PASS` (exit 0): structure holds and everything drew, but the script does not judge meaning.
   Read every screenshot it lists: each chart has its marks, axes and labels, each DAG's text sits

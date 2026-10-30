@@ -325,8 +325,10 @@ Each of these is a problem, and any problem makes the verdict `FAIL`:
 - A page or figure wider than its frame at any of the four widths.
 - A diagram, chart or DAG that drew wrong: a parse error, empty, clipped or illegible.
 
-`BLOCKED` means the environment kept the check from running: no Playwright or Chromium, or the
-CDN unreachable. A missing scaffold leaves the locked block unverified, not blocked.
+Structure faults (the first six above) come from the source alone, so the script finds them
+without Playwright or Chromium and reports `FAIL`. `BLOCKED` means the source pass was clean but
+the environment kept the render from running: no Playwright or Chromium, or the CDN unreachable.
+A missing scaffold leaves the locked block unverified, not blocked.
 
 Each of these is a warning, which the agent resolves or names at handover:
 

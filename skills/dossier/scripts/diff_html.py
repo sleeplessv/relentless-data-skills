@@ -316,10 +316,10 @@ def main(argv=None):
                          "list (`backticks` become code); repeatable")
     ap.add_argument("--out", help="write the fragment here instead of stdout")
     args = ap.parse_args(argv)
-    text = sys.stdin.read() if args.diff == "-" else Path(args.diff).read_text(encoding="utf-8")
     try:
+        text = sys.stdin.read() if args.diff == "-" else Path(args.diff).read_text(encoding="utf-8")
         fragment = render(text, path=args.path, line_range=args.lines, notes=args.note)
-    except DiffError as e:
+    except (OSError, DiffError) as e:
         print(f"diff_html: {e}", file=sys.stderr)
         return 1
     if args.out:

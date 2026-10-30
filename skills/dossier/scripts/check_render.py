@@ -174,10 +174,6 @@ def mermaid_blocks(html):
     return parser.blocks
 
 
-def source_key(text):
-    return " ".join((text or "").split())
-
-
 def locate(text, lines):
     """First line where a diagram's source lines appear consecutively in the file."""
     want = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -203,13 +199,13 @@ def assign_lines(diagrams, html):
     others. A diagram matching no block (another selector, or built by a
     script) is looked up as text; failing that it gets line None.
     """
-    unused = [(source_key(b["source"]), b["line"]) for b in mermaid_blocks(html)]
+    unused = [(norm(b["source"]), b["line"]) for b in mermaid_blocks(html)]
     lines = html.splitlines()
     for d in diagrams:
         d["line"] = None
         if d.get("text") is None:
             continue
-        key = source_key(d["text"])
+        key = norm(d["text"])
         for i, (k, line) in enumerate(unused):
             if k == key:
                 d["line"] = line
@@ -223,13 +219,16 @@ IMPORT = re.compile(r"""import\s+mermaid\s+from\s+["']([^"']+)["']""")
 MERMAID_ENTRY = re.compile(r"/mermaid(?:\.esm)?(?:\.min)?\.m?js$")
 
 
+def strip_js_comments(text):
+    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+    return re.sub(r"(?m)^\s*//.*$", "", text)
+
+
 def import_urls(script_texts):
     """Mermaid import URLs in the page's module scripts, ignoring commented-out ones."""
     urls = []
     for text in script_texts:
-        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-        text = re.sub(r"(?m)^\s*//.*$", "", text)
-        urls += IMPORT.findall(text)
+        urls += IMPORT.findall(strip_js_comments(text))
     return urls
 
 
@@ -380,8 +379,12 @@ def verdict(result):
 
     An error diagram, a 404, or a broken image is a defect whatever else went
     wrong. An unreachable CDN explains unrendered diagrams and script errors,
-    so those count only when the network was fine.
+    so those count only when the network was fine. Structure faults, the
+    locked-block check among them, come from the source alone, so they fail
+    even when no browser ran.
     """
+    if result.get("structure"):
+        return FAIL
     if result.get("blocked"):
         return BLOCKED
     diagrams = (result.get("diagrams", []) + result.get("charts", [])
@@ -389,7 +392,7 @@ def verdict(result):
     requests = result.get("requests", [])
     if (any(d["status"] in DRAWN_BAD and not d.get("env") for d in diagrams)
             or any(r["kind"] == "defect" for r in requests)
-            or result.get("structure") or result.get("layout")
+            or result.get("layout")
             or result.get("broken_images") or result.get("hung")):
         return FAIL
     if (any(r["kind"] == "blocked" for r in requests)
@@ -443,11 +446,6 @@ RESOURCE_ATTRS = {"script": "src", "img": "src", "iframe": "src", "source": "src
 JS_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']""")
 NPM_PATH = re.compile(r"^/npm/((?:@[^/@]+/)?[^/@]+)(?:@([^/]*))?")
 PINNED = re.compile(r"^\d+\.\d+\.\d+$")
-
-
-def strip_js_comments(text):
-    text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-    return re.sub(r"(?m)^\s*//.*$", "", text)
 
 
 class Resources(HTMLParser):
@@ -525,6 +523,8 @@ def library_warnings(urls):
 VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
         "source", "track", "wbr"}
 FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
+# Block starts that close an open <p>, as browsers do.
+P_CLOSERS = {"p", "div", "ul", "ol", "table", "figure", "section", "h2", "h3", "pre", "details"}
 MAX_PARAGRAPH_WORDS = 60
 MAX_VISIBLE_ROWS = 20
 TOC_FROM_SECTIONS = 4
@@ -577,8 +577,8 @@ class Tree(HTMLParser):
         self.root = self.cur = Node("#root", {}, 1)
 
     def handle_starttag(self, tag, attrs):
-        if tag == "p" and self.cur.tag == "p":
-            self.cur = self.cur.parent   # <p> cannot nest
+        if self.cur.tag == "p" and tag in P_CLOSERS:
+            self.cur = self.cur.parent   # a block start closes the paragraph
         node = Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur)
         self.cur.children.append(node)
         if tag not in VOID:
@@ -604,12 +604,8 @@ def parse_tree(html):
     return t.root
 
 
-def words(text):
-    return text.split()
-
-
 def norm(text):
-    return " ".join(text.split())
+    return " ".join((text or "").split())
 
 
 def figure_of(node):
@@ -761,7 +757,7 @@ def structure(html):
             warnings.append(f'heading "{title}" is in {case}; use sentence case')
 
     for p in root.find(lambda n: n.tag == "p"):
-        n = len(words(p.text()))
+        n = len(p.text().split())
         if n > MAX_PARAGRAPH_WORDS:
             warnings.append(f"the paragraph at line {p.line} has {n} words; keep paragraphs to "
                             f"{MAX_PARAGRAPH_WORDS} or split them into bullets")
@@ -1406,11 +1402,18 @@ async def settle(q, budget, quiet_ms, since):
         await asyncio.sleep(0.25)
 
 
+SHOT_NAME = re.compile(r"(?:page|diagram|chart|dag)-\d+\.png")
+
+
+def stale_shots(shots):
+    """Earlier shots in the folder, matched by the exact names this script writes."""
+    return [p for p in shots.iterdir() if p.is_file() and SHOT_NAME.fullmatch(p.name)]
+
+
 async def screenshots(page, q, shots, diagrams, result):
     """Page slices and one shot per diagram; earlier shots are removed first."""
     shots.mkdir(parents=True, exist_ok=True)
-    for old in [*shots.glob("page*.png"), *shots.glob("diagram-*.png"),
-                *shots.glob("chart-*.png"), *shots.glob("dag-*.png")]:
+    for old in stale_shots(shots):
         old.unlink()
     height = await q.call("() => document.documentElement.scrollHeight")
     bands = page_slices(height, VIEWPORT["height"])

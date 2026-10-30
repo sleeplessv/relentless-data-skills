@@ -346,6 +346,17 @@ class TestPageSlices(unittest.TestCase):
         self.assertEqual(len(check_render.page_slices(10 ** 6, 900, limit=5)), 5)
 
 
+class TestStaleShots(unittest.TestCase):
+    def test_only_the_scripts_own_shot_names_are_removed(self):
+        mine = ["page-1.png", "page-12.png", "diagram-3.png", "chart-1.png", "dag-2.png"]
+        theirs = ["page-header.png", "diagram-foo.png", "chart-1.jpg", "pages.png", "dag-.png"]
+        with tempfile.TemporaryDirectory() as d:
+            for name in mine + theirs:
+                (Path(d) / name).write_bytes(b"")
+            stale = sorted(p.name for p in check_render.stale_shots(Path(d)))
+        self.assertEqual(stale, sorted(mine))
+
+
 class TestCounted(unittest.TestCase):
     def test_repeats_collapse(self):
         self.assertEqual(check_render.counted(["a", "b", "a"]), ["a (x2)", "b"])
@@ -541,6 +552,11 @@ class TestStructure(unittest.TestCase):
         self.assertEqual(self.warnings(ok), "")
         long = dossier(section(1, "How the check runs", f"<p>{words(61)}</p>" + figure(1)))
         self.assertIn("61 words", self.warnings(long))
+
+    def test_a_list_after_an_unclosed_paragraph_is_not_part_of_it(self):
+        items = "".join(f"<li>{' '.join(['word'] * 10)}</li>" for _ in range(7))
+        html = dossier(section(1, "How the check runs", f"<p>Intro<ul>{items}</ul>" + figure(1)))
+        self.assertEqual(self.warnings(html), "")
 
     def test_section_without_a_figure_warns(self):
         html = dossier(section(1, "How the check runs", "<p>Prose only.</p>"))
@@ -830,7 +846,8 @@ class TestVerdictExtensions(unittest.TestCase):
 
     def test_structure_and_layout_problems_fail_even_offline(self):
         for case in (result(structure=["no answer box"]), result(layout=["page scrolls"]),
-                     result(structure=["no Limits"], requests=[self.blocked_cdn])):
+                     result(structure=["no Limits"], requests=[self.blocked_cdn]),
+                     result(blocked="no browser", structure=["no answer box"])):
             self.assertEqual(check_render.verdict(case), FAIL, case)
 
     def test_drawn_but_bad_charts_and_dags_fail(self):

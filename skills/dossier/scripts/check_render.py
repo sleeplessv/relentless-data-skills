@@ -62,6 +62,7 @@ import re
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -855,6 +856,202 @@ def source_checks(html, scaffold_html, scaffold_path):
     if locked:
         problems.append(locked)
     return problems, warnings, []
+
+
+# ---------------------------------------------------------------------------
+# Reading the dossier: one parse into a model of what the page states. The model
+# holds texts, counts, positions and source lines; the house rules judge them.
+# Every tuple is in document (start-tag) order, and inert content and comments
+# never reach it, except the document <title> text.
+
+@dataclass(frozen=True)
+class Answer:
+    claims: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class KeyFinding:
+    href: str | None   # None: the item has no <a>; "": the <a> has no href
+
+
+@dataclass(frozen=True)
+class KeyFindings:
+    follows_answer: bool
+    items: tuple[KeyFinding, ...]   # top-level <li> only
+
+
+@dataclass(frozen=True)
+class Section:
+    id: str | None
+    title: str
+    has_figure: bool
+
+
+@dataclass(frozen=True)
+class Claim:
+    text: str
+    key_figures: int
+
+
+@dataclass(frozen=True)
+class SoWhat:
+    after_caption: bool
+    has_label: bool
+    claims: tuple[Claim, ...]
+
+
+@dataclass(frozen=True)
+class Figure:
+    kind: str   # "Figure" or "Table"
+    number: int
+    id: str
+    line: int
+    figno: str
+    so_whats: tuple[SoWhat, ...]
+    dag_so_what: bool
+
+
+@dataclass(frozen=True)
+class Visual:
+    kind: str   # "table", "chart", "mermaid", "dag-frame", "figframe" or "dag"
+    line: int
+
+
+@dataclass(frozen=True)
+class MermaidBlock:
+    line: int
+    source: str
+
+
+@dataclass(frozen=True)
+class Dag:
+    figure: tuple[str, int] | None
+    line: int
+    nodes: int
+
+
+@dataclass(frozen=True)
+class Paragraph:
+    line: int
+    text: str
+
+
+@dataclass(frozen=True)
+class Table:
+    line: int
+    visible_rows: int
+
+
+@dataclass(frozen=True)
+class Dossier:
+    answer: Answer | None
+    key_findings: KeyFindings | None
+    sections: tuple[Section, ...]
+    figures: tuple[Figure, ...]
+    uncaptioned: tuple[Visual, ...]
+    mermaid: tuple[MermaidBlock, ...]
+    dags: tuple[Dag, ...]
+    paragraphs: tuple[Paragraph, ...]
+    tables: tuple[Table, ...]
+    has_toc: bool
+    has_toc_inline: bool
+    title: str
+    prose: str
+    resources: tuple[str, ...]
+    vega_data_urls: tuple[str, ...]
+
+
+def read_dossier(html):
+    """The Dossier model of `html`; never raises, and an unrecognisable page
+    gives None, empty tuples, "" and False."""
+    root = parse_tree(html)
+    answers = root.find(lambda n: n.tag == "section" and "answer" in n.classes)
+    boxes = root.find(lambda n: n.tag == "section" and "findings" in n.classes)
+    body = next(iter(root.find(lambda n: n.tag == "body")), root)
+    title = next(iter(root.find(lambda n: n.tag == "title"
+                                and not any(a.tag == "svg" for a in n.ancestors()))), None)
+    return Dossier(
+        answer=Answer(tuple(norm(c.text()) for c in answers[0].find(lambda n: "claim" in n.classes)))
+        if answers else None,
+        key_findings=_read_key_findings(boxes[0], answers) if boxes else None,
+        sections=tuple(_read_section(s) for s in root.find(lambda n: n.tag == "section"
+                                                            and "sec" in n.classes)),
+        figures=tuple(_read_figure(f) for f in root.find(figure_of)),
+        uncaptioned=_read_uncaptioned(root),
+        mermaid=tuple(MermaidBlock(b["line"], b["source"]) for b in mermaid_blocks(html)),
+        dags=_read_dags(root),
+        paragraphs=tuple(Paragraph(p.line, norm(p.text())) for p in root.find(lambda n: n.tag == "p")),
+        tables=tuple(Table(t.line, len([r for r in t.find(lambda n: n.tag == "tr")
+                                        if r.find(lambda n: n.tag == "td") and not hidden(r)]))
+                     for t in root.find(lambda n: n.tag == "table")),
+        has_toc=bool(root.find(lambda n: n.attrs.get("id") == "toc")),
+        has_toc_inline=bool(root.find(lambda n: "toc-inline" in n.classes)),
+        title=title.raw if title else "",
+        prose=body.text(skip=lambda n: n.tag in NOT_PROSE),
+        resources=tuple(resource_urls(html)),
+        vega_data_urls=tuple(vega_data_urls(html)),
+    )
+
+
+def _read_key_findings(box, answers):
+    sibs = [c for c in box.parent.children if isinstance(c, Node)]
+    at = sibs.index(box)
+    items = box.find(lambda n: n.tag == "li" and not any(a.tag == "li" for a in n.ancestors()))
+    links = [next(iter(li.find(lambda n: n.tag == "a")), None) for li in items]
+    return KeyFindings(follows_answer=bool(at) and sibs[at - 1] in answers,
+                       items=tuple(KeyFinding(a.attrs.get("href", "") if a else None) for a in links))
+
+
+def _read_section(s):
+    h2 = next(iter(s.find(lambda n: n.tag == "h2")), None)
+    return Section(s.attrs.get("id"), heading_title(h2) if h2 else "", bool(s.find(figure_of)))
+
+
+def _read_figure(f):
+    kind, n = figure_of(f)
+    nos = [x for c in f.find(lambda x: "caption" in x.classes)
+           for x in c.find(lambda x: "figno" in x.classes)]
+    order = f.find(lambda x: "caption" in x.classes or "sowhat" in x.classes)
+    so_whats = []
+    for so in f.find(lambda x: "sowhat" in x.classes):
+        claims = so.find(lambda x: "claim" in x.classes)
+        so_whats.append(SoWhat(
+            after_caption=any("caption" in c.classes for c in order[:order.index(so)]),
+            has_label=bool(so.find(lambda x: "lbl" in x.classes)),
+            claims=tuple(Claim(norm(c.text()), len(c.find(lambda x: x.tag == "em"))) for c in claims)))
+    # A DAG figure carries its so-what in .dag-notes under an h3 "So what".
+    dag_so = any(norm(h.text()).lower() == "so what"
+                 for d in f.find(lambda x: "dag-notes" in x.classes)
+                 for h in d.find(lambda x: x.tag == "h3"))
+    return Figure(kind, n, f.attrs["id"], f.line, norm(nos[0].text()) if nos else "",
+                  tuple(so_whats), dag_so)
+
+
+def _read_uncaptioned(root):
+    """Tables, charts, Mermaid blocks, DAGs and figure frames outside any figure,
+    each counted once at its outermost element."""
+    kinds = ("chart", "mermaid", "dag-frame", "figframe")
+    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds)
+                        or (n.tag == "svg" and "dag" in n.classes))
+    return tuple(Visual("table" if v.tag == "table" else next((k for k in kinds if k in v.classes), "dag"),
+                        v.line)
+                 for v in visuals if not in_figure(v) and not any(a in visuals for a in v.ancestors()))
+
+
+def _read_dags(root):
+    """Each .dag-frame, and each svg.dag outside one, with the most nodes any of
+    its orientations draws."""
+    def svg_dag(n):
+        return n.tag == "svg" and "dag" in n.classes
+    frames = root.find(lambda n: "dag-frame" in n.classes or (
+        svg_dag(n) and not any("dag-frame" in a.classes for a in n.ancestors())))
+    dags = []
+    for fr in frames:
+        svgs = [fr] if fr.tag == "svg" else fr.find(svg_dag)
+        nodes = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
+        fig = next((figure_of(a) for a in fr.ancestors() if figure_of(a)), None)
+        dags.append(Dag(fig, fr.line, nodes))
+    return tuple(dags)
 
 
 # ---------------------------------------------------------------------------

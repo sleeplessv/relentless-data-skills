@@ -72,39 +72,6 @@ class TestReadSource(unittest.TestCase):
         self.assertEqual(self.read(b"\xef\xbb\xbf<p>x</p>"), "<p>x</p>")
 
 
-class TestMermaidBlocks(unittest.TestCase):
-    def test_finds_blocks_with_lines_and_decoded_source(self):
-        html = (
-            "<html><body>\n"
-            '<pre class="mermaid">flowchart LR\n  A --&gt; B</pre>\n'
-            '<div class="card mermaid">sequenceDiagram</div>\n'
-            "</body></html>"
-        )
-        blocks = check_render.mermaid_blocks(html)
-        self.assertEqual([b["line"] for b in blocks], [2, 4])
-        self.assertEqual(blocks[0]["source"], "flowchart LR\n  A --> B")
-        self.assertEqual(blocks[1]["source"], "sequenceDiagram")
-
-    def test_ignores_elements_without_the_mermaid_class(self):
-        html = '<pre class="mermaid-ish">x</pre><pre class="code">flowchart</pre>'
-        self.assertEqual(check_render.mermaid_blocks(html), [])
-
-    def test_nested_same_tag_does_not_end_the_block_early(self):
-        html = '<div class="mermaid">a<div>b</div>c</div><div>outside</div>'
-        self.assertEqual(check_render.mermaid_blocks(html)[0]["source"], "abc")
-
-    def test_skips_blocks_the_browser_never_renders(self):
-        html = (
-            '<template><pre class="mermaid">T</pre></template>\n'
-            '<noscript><pre class="mermaid">N</pre></noscript>\n'
-            '<textarea><pre class="mermaid">X</pre></textarea>\n'
-            "<!-- <pre class=\"mermaid\">C</pre> -->\n"
-            '<pre class="mermaid">real</pre>\n'
-        )
-        blocks = check_render.mermaid_blocks(html)
-        self.assertEqual([(b["line"], b["source"]) for b in blocks], [(5, "real")])
-
-
 class TestAssignLines(unittest.TestCase):
     def test_pairs_by_source_text_not_position(self):
         html = ('<div id="slot"></div>\n'
@@ -430,37 +397,6 @@ class TestLockedBlock(unittest.TestCase):
 
 
 MERMAID_PIN = "https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.esm.min.mjs"
-
-
-class TestResourceUrls(unittest.TestCase):
-    def test_collects_every_resource_the_page_loads(self):
-        html = (
-            '<link rel="stylesheet" href="https://fonts.example/a.css">\n'
-            '<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>\n'
-            '<img src="https://img.example/x.png">\n'
-            '<a href="https://elsewhere.example/">a link is not a resource</a>\n'
-            '<script type="module">\n'
-            '  // import x from "https://old.example/x.mjs";\n'
-            f'  import mermaid from "{MERMAID_PIN}";\n'
-            '  const m = await import("https://esm.sh/thing@1");\n'
-            '</script>\n'
-            '<img src="local.png"><img src="data:image/gif;base64,R0lG">\n'
-        )
-        self.assertEqual(check_render.resource_urls(html), [
-            "https://fonts.example/a.css",
-            "https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js",
-            "https://img.example/x.png",
-            MERMAID_PIN,
-            "https://esm.sh/thing@1",
-        ])
-
-    def test_hints_that_load_nothing_are_not_resources(self):
-        html = ('<link rel="preconnect" href="https://cdn.jsdelivr.net">'
-                '<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">'
-                '<link rel="Preconnect stylesheet" href="https://fonts.example/a.css">'
-                '<link href="https://fonts.example/b.css">')
-        self.assertEqual(check_render.resource_urls(html),
-                         ["https://fonts.example/a.css", "https://fonts.example/b.css"])
 
 
 class TestUrlProblem(unittest.TestCase):
@@ -1009,7 +945,7 @@ class TestReadDossier(unittest.TestCase):
                       'vegaEmbed("#c", {"data": {"values": [{"url": "x.csv"}]}});</script>')
         self.assertEqual(d.vega_data_urls, ("rows.csv",))
 
-    # Carried over from TestMermaidBlocks and TestResourceUrls, which go in the contract phase.
+    # Carried over from TestMermaidBlocks and TestResourceUrls.
 
     def test_mermaid_blocks_with_lines_and_decoded_source(self):
         html = (

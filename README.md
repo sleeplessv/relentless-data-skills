@@ -194,8 +194,12 @@ schedule, and manual dispatch. See [the CI workflow](.github/workflows/ci.yml)
 for the schedule and Python versions.
 
 Run `scripts/check.sh` before committing. It runs the checks below except the
-doc URL check (add `--network`), plus `claude plugin validate .` when the
-`claude` CLI is installed. To run its fast subset on every commit, enable the
+doc URL check (add `--network`) and the dossier browser tests (add `--browser`),
+plus `claude plugin validate .` when the `claude` CLI is installed. `--browser`
+needs `uv` and network access: it installs Chromium and runs `tests/test_dossier.py`
+with Playwright, and fails if any of those tests skips. The
+[browser workflow](.github/workflows/browser.yml) runs it on pull requests that
+change the dossier skill. To run its fast subset on every commit, enable the
 opt-in hook once per clone with `git config core.hooksPath .githooks`.
 
 - `python3 -m unittest discover -s tests -v` runs the repository's Python tests.
@@ -214,7 +218,9 @@ After editing a skill's `plugin.json`, run
 `python3 scripts/sync_registry.py --write` to regenerate the catalog.
 
 The root Python validation scripts and tests require Python 3.13 or newer, use
-only the standard library, and require no dependency installation. Without a
+only the standard library, and require no dependency installation. The dossier
+browser tests are the one exception: they skip without Playwright, and
+`scripts/check.sh --browser` supplies it. Without a
 local 3.13, run them with `uv run --python 3.13 --no-project python ...`. Individual skills can have
 additional dependencies.
 

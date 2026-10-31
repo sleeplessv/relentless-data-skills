@@ -1,0 +1,30 @@
+name: Dossier browser tests
+
+# The dossier render check's browser tests need Playwright and Chromium, so they
+# run here, apart from the install-free tests in ci.yml, and only when the
+# dossier skill or its tests change. Not a required check: the gallery loads its
+# libraries from public CDNs, so an outage there can fail it.
+
+on:
+  pull_request:
+    paths:
+      - "skills/dossier/**"
+      - "tests/test_dossier*.py"
+      - "scripts/check.sh"
+      - ".github/workflows/browser.yml"
+  workflow_dispatch:
+
+jobs:
+  browser-tests:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v6
+      - name: Install Chromium's system libraries
+        run: uv run --python 3.13 --no-project --with playwright playwright install-deps chromium
+      - name: Run the checks with the browser tests
+        run: scripts/check.sh --fast --browser --base "$(git rev-parse HEAD^1)"

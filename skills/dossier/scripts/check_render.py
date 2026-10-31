@@ -988,12 +988,15 @@ def _read_figure(f):
                   tuple(so_whats), dag_so)
 
 
+def _svg_dag(n):
+    return n.tag == "svg" and "dag" in n.classes
+
+
 def _read_uncaptioned(root):
     """Tables, charts, Mermaid blocks, DAGs and figure frames outside any figure,
     each counted once at its outermost element."""
     kinds = ("chart", "mermaid", "dag-frame", "figframe")
-    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds)
-                        or (n.tag == "svg" and "dag" in n.classes))
+    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds) or _svg_dag(n))
     return tuple(Visual("table" if v.tag == "table" else next((k for k in kinds if k in v.classes), "dag"),
                         v.line)
                  for v in visuals if not _in_figure(v) and not any(a in visuals for a in v.ancestors()))
@@ -1002,13 +1005,11 @@ def _read_uncaptioned(root):
 def _read_dags(root):
     """Each .dag-frame, and each svg.dag outside one, with the most nodes any of
     its orientations draws."""
-    def svg_dag(n):
-        return n.tag == "svg" and "dag" in n.classes
     frames = root.find(lambda n: "dag-frame" in n.classes or (
-        svg_dag(n) and not any("dag-frame" in a.classes for a in n.ancestors())))
+        _svg_dag(n) and not any("dag-frame" in a.classes for a in n.ancestors())))
     dags = []
     for fr in frames:
-        svgs = [fr] if fr.tag == "svg" else fr.find(svg_dag)
+        svgs = [fr] if fr.tag == "svg" else fr.find(_svg_dag)
         nodes = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
         fig = next((_figure_of(a) for a in fr.ancestors() if _figure_of(a)), None)
         dags.append(Dag(fig, fr.line, nodes))

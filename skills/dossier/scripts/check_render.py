@@ -62,6 +62,7 @@ import re
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -99,9 +100,6 @@ REVIEW = ("This check proves structure and that things drew, not that they are r
 DRAWN_BAD = {"error", "empty", "illegible", "clipped", "spill"}
 # Statuses for which nothing was drawn: a defect, unless the network is to blame.
 NOT_DRAWN = {"unrendered", "rendering"}
-# Elements whose content never becomes live page elements.
-INERT = {"template", "noscript", "textarea", "title", "xmp", "iframe",
-         "noembed", "noframes"}
 FETCH_FAILED = re.compile(
     r"Failed to fetch dynamically imported module|error loading dynamically "
     r"imported module|Importing a module script failed", re.I)
@@ -122,14 +120,6 @@ def read_source(path):
         except (LookupError, UnicodeDecodeError):
             pass
     return data.decode("cp1252", "replace")
-
-
-def mermaid_blocks(html):
-    """Each live `class="mermaid"` element's source text and start line (Tree skips
-    inert content and comments); a block nested in another counts once."""
-    return [{"line": n.line, "source": n.text()}
-            for n in parse_tree(html).find(lambda n: "mermaid" in n.classes)
-            if not any("mermaid" in a.classes for a in n.ancestors())]
 
 
 def locate(text, lines):
@@ -157,7 +147,7 @@ def assign_lines(diagrams, html):
     others. A diagram matching no block (another selector, or built by a
     script) is looked up as text; failing that it gets line None.
     """
-    unused = [(norm(b["source"]), b["line"]) for b in mermaid_blocks(html)]
+    unused = [(norm(b.source), b.line) for b in read_dossier(html).mermaid]
     lines = html.splitlines()
     for d in diagrams:
         d["line"] = None
@@ -399,39 +389,8 @@ def locked_problem(report_html, scaffold_html):
     return None
 
 
-RESOURCE_ATTRS = {"script": "src", "img": "src", "iframe": "src", "source": "src",
-                  "video": "src", "audio": "src", "embed": "src", "link": "href"}
-JS_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']""")
 NPM_PATH = re.compile(r"^/npm/((?:@[^/@]+/)?[^/@]+)(?:@([^/]*))?")
 PINNED = re.compile(r"^\d+\.\d+\.\d+$")
-HINT_RELS = {"preconnect", "dns-prefetch"}   # <link> hints that load nothing
-# A Vega data source read from a URL: `data: {url: ...}`, keys quoted or not.
-# shortcut: allows one level of nested braces before url, so a url after a deeper
-# object (format: {parse: {...}}) is missed; the browser pass still catches remote hosts.
-VEGA_DATA_URL = re.compile(r"""\bdata["']?\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?\burl["']?\s*:\s*["']([^"']*)["']""")
-
-
-def resource_urls(html):
-    """Remote URLs the page loads: src/href of resources and JS imports, in order."""
-    urls = []
-    for n in parse_tree(html).walk():
-        attr = RESOURCE_ATTRS.get(n.tag)
-        rels = set(n.attrs.get("rel", "").lower().split())
-        if n.tag == "link" and rels and rels <= HINT_RELS:
-            continue
-        if attr and n.attrs.get(attr):
-            urls.append(n.attrs[attr].strip())
-        if n.tag == "script" and not n.attrs.get("src"):
-            urls += JS_IMPORT.findall(strip_js_comments(n.text()))
-    return [u for u in urls if urlsplit(u).scheme in ("http", "https")]
-
-
-def vega_data_urls(html):
-    """URLs a Vega spec in an inline script loads its data from; data: URIs are inline."""
-    urls = []
-    for n in parse_tree(html).find(lambda n: n.tag == "script" and not n.attrs.get("src")):
-        urls += VEGA_DATA_URL.findall(strip_js_comments(n.text()))
-    return [u for u in urls if not u.startswith("data:")]
 
 
 def npm_package(url):
@@ -474,20 +433,11 @@ def library_warnings(urls):
 # ---------------------------------------------------------------------------
 # Structure pass: the house rules a page's source can prove or disprove.
 
-VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
-        "source", "track", "wbr"}
-FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
-# Start tags that close an open <p>, as browsers apply them.
-P_CLOSERS = {"address", "article", "aside", "blockquote", "details", "dialog", "div", "dl",
-             "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",
-             "h6", "header", "hgroup", "hr", "main", "menu", "nav", "ol", "p", "pre", "search",
-             "section", "summary", "table", "ul"}
 MAX_PARAGRAPH_WORDS = 60
 MAX_CLAIM_WORDS = 20   # a "So what" claim is set large; longer ones crowd the margin
 MAX_VISIBLE_ROWS = 20
 MIN_FINDINGS, MAX_FINDINGS = 3, 5   # the key findings under the answer box
 TOC_FROM_SECTIONS = 4
-NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg"}
 # AI vocabulary that leaks in from source material: references/WRITING.md "Banned words"
 # ("landscape" is banned only when abstract, which a regex cannot tell, so it is left out).
 SLOP = re.compile(r"\b(additionally|crucial(?:ly)?|delv(?:e|es|ed|ing)|enduring|"
@@ -501,123 +451,8 @@ SLOP = re.compile(r"\b(additionally|crucial(?:ly)?|delv(?:e|es|ed|ing)|enduring|
 PLACEHOLDER = re.compile(r"\[[A-Z][^\]\n]{6,}\]")
 
 
-class Node:
-    def __init__(self, tag, attrs, line, parent=None):
-        self.tag, self.attrs, self.line, self.parent = tag, attrs, line, parent
-        self.classes = set((attrs.get("class") or "").split())
-        self.children = []   # Node or str
-        self.raw = ""        # an INERT element's text, kept out of text()
-
-    def walk(self):
-        for c in self.children:
-            if isinstance(c, Node):
-                yield c
-                yield from c.walk()
-
-    def find(self, pred):
-        return [n for n in self.walk() if pred(n)]
-
-    def ancestors(self):
-        a = self.parent
-        while a is not None:
-            yield a
-            a = a.parent
-
-    def text(self, skip=lambda n: False):
-        out = []
-        for c in self.children:
-            if isinstance(c, str):
-                out.append(c)
-            elif not skip(c):
-                out.append(c.text(skip))
-        return "".join(out)
-
-
-class Tree(HTMLParser):
-    """A forgiving DOM: end tags close the nearest open match; strays are ignored.
-
-    An INERT element is kept, but not its content: the browser never turns
-    <template> or <noscript> markup, or <textarea> and <title> text, into page elements.
-    Its text goes to the node's raw instead.
-    """
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.root = self.cur = Node("#root", {}, 1)
-        self._inert = None  # [tag, depth, node] of the inert element being skipped
-
-    def handle_starttag(self, tag, attrs):
-        if self._inert:
-            if tag == self._inert[0]:
-                self._inert[1] += 1
-            return
-        if self.cur.tag == "p" and tag in P_CLOSERS:
-            self.cur = self.cur.parent   # a block start closes the paragraph
-        node = Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur)
-        self.cur.children.append(node)
-        if tag in INERT:
-            self._inert = [tag, 1, node]
-        elif tag not in VOID:
-            self.cur = node
-
-    def handle_startendtag(self, tag, attrs):
-        if not self._inert:
-            self.cur.children.append(Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur))
-
-    def handle_endtag(self, tag):
-        if self._inert:
-            if tag == self._inert[0]:
-                self._inert[1] -= 1
-                if not self._inert[1]:
-                    self._inert = None
-            return
-        for a in [self.cur, *self.cur.ancestors()]:
-            if a.tag == tag:
-                self.cur = a.parent
-                return
-
-    def handle_data(self, data):
-        if self._inert:
-            self._inert[2].raw += data
-        else:
-            self.cur.children.append(data)
-
-
-def parse_tree(html):
-    t = Tree()
-    t.feed(html)
-    t.close()
-    return t.root
-
-
 def norm(text):
     return " ".join((text or "").split())
-
-
-def figure_of(node):
-    """('Figure'|'Table', n) for a figure container, else None."""
-    m = FIGURE_ID.match(node.attrs.get("id", ""))
-    if not m:
-        return None
-    return ("Figure", int(m.group(1))) if m.group(1) else ("Table", int(m.group(2)))
-
-
-def in_figure(node):
-    return any(figure_of(a) for a in node.ancestors())
-
-
-def hidden(node):
-    for a in [node, *node.ancestors()]:
-        if "hidden" in a.attrs or re.search(r"display\s*:\s*none", a.attrs.get("style", "")):
-            return True
-        if a.tag == "details" and "open" not in a.attrs and a is not node:
-            return True
-    return False
-
-
-def heading_title(h2):
-    """An h2's own words, without the section number and the figure count spans."""
-    return norm(h2.text(skip=lambda n: bool(n.classes & {"n", "count"})))
 
 
 def case_problem(title):
@@ -645,112 +480,89 @@ def mermaid_kind(source):
     return None
 
 
-def sowhat_faults(so, where, fig):
-    """(problems, warnings) for a .sowhat in figure `fig`, which must be a pull
+def sowhat_faults(so, where):
+    """(problems, warnings) for a "So what" at `where`, which must be a pull
     quote: a .lbl, then one short .claim with at most one <em>, placed before
     the caption."""
     problems, warnings = [], []
-    order = fig.find(lambda x: x is so or "caption" in x.classes)
-    if any("caption" in c.classes for c in order[:order.index(so)]):
+    if so.after_caption:
         problems.append(f'{where}\'s "So what" comes after its caption; put .sowhat first in .margin')
-    if not so.find(lambda x: "lbl" in x.classes):
+    if not so.has_label:
         warnings.append(f'{where}\'s "So what" has no .lbl: start it with <p class="lbl">So what</p>')
-    claims = so.find(lambda x: "claim" in x.classes)
-    if len(claims) > 1:
-        problems.append(f'{where}\'s "So what" has {len(claims)} .claim; keep one and move the '
+    if len(so.claims) > 1:
+        problems.append(f'{where}\'s "So what" has {len(so.claims)} .claim; keep one and move the '
                         "rest to .rest")
-    if not claims or not claims[0].text().strip():
+    if not so.claims or not so.claims[0].text:
         problems.append(f'{where}\'s "So what" has no .claim: state the conclusion in '
                         '<p class="claim">')
         return problems, warnings
-    for claim in claims:
-        ems = len(claim.find(lambda x: x.tag == "em"))
-        if ems > 1:
-            problems.append(f'{where}\'s "So what" claim has {ems} <em>; mark one key figure at most')
-        words = len(claim.text().split())
+    for claim in so.claims:
+        if claim.key_figures > 1:
+            problems.append(f'{where}\'s "So what" claim has {claim.key_figures} <em>; '
+                            "mark one key figure at most")
+        words = len(claim.text.split())
         if words > MAX_CLAIM_WORDS:
             warnings.append(f'{where}\'s "So what" claim has {words} words; keep it to '
                             f"{MAX_CLAIM_WORDS} and move the detail to .rest")
     return problems, warnings
 
 
-def findings_faults(box, answers, sec_ids):
+def findings_faults(box, sec_ids):
     """Problems with the key-findings box: placed right after the answer box,
     with 3 to 5 findings, each linking to the id of a section.sec."""
     problems = []
-    sibs = [c for c in box.parent.children if isinstance(c, Node)]
-    at = sibs.index(box)
-    if not at or sibs[at - 1] not in answers:
+    if not box.follows_answer:
         problems.append("the key findings box is not right after the answer box; move "
                         '<section class="findings"> up to follow section.answer, before .stats')
-    items = box.find(lambda n: n.tag == "li" and not any(a.tag == "li" for a in n.ancestors()))
-    if not MIN_FINDINGS <= len(items) <= MAX_FINDINGS:
-        problems.append(f"the key findings box lists {len(items)} findings; give {MIN_FINDINGS} "
+    if not MIN_FINDINGS <= len(box.items) <= MAX_FINDINGS:
+        problems.append(f"the key findings box lists {len(box.items)} findings; give {MIN_FINDINGS} "
                         f"to {MAX_FINDINGS}, one sentence each")
-    for i, li in enumerate(items, 1):
-        link = next(iter(li.find(lambda n: n.tag == "a")), None)
-        href = link.attrs.get("href", "") if link else ""
-        if link is None:
+    for i, item in enumerate(box.items, 1):
+        if item.href is None:
             problems.append(f'key finding {i} has no link; wrap it in <a href="#sN"> to its section')
-        elif not href.startswith("#") or href[1:] not in sec_ids:
-            problems.append(f'key finding {i} links to "{href}", which is not the id of a '
+        elif not item.href.startswith("#") or item.href[1:] not in sec_ids:
+            problems.append(f'key finding {i} links to "{item.href}", which is not the id of a '
                             "section.sec; link it to the section that holds the evidence")
     return problems
 
 
-def structure(html):
-    """(problems, warnings) from the page source: answer box, key findings, Limits, figure
-    numbering and captions, Mermaid use, DAG size, and the prose warnings."""
-    root = parse_tree(html)
+def structure(dossier):
+    """(problems, warnings) from the page's Dossier model: answer box, key findings, Limits,
+    figure numbering and captions, Mermaid use, DAG size, and the prose warnings."""
     problems, warnings = [], []
 
-    answers = root.find(lambda n: n.tag == "section" and "answer" in n.classes)
-    if not answers:
+    if dossier.answer is None:
         problems.append('no answer box: add <section class="answer"> with the claim in a '
                         '.claim paragraph at the top')
-    elif not any(c.text().strip() for c in answers[0].find(lambda n: "claim" in n.classes)):
+    elif not any(dossier.answer.claims):
         problems.append("the answer box has no .claim: state the one claim the dossier defends")
 
-    secs = root.find(lambda n: n.tag == "section" and "sec" in n.classes)
-    findings = root.find(lambda n: n.tag == "section" and "findings" in n.classes)
-    if not findings:
+    secs = dossier.sections
+    if dossier.key_findings is None:
         problems.append('no key findings: add <section class="findings"> right after the answer '
                         "box, an <ol> of 3 to 5 one-sentence findings, each linking to its section")
     else:
-        problems += findings_faults(findings[0], answers, {s.attrs.get("id") for s in secs})
+        problems += findings_faults(dossier.key_findings, {s.id for s in secs})
 
-    titled = []
-    for s in secs:
-        h2 = next(iter(s.find(lambda n: n.tag == "h2")), None)
-        titled.append((s, h2, heading_title(h2) if h2 else ""))
-    limits = [i for i, (_, _, t) in enumerate(titled) if t.lower() == "limits"]
+    limits = [i for i, s in enumerate(secs) if s.title.lower() == "limits"]
     if not limits:
         problems.append('no Limits section: end with <section class="sec"> headed "Limits", '
                         'even when it says "None"')
-    elif limits[-1] != len(titled) - 1:
+    elif limits[-1] != len(secs) - 1:
         problems.append("the Limits section is not the last section")
 
-    figures = root.find(figure_of)
     counters = {"Figure": [], "Table": []}
-    for f in figures:
-        kind, n = figure_of(f)
+    for f in dossier.figures:
+        kind, n = f.kind, f.number
         counters[kind].append(n)
         want = f"{kind} {n}."
-        nos = [x for c in f.find(lambda x: "caption" in x.classes)
-               for x in c.find(lambda x: "figno" in x.classes)]
-        got = norm(nos[0].text()) if nos else ""
-        if got != want:
-            problems.append(f'{kind} {n} (id="{f.attrs["id"]}", line {f.line}) needs a caption '
-                            f'whose .figno reads "{want}"' + (f'; it reads "{got}"' if got else ""))
-        # A DAG figure carries its so-what in .dag-notes under an h3 "So what".
-        dag_so = any(norm(h.text()).lower() == "so what"
-                     for d in f.find(lambda x: "dag-notes" in x.classes)
-                     for h in d.find(lambda x: x.tag == "h3"))
-        sowhats = f.find(lambda x: "sowhat" in x.classes)
-        if not dag_so and not sowhats:
+        if f.figno != want:
+            problems.append(f'{kind} {n} (id="{f.id}", line {f.line}) needs a caption '
+                            f'whose .figno reads "{want}"' + (f'; it reads "{f.figno}"' if f.figno else ""))
+        if not f.dag_so_what and not f.so_whats:
             warnings.append(f'{kind} {n} has no "So what" (.sowhat with .lbl and .claim)')
-        for so in sowhats:
-            p, w = sowhat_faults(so, f"{kind} {n}", f)
+        for so in f.so_whats:
+            p, w = sowhat_faults(so, f"{kind} {n}")
             problems += p
             warnings += w
     for kind, nums in counters.items():
@@ -760,76 +572,59 @@ def structure(html):
                                 f"{kind.lower()}s in the order they appear")
                 break
 
-    kinds = ("chart", "mermaid", "dag-frame", "figframe")
-    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds)
-                        or (n.tag == "svg" and "dag" in n.classes))
     loose = {}
-    for v in visuals:
-        if in_figure(v) or any(a in visuals for a in v.ancestors()):
-            continue
-        what = "a table" if v.tag == "table" else "a ." + next((k for k in kinds if k in v.classes), "dag")
+    for v in dossier.uncaptioned:
+        what = "a table" if v.kind == "table" else "a ." + v.kind
         loose.setdefault(what, []).append(str(v.line))
     for what, lines in loose.items():
         problems.append(f"{what} at line {', '.join(lines)} has no numbered caption: put it in a "
                         'figure (id="fig-N" or id="table-N-fig") with .caption .figno')
 
-    for b in mermaid_blocks(html):
-        kind = mermaid_kind(b["source"])
+    for b in dossier.mermaid:
+        kind = mermaid_kind(b.source)
         if kind and kind != "sequenceDiagram":
-            problems.append(f"the Mermaid diagram at line {b['line']} is a {kind}; Mermaid is for "
+            problems.append(f"the Mermaid diagram at line {b.line} is a {kind}; Mermaid is for "
                             "sequence diagrams only, so draw graphs and flows with scripts/dag_svg.py")
 
-    frames = root.find(lambda n: "dag-frame" in n.classes)
-    frames += [s for s in root.find(lambda n: n.tag == "svg" and "dag" in n.classes)
-               if not any(a in frames for a in s.ancestors())]
-    for fr in frames:
-        svgs = [fr] if fr.tag == "svg" else fr.find(lambda n: n.tag == "svg" and "dag" in n.classes)
-        count = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
-        where_ = next(("%s %d" % figure_of(a) for a in fr.ancestors() if figure_of(a)),
-                      f"the DAG at line {fr.line}")
-        if count > MAX_NODES:
-            problems.append(f"{where_} draws {count} nodes; the cap is {MAX_NODES}. Merge "
+    for d in dossier.dags:
+        where_ = "%s %d" % d.figure if d.figure else f"the DAG at line {d.line}"
+        if d.nodes > MAX_NODES:
+            problems.append(f"{where_} draws {d.nodes} nodes; the cap is {MAX_NODES}. Merge "
                             "sibling sets into group nodes or draw a neighbourhood")
-        elif count > WARN_ABOVE:
-            warnings.append(f"{where_} draws {count} nodes; aim for {WARN_ABOVE} or fewer by "
+        elif d.nodes > WARN_ABOVE:
+            warnings.append(f"{where_} draws {d.nodes} nodes; aim for {WARN_ABOVE} or fewer by "
                             "merging sibling sets into group nodes")
 
     if len(secs) >= TOC_FROM_SECTIONS:
-        if not root.find(lambda n: n.attrs.get("id") == "toc"):
+        if not dossier.has_toc:
             warnings.append(f"{len(secs)} sections and no table of contents (#toc in .side)")
-        elif not root.find(lambda n: "toc-inline" in n.classes):
+        elif not dossier.has_toc_inline:
             warnings.append("no .toc-inline: below 1100px the sidebar contents are hidden")
 
-    for s, h2, title in titled:
-        if title and title.lower() != "limits" and not s.find(figure_of):
-            warnings.append(f'section "{title}" has no figure or table')
-        case = case_problem(title)
+    for s in secs:
+        if s.title and s.title.lower() != "limits" and not s.has_figure:
+            warnings.append(f'section "{s.title}" has no figure or table')
+        case = case_problem(s.title)
         if case:
-            warnings.append(f'heading "{title}" is in {case}; use sentence case')
+            warnings.append(f'heading "{s.title}" is in {case}; use sentence case')
 
-    for p in root.find(lambda n: n.tag == "p"):
-        n = len(p.text().split())
+    for p in dossier.paragraphs:
+        n = len(p.text.split())
         if n > MAX_PARAGRAPH_WORDS:
             warnings.append(f"the paragraph at line {p.line} has {n} words; keep paragraphs to "
                             f"{MAX_PARAGRAPH_WORDS} or split them into bullets")
 
-    for t in root.find(lambda n: n.tag == "table"):
-        rows = [r for r in t.find(lambda n: n.tag == "tr")
-                if r.find(lambda n: n.tag == "td") and not hidden(r)]
-        if len(rows) > MAX_VISIBLE_ROWS:
-            warnings.append(f"the table at line {t.line} shows {len(rows)} visible rows; show "
+    for t in dossier.tables:
+        if t.visible_rows > MAX_VISIBLE_ROWS:
+            warnings.append(f"the table at line {t.line} shows {t.visible_rows} visible rows; show "
                             f"{MAX_VISIBLE_ROWS} and put the rest behind details.more")
 
-    body = next(iter(root.find(lambda n: n.tag == "body")), root)
-    prose = body.text(skip=lambda n: n.tag in NOT_PROSE)
-    title = next(iter(root.find(lambda n: n.tag == "title"
-                                and not any(a.tag == "svg" for a in n.ancestors()))), None)
-    left = PLACEHOLDER.findall(title.raw if title else "") + PLACEHOLDER.findall(prose)
+    left = PLACEHOLDER.findall(dossier.title) + PLACEHOLDER.findall(dossier.prose)
     if left:
         problems.append(f'{len(left)} scaffold placeholder(s) left in the text, the first '
                         f'"{left[0]}"; replace each with the real text')
     slop = {}
-    for m in SLOP.finditer(prose):
+    for m in SLOP.finditer(dossier.prose):
         slop[m.group(1).lower()] = slop.get(m.group(1).lower(), 0) + 1
     for w, n in slop.items():
         warnings.append(f'the word "{w}" appears {n} time(s); replace it with a plain word')
@@ -842,19 +637,383 @@ SCAFFOLD = Path(__file__).resolve().parent.parent / "assets" / "scaffold.html"
 def source_checks(html, scaffold_html, scaffold_path):
     """(problems, warnings, unverified) from the page source alone: the
     structure pass, allowed hosts and pins, the library block, the locked block."""
-    problems, warnings = structure(html)
-    urls = resource_urls(html)
-    problems += counted([p for p in map(url_problem, urls) if p])
+    dossier = read_dossier(html)
+    problems, warnings = structure(dossier)
+    problems += counted([p for p in map(url_problem, dossier.resources) if p])
     problems += counted([f'Vega data URL "{u}": the chart reads it at run time, so the dossier breaks '
                          'away from that file or site; put the rows in data.values instead'
-                         for u in vega_data_urls(html)])
-    warnings += library_warnings(urls)
+                         for u in dossier.vega_data_urls])
+    warnings += library_warnings(dossier.resources)
     if scaffold_html is None:
         return problems, warnings, [f"locked block not compared: no scaffold at {scaffold_path}"]
     locked = locked_problem(html, scaffold_html)
     if locked:
         problems.append(locked)
     return problems, warnings, []
+
+
+# ---------------------------------------------------------------------------
+# Reading the dossier: one parse into a model of what the page states. The model
+# holds texts, counts, positions and source lines; the house rules judge them.
+# Every tuple is in document (start-tag) order, and inert content and comments
+# never reach it, except the document <title> text.
+
+@dataclass(frozen=True)
+class Answer:
+    claims: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class KeyFinding:
+    href: str | None   # None: the item has no <a>; "": the <a> has no href
+
+
+@dataclass(frozen=True)
+class KeyFindings:
+    follows_answer: bool
+    items: tuple[KeyFinding, ...]   # top-level <li> only
+
+
+@dataclass(frozen=True)
+class Section:
+    id: str | None
+    title: str
+    has_figure: bool
+
+
+@dataclass(frozen=True)
+class Claim:
+    text: str
+    key_figures: int
+
+
+@dataclass(frozen=True)
+class SoWhat:
+    after_caption: bool
+    has_label: bool
+    claims: tuple[Claim, ...]
+
+
+@dataclass(frozen=True)
+class Figure:
+    kind: str   # "Figure" or "Table"
+    number: int
+    id: str
+    line: int
+    figno: str
+    so_whats: tuple[SoWhat, ...]
+    dag_so_what: bool
+
+
+@dataclass(frozen=True)
+class Visual:
+    kind: str   # "table", "chart", "mermaid", "dag-frame", "figframe" or "dag"
+    line: int
+
+
+@dataclass(frozen=True)
+class MermaidBlock:
+    line: int
+    source: str
+
+
+@dataclass(frozen=True)
+class Dag:
+    figure: tuple[str, int] | None
+    line: int
+    nodes: int
+
+
+@dataclass(frozen=True)
+class Paragraph:
+    line: int
+    text: str
+
+
+@dataclass(frozen=True)
+class Table:
+    line: int
+    visible_rows: int
+
+
+@dataclass(frozen=True)
+class Dossier:
+    answer: Answer | None
+    key_findings: KeyFindings | None
+    sections: tuple[Section, ...]
+    figures: tuple[Figure, ...]
+    uncaptioned: tuple[Visual, ...]
+    mermaid: tuple[MermaidBlock, ...]
+    dags: tuple[Dag, ...]
+    paragraphs: tuple[Paragraph, ...]
+    tables: tuple[Table, ...]
+    has_toc: bool
+    has_toc_inline: bool
+    title: str
+    prose: str
+    resources: tuple[str, ...]
+    vega_data_urls: tuple[str, ...]
+
+
+# Elements whose content never becomes live page elements.
+_INERT = {"template", "noscript", "textarea", "title", "xmp", "iframe",
+          "noembed", "noframes"}
+_RESOURCE_ATTRS = {"script": "src", "img": "src", "iframe": "src", "source": "src",
+                   "video": "src", "audio": "src", "embed": "src", "link": "href"}
+_JS_IMPORT = re.compile(r"""(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']""")
+_HINT_RELS = {"preconnect", "dns-prefetch"}   # <link> hints that load nothing
+# A Vega data source read from a URL: `data: {url: ...}`, keys quoted or not.
+# shortcut: allows one level of nested braces before url, so a url after a deeper
+# object (format: {parse: {...}}) is missed; the browser pass still catches remote hosts.
+_VEGA_DATA_URL = re.compile(r"""\bdata["']?\s*:\s*\{(?:[^{}]|\{[^{}]*\})*?\burl["']?\s*:\s*["']([^"']*)["']""")
+_VOID = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+         "source", "track", "wbr"}
+_FIGURE_ID = re.compile(r"^(?:fig-(\d+)|table-(\d+)-fig)$")
+# Start tags that close an open <p>, as browsers apply them.
+_P_CLOSERS = {"address", "article", "aside", "blockquote", "details", "dialog", "div", "dl",
+              "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3", "h4", "h5",
+              "h6", "header", "hgroup", "hr", "main", "menu", "nav", "ol", "p", "pre", "search",
+              "section", "summary", "table", "ul"}
+_NOT_PROSE = {"script", "style", "code", "pre", "kbd", "samp", "svg"}
+
+
+class _Node:
+    def __init__(self, tag, attrs, line, parent=None):
+        self.tag, self.attrs, self.line, self.parent = tag, attrs, line, parent
+        self.classes = set((attrs.get("class") or "").split())
+        self.children = []   # _Node or str
+        self.raw = ""        # an _INERT element's text, kept out of text()
+
+    def walk(self):
+        for c in self.children:
+            if isinstance(c, _Node):
+                yield c
+                yield from c.walk()
+
+    def find(self, pred):
+        return [n for n in self.walk() if pred(n)]
+
+    def ancestors(self):
+        a = self.parent
+        while a is not None:
+            yield a
+            a = a.parent
+
+    def text(self, skip=lambda n: False):
+        out = []
+        for c in self.children:
+            if isinstance(c, str):
+                out.append(c)
+            elif not skip(c):
+                out.append(c.text(skip))
+        return "".join(out)
+
+
+class _Tree(HTMLParser):
+    """A forgiving DOM: end tags close the nearest open match; strays are ignored.
+
+    An _INERT element is kept, but not its content: the browser never turns
+    <template> or <noscript> markup, or <textarea> and <title> text, into page elements.
+    Its text goes to the node's raw instead.
+    """
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = self.cur = _Node("#root", {}, 1)
+        self._inert = None  # [tag, depth, node] of the inert element being skipped
+
+    def handle_starttag(self, tag, attrs):
+        if self._inert:
+            if tag == self._inert[0]:
+                self._inert[1] += 1
+            return
+        if self.cur.tag == "p" and tag in _P_CLOSERS:
+            self.cur = self.cur.parent   # a block start closes the paragraph
+        node = _Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur)
+        self.cur.children.append(node)
+        if tag in _INERT:
+            self._inert = [tag, 1, node]
+        elif tag not in _VOID:
+            self.cur = node
+
+    def handle_startendtag(self, tag, attrs):
+        if not self._inert:
+            self.cur.children.append(_Node(tag, {k: v or "" for k, v in attrs}, self.getpos()[0], self.cur))
+
+    def handle_endtag(self, tag):
+        if self._inert:
+            if tag == self._inert[0]:
+                self._inert[1] -= 1
+                if not self._inert[1]:
+                    self._inert = None
+            return
+        for a in [self.cur, *self.cur.ancestors()]:
+            if a.tag == tag:
+                self.cur = a.parent
+                return
+
+    def handle_data(self, data):
+        if self._inert:
+            self._inert[2].raw += data
+        else:
+            self.cur.children.append(data)
+
+
+def _parse_tree(html):
+    t = _Tree()
+    t.feed(html)
+    t.close()
+    return t.root
+
+
+def _figure_of(node):
+    """('Figure'|'Table', n) for a figure container, else None."""
+    m = _FIGURE_ID.match(node.attrs.get("id", ""))
+    if not m:
+        return None
+    return ("Figure", int(m.group(1))) if m.group(1) else ("Table", int(m.group(2)))
+
+
+def _in_figure(node):
+    return any(_figure_of(a) for a in node.ancestors())
+
+
+def _hidden(node):
+    for a in [node, *node.ancestors()]:
+        if "hidden" in a.attrs or re.search(r"display\s*:\s*none", a.attrs.get("style", "")):
+            return True
+        if a.tag == "details" and "open" not in a.attrs and a is not node:
+            return True
+    return False
+
+
+def _heading_title(h2):
+    """An h2's own words, without the section number and the figure count spans."""
+    return norm(h2.text(skip=lambda n: bool(n.classes & {"n", "count"})))
+
+
+def _read_mermaid(root):
+    """Each live `class="mermaid"` element's source text and start line; a block
+    nested in another counts once."""
+    return tuple(MermaidBlock(n.line, n.text()) for n in root.find(lambda n: "mermaid" in n.classes)
+                 if not any("mermaid" in a.classes for a in n.ancestors()))
+
+
+def _read_resources(root):
+    """Remote URLs the page loads: src/href of resources and JS imports, in order."""
+    urls = []
+    for n in root.walk():
+        attr = _RESOURCE_ATTRS.get(n.tag)
+        rels = set(n.attrs.get("rel", "").lower().split())
+        if n.tag == "link" and rels and rels <= _HINT_RELS:
+            continue
+        if attr and n.attrs.get(attr):
+            urls.append(n.attrs[attr].strip())
+        if n.tag == "script" and not n.attrs.get("src"):
+            urls += _JS_IMPORT.findall(strip_js_comments(n.text()))
+    return tuple(u for u in urls if urlsplit(u).scheme in ("http", "https"))
+
+
+def _read_vega_data_urls(root):
+    """URLs a Vega spec in an inline script loads its data from; data: URIs are inline."""
+    urls = []
+    for n in root.find(lambda n: n.tag == "script" and not n.attrs.get("src")):
+        urls += _VEGA_DATA_URL.findall(strip_js_comments(n.text()))
+    return tuple(u for u in urls if not u.startswith("data:"))
+
+
+def read_dossier(html):
+    """The Dossier model of `html`; never raises, and an unrecognisable page
+    gives None, empty tuples, "" and False."""
+    root = _parse_tree(html)
+    answers = root.find(lambda n: n.tag == "section" and "answer" in n.classes)
+    boxes = root.find(lambda n: n.tag == "section" and "findings" in n.classes)
+    body = next(iter(root.find(lambda n: n.tag == "body")), root)
+    title = next(iter(root.find(lambda n: n.tag == "title"
+                                and not any(a.tag == "svg" for a in n.ancestors()))), None)
+    return Dossier(
+        answer=Answer(tuple(norm(c.text()) for c in answers[0].find(lambda n: "claim" in n.classes)))
+        if answers else None,
+        key_findings=_read_key_findings(boxes[0], answers) if boxes else None,
+        sections=tuple(_read_section(s) for s in root.find(lambda n: n.tag == "section"
+                                                            and "sec" in n.classes)),
+        figures=tuple(_read_figure(f) for f in root.find(_figure_of)),
+        uncaptioned=_read_uncaptioned(root),
+        mermaid=_read_mermaid(root),
+        dags=_read_dags(root),
+        paragraphs=tuple(Paragraph(p.line, norm(p.text())) for p in root.find(lambda n: n.tag == "p")),
+        tables=tuple(Table(t.line, len([r for r in t.find(lambda n: n.tag == "tr")
+                                        if r.find(lambda n: n.tag == "td") and not _hidden(r)]))
+                     for t in root.find(lambda n: n.tag == "table")),
+        has_toc=bool(root.find(lambda n: n.attrs.get("id") == "toc")),
+        has_toc_inline=bool(root.find(lambda n: "toc-inline" in n.classes)),
+        title=title.raw if title else "",
+        prose=body.text(skip=lambda n: n.tag in _NOT_PROSE),
+        resources=_read_resources(root),
+        vega_data_urls=_read_vega_data_urls(root),
+    )
+
+
+def _read_key_findings(box, answers):
+    sibs = [c for c in box.parent.children if isinstance(c, _Node)]
+    at = sibs.index(box)
+    items = box.find(lambda n: n.tag == "li" and not any(a.tag == "li" for a in n.ancestors()))
+    links = [next(iter(li.find(lambda n: n.tag == "a")), None) for li in items]
+    return KeyFindings(follows_answer=bool(at) and sibs[at - 1] in answers,
+                       items=tuple(KeyFinding(a.attrs.get("href", "") if a else None) for a in links))
+
+
+def _read_section(s):
+    h2 = next(iter(s.find(lambda n: n.tag == "h2")), None)
+    return Section(s.attrs.get("id"), _heading_title(h2) if h2 else "", bool(s.find(_figure_of)))
+
+
+def _read_figure(f):
+    kind, n = _figure_of(f)
+    nos = [x for c in f.find(lambda x: "caption" in x.classes)
+           for x in c.find(lambda x: "figno" in x.classes)]
+    order = f.find(lambda x: "caption" in x.classes or "sowhat" in x.classes)
+    so_whats = []
+    for so in f.find(lambda x: "sowhat" in x.classes):
+        claims = so.find(lambda x: "claim" in x.classes)
+        so_whats.append(SoWhat(
+            after_caption=any("caption" in c.classes for c in order[:order.index(so)]),
+            has_label=bool(so.find(lambda x: "lbl" in x.classes)),
+            claims=tuple(Claim(norm(c.text()), len(c.find(lambda x: x.tag == "em"))) for c in claims)))
+    # A DAG figure carries its so-what in .dag-notes under an h3 "So what".
+    dag_so = any(norm(h.text()).lower() == "so what"
+                 for d in f.find(lambda x: "dag-notes" in x.classes)
+                 for h in d.find(lambda x: x.tag == "h3"))
+    return Figure(kind, n, f.attrs["id"], f.line, norm(nos[0].text()) if nos else "",
+                  tuple(so_whats), dag_so)
+
+
+def _svg_dag(n):
+    return n.tag == "svg" and "dag" in n.classes
+
+
+def _read_uncaptioned(root):
+    """Tables, charts, Mermaid blocks, DAGs and figure frames outside any figure,
+    each counted once at its outermost element."""
+    kinds = ("chart", "mermaid", "dag-frame", "figframe")
+    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds) or _svg_dag(n))
+    return tuple(Visual("table" if v.tag == "table" else next((k for k in kinds if k in v.classes), "dag"),
+                        v.line)
+                 for v in visuals if not _in_figure(v) and not any(a in visuals for a in v.ancestors()))
+
+
+def _read_dags(root):
+    """Each .dag-frame, and each svg.dag outside one, with the most nodes any of
+    its orientations draws."""
+    frames = root.find(lambda n: "dag-frame" in n.classes or (
+        _svg_dag(n) and not any("dag-frame" in a.classes for a in n.ancestors())))
+    dags = []
+    for fr in frames:
+        svgs = [fr] if fr.tag == "svg" else fr.find(_svg_dag)
+        nodes = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
+        fig = next((_figure_of(a) for a in fr.ancestors() if _figure_of(a)), None)
+        dags.append(Dag(fig, fr.line, nodes))
+    return tuple(dags)
 
 
 # ---------------------------------------------------------------------------

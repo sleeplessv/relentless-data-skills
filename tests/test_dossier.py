@@ -12,6 +12,7 @@ interface: SKILL.md tells the agent what PASS, FAIL, and BLOCKED mean.
 """
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
 import json
 import re
@@ -907,6 +908,161 @@ class TestStripWarnings(unittest.TestCase):
         self.assertEqual(check_render.strip_warnings(
             [{"label": "div.figframe", "left": 1, "right": 1, "top": 1, "bottom": 1},
              {"label": "div.box", "left": 3, "right": 3, "top": 3, "bottom": 3}]), [])
+
+
+class TestReadDossier(unittest.TestCase):
+    def read(self, html):
+        return check_render.read_dossier(html)
+
+    def test_an_empty_or_broken_page_gives_an_empty_model(self):
+        for html in ("", "</p></div></section></body>", '<html><body><div class="x"><sp'):
+            d = self.read(html)
+            for f in dataclasses.fields(d):
+                self.assertIn(getattr(d, f.name), (None, (), "", False), (html, f.name))
+
+    def test_inert_content_and_comments_never_reach_the_model(self):
+        d = self.read('<template><section class="answer"><p class="claim">T</p></section></template>'
+                      '<noscript><table><tr><td>x</td></tr></table></noscript>'
+                      '<!-- <p>comment</p> --><p>live</p>')
+        self.assertIsNone(d.answer)
+        self.assertEqual((d.uncaptioned, d.tables), ((), ()))
+        self.assertEqual([p.text for p in d.paragraphs], ["live"])
+
+    def test_the_answer_box_claims(self):
+        d = self.read('<section class="answer"><p class="claim">The check\n  fails.</p>'
+                      '<p class="claim"><em>Two</em> claims</p></section>'
+                      '<section class="answer"><p class="claim">A second box</p></section>')
+        self.assertEqual(d.answer.claims, ("The check fails.", "Two claims"))
+
+    def test_a_key_finding_href_is_none_without_a_link_and_empty_without_an_href(self):
+        d = self.read('<section class="answer"></section><section class="findings"><ol>'
+                      '<li>No link</li><li><a>No href</a></li>'
+                      '<li><a href="#s1">Linked</a><ul><li>nested</li></ul></li></ol></section>')
+        self.assertEqual([f.href for f in d.key_findings.items], [None, "", "#s1"])
+        self.assertTrue(d.key_findings.follows_answer)
+        d = self.read('<section class="findings"><ol></ol></section><section class="answer"></section>')
+        self.assertFalse(d.key_findings.follows_answer)
+
+    def test_section_titles_skip_the_number_and_the_count(self):
+        d = self.read(section(1, "How the  check runs", "<p>x</p>") + section(2, "Costs", figure(1))
+                      + '<section class="sec"><h2>Bare</h2></section>')
+        self.assertEqual([(s.id, s.title, s.has_figure) for s in d.sections],
+                         [("s1", "How the check runs", False), ("s2", "Costs", True), (None, "Bare", False)])
+
+    def test_figno_is_the_first_caption_figno_normalised(self):
+        d = self.read(figure(1, caption=" Figure\n 1. ") + figure(2, "table")
+                      + '<div class="fig" id="fig-3"><span class="figno">Figure 9.</span>'
+                      '<p class="caption"><span class="figno">Figure 3.</span></p></div>'
+                      '<div class="fig" id="fig-4"><div class="figframe">x</div></div>')
+        self.assertEqual([(f.kind, f.number, f.id, f.figno) for f in d.figures], [
+            ("Figure", 1, "fig-1", "Figure 1."), ("Table", 2, "table-2-fig", "Table 2."),
+            ("Figure", 3, "fig-3", "Figure 3."), ("Figure", 4, "fig-4", "")])
+
+    def test_after_caption_sees_a_wrapped_sowhat(self):
+        wrapped = f'<div class="wrap">{SOWHAT}</div>'
+        d = self.read(figure(1, sowhat=wrapped, after=True) + figure(2, sowhat=wrapped))
+        self.assertEqual([so.after_caption for f in d.figures for so in f.so_whats], [True, False])
+        so = d.figures[1].so_whats[0]
+        self.assertTrue(so.has_label)
+        self.assertEqual([(c.text, c.key_figures) for c in so.claims], [("It costs 4 times more.", 1)])
+
+    def test_dag_so_what_is_an_h3_so_what_in_dag_notes(self):
+        notes = '<div class="dag-notes"><h3> So  what </h3><p>It is slow.</p></div>'
+        d = self.read(figure(1, body=dag(3), sowhat=notes) + figure(2, body=dag(3), sowhat=""))
+        self.assertEqual([(f.dag_so_what, f.so_whats) for f in d.figures], [(True, ()), (False, ())])
+
+    def test_a_dag_knows_its_figure_and_its_largest_orientation(self):
+        uneven = ('<div class="dag-frame"><svg class="dag dag-lr"><g class="dn"></g></svg>'
+                  '<svg class="dag dag-tb">' + '<g class="dn"></g>' * 5 + '</svg></div>')
+        d = self.read('<svg class="dag"><g class="dn"></g><g class="dn"></g></svg>\n'
+                      + figure(1, body=dag(4)) + "\n" + uneven)
+        self.assertEqual([(g.figure, g.line, g.nodes) for g in d.dags],
+                         [(None, 1, 2), (("Figure", 1), 2, 4), (None, 3, 5)])
+
+    def test_visible_rows_skip_hidden_rows_and_closed_details(self):
+        d = self.read('<table><tr><th>h</th></tr><tr><td>1</td></tr><tr hidden><td>2</td></tr>'
+                      '<tr style="display: none"><td>3</td></tr>'
+                      '<tbody style="display:none"><tr><td>4</td></tr></tbody></table>\n'
+                      '<details><summary>more</summary><table><tr><td>5</td></tr></table></details>\n'
+                      '<details open><table><tr><td>6</td></tr></table></details>')
+        self.assertEqual([(t.line, t.visible_rows) for t in d.tables], [(1, 1), (2, 0), (3, 1)])
+
+    def test_the_title_is_the_documents_not_an_svgs(self):
+        d = self.read('<html><head><svg><title>Chart</title></svg><title>Report [Title here]</title>'
+                      '</head><body><p>x</p></body></html>')
+        self.assertEqual(d.title, "Report [Title here]")
+        self.assertNotIn("Chart", d.prose)
+
+    def test_prose_skips_code_scripts_and_svg(self):
+        d = self.read('<html><body><p>Plain <code>code</code> words</p><script>var s</script>'
+                      '<svg><text>label</text></svg><pre>pre</pre><style>.x{}</style></body></html>')
+        self.assertEqual(check_render.norm(d.prose), "Plain words")
+
+    def test_vega_data_urls_skip_data_uris_and_inline_values(self):
+        d = self.read('<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>'
+                      '<script>vegaEmbed("#a", {"data": {"url": "rows.csv"}});'
+                      'vegaEmbed("#b", {"data": {"url": "data:text/csv,a%0A1"}});'
+                      'vegaEmbed("#c", {"data": {"values": [{"url": "x.csv"}]}});</script>')
+        self.assertEqual(d.vega_data_urls, ("rows.csv",))
+
+    # Carried over from TestMermaidBlocks and TestResourceUrls, which go in the contract phase.
+
+    def test_mermaid_blocks_with_lines_and_decoded_source(self):
+        html = (
+            "<html><body>\n"
+            '<pre class="mermaid">flowchart LR\n  A --&gt; B</pre>\n'
+            '<div class="card mermaid">sequenceDiagram</div>\n'
+            "</body></html>"
+        )
+        self.assertEqual([(b.line, b.source) for b in self.read(html).mermaid],
+                         [(2, "flowchart LR\n  A --> B"), (4, "sequenceDiagram")])
+
+    def test_mermaid_needs_the_mermaid_class(self):
+        html = '<pre class="mermaid-ish">x</pre><pre class="code">flowchart</pre>'
+        self.assertEqual(self.read(html).mermaid, ())
+
+    def test_a_nested_same_tag_does_not_end_a_mermaid_block_early(self):
+        html = '<div class="mermaid">a<div>b</div>c</div><div>outside</div>'
+        self.assertEqual(self.read(html).mermaid[0].source, "abc")
+
+    def test_mermaid_skips_blocks_the_browser_never_renders(self):
+        html = (
+            '<template><pre class="mermaid">T</pre></template>\n'
+            '<noscript><pre class="mermaid">N</pre></noscript>\n'
+            '<textarea><pre class="mermaid">X</pre></textarea>\n'
+            "<!-- <pre class=\"mermaid\">C</pre> -->\n"
+            '<pre class="mermaid">real</pre>\n'
+        )
+        self.assertEqual([(b.line, b.source) for b in self.read(html).mermaid], [(5, "real")])
+
+    def test_resources_are_every_http_url_the_page_loads(self):
+        html = (
+            '<link rel="stylesheet" href="https://fonts.example/a.css">\n'
+            '<script src="https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js"></script>\n'
+            '<img src="https://img.example/x.png">\n'
+            '<a href="https://elsewhere.example/">a link is not a resource</a>\n'
+            '<script type="module">\n'
+            '  // import x from "https://old.example/x.mjs";\n'
+            f'  import mermaid from "{MERMAID_PIN}";\n'
+            '  const m = await import("https://esm.sh/thing@1");\n'
+            '</script>\n'
+            '<img src="local.png"><img src="data:image/gif;base64,R0lG">\n'
+        )
+        self.assertEqual(self.read(html).resources, (
+            "https://fonts.example/a.css",
+            "https://cdn.jsdelivr.net/npm/vega@6.4.0/build/vega.min.js",
+            "https://img.example/x.png",
+            MERMAID_PIN,
+            "https://esm.sh/thing@1",
+        ))
+
+    def test_resources_skip_preconnect_hints(self):
+        html = ('<link rel="preconnect" href="https://cdn.jsdelivr.net">'
+                '<link rel="dns-prefetch" href="https://cdn.jsdelivr.net">'
+                '<link rel="Preconnect stylesheet" href="https://fonts.example/a.css">'
+                '<link href="https://fonts.example/b.css">')
+        self.assertEqual(self.read(html).resources,
+                         ("https://fonts.example/a.css", "https://fonts.example/b.css"))
 
 
 class TestSourceChecks(unittest.TestCase):

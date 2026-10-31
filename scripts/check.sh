@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Run the repo's local checks; stop at the first failure.
 #
-# Usage: scripts/check.sh [--fast] [--network] [--base <commit-or-ref>]
+# Usage: scripts/check.sh [--fast] [--network] [--browser] [--base <commit-or-ref>]
 #   --fast     skip the unit test suite (used by the pre-commit hook)
 #   --network  also run scripts/check_doc_urls.py (needs network access)
+#   --browser  also run the dossier tests with Playwright and Chromium, via uv
+#              (needs uv and network access); a skipped test fails the run
 #   --base     baseline for skill_versions.py; also settable via CHECK_BASE.
 #              Default: git merge-base HEAD origin/main, falling back to main.
 set -euo pipefail
@@ -12,12 +14,14 @@ cd "$(git rev-parse --show-toplevel)"
 
 fast=0
 network=0
+browser=0
 base="${CHECK_BASE:-}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --fast) fast=1 ;;
     --network) network=1 ;;
+    --browser) browser=1 ;;
     --base)
       [ $# -ge 2 ] || { echo "check.sh: --base needs a value" >&2; exit 2; }
       base="$2"
@@ -25,7 +29,7 @@ while [ $# -gt 0 ]; do
       ;;
     --base=*) base="${1#--base=}" ;;
     -h | --help)
-      sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -72,6 +76,22 @@ fi
 
 if [ "$network" -eq 1 ]; then
   run "doc URL liveness" python3 scripts/check_doc_urls.py
+fi
+
+if [ "$browser" -eq 1 ]; then
+  command -v uv >/dev/null 2>&1 || { echo "FAIL: --browser needs uv on PATH" >&2; exit 2; }
+  pw=(uv run --python 3.13 --no-project --with playwright)
+  run "install Chromium" "${pw[@]}" playwright install chromium
+  # unittest passes skipped tests, but here a skip means the browser never ran.
+  browser_tests() {
+    local out
+    out="$("${pw[@]}" python -m unittest -v tests.test_dossier 2>&1)" || { echo "$out"; return 1; }
+    if grep -q "\.\.\. skipped" <<<"$out"; then
+      grep "\.\.\. skipped" <<<"$out" >&2
+      return 1
+    fi
+  }
+  run "dossier browser tests" browser_tests
 fi
 
 echo "All checks passed."

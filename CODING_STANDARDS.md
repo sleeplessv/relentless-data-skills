@@ -50,10 +50,13 @@ Each rule is one statement followed by why it exists or an example. The backgrou
 ## Python
 
 - **PY1. Python 3.13 is the floor. Repo tooling (`scripts/`) and tests (`tests/`) use the standard
-  library only; skill scripts document `uv run --python 3.13 --no-project <script>` (adding `--with
+  library only, except browser tests, which import Playwright, skip without it, and run through
+  `scripts/check.sh --browser`; skill scripts document `uv run --python 3.13 --no-project <script>` (adding `--with
   <pkg>` for third-party packages), with plain `python3` as a fallback that must be 3.13 or newer.**
   Why: 3.9 reached end of life in October 2025, and `uv` supplies 3.13 without a system install;
-  `--no-project` keeps a stdlib script from syncing the user's project environment.
+  `--no-project` keeps a stdlib script from syncing the user's project environment. Playwright is
+  the one exception because a render check cannot be proved without a browser; `uv` fetches it
+  per run, so `python3 -m unittest` still needs no installs.
 
 ## Contracts between skills
 

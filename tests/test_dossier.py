@@ -4,8 +4,9 @@ Standard library only. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-The browser half of the check needs Playwright and Chromium, which CI does not
-install, so these tests cover the pure parts: reading the report, locating
+The browser half of the check needs Playwright and Chromium. The tests that use
+them skip without Playwright; `scripts/check.sh --browser` runs them, and so does
+the browser workflow on dossier pull requests. The other tests cover the pure parts: reading the report, locating
 Mermaid blocks and their lines, classifying rendered-DOM facts and failed
 requests, and turning them into a verdict. The verdict codes are an
 interface: SKILL.md tells the agent what PASS, FAIL, and BLOCKED mean.

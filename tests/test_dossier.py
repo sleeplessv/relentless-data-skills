@@ -558,7 +558,7 @@ def dag(nodes):
 
 class TestStructure(unittest.TestCase):
     def check(self, html):
-        return check_render.structure(html)
+        return check_render.structure(check_render.read_dossier(html))
 
     def problems(self, html):
         return " | ".join(self.check(html)[0])
@@ -626,7 +626,7 @@ class TestStructure(unittest.TestCase):
     def test_a_nested_list_in_a_finding_is_not_another_finding(self):
         nested = FINDINGS.replace("</a></li></ol>",
                                   "</a><ul><li>a</li><li>b</li><li>c</li></ul></li></ol>")
-        self.assertEqual(self.problems(dossier(findings=nested)), "")
+        self.assertEqual(len(check_render.read_dossier(dossier(findings=nested)).key_findings.items), 3)
 
     def test_no_limits_section_fails(self):
         self.assertIn("Limits", self.problems(dossier(limits="")))
@@ -651,10 +651,10 @@ class TestStructure(unittest.TestCase):
         for tag in ("template", "noscript"):
             loose = f'<{tag}><table><tr><td>1</td></tr></table><div class="chart"></div></{tag}>'
             html = dossier(section(1, "How the check runs", loose + figure(1)))
-            self.assertEqual(self.problems(html), "", tag)
+            self.assertEqual(check_render.read_dossier(html).uncaptioned, (), tag)
             boxed = dossier(answer=f'<{tag}><section class="answer"><p class="claim">x</p>'
                             f"</section></{tag}>")
-            self.assertIn("no answer box", self.problems(boxed), tag)
+            self.assertIsNone(check_render.read_dossier(boxed).answer, tag)
 
     def test_figures_out_of_numeric_order_fail(self):
         html = dossier(section(1, "How the check runs", figure(2) + figure(1)))
@@ -680,14 +680,18 @@ class TestStructure(unittest.TestCase):
     def test_a_list_after_an_unclosed_paragraph_is_not_part_of_it(self):
         items = "".join(f"<li>{' '.join(['word'] * 10)}</li>" for _ in range(7))
         html = dossier(section(1, "How the check runs", f"<p>Intro<ul>{items}</ul>" + figure(1)))
-        self.assertEqual(self.warnings(html), "")
+        texts = [p.text for p in check_render.read_dossier(html).paragraphs]
+        self.assertIn("Intro", texts)
+        self.assertFalse(any("word" in t for t in texts))
 
     def test_any_block_start_closes_an_unclosed_paragraph(self):
         words = " ".join(["word"] * 40)
         for tag in ("aside", "h4", "blockquote", "header"):
             html = dossier(section(1, "How the check runs",
                                    f"<p>{words}<{tag}>{words}</{tag}>" + figure(1)))
-            self.assertEqual(self.warnings(html), "", tag)
+            texts = [p.text for p in check_render.read_dossier(html).paragraphs]
+            self.assertIn(words, texts, tag)
+            self.assertNotIn(f"{words} {words}", texts, tag)
 
     def test_section_without_a_figure_warns(self):
         html = dossier(section(1, "How the check runs", "<p>Prose only.</p>"))

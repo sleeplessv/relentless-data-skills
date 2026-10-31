@@ -158,7 +158,7 @@ def assign_lines(diagrams, html):
     others. A diagram matching no block (another selector, or built by a
     script) is looked up as text; failing that it gets line None.
     """
-    unused = [(norm(b["source"]), b["line"]) for b in mermaid_blocks(html)]
+    unused = [(norm(b.source), b.line) for b in read_dossier(html).mermaid]
     lines = html.splitlines()
     for d in diagrams:
         d["line"] = None
@@ -646,112 +646,89 @@ def mermaid_kind(source):
     return None
 
 
-def sowhat_faults(so, where, fig):
-    """(problems, warnings) for a .sowhat in figure `fig`, which must be a pull
+def sowhat_faults(so, where):
+    """(problems, warnings) for a "So what" at `where`, which must be a pull
     quote: a .lbl, then one short .claim with at most one <em>, placed before
     the caption."""
     problems, warnings = [], []
-    order = fig.find(lambda x: x is so or "caption" in x.classes)
-    if any("caption" in c.classes for c in order[:order.index(so)]):
+    if so.after_caption:
         problems.append(f'{where}\'s "So what" comes after its caption; put .sowhat first in .margin')
-    if not so.find(lambda x: "lbl" in x.classes):
+    if not so.has_label:
         warnings.append(f'{where}\'s "So what" has no .lbl: start it with <p class="lbl">So what</p>')
-    claims = so.find(lambda x: "claim" in x.classes)
-    if len(claims) > 1:
-        problems.append(f'{where}\'s "So what" has {len(claims)} .claim; keep one and move the '
+    if len(so.claims) > 1:
+        problems.append(f'{where}\'s "So what" has {len(so.claims)} .claim; keep one and move the '
                         "rest to .rest")
-    if not claims or not claims[0].text().strip():
+    if not so.claims or not so.claims[0].text:
         problems.append(f'{where}\'s "So what" has no .claim: state the conclusion in '
                         '<p class="claim">')
         return problems, warnings
-    for claim in claims:
-        ems = len(claim.find(lambda x: x.tag == "em"))
-        if ems > 1:
-            problems.append(f'{where}\'s "So what" claim has {ems} <em>; mark one key figure at most')
-        words = len(claim.text().split())
+    for claim in so.claims:
+        if claim.key_figures > 1:
+            problems.append(f'{where}\'s "So what" claim has {claim.key_figures} <em>; '
+                            "mark one key figure at most")
+        words = len(claim.text.split())
         if words > MAX_CLAIM_WORDS:
             warnings.append(f'{where}\'s "So what" claim has {words} words; keep it to '
                             f"{MAX_CLAIM_WORDS} and move the detail to .rest")
     return problems, warnings
 
 
-def findings_faults(box, answers, sec_ids):
+def findings_faults(box, sec_ids):
     """Problems with the key-findings box: placed right after the answer box,
     with 3 to 5 findings, each linking to the id of a section.sec."""
     problems = []
-    sibs = [c for c in box.parent.children if isinstance(c, Node)]
-    at = sibs.index(box)
-    if not at or sibs[at - 1] not in answers:
+    if not box.follows_answer:
         problems.append("the key findings box is not right after the answer box; move "
                         '<section class="findings"> up to follow section.answer, before .stats')
-    items = box.find(lambda n: n.tag == "li" and not any(a.tag == "li" for a in n.ancestors()))
-    if not MIN_FINDINGS <= len(items) <= MAX_FINDINGS:
-        problems.append(f"the key findings box lists {len(items)} findings; give {MIN_FINDINGS} "
+    if not MIN_FINDINGS <= len(box.items) <= MAX_FINDINGS:
+        problems.append(f"the key findings box lists {len(box.items)} findings; give {MIN_FINDINGS} "
                         f"to {MAX_FINDINGS}, one sentence each")
-    for i, li in enumerate(items, 1):
-        link = next(iter(li.find(lambda n: n.tag == "a")), None)
-        href = link.attrs.get("href", "") if link else ""
-        if link is None:
+    for i, item in enumerate(box.items, 1):
+        if item.href is None:
             problems.append(f'key finding {i} has no link; wrap it in <a href="#sN"> to its section')
-        elif not href.startswith("#") or href[1:] not in sec_ids:
-            problems.append(f'key finding {i} links to "{href}", which is not the id of a '
+        elif not item.href.startswith("#") or item.href[1:] not in sec_ids:
+            problems.append(f'key finding {i} links to "{item.href}", which is not the id of a '
                             "section.sec; link it to the section that holds the evidence")
     return problems
 
 
-def structure(html):
-    """(problems, warnings) from the page source: answer box, key findings, Limits, figure
-    numbering and captions, Mermaid use, DAG size, and the prose warnings."""
-    root = parse_tree(html)
+def structure(dossier):
+    """(problems, warnings) from the page's Dossier model: answer box, key findings, Limits,
+    figure numbering and captions, Mermaid use, DAG size, and the prose warnings."""
     problems, warnings = [], []
 
-    answers = root.find(lambda n: n.tag == "section" and "answer" in n.classes)
-    if not answers:
+    if dossier.answer is None:
         problems.append('no answer box: add <section class="answer"> with the claim in a '
                         '.claim paragraph at the top')
-    elif not any(c.text().strip() for c in answers[0].find(lambda n: "claim" in n.classes)):
+    elif not any(dossier.answer.claims):
         problems.append("the answer box has no .claim: state the one claim the dossier defends")
 
-    secs = root.find(lambda n: n.tag == "section" and "sec" in n.classes)
-    findings = root.find(lambda n: n.tag == "section" and "findings" in n.classes)
-    if not findings:
+    secs = dossier.sections
+    if dossier.key_findings is None:
         problems.append('no key findings: add <section class="findings"> right after the answer '
                         "box, an <ol> of 3 to 5 one-sentence findings, each linking to its section")
     else:
-        problems += findings_faults(findings[0], answers, {s.attrs.get("id") for s in secs})
+        problems += findings_faults(dossier.key_findings, {s.id for s in secs})
 
-    titled = []
-    for s in secs:
-        h2 = next(iter(s.find(lambda n: n.tag == "h2")), None)
-        titled.append((s, h2, heading_title(h2) if h2 else ""))
-    limits = [i for i, (_, _, t) in enumerate(titled) if t.lower() == "limits"]
+    limits = [i for i, s in enumerate(secs) if s.title.lower() == "limits"]
     if not limits:
         problems.append('no Limits section: end with <section class="sec"> headed "Limits", '
                         'even when it says "None"')
-    elif limits[-1] != len(titled) - 1:
+    elif limits[-1] != len(secs) - 1:
         problems.append("the Limits section is not the last section")
 
-    figures = root.find(figure_of)
     counters = {"Figure": [], "Table": []}
-    for f in figures:
-        kind, n = figure_of(f)
+    for f in dossier.figures:
+        kind, n = f.kind, f.number
         counters[kind].append(n)
         want = f"{kind} {n}."
-        nos = [x for c in f.find(lambda x: "caption" in x.classes)
-               for x in c.find(lambda x: "figno" in x.classes)]
-        got = norm(nos[0].text()) if nos else ""
-        if got != want:
-            problems.append(f'{kind} {n} (id="{f.attrs["id"]}", line {f.line}) needs a caption '
-                            f'whose .figno reads "{want}"' + (f'; it reads "{got}"' if got else ""))
-        # A DAG figure carries its so-what in .dag-notes under an h3 "So what".
-        dag_so = any(norm(h.text()).lower() == "so what"
-                     for d in f.find(lambda x: "dag-notes" in x.classes)
-                     for h in d.find(lambda x: x.tag == "h3"))
-        sowhats = f.find(lambda x: "sowhat" in x.classes)
-        if not dag_so and not sowhats:
+        if f.figno != want:
+            problems.append(f'{kind} {n} (id="{f.id}", line {f.line}) needs a caption '
+                            f'whose .figno reads "{want}"' + (f'; it reads "{f.figno}"' if f.figno else ""))
+        if not f.dag_so_what and not f.so_whats:
             warnings.append(f'{kind} {n} has no "So what" (.sowhat with .lbl and .claim)')
-        for so in sowhats:
-            p, w = sowhat_faults(so, f"{kind} {n}", f)
+        for so in f.so_whats:
+            p, w = sowhat_faults(so, f"{kind} {n}")
             problems += p
             warnings += w
     for kind, nums in counters.items():
@@ -761,76 +738,59 @@ def structure(html):
                                 f"{kind.lower()}s in the order they appear")
                 break
 
-    kinds = ("chart", "mermaid", "dag-frame", "figframe")
-    visuals = root.find(lambda n: n.tag == "table" or n.classes & set(kinds)
-                        or (n.tag == "svg" and "dag" in n.classes))
     loose = {}
-    for v in visuals:
-        if in_figure(v) or any(a in visuals for a in v.ancestors()):
-            continue
-        what = "a table" if v.tag == "table" else "a ." + next((k for k in kinds if k in v.classes), "dag")
+    for v in dossier.uncaptioned:
+        what = "a table" if v.kind == "table" else "a ." + v.kind
         loose.setdefault(what, []).append(str(v.line))
     for what, lines in loose.items():
         problems.append(f"{what} at line {', '.join(lines)} has no numbered caption: put it in a "
                         'figure (id="fig-N" or id="table-N-fig") with .caption .figno')
 
-    for b in mermaid_blocks(html):
-        kind = mermaid_kind(b["source"])
+    for b in dossier.mermaid:
+        kind = mermaid_kind(b.source)
         if kind and kind != "sequenceDiagram":
-            problems.append(f"the Mermaid diagram at line {b['line']} is a {kind}; Mermaid is for "
+            problems.append(f"the Mermaid diagram at line {b.line} is a {kind}; Mermaid is for "
                             "sequence diagrams only, so draw graphs and flows with scripts/dag_svg.py")
 
-    frames = root.find(lambda n: "dag-frame" in n.classes)
-    frames += [s for s in root.find(lambda n: n.tag == "svg" and "dag" in n.classes)
-               if not any(a in frames for a in s.ancestors())]
-    for fr in frames:
-        svgs = [fr] if fr.tag == "svg" else fr.find(lambda n: n.tag == "svg" and "dag" in n.classes)
-        count = max([len(s.find(lambda n: n.tag == "g" and "dn" in n.classes)) for s in svgs] or [0])
-        where_ = next(("%s %d" % figure_of(a) for a in fr.ancestors() if figure_of(a)),
-                      f"the DAG at line {fr.line}")
-        if count > MAX_NODES:
-            problems.append(f"{where_} draws {count} nodes; the cap is {MAX_NODES}. Merge "
+    for d in dossier.dags:
+        where_ = "%s %d" % d.figure if d.figure else f"the DAG at line {d.line}"
+        if d.nodes > MAX_NODES:
+            problems.append(f"{where_} draws {d.nodes} nodes; the cap is {MAX_NODES}. Merge "
                             "sibling sets into group nodes or draw a neighbourhood")
-        elif count > WARN_ABOVE:
-            warnings.append(f"{where_} draws {count} nodes; aim for {WARN_ABOVE} or fewer by "
+        elif d.nodes > WARN_ABOVE:
+            warnings.append(f"{where_} draws {d.nodes} nodes; aim for {WARN_ABOVE} or fewer by "
                             "merging sibling sets into group nodes")
 
     if len(secs) >= TOC_FROM_SECTIONS:
-        if not root.find(lambda n: n.attrs.get("id") == "toc"):
+        if not dossier.has_toc:
             warnings.append(f"{len(secs)} sections and no table of contents (#toc in .side)")
-        elif not root.find(lambda n: "toc-inline" in n.classes):
+        elif not dossier.has_toc_inline:
             warnings.append("no .toc-inline: below 1100px the sidebar contents are hidden")
 
-    for s, h2, title in titled:
-        if title and title.lower() != "limits" and not s.find(figure_of):
-            warnings.append(f'section "{title}" has no figure or table')
-        case = case_problem(title)
+    for s in secs:
+        if s.title and s.title.lower() != "limits" and not s.has_figure:
+            warnings.append(f'section "{s.title}" has no figure or table')
+        case = case_problem(s.title)
         if case:
-            warnings.append(f'heading "{title}" is in {case}; use sentence case')
+            warnings.append(f'heading "{s.title}" is in {case}; use sentence case')
 
-    for p in root.find(lambda n: n.tag == "p"):
-        n = len(p.text().split())
+    for p in dossier.paragraphs:
+        n = len(p.text.split())
         if n > MAX_PARAGRAPH_WORDS:
             warnings.append(f"the paragraph at line {p.line} has {n} words; keep paragraphs to "
                             f"{MAX_PARAGRAPH_WORDS} or split them into bullets")
 
-    for t in root.find(lambda n: n.tag == "table"):
-        rows = [r for r in t.find(lambda n: n.tag == "tr")
-                if r.find(lambda n: n.tag == "td") and not hidden(r)]
-        if len(rows) > MAX_VISIBLE_ROWS:
-            warnings.append(f"the table at line {t.line} shows {len(rows)} visible rows; show "
+    for t in dossier.tables:
+        if t.visible_rows > MAX_VISIBLE_ROWS:
+            warnings.append(f"the table at line {t.line} shows {t.visible_rows} visible rows; show "
                             f"{MAX_VISIBLE_ROWS} and put the rest behind details.more")
 
-    body = next(iter(root.find(lambda n: n.tag == "body")), root)
-    prose = body.text(skip=lambda n: n.tag in NOT_PROSE)
-    title = next(iter(root.find(lambda n: n.tag == "title"
-                                and not any(a.tag == "svg" for a in n.ancestors()))), None)
-    left = PLACEHOLDER.findall(title.raw if title else "") + PLACEHOLDER.findall(prose)
+    left = PLACEHOLDER.findall(dossier.title) + PLACEHOLDER.findall(dossier.prose)
     if left:
         problems.append(f'{len(left)} scaffold placeholder(s) left in the text, the first '
                         f'"{left[0]}"; replace each with the real text')
     slop = {}
-    for m in SLOP.finditer(prose):
+    for m in SLOP.finditer(dossier.prose):
         slop[m.group(1).lower()] = slop.get(m.group(1).lower(), 0) + 1
     for w, n in slop.items():
         warnings.append(f'the word "{w}" appears {n} time(s); replace it with a plain word')
@@ -843,13 +803,13 @@ SCAFFOLD = Path(__file__).resolve().parent.parent / "assets" / "scaffold.html"
 def source_checks(html, scaffold_html, scaffold_path):
     """(problems, warnings, unverified) from the page source alone: the
     structure pass, allowed hosts and pins, the library block, the locked block."""
-    problems, warnings = structure(html)
-    urls = resource_urls(html)
-    problems += counted([p for p in map(url_problem, urls) if p])
+    dossier = read_dossier(html)
+    problems, warnings = structure(dossier)
+    problems += counted([p for p in map(url_problem, dossier.resources) if p])
     problems += counted([f'Vega data URL "{u}": the chart reads it at run time, so the dossier breaks '
                          'away from that file or site; put the rows in data.values instead'
-                         for u in vega_data_urls(html)])
-    warnings += library_warnings(urls)
+                         for u in dossier.vega_data_urls])
+    warnings += library_warnings(dossier.resources)
     if scaffold_html is None:
         return problems, warnings, [f"locked block not compared: no scaffold at {scaffold_path}"]
     locked = locked_problem(html, scaffold_html)

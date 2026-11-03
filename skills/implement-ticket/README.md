@@ -1,7 +1,11 @@
 # implement-ticket
 
 Take a GitHub ticket through implementation, applicable checks, and a ready-for-review PR.
-The workflow can select the lowest-numbered eligible ready ticket, or use an explicit number.
+The workflow can select the lowest-numbered eligible ready ticket, use an explicit number, or, with
+the `session` argument, draft the ticket from the current conversation, confirm it with the user,
+and file it before implementing ([Session ticket](references/session.md)). A conversation whose
+deliverables depend on each other is feature-sized; the gate points to `to-spec`, `to-tickets`, and
+`implement-feature` instead.
 It preserves unrelated work, checks ownership before claiming, and records the base and PR
 target explicitly. Failed work remains recoverable, including when a push fails.
 
@@ -30,7 +34,8 @@ bodies. `technical-writing` governs authored docs, commit messages, issue text, 
 `unslop` edits all authored prose, including handoffs, progress updates, and final reports.
 
 [SKILL.md](SKILL.md) is the workflow. [Auto-pick](references/auto-pick.md) is loaded only for
-selection, and [Orchestrated dispatch](references/orchestrated.md) only for feature workers.
+selection, [Session ticket](references/session.md) only for the `session` argument, and
+[Orchestrated dispatch](references/orchestrated.md) only for feature workers.
 Legacy `feat/ticket-*` and `feat/issue-*` branches remain recognizable; new branches follow
 the current environment's naming convention.
 

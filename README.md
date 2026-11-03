@@ -49,7 +49,9 @@ triage-label, and domain-doc conventions the rest assume, which is where this
 repo's `docs/agents/` files and the `## Agent skills` block in `CLAUDE.md` come
 from. `ask-matt` is the router if you forget which one to reach for.
 
-Our `implement-ticket` adds the GitHub ticket and PR lifecycle. `implement-feature`
+Our `implement-ticket` adds the GitHub ticket and PR lifecycle; its `session` argument
+files a ticket from the current conversation when the work is one ticket and `to-spec` would
+be ceremony. `implement-feature`
 is our counterpart to upstream `implement-spec`: both schedule a task graph across
 isolated worktrees and review the integrated result. We retain one GitHub feature PR,
 pinned dispatch bases, verified merges, and recoverable WIP. Upstream `implement-spec`

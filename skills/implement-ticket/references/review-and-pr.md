@@ -102,6 +102,48 @@ prior outcomes still cover unchanged work. Readiness requires both axes and veri
 cover the final committed tree, with in-scope correctness, requirement, and documented-standard defects
 resolved. New defects require fixes; optional preferences do not extend the completion loop.
 
+## Final review
+
+The final review is one quality pass by a worker that wrote none of the change and saw none
+of the earlier reviews. The coordinator dispatches it once per run, after independent
+verification and both review axes pass on the final committed tree, and before any publication
+work. The trivial solo route and orchestrated ticket dispatches skip it; record the reason.
+Feature runs take it once at integration
+([Integration review](../../implement-feature/references/reference.md#integration-review)).
+
+Brief the reviewer with a clean checkout at the reviewed `head_sha` (or integration SHA),
+`base_sha` as the fixed point, the absolute path to the scope file (`ticket-snapshot.md` or
+`scope.md`) so lean findings respect what the ticket requires, and the instruction to run the
+installed `ponytail-review` skill on `git diff <base_sha>...HEAD`. The pass is blind: those
+are its only inputs, and it receives no Standards or Spec report, findings artifact, or earlier
+disposition. An unavailable `ponytail-review` skips the gate; the findings artifact and PR
+body record "final review not run: skill missing" and readiness is unaffected.
+
+The coordinator decides every finding and records the disposition itself, with no user prompt:
+
+- **Must fix:** fix in this PR, including defects in pre-existing code the diff did not cause.
+  This is the exception named by the scope rule at the top of SKILL.md's Workflow; the PR body
+  names each such fix under Evidence.
+- **Should fix:** fix in this PR, including lean refactors (delete, merge, split) and a
+  missing test for changed behaviour. The sole exemption is a finding that restates a disposition an earlier review
+  recorded with a reason, with no new evidence; carry that disposition forward.
+- **Nice to have:** record and leave; list under deferred cleanup with the follow-up offer.
+- **Oversized fix:** a must-fix or should-fix whose fix would be larger than the reviewed diff
+  (`base_sha...HEAD`) is escalated through `open_questions` with the proposed fix and its size. The PR stays
+  draft and the stop comment names it.
+
+Accepted fixes go to the implementing worker (solo) or one fix worker (feature). A
+code-touching fix returns through [Independent verification](#independent-verification) and
+follow-up `code-review` on both axes over the fix diff; a prose-only fix takes the
+[prose-only loop](#independent-review) with no follow-up review. The final review runs once and
+is not repeated after its own fixes.
+
+Record a `## Final review` section in the findings artifact: each finding with its tier,
+disposition (fixed, escalated, recorded), fixing commit, and a one-line reason for anything not
+fixed. The PR body's Evidence states the tier counts and outcomes. Readiness requires every
+must-fix and should-fix fixed; an escalated finding keeps the PR draft until the user answers.
+Nice-to-haves never block it.
+
 ## PR body
 
 Follow [Writing](setup.md#writing) for all PR prose. Apply `technical-writing` and `unslop`
@@ -139,7 +181,7 @@ Merge Danger using the actual change. Replace stale draft claims on resume.
 
 ## Solo finalization
 
-The implementing worker owns this section. After independent review, push the checked head and
+The implementing worker owns this section. After the final review, push the checked head and
 confirm the remote tip. Author the PR body.
 A new defect returns to implementation, checks, and review.
 Update or reuse the ticket's draft PR with the closing line chosen in [PR body](#pr-body) and the observed results.

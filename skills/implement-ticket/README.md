@@ -17,7 +17,9 @@ ticket before the PR becomes ready. Trivial changes
 that preserve behavior can use one reviewer with the loaded `code-review` prompts and separate
 Standards and Spec reports. Behavioral changes or uncertainty require both parallel reviewers.
 Follow-up review covers fixes, their consequences, and new evidence. Optional preferences can
-receive a reasoned disposition without another implementation cycle.
+receive a reasoned disposition without another implementation cycle. Once both axes pass, a
+final review runs once: a blind `ponytail-review` pass whose must-fix and should-fix findings
+the coordinator fixes or escalates before the PR goes ready.
 
 A feature-dispatched worker uses its own pinned dispatch base, reuses the recorded original
 baseline, and returns criterion evidence and preservation state. It performs self-review;
@@ -39,7 +41,7 @@ revision. Solo ticket use needs this skill, `orchestrator-mode`, and the compani
 [implementation workflow update guidance](../../README.md#implementation-workflow-updates)
 for the compatible pair and the [installation methods](../../README.md#install).
 
-Install upstream `code-review` and `pr` for final review and PR publication using the
+Install upstream `code-review` and `pr` for independent review and PR publication using the
 [companion skills command](../../README.md#matt-pococks-engineering-skills). Setup checks
 dependencies before implementation and reports any missing skills. The workflow invokes
 these installed skills without copying or modifying them.

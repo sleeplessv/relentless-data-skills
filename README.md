@@ -234,7 +234,7 @@ with missing or incompatible instructions. Solo ticket use does not require `imp
 but both solo and feature runs require `orchestrator-mode`.
 
 The minimum compatible pair for this shared contract is `implement-feature`
-`0.2.3` with `implement-ticket` `0.2.3`. From `0.2.3`, `implement-ticket` is
+`0.3.0` with `implement-ticket` `0.3.0`. From `0.2.3`, `implement-ticket` is
 user-only and absent from the skill catalog, and `implement-feature` locates it
 by path. The skills keep independent version
 numbers. Matching source revisions are the preferred compatibility check.
@@ -257,6 +257,8 @@ changes in the same PR. Bump each changed skill using [Version skill changes](#v
 checks their availability early and reports missing dependencies without
 installing them automatically. A missing `pr` prevents PR creation and body updates until it
 is available. See the [companion installation command](#matt-pococks-engineering-skills).
+`ponytail-review` is the optional companion behind the final review gate; when it is missing,
+setup reports it and the gate is skipped on record. Install it from the [others table](#others).
 
 Install `technical-writing` and `unslop` with the [Cursor pstack command](#cursors-pstack).
 `pr` owns PR sections. `technical-writing` governs authored documentation, commit messages,

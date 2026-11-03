@@ -3,7 +3,7 @@
 Solo ticket owners and feature coordinators run this check before claims, lifecycle comments,
 branch creation, or implementation. Orchestrated ticket workers reuse the coordinator's record.
 
-Resolve `code-review`, `pr`, `technical-writing`, and `unslop` by locating their installed `SKILL.md`
+Resolve `code-review`, `ponytail-review`, `pr`, `technical-writing`, and `unslop` by locating their installed `SKILL.md`
 on disk. User-only skills are absent from the invocable catalog, and installed entries are often
 symlinks, so follow links (`find -L`, `readlink -f`) rather than matching directory names.
 Confirm the files are readable. Load the writing references before authoring prose,
@@ -24,7 +24,8 @@ Pass the resolved paths and dependency results to workers so they reuse setup's 
 
 Report missing or incompatible dependencies during setup, with the affected phase and required
 update. Continue independent authorized work. An unavailable `code-review` blocks independent
-review and readiness; an unavailable `pr` blocks PR creation and body updates, not branch pushes.
+review and readiness; an unavailable `ponytail-review` skips the final review, recorded in the
+findings artifact and PR body; an unavailable `pr` blocks PR creation and body updates, not branch pushes.
 Missing feature-worker contracts or a known mixed installation block ticket dispatch while
 scope discovery can continue.
 Installing or updating skills requires the user's authorization; preflight only inspects them.

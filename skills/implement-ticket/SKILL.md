@@ -18,11 +18,11 @@ steps the worker owns. A worker reports an auto-pick, a stop condition, or a que
 
 For a feature dispatch, read [references/orchestrated.md](references/orchestrated.md) first. Skip steps 0
 through 3, use step 4 for local exploration, then follow steps 5 through 7 and self-review in step 8. The
-coordinator owns PRs, issue actions, and independent review.
+coordinator owns PRs, issue actions, independent review, and final review.
 
 ## Workflow
 
-**Implement what the ticket asks, at the scope it asks for.** Adjacent bugs, drive-by refactors, and missing tests outside the acceptance criteria get reported in the PR body (or `open_questions` under an orchestrated dispatch), not fixed here.
+**Implement what the ticket asks, at the scope it asks for.** Adjacent bugs, drive-by refactors, and missing tests outside the acceptance criteria get reported in the PR body (or `open_questions` under an orchestrated dispatch), not fixed here, except where [Final review](references/review-and-pr.md#final-review) directs.
 
 **Make the smallest change that solves the ticket.** Prefer deletion over addition, keep the call hierarchy flat, and put each decision in one place; a diff a maintainer would find exhausting is the wrong solution. The `principle-laziness-protocol` skill, when installed, is the full protocol; follow it.
 
@@ -127,7 +127,7 @@ Record each smoke check as the exact command, or a short script saved in the fin
 
 The implementing worker reads the committed `git diff <base_sha>...HEAD` and fixes in-scope findings, including refactoring deferred from step 5. Commit fixes and rerun steps 6 and 7 for affected paths. Feature workers return through their orchestrated contract without nested review.
 
-Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where a worker that wrote none of the change reruns the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review) with the pinned base and ticket snapshot; the coordinator dispatches both. Then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
+Solo runs then follow [Independent verification](references/review-and-pr.md#independent-verification), where a worker that wrote none of the change reruns the recorded checks on the tested head, then [Independent review](references/review-and-pr.md#independent-review) with the pinned base and ticket snapshot, then [Final review](references/review-and-pr.md#final-review), one blind `ponytail-review` pass whose findings the coordinator triages; the coordinator dispatches all three. Then [Solo finalization](references/review-and-pr.md#solo-finalization), owned by the implementing worker.
 
 ## Stop conditions
 

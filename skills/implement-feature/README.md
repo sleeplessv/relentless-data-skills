@@ -19,7 +19,9 @@ holds setup, integration, review, and publication contracts. Install `orchestrat
 `implement-ticket` alongside it. The coordinator always runs both independent `code-review`
 reviewers in parallel on the integrated feature; ticket workers perform self-review.
 Follow-up review covers fixes, their consequences, and new evidence. Optional preferences can
-receive a reasoned disposition without another implementation cycle.
+receive a reasoned disposition without another implementation cycle. Once both axes pass, a
+final review runs once: a blind `ponytail-review` pass whose must-fix and should-fix findings
+the coordinator fixes or escalates before the PR goes ready.
 
 The installed `pr` skill supplies Summary, Evidence, and Merge Danger.
 `technical-writing` governs authored docs, commit messages, issue text, and PR prose.
@@ -32,7 +34,7 @@ Install and update this skill with `implement-ticket` from the same repository
 revision. Follow the [implementation workflow update guidance](../../README.md#implementation-workflow-updates)
 for the compatible pair and the [installation methods](../../README.md#install).
 
-Install upstream `code-review` and `pr` for final review and PR publication using the
+Install upstream `code-review` and `pr` for independent review and PR publication using the
 [companion skills command](../../README.md#matt-pococks-engineering-skills). Setup checks
 dependencies before dispatch and reports any missing skills. The workflow invokes
 these installed skills without copying or modifying them. Upstream `implement-spec`

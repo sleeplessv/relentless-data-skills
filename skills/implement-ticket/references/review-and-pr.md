@@ -58,7 +58,7 @@ completes step 1 saves the ticket's body, relevant comments, and acceptance crit
 `## Requirements` section before implementation starts, so the enforced scope predates every
 design choice. The implementing worker records its design choices in a separate
 `## Author decisions` section of the same file, each tied to the criterion it resolves.
-Parent-spec context stays in `## Context only`. A feature uses its materialized `scope.md`.
+Parent-spec context and a ticket body's own `## Context` section stay in `## Context only`. A feature uses its materialized `scope.md`.
 Explicitly instruct this invocation to use the supplied snapshot, skip spec discovery and
 issue-tracker setup, enforce only `## Requirements`, and judge each author decision against
 them rather than as a requirement. Commit issue references must not replace that scope. Use

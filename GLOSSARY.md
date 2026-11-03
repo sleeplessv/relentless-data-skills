@@ -9,6 +9,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Skill version**: the identifier of a skill revision, used to track changes and support updates to installed copies.
 - **Ticket** — the unit of implementable work. On GitHub or GitLab the ticket is stored as an issue; the skills' mechanics use GitHub (`gh`).
 - **Integration branch** — the branch created off the default branch (`main` in most repos) for a whole feature; all per-ticket work for that feature lands here before anything reaches the default branch.
+- **Session ticket**: a ticket drafted from the current Claude Code session's discussion, confirmed by the user, and filed as an issue before implementation starts. Once filed it is an ordinary ticket. _Avoid_: chat ticket, ad-hoc ticket, ticket-less run.
 - **Ticket branch**: a branch for one ticket. Each feature dispatch starts from a pinned integration commit. Its temporary branch remains until verified integration preserves its commits and cleanup proves ownership.
 - **Feature PR** — the single pull request from the integration branch into the default branch; the only PR a feature produces.
 - **Spec**: a specification stored as an issue, labelled `spec` or the older `prd`. Tickets divide its implementation. A spec-only feature run promises its full requirements; an explicit ticket set uses it as context.

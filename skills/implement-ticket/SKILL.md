@@ -8,11 +8,11 @@ description: "Implement a ticket (GitHub issue) end-to-end on a ticket branch an
 # Implement ticket
 
 Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket number and repository,
-defaulting to the current `gh` remote and step 0's selection. Solo runs load `orchestrator-mode` in standing
-mode first: the main thread coordinates, and workers complete [Setup](references/setup.md), then steps 0
+defaulting to the current `gh` remote and step 0's selection. With the `session` argument, the main thread first works
+[Session ticket](references/session.md) itself, drafting and filing the ticket from this conversation while it still holds it.
+Solo runs then load `orchestrator-mode` in standing mode: the main thread coordinates, and workers complete [Setup](references/setup.md), then steps 0
 through 8; the coordinator dispatches step 8's verification and review. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
-steps the worker owns. A worker reports an auto-pick, a stop condition, or a question through
-`open_questions`; the coordinator puts it to the user and dispatches the answer.
+steps the worker owns. A worker reports an auto-pick, a stop condition, or a question through `open_questions`; the coordinator puts it to the user and dispatches the answer.
 
 ## Orchestrated dispatch
 
@@ -57,7 +57,7 @@ before posting a new start.
 
 ### 0. Resolve the ticket number
 
-If the user provided a number, use it as `<N>`. If the argument is `session`, read [references/session.md](references/session.md) first: the main thread drafts a session ticket from this conversation, gets the user's confirmation, files it, and continues at step 1 with the filed number. Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs**, unassigned and free of stop-condition labels, with the query in [references/auto-pick.md](references/auto-pick.md) (read it first: it paginates before selection). If it returns a ticket, announce the pick (number + title) before proceeding; if the user declines it, exclude that number and take the next survivor. If it returns `null` or nothing, stop and ask; do not implement a spec directly (specs get broken into tickets first, e.g. via a `to-tickets` skill).
+If the user provided a number, use it as `<N>`. If the argument is `session`, `<N>` is the session ticket the main thread filed before `orchestrator-mode` loaded ([Session ticket](references/session.md)). Otherwise auto-pick the **lowest-numbered** open `ready-for-agent` ticket, **excluding specs**, unassigned and free of stop-condition labels, with the query in [references/auto-pick.md](references/auto-pick.md) (read it first: it paginates before selection). If it returns a ticket, announce the pick (number + title) before proceeding; if the user declines it, exclude that number and take the next survivor. If it returns `null` or nothing, stop and ask; do not implement a spec directly (specs get broken into tickets first, e.g. via a `to-tickets` skill).
 
 ### 1. Read the ticket and claim it
 
@@ -95,10 +95,10 @@ Done when you have: (a) the type-check and test commands, (b) the run command, a
 
 ### 5. Implement
 
-Before choosing a path: an acceptance criterion that is subjective or unverifiable ("looks right", "feels fast") is the **ambiguous-acceptance-criteria stop condition, whichever kind of work the ticket is**. Untestable is not the same as unspecified. A criterion tied to a concrete reference artifact (design mockup, screenshot, spec doc) is untestable but specified: take the "everything else" path and record the manual comparison against the artifact in the PR body. The stop is per criterion: name the ambiguous ones in your question rather than declaring the whole ticket ambiguous. Then **recognise what kind of work the ticket is**; it decides how you build:
+Files listed under `## Session inputs` in `ticket-snapshot.md` are this step's first commit, before any other edit: apply `session-inputs.patch` from the run directory with `git apply --3way`, copy its untracked files into the worktree, and commit. The before observation stays the pinned base, not that commit. Before choosing a path: an acceptance criterion that is subjective or unverifiable ("looks right", "feels fast") is the **ambiguous-acceptance-criteria stop condition, whichever kind of work the ticket is**. Untestable is not the same as unspecified. A criterion tied to a concrete reference artifact (design mockup, screenshot, spec doc) is untestable but specified: take the "everything else" path and record the manual comparison against the artifact in the PR body. The stop is per criterion: name the ambiguous ones in your question rather than declaring the whole ticket ambiguous. Then **recognise what kind of work the ticket is**; it decides how you build:
 
 - **Testable backend work** (a service, pipeline, API, library function with a working test suite and acceptance criteria that describe verifiable behaviour): build it in **tracer bullets**: the **red → green** loop, one test at a time. One failing test (**red**), then the minimal code to pass it (**green**). Don't write all the tests up front; each test responds to what the last one taught you. Refactoring is not part of the loop. It belongs to the step 8 review pass. Follow the `tdd` skill for the full loop. The `tdd` skill expects tests at **pre-agreed seams**: with no user in the loop, the ticket is that agreement: place tests at the seams its acceptance criteria and the existing test layout imply. If no sensible seam exists for a criterion, treat it as ambiguous acceptance criteria (a stop condition), not a licence to test implementation details.
-- **Everything else**: frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Mixed tickets split by part: tracer bullets for the testable seams, direct implementation for the rest. Say which path you took, and record each design choice in `## Author decisions` of `ticket-snapshot.md`, tied to the criterion it resolves. Files listed under `## Session inputs` in that snapshot are the first commit of this step, before any other edit ([Session inputs](references/session.md#session-inputs)).
+- **Everything else**: frontend code (the suite doesn't cover it), exploratory data analysis, notebooks, one-off scripts, or any change where no test can pin the behaviour: implement directly and lean on the step 6 feedback loop and the step 7 smoke check instead. Mixed tickets split by part: tracer bullets for the testable seams, direct implementation for the rest. Say which path you took, and record each design choice in `## Author decisions` of `ticket-snapshot.md`, tied to the criterion it resolves.
 
 Throughout:
 

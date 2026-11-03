@@ -1,8 +1,12 @@
 # Session ticket
 
-Read only when the argument is `session`. The main thread works this file itself, before loading
-`orchestrator-mode`: workers never see the conversation. Solo only; a feature dispatch supplies
-a ticket number. The result is an ordinary ticket, so the run continues at step 1 with its number.
+Read only when the argument is `session`, before `orchestrator-mode` loads. The main thread works
+this file itself: workers never see the conversation, and once standing mode is on the coordinator
+cannot run the commands below. The result is a session ticket, an ordinary ticket once filed, so
+the run continues at step 1 with its number.
+
+Choose the run directory now, as `orchestrator-mode` will expect it: an absolute path outside the
+repository, the session scratchpad when one exists. Name it in the plan when that skill loads.
 
 ## Draft
 
@@ -15,11 +19,10 @@ Read the whole conversation and draft the ticket it asks for. Use `to-tickets`' 
 - `## Context`: file names, snippets, and pointers that help the implementer. Step 1 saves them
   under `## Context only`, so review reads them for interpretation and never as work.
 
-Criteria describe behaviour the user can observe and a verifier can check. A subjective or
-unverifiable criterion ("looks right", "feels fast") is settled with the user here, since the user
-is present; step 5's stop condition exists for criteria that reach the run unexamined. A
-criterion tied to a reference artifact (mockup, screenshot, spec doc) is specified and stays.
-Keep file paths out of criteria; the `to-tickets` prototype-snippet exception applies.
+Criteria describe behaviour the user can observe and a verifier can check. Settle with the user,
+now, any criterion step 5 would stop on as ambiguous: the user is present, and that stop exists
+for criteria that reach the run unexamined. Keep file paths out of criteria; a prototype snippet
+trimmed to the decision it encodes may appear.
 
 Size the work before the gate:
 
@@ -51,9 +54,10 @@ From the repository's main checkout:
 gh issue create --title "<title>" --body-file <body-file> --label ready-for-agent --assignee @me
 ```
 
-Record the number as `<N>` and that this run added the assignment, so the stop path releases it.
-File each other chosen draft with `--label needs-triage` and no assignee, and report the numbers.
-Then continue at step 1 with `<N>`.
+Assigning at creation, ahead of step 1's preflight, is deliberate: the user has just confirmed
+this work as theirs. Record the number as `<N>` and that this run added the assignment, so the
+stop path releases it. File each other chosen draft with `--label needs-triage` and no assignee,
+and report the numbers. Then continue at step 1 with `<N>`.
 
 ## Session inputs
 
@@ -61,9 +65,4 @@ When the user keeps the uncommitted files: save `git diff --binary HEAD -- <trac
 `session-inputs.patch` in the run directory and copy each untracked file to
 `session-inputs/<path>` there. Create `ticket-snapshot.md` in the run directory with a
 `## Session inputs` section listing the files and both locations; step 1 adds `## Requirements`.
-The checkout stays as it is.
-
-The implementing worker applies the patch (`git apply --3way`) and copies the untracked files
-into the worktree as the first commit of step 5, before any other edit, after step 4's baseline
-has run on the clean `base_sha`. The before observation for the PR's Evidence is the pinned base;
-that first commit is the starting point, not the delivered behaviour.
+The checkout stays as it is. Step 5 applies them as its first commit.

@@ -257,6 +257,8 @@ changes in the same PR. Bump each changed skill using [Version skill changes](#v
 checks their availability early and reports missing dependencies without
 installing them automatically. A missing `pr` prevents PR creation and body updates until it
 is available. See the [companion installation command](#matt-pococks-engineering-skills).
+`ponytail-review` is the optional companion behind the final review gate; when it is missing,
+setup reports it and the gate is skipped on record. Install it from the [others table](#others).
 
 Install `technical-writing` and `unslop` with the [Cursor pstack command](#cursors-pstack).
 `pr` owns PR sections. `technical-writing` governs authored documentation, commit messages,

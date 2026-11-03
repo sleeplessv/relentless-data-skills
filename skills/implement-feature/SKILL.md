@@ -44,6 +44,7 @@ ticket, and tick each item when its evidence is recorded. On resume, reconcile i
 - [ ] 1. Owned worktrees and branches cleaned or retained with a reason
 - [ ] 2. Verify passed on the fixed integration SHA
 - [ ] 2. Integration review passed (Standards and Spec) on the same SHA
+- [ ] 2. Final review run on the same SHA; every must-fix and should-fix resolved or escalated; nice-to-haves recorded
 - [ ] 3. Tracker coverage refreshed; closing lines backed by current evidence
 - [ ] 3. Feature PR body published and marked ready; every started attempt has a stop comment
 ```
@@ -115,11 +116,15 @@ or dispatch its Standards and Spec axes directly using the loaded skill's prompt
 Readers of a fixed SHA share no concurrent writer.
 
 Send actionable in-scope findings to one fix worker, then rerun affected gates on the new SHA.
+Once Verify and both axes pass, dispatch the final review once on that SHA as
+[Integration review](references/reference.md#integration-review) describes, triage its findings,
+and send accepted fixes through the same fix worker and gate rerun.
 Resolve whole-spec coverage gaps before final completion. Report requirements outside an
 explicit ticket list without implementing them. Diagnose repeated failures or change approach.
 For partial work, verify the preserved integration and report incomplete gates with the PR body, published as a draft PR when one exists.
 
-Done when both gates pass on the preserved head and the recorded completion obligations are met.
+Done when Verify, both review axes, and the final review pass on the preserved head and the recorded
+completion obligations are met.
 
 ### 3. Finalize the feature PR
 

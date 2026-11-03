@@ -54,7 +54,7 @@ actual attempt checkout. Use configured permissions and the recorded command/res
 
 Follow SKILL.md's orchestrated route for implementation, checks, and self-review. Return
 questions to the coordinator and continue independent work within this ticket where possible.
-The feature gates own independent review; this worker owns its implementation evidence.
+The feature gates own independent and final review; this worker owns its implementation evidence.
 
 Reuse setup's command and resource configuration and the original baseline at
 `original_base_sha`. The feature setup worker owns that baseline; an advanced dispatch base

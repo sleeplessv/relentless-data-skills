@@ -275,6 +275,12 @@ as `base_sha`, that integration SHA as `review_sha`, and `scope.md` as the autho
 Retain separate Standards and Spec reports in the run record. Ticket workers perform self-review;
 this gate owns independent review of the complete feature.
 
+After both axes pass, dispatch the
+[Final review](../../implement-ticket/references/review-and-pr.md#final-review) once on the same
+integration SHA with `scope.md` as its scope file. The coordinator triages by that contract;
+accepted fixes go to one fix worker, then Verify and both `code-review` axes rerun over the fix
+diff on the new SHA. Retain the findings and dispositions in the run record.
+
 ## Feature PR
 
 Prepare a draft body during setup with the intended scope and links to the spec and tickets.

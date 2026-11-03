@@ -277,9 +277,8 @@ this gate owns independent review of the complete feature.
 
 After both axes pass, dispatch the
 [Final review](../../implement-ticket/references/review-and-pr.md#final-review) once on the same
-integration SHA with `scope.md` as its scope file. The coordinator triages by that contract;
-accepted fixes go to one fix worker, then Verify and both `code-review` axes rerun over the fix
-diff on the new SHA. Retain the findings and dispositions in the run record.
+integration SHA, with `scope.md` as its scope file and one fix worker for accepted fixes. Retain
+the findings and dispositions in the run record.
 
 ## Feature PR
 

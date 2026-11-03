@@ -22,7 +22,7 @@ coordinator owns PRs, issue actions, independent review, and final review.
 
 ## Workflow
 
-**Implement what the ticket asks, at the scope it asks for.** Adjacent bugs, drive-by refactors, and missing tests outside the acceptance criteria get reported in the PR body (or `open_questions` under an orchestrated dispatch), not fixed here.
+**Implement what the ticket asks, at the scope it asks for.** Adjacent bugs, drive-by refactors, and missing tests outside the acceptance criteria get reported in the PR body (or `open_questions` under an orchestrated dispatch), not fixed here, except where [Final review](references/review-and-pr.md#final-review) directs.
 
 **Make the smallest change that solves the ticket.** Prefer deletion over addition, keep the call hierarchy flat, and put each decision in one place; a diff a maintainer would find exhausting is the wrong solution. The `principle-laziness-protocol` skill, when installed, is the full protocol; follow it.
 

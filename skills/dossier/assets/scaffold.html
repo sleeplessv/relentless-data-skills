@@ -15,7 +15,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>[Report title]</title>
 <style>
-/* dossier:locked:begin v5 */
+/* dossier:locked:begin v6 */
   /* ===== Tokens: Navy & coral. Every pair below is checked by scripts/check_contrast.py. ===== */
   :root {
     --paper: #ffffff;
@@ -163,8 +163,8 @@
   /* answer: the claim between full-width navy rules; an optional .lead number on its left */
   .answer { display: flex; align-items: center; gap: 1rem 2rem; margin: 0 0 3rem; padding: 1.5rem 0; border-top: 1px solid var(--ink); border-bottom: 1px solid var(--ink); }
   .answer:has(+ .findings, + .stats) { margin-bottom: 1.25rem; }
-  .answer .lead { flex: none; text-align: center; }
-  .answer .lead .n { font: 800 5.5rem/0.9 var(--display); letter-spacing: -0.05em; font-variant-numeric: tabular-nums; }
+  .answer .lead { flex: none; width: min-content; min-width: 8rem; text-align: center; }
+  .answer .lead .n { font: 800 5.5rem/0.9 var(--display); letter-spacing: -0.05em; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .answer .lead .key { color: var(--coral-text); }
   .answer .lead .u { display: block; font-size: var(--s-1); color: var(--muted); margin-top: 0.4rem; font-weight: 600; }
   .answer .text { flex: 1 1 auto; min-width: 0; }

@@ -64,10 +64,11 @@ CLAUDE_CONFIG_DIR=~/.claude-work CLAUDE_STATUSLINE_ACCOUNT=work claude
 
 Without that variable, a profile with `CLAUDE_CONFIG_DIR` set shows
 `oauthAccount.emailAddress` from `$CLAUDE_CONFIG_DIR/.claude.json`, or
-`oauthAccount.organizationName` when there is no email address, cut to 30
-characters. To keep the address off your screen in that profile, set the
-variable. Without `CLAUDE_CONFIG_DIR`, the script does not read `.claude.json`,
-so the line has no label unless you set the variable.
+`oauthAccount.organizationName` when there is no email address. The script
+removes control characters from that value and cuts it to 30 characters. To
+keep the address off your screen in that profile, set the variable. Without
+`CLAUDE_CONFIG_DIR`, the script does not read `.claude.json`, so the line has no
+label unless you set the variable.
 
 The label's colour comes from a hash of the label, so each account keeps its
 colour. If two accounts land on the same colour, change one label.

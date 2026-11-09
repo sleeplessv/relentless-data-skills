@@ -459,6 +459,56 @@ class StatuslineTest(unittest.TestCase):
                 self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"organizationName": name}}))
                 self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{label}] M"))
 
+    def test_account_label_drops_control_characters(self):
+        control = "".join(chr(c) for c in (*range(0x00, 0x20), *range(0x7f, 0xa0)))
+        cases = [
+            ("us\ner@example.com", "user@example.com"),
+            ("\x1b[31muser@example.com\x1b[0m", "[31muser@example.com[0m"),
+            (f"a{control}b", "ab"),
+            ("a~\u00a0b", "a~\u00a0b"),
+        ]
+        for email, label in cases:
+            with self.subTest(email=email):
+                self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": email}}))
+                line = self.first_line()
+                self.assertRegex(line, r"^\x1b\[1;38;2;\d+;\d+;\d+m\[")
+                self.assertTrue(line.split("m", 1)[1].startswith(f"[{label}]\x1b[0m \x1b[1;38;2;215;119;87mM"), repr(line))
+
+    def test_account_of_only_control_characters_falls_through_to_the_organization(self):
+        account = {"emailAddress": "\n\x1b\x7f\u0085", "organizationName": "Acme"}
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": account}))
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[Acme] M"))
+
+    def test_account_left_empty_by_control_characters_shows_no_label(self):
+        account = {"emailAddress": "\n\t", "organizationName": "\x1b\u009f"}
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": account}))
+        self.assertTrue(self.first_line().startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+
+    def test_account_label_is_shortened_after_control_characters_are_dropped(self):
+        cases = [("\n" * 5 + "n" * 30, "n" * 30), ("\x1b" * 5 + "n" * 31, f"{'n' * 29}…")]
+        for email, label in cases:
+            with self.subTest(email=email):
+                self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": email}}))
+                self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{label}] M"))
+
+    def test_non_string_or_malformed_account_shows_no_label_and_no_error(self):
+        for content in (
+            '{"oauthAccount": {"emailAddress": 7}}',
+            '{"oauthAccount": {"emailAddress": true}}',
+            '{"oauthAccount": {"emailAddress": {"a": 1}, "organizationName": ["x"]}}',
+            '{"oauthAccount": "text"}',
+            "[]",
+            "not json",
+        ):
+            with self.subTest(content=content):
+                self.write_claude_json(self.tmp, content)
+                self.assertTrue(self.first_line().startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+                self.assertEqual(self.render_stderr(), "")
+
+    def test_non_string_email_falls_through_to_the_organization(self):
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": 12345, "organizationName": "Acme"}}))
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[Acme] M"))
+
     def test_account_env_var_is_not_shortened(self):
         self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "n" * 40
         self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{'n' * 40}] M"))

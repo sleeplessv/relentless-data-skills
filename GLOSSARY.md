@@ -17,7 +17,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Deepening candidate**: a proposed refactor, produced by an architecture review, that turns a shallow module into a deep one. It carries the files involved, the problem, the proposed solution, and a recommendation strength.
 - **Decision log**: the answered design tree for one deepening candidate, each decision paired with its evidence. The spec for that candidate is written from it.
 - **Final review**: the single-pass quality review run by a worker that wrote none of the change and saw none of the earlier reviews, after verification and independent review pass, whose findings the coordinator triages. _Avoid_: ponytail review (names the tool, not the gate), sanity check, last pass.
-- **Review workspace**: the directory a verifier or reviewer owns under the run directory. It holds the worker's detached checkout and scratch files, and it is the only place the worker writes. _Avoid_: reviewer worktree, scratch checkout.
+- **Review workspace**: the directory a verifier or reviewer owns under the run directory. It holds the worker's detached checkout and scratch files. _Avoid_: reviewer worktree, scratch checkout.
 - **Frontier**: tickets with no active implementer whose blockers are satisfied in the verified, preserved integration tip. Assignment to the authenticated actor is advisory and does not make that actor an active implementer.
 - **Dispatch base**: the immutable integration commit assigned to a ticket attempt. Concurrent attempts can have different bases as integration advances.
 - **Completion mode**: the obligations a feature run must satisfy. A whole-spec run covers every spec requirement; a selected-ticket run covers its explicit work-set.

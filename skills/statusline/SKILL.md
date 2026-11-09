@@ -17,6 +17,8 @@ The bar fills by tokens used, whatever the size of the context window, and the t
 
 After the branch comes the branch diff: the lines the branch adds and removes, from where it split from the default branch to the working tree, untracked files included. The default branch is `origin/HEAD`, or local `main` or `master` when `origin/HEAD` is missing or points at a deleted branch. The diff is hidden on the default branch, on a detached HEAD, and when the branch changes nothing. It needs git 2.26 or later.
 
+The first line starts with an account label, such as `[work]`, when one is known: `CLAUDE_STATUSLINE_ACCOUNT`, or else, when `CLAUDE_CONFIG_DIR` is set, the signed-in email address or organization name from `$CLAUDE_CONFIG_DIR/.claude.json`. With neither, the line has no label. `CLAUDE_STATUSLINE_HIDE_ACCOUNT=1` hides the label from every source, for example while the user shares their screen.
+
 The PR line is the second line. It lists the repo's open pull requests as clickable numbers, such as `#42`, coloured by state. After each PR come the issues it closes, as numbers on an orange chip. The line ends with counts of the repo's open pull requests by state. The README lists the symbols and colours. The PR line needs `gh`, signed in to an account that can read the repo. Without `gh`, the status line leaves the PR line out.
 
 The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp, or the VS Code terminal. Older versions of macOS Terminal.app do not show it.
@@ -37,7 +39,7 @@ If `~/.claude/statusline.sh` already exists and differs, show the diff and ask b
 
 ### Step 3: Register it in settings
 
-Use `~/.claude/settings.json` by default, so it applies to every project. Use the project's `.claude/settings.json` only when the user asks for a project-level status line.
+Use `~/.claude/settings.json` by default, so it applies to every project when `CLAUDE_CONFIG_DIR` is not set. Use the project's `.claude/settings.json` only when the user asks for a project-level status line.
 
 If the file does not exist, create it with only the `statusLine` key below. Otherwise, read the file first. If a `statusLine` key already exists and does not point to `~/.claude/statusline.sh`, show it and ask before replacing it. Otherwise set:
 
@@ -61,4 +63,4 @@ Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 4
 
 The first run starts a background fetch of the PR counts, so the PR line can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the line stays hidden.
 
-Tell the user that the status line appears from their next message. If it does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.
+Tell the user that the status line appears from their next message in a session without `CLAUDE_CONFIG_DIR`. After a user-level install, a profile that sets `CLAUDE_CONFIG_DIR` needs the `statusLine` key in that directory's `settings.json`, as [Tell Claude accounts apart](README.md#tell-claude-accounts-apart) describes. If the status line does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.

@@ -79,7 +79,9 @@ def run(branch, used, prs, tmp: Path) -> list[str]:
     bin_dir.mkdir()
     (bin_dir / "gh").write_text("#!/bin/sh\nexit 1\n")
     (bin_dir / "gh").chmod(0o755)
-    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "XDG_CACHE_HOME": str(tmp / "cache")}
+    # A config dir with no .claude.json, so the screenshots never show the real account.
+    env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}", "XDG_CACHE_HOME": str(tmp / "cache"),
+           "CLAUDE_CONFIG_DIR": str(tmp), "CLAUDE_STATUSLINE_ACCOUNT": ""}
     stdin = json.dumps({
         "model": {"display_name": "Opus 5.5"},
         "effort": {"level": "high"},

@@ -53,6 +53,38 @@ The script refreshes the PR line in the background about every 20 seconds.
 When a refresh fails, the line keeps the last counts and shows their age once
 they are two minutes old, such as `(5m old)`.
 
+## Tell Claude accounts apart
+
+The first line can start with a label for the account, such as `[work]`. To
+choose the label, set `CLAUDE_STATUSLINE_ACCOUNT` where you start that profile:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-work CLAUDE_STATUSLINE_ACCOUNT=work claude
+```
+
+Each config directory has its own `settings.json`, and `/statusline` writes to
+`~/.claude/settings.json` by default. To show the status line in a profile that
+sets `CLAUDE_CONFIG_DIR`, add the same `statusLine` key to
+`$CLAUDE_CONFIG_DIR/settings.json`. The `command` value can stay
+`~/.claude/statusline.sh`.
+
+Without `CLAUDE_STATUSLINE_ACCOUNT`, a profile with `CLAUDE_CONFIG_DIR` set
+shows `oauthAccount.emailAddress` from `$CLAUDE_CONFIG_DIR/.claude.json`, or
+`oauthAccount.organizationName` when there is no email address. The script
+removes control characters from that value and cuts it to 30 characters. To
+keep the address off your screen in that profile, set
+`CLAUDE_STATUSLINE_ACCOUNT`. Without `CLAUDE_CONFIG_DIR`, the script does not
+read `.claude.json`, so the line has no label unless you set
+`CLAUDE_STATUSLINE_ACCOUNT`.
+
+To hide the label, for example while you share your screen, start Claude Code
+with `CLAUDE_STATUSLINE_HIDE_ACCOUNT=1`. The value `1` hides the label from
+every source, including `CLAUDE_STATUSLINE_ACCOUNT`, and the script does not
+read `.claude.json`. Any other value has no effect.
+
+The label's colour comes from a hash of the label, so each account keeps its
+colour. If two accounts land on the same colour, change one label.
+
 ## Install
 
 See the [repo root README](../../README.md) for the general install patterns.

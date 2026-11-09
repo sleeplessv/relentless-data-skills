@@ -1,12 +1,13 @@
 #!/bin/sh
-# Claude Code status line: model and effort | bar used/size (pct) | dir (branch
-# +added −removed), then open PRs, the issues each closes, and PR counts on a
-# second line. The branch diff needs git 2.26 or later.
+# Claude Code status line: [account] model and effort | bar used/size (pct) |
+# dir (branch +added −removed), then open PRs, the issues each closes, and PR
+# counts on a second line. The branch diff needs git 2.26 or later.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
-# Colours: Claude Code orange marks identity (model, branch, issue chips).
-# Softened sage, sand, and coral mark status, and dim text marks the rest.
+# Colours: Claude Code orange marks identity (model, branch, issue chips), and
+# the account label takes a colour hashed from its text. Softened sage, sand,
+# and coral mark status, and dim text marks the rest.
 #
 # Context thresholds, in tokens: sage up to GREEN_UNTIL, then a gradient
 # through sand (midway) to coral at GREEN_UNTIL + FADE_SPAN and above. The
@@ -25,6 +26,11 @@ PR_LIST_MAX=5
 # Files over this size count as binary in the branch diff, so 0 lines, and a
 # big data file is not read on every render. In git's size units, like 10m.
 DIFF_BIG_FILE=10m
+# Most characters of an account label read from .claude.json.
+ACCOUNT_MAX=30
+# The account label's colour is picked from these by a hash of the label, so
+# each account keeps its colour. Orange and the status colours stay out.
+ACCOUNT_COLOURS='86;130;235 70;190;225 170;130;235 50;175;175 214;102;196 130;150;175'
 
 if ! command -v jq >/dev/null 2>&1; then
   printf 'statusline: install jq'
@@ -77,6 +83,33 @@ bar=$(awk -v u="$used" -v cell="$CELL" 'BEGIN{
 
 sep=' \033[2m|\033[0m '
 
+# The account label: CLAUDE_STATUSLINE_ACCOUNT, or else the signed-in account in
+# $CLAUDE_CONFIG_DIR. CLAUDE_STATUSLINE_HIDE_ACCOUNT=1 hides the label from
+# every source and skips the read of .claude.json. Without $CLAUDE_CONFIG_DIR
+# the script reads no .claude.json, so a default profile keeps its email address
+# off the line. The email comes first because an organization name can be shared
+# between accounts. With neither, the line shows no label. A missing file or
+# invalid JSON also gives no label, because jq prints no value and 2>/dev/null
+# discards its error. With -s, jq parses the whole file before the filter runs,
+# so trailing garbage is invalid JSON, and select drops a file that holds more
+# than one document. The filter removes control characters first. A newline
+# would split the line, and an escape sequence would reach the terminal.
+account=$CLAUDE_STATUSLINE_ACCOUNT
+if [ "$CLAUDE_STATUSLINE_HIDE_ACCOUNT" = 1 ]; then
+  account=
+elif [ -z "$account" ] && [ -n "$CLAUDE_CONFIG_DIR" ]; then
+  account=$(jq -rs --argjson max "$ACCOUNT_MAX" '
+    select(length == 1) | .[0] | .oauthAccount | first((.emailAddress, .organizationName) | strings | gsub("\\p{Cc}"; "") | select(length > 0))
+    | if length > $max then .[:$max - 1] + "…" else . end
+  ' "$CLAUDE_CONFIG_DIR/.claude.json" 2>/dev/null)
+fi
+if [ -n "$account" ]; then
+  hash=$(printf '%s' "$account" | cksum | cut -d' ' -f1)
+  set -- $ACCOUNT_COLOURS
+  shift $((hash % $#))
+  printf '\033[1;38;2;%sm[%s]\033[0m ' "$1" "$account"
+fi
+
 printf '\033[1;38;2;215;119;87m%s\033[0m' "$model"
 # Claude Code leaves out effort when the model does not support it.
 [ -n "$effort" ] && printf ' \033[2m· %s\033[0m' "$effort"
@@ -101,7 +134,7 @@ if [ -n "$cwd" ]; then
   base=$(git --no-optional-locks -C "$cwd" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)
   git --no-optional-locks -C "$cwd" rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 || base=
   for b in main master; do
-    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" && base=refs/heads/$b
+    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" 2>/dev/null && base=refs/heads/$b
   done
   base_branch=${base#refs/remotes/origin/}
   mb=$([ -n "$head_branch" ] && [ "$head_branch" != "${base_branch#refs/heads/}" ] \

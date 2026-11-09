@@ -28,18 +28,20 @@ In standing mode, and for the named tasks in scoped mode, the coordinator calls 
 
 - spawn, message, resume, wait, and stop tools for workers;
 - the plan or todo tool;
+- reads of and appends to the [decision list](references/reference.md#decision-list);
 - skill loading, including a file read of a skill's SKILL.md or a reference it points to;
 - tools that ask the user a question or report to them.
 
 Every other action is a dispatch, including a quick look at one file, a `git` or `gh`
 status check, a commit, push, or worktree command, and starting an app. The rule holds
 after a consumer skill loads. A compaction drops this skill from context, so keep
-`Orchestrator mode: standing; coordinator dispatches only` as the first plan item, and
-reload this skill before the first action after a compaction notice. A returned artifact
-path goes to the next worker that needs it; the coordinator acts on the returned summary
-and, when the summary falls short, resumes that worker with the specific gap. Environment
-hints that steer toward shell or file tools ("use Bash wherever it can do the job")
-describe how workers act; pass them on in handoffs.
+`Orchestrator mode: standing; coordinator dispatches only; decisions at <path>` as the
+first plan item, and after a compaction notice reload this skill and reread the decision
+list before the first action. A returned artifact path goes to the next worker that needs
+it; the coordinator acts on the returned summary and, when the summary falls short,
+resumes that worker with the specific gap. Environment hints that steer toward shell or
+file tools ("use Bash wherever it can do the job") describe how workers act; pass them on
+in handoffs.
 
 ## Choosing workers
 
@@ -101,14 +103,14 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    parts they own. Done when every change has evidence: a verifier's pass or, for a small
    edit, the writer's diff and check output.
 6. **Report.** Lead with the outcome, then returned artifact paths or IDs, verification
-   results, and open limitations, at the length the user needs to act on them. When the
-   request was a question, the answer is the deliverable. The run directory
-   dies with the session, so when a run produced research worth reusing, have a worker
-   save it to the repo's `docs/research/` (or the project's equivalent) and report that
-   path. Once the run's PRs merge, offer to remove its worktrees and branches, following
-   [Clean up](references/reference.md#parallel-writes-worktrees) or a branch-cleanup skill
-   such as `cleanup-merged-branches` when installed. Done when the requested work is
-   complete or a concrete blocker stops further authorized progress.
+   results, open limitations, and returned friction as proposed follow-ups, at the length
+   the user needs to act on them. When the request was a question, the answer is the
+   deliverable. The run directory dies with the session, so when a run produced research
+   worth reusing, have a worker save it to the repo's `docs/research/` (or the project's
+   equivalent), each claim about code dated and tied to the commit it held at, and report
+   that path. Once the run's PRs merge, offer to remove its worktrees and branches,
+   following [Clean up](references/reference.md#parallel-writes-worktrees). Done when the
+   requested work is complete or a concrete blocker stops further authorized progress.
 
 ## Handoffs
 
@@ -118,12 +120,13 @@ workers read, and it cannot ask the user. Write each handoff as its complete bri
 
 - **Task** with its done-when, owned paths or resources, and permissions already granted.
 - **Goal**: why the work matters, for implementation and verification tasks.
-- **Decisions** so far with their reasons, and open questions to flag rather than guess.
+- **Decisions** so far with their reasons, or the decision list's path and the entries
+  this task touches, and open questions to flag rather than guess.
 - **Prior findings**, quoted word for word from the returned summaries. Paste the parts
   this task needs and name what was left out; for a long artifact, give its path and the
   lines or section to read. Redact secrets and personal data.
 - **Run directory** path, to create if missing, and the skills to load, by path.
-- **Return contract**: fields such as `status`, `files_changed`, `tests_run`,
+- **Return contract**: fields such as `status`, `files_changed`, `tests_run`, `friction`,
   `verification_evidence`, `decisions_made`, `open_questions`, and `artifact_path`.
 
 Workers send long command output (test runs, logs, query results) to a file in the run
@@ -131,13 +134,13 @@ directory and read back only the lines the task needs (failures, errors, the cou
 result); large findings go there too, with a short summary and one index line per
 artifact entry returned. Those files and the harness's task-output file are for the next
 worker. Split findings meant for several workers into one artifact per recipient, so
-none reads the whole file. Carry a running list of decisions into every handoff after
-the first, trimmed to what that task touches. Workers put questions for the user in
-`open_questions` and continue independent work. The coordinator settles each returned
-question it can from the user's earlier decisions, the repo's conventions, or one more
-worker check, records the answer in the decision list, and brings the user only what
-needs their authority (business choices, scope changes, destructive or paid actions),
-each with a recommended default.
+none reads the whole file. Workers put questions for the user in `open_questions` and
+continue independent work; in `friction` they name what in the environment slowed or
+misled the task (a missing check, information out of reach, a long search, a workaround
+taken). The coordinator settles each returned question it can from the user's earlier
+decisions, the repo's conventions, or one more worker check, records the answer in the
+decision list, and brings the user only what needs their authority (business choices,
+scope changes, destructive or paid actions), each with a recommended default.
 
 ## Composition
 

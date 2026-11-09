@@ -62,6 +62,12 @@ choose the label, set `CLAUDE_STATUSLINE_ACCOUNT` where you start that profile:
 CLAUDE_CONFIG_DIR=~/.claude-work CLAUDE_STATUSLINE_ACCOUNT=work claude
 ```
 
+Each config directory has its own `settings.json`, and `/statusline` writes to
+`~/.claude/settings.json` by default. To show the status line in a profile that
+sets `CLAUDE_CONFIG_DIR`, add the same `statusLine` key to
+`$CLAUDE_CONFIG_DIR/settings.json`. The `command` value can stay
+`~/.claude/statusline.sh`.
+
 Without that variable, a profile with `CLAUDE_CONFIG_DIR` set shows
 `oauthAccount.emailAddress` from `$CLAUDE_CONFIG_DIR/.claude.json`, or
 `oauthAccount.organizationName` when there is no email address. The script

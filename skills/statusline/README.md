@@ -77,7 +77,7 @@ keep the address off your screen in that profile, set
 read `.claude.json`, so the line has no label unless you set
 `CLAUDE_STATUSLINE_ACCOUNT`.
 
-To remove the label, for example while you share your screen, start Claude Code
+To hide the label, for example while you share your screen, start Claude Code
 with `CLAUDE_STATUSLINE_HIDE_ACCOUNT=1`. The value `1` hides the label from
 every source, including `CLAUDE_STATUSLINE_ACCOUNT`, and the script does not
 read `.claude.json`. Any other value has no effect.

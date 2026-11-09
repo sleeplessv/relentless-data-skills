@@ -84,16 +84,16 @@ bar=$(awk -v u="$used" -v cell="$CELL" 'BEGIN{
 sep=' \033[2m|\033[0m '
 
 # The account label: CLAUDE_STATUSLINE_ACCOUNT, or else the signed-in account in
-# $CLAUDE_CONFIG_DIR. Without that dir the script reads no .claude.json, so a
-# default profile keeps its email address off the line. The email comes first
-# because an organization name can be shared between accounts. With neither,
-# the line shows no label. A missing file or invalid JSON also gives no label,
-# because jq prints no value and 2>/dev/null discards its error. With -s, jq
-# parses the whole file before the filter runs, so trailing garbage is invalid
-# JSON, and select drops a file that holds more than one document. The filter
-# removes control characters first. A newline would split the line, and an
-# escape sequence would reach the terminal. CLAUDE_STATUSLINE_HIDE_ACCOUNT=1
-# hides the label from every source and skips the read of .claude.json.
+# $CLAUDE_CONFIG_DIR. CLAUDE_STATUSLINE_HIDE_ACCOUNT=1 hides the label from
+# every source and skips the read of .claude.json. Without $CLAUDE_CONFIG_DIR
+# the script reads no .claude.json, so a default profile keeps its email address
+# off the line. The email comes first because an organization name can be shared
+# between accounts. With neither, the line shows no label. A missing file or
+# invalid JSON also gives no label, because jq prints no value and 2>/dev/null
+# discards its error. With -s, jq parses the whole file before the filter runs,
+# so trailing garbage is invalid JSON, and select drops a file that holds more
+# than one document. The filter removes control characters first. A newline
+# would split the line, and an escape sequence would reach the terminal.
 account=$CLAUDE_STATUSLINE_ACCOUNT
 if [ "$CLAUDE_STATUSLINE_HIDE_ACCOUNT" = 1 ]; then
   account=

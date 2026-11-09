@@ -5,8 +5,9 @@
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
-# Colours: Claude Code orange marks identity (model, branch, issue chips).
-# Softened sage, sand, and coral mark status, and dim text marks the rest.
+# Colours: Claude Code orange marks identity (model, branch, issue chips), and
+# the account label takes a colour hashed from its text. Softened sage, sand,
+# and coral mark status, and dim text marks the rest.
 #
 # Context thresholds, in tokens: sage up to GREEN_UNTIL, then a gradient
 # through sand (midway) to coral at GREEN_UNTIL + FADE_SPAN and above. The
@@ -86,7 +87,8 @@ sep=' \033[2m|\033[0m '
 # $CLAUDE_CONFIG_DIR. Without that dir the script reads no .claude.json, so a
 # default profile keeps its email address off the line. The email comes first
 # because an organization name can be shared between accounts. With neither,
-# the line shows no label.
+# the line shows no label. A missing file or invalid JSON also gives no label,
+# because jq prints no value and 2>/dev/null discards its error.
 account=$CLAUDE_STATUSLINE_ACCOUNT
 if [ -z "$account" ] && [ -n "$CLAUDE_CONFIG_DIR" ]; then
   account=$(jq -r --argjson max "$ACCOUNT_MAX" '

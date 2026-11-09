@@ -3,6 +3,45 @@
 Solo ticket owners and feature coordinators use these contracts. Orchestrated ticket workers
 return implementation evidence through their dispatch contract.
 
+## Review workspace
+
+These rules bind every worker that verifies or reviews: the verifier, each `code-review`
+reviewer, and the final reviewer. Each brief names the run directory and links here.
+
+Set `REPO` to the main checkout, `RUN_DIR` to the run directory, `SHA` to the full commit SHA
+the brief pins, and `ROLE` to the worker's job (`verify`, `review`, `standards`, `spec`, or
+`final`). If `$RUN_DIR/$ROLE-$SHA` already exists, add a numeric suffix to `ROLE`.
+
+**Writes.** The worker writes only under `$RUN_DIR/$ROLE-$SHA`. That directory holds its
+checkout, temporary files, lists of changed paths, and captured command output. `/tmp`, other
+shared paths, and the rest of the run directory stay untouched. Git's worktree metadata and the
+uniquely named temporary files that tools create for themselves are outside this rule. Results
+still return inline, as [Independent verification](#independent-verification) says.
+
+**Checkout.** The worker creates its own detached checkout, so it owns what it later removes.
+Exit 0 passes. On any other exit, the worker reports a blocked check with the error.
+
+```sh
+git -C "$REPO" worktree add --detach "$RUN_DIR/$ROLE-$SHA/checkout" "$SHA"
+```
+
+A worker that dispatches children, as `code-review` does, shares its checkout with them. That
+worker alone removes the checkout, after every child returns.
+
+**Removal.** Before returning, whatever the verdict, the worker runs both commands in order and
+stops at the first non-zero exit.
+
+```sh
+test "$(git -C "$RUN_DIR/$ROLE-$SHA/checkout" rev-parse HEAD)" = "$SHA"   # exit 0 = still at the pinned commit
+git -C "$REPO" worktree remove "$RUN_DIR/$ROLE-$SHA/checkout"             # exit 0 = removed
+```
+
+A non-zero exit leaves the checkout in place. Git refuses to remove a dirty tree, and the worker
+runs this command without `--force`, because a clean tree does not need it. The return states
+`checkout: removed`, or `checkout: retained at <path>` with the reason. A worker handed a
+checkout it did not create leaves it in place and reports it as retained, naming its creator.
+The coordinator records each retained checkout in the findings artifact or run record.
+
 ## Independent verification
 
 The coordinator (the solo run's main thread) dispatches the verifier and the reviewers; a
@@ -15,9 +54,9 @@ implementing worker's resource allocation.
 Verifiers, reviewers, and fix workers return results inline and the coordinator saves them; the
 harness may block their report-file writes. Only implementers write the evidence artifact.
 
-The verifier uses a clean checkout at `head_sha`, confirms `HEAD` matches, reruns every recorded
-command changed only where a checkout path must point at its own checkout, records each such
-substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
+The verifier follows [Review workspace](#review-workspace), uses a clean checkout at `head_sha`,
+confirms `HEAD` matches, reruns every recorded command changed only where a path must point at
+its own checkout or workspace, records each such substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
 cannot run is a blocked check reported with its reason. Reuse the implementing worker's ports and
 resources, or serialize with any still in use.
 
@@ -46,7 +85,8 @@ label stays. Orchestrated workers return `already_satisfied` under their dispatc
 Independently review every nonempty solo change and the complete feature integration.
 Use the installed `code-review` instructions for both axes, including the full smell baseline.
 
-Commit all intended changes and use a clean review checkout at the tested `review_sha`.
+Commit all intended changes and use a clean review checkout at the tested `review_sha`, set up
+as [Review workspace](#review-workspace) describes.
 Resolve the immutable base and review commits, record `git diff <base_sha>...<review_sha>` and
 `git log <base_sha>..<review_sha> --oneline`, and confirm the diff includes the intended work.
 Set the review checkout's `HEAD` to `review_sha` so the skill's `...HEAD` command sees that tree.
@@ -111,12 +151,15 @@ work. The trivial solo route and orchestrated ticket dispatches skip it; record 
 Feature runs take it once at integration
 ([Integration review](../../implement-feature/references/reference.md#integration-review)).
 
-Brief the reviewer with a clean checkout at the reviewed `head_sha` (or integration SHA),
-`base_sha` as the fixed point, the absolute path to the scope file (`ticket-snapshot.md` or
+Brief the reviewer with the run directory, the reviewed `head_sha` (or integration SHA) to check
+out, `base_sha` as the fixed point, the absolute path to the scope file (`ticket-snapshot.md` or
 `scope.md`) so lean findings respect what the ticket requires, and the instruction to run the
-installed `ponytail-review` skill on `git diff <base_sha>...HEAD`. The pass is blind: those
-are its only inputs, and it receives no Standards or Spec report, findings artifact, or earlier
-disposition. An unavailable `ponytail-review` skips the gate; the findings artifact and PR
+installed `ponytail-review` skill on `git diff <base_sha>...HEAD`. The reviewer follows
+[Review workspace](#review-workspace), which limits its writes to its directory under the run
+directory and requires it to remove its checkout and report the result. The pass is blind:
+those are its only inputs, and it receives no Standards or Spec report, findings artifact, or
+earlier disposition. The run directory is a place to write, and the scope file is the only file
+the reviewer reads there. An unavailable `ponytail-review` skips the gate; the findings artifact and PR
 body record "final review not run: skill missing" and readiness is unaffected.
 
 The coordinator decides every finding and records the disposition itself, with no user prompt:

@@ -280,6 +280,9 @@ After both axes pass, dispatch the
 integration SHA, with `scope.md` as its scope file and one fix worker for accepted fixes. Retain
 the findings and dispositions in the run record.
 
+Reviewers in both passes follow the Review workspace section of `references/review-and-pr.md`,
+resolved from implement-ticket's installed root, with the feature run directory as `RUN_DIR`.
+
 ## Feature PR
 
 Prepare a draft body during setup with the intended scope and links to the spec and tickets.

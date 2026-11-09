@@ -1,7 +1,7 @@
 #!/bin/sh
-# Claude Code status line: [account] model and effort | bar used/size (pct) | dir (branch
-# +added −removed), then open PRs, the issues each closes, and PR counts on a
-# second line. The branch diff needs git 2.26 or later.
+# Claude Code status line: [account] model and effort | bar used/size (pct) |
+# dir (branch +added −removed), then open PRs, the issues each closes, and PR
+# counts on a second line. The branch diff needs git 2.26 or later.
 # Reads the status line JSON from stdin. Requires jq and a truecolor terminal.
 # The PR counts also need gh, signed in to an account that can read the repo.
 #
@@ -95,6 +95,7 @@ if [ -n "$account" ]; then
   shift $((hash % $#))
   printf '\033[1;38;2;%sm[%s]\033[0m ' "$1" "$account"
 fi
+
 printf '\033[1;38;2;215;119;87m%s\033[0m' "$model"
 # Claude Code leaves out effort when the model does not support it.
 [ -n "$effort" ] && printf ' \033[2m· %s\033[0m' "$effort"

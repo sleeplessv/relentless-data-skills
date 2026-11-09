@@ -64,10 +64,10 @@ CLAUDE_CONFIG_DIR=~/.claude-work CLAUDE_STATUSLINE_ACCOUNT=work claude
 
 Without that variable, the label is `oauthAccount.emailAddress` from
 `${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, or `oauthAccount.organizationName`
-when there is no email address, cut to 30 characters. This means a signed-in
-account shows its email address even with one profile. To keep the address off
-your screen, set the variable. With no variable and no signed-in account, the
-line has no label.
+when there is no email address, cut to 30 characters. A signed-in account
+therefore shows its email address even with one profile. To keep the address
+off your screen, set the variable. With no variable and no signed-in account,
+the line has no label.
 
 The label's colour comes from a hash of the label, so each account keeps its
 colour. If two accounts land on the same colour, change one label.

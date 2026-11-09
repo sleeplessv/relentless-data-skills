@@ -39,7 +39,7 @@ If `~/.claude/statusline.sh` already exists and differs, show the diff and ask b
 
 ### Step 3: Register it in settings
 
-Use `~/.claude/settings.json` by default, so it applies to every project. Use the project's `.claude/settings.json` only when the user asks for a project-level status line.
+Use `~/.claude/settings.json` by default, so it applies to every project when `CLAUDE_CONFIG_DIR` is not set. Use the project's `.claude/settings.json` only when the user asks for a project-level status line.
 
 If the file does not exist, create it with only the `statusLine` key below. Otherwise, read the file first. If a `statusLine` key already exists and does not point to `~/.claude/statusline.sh`, show it and ask before replacing it. Otherwise set:
 
@@ -63,4 +63,4 @@ Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 4
 
 The first run starts a background fetch of the PR counts, so the PR line can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the line stays hidden.
 
-Tell the user that the status line appears from their next message. If it does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.
+Tell the user that the status line appears from their next message in a session without `CLAUDE_CONFIG_DIR`. A session with `CLAUDE_CONFIG_DIR` set needs the `statusLine` key in that directory's `settings.json`, as [Tell Claude accounts apart](README.md#tell-claude-accounts-apart) describes. If the status line does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.

@@ -68,13 +68,14 @@ sets `CLAUDE_CONFIG_DIR`, add the same `statusLine` key to
 `$CLAUDE_CONFIG_DIR/settings.json`. The `command` value can stay
 `~/.claude/statusline.sh`.
 
-Without that variable, a profile with `CLAUDE_CONFIG_DIR` set shows
-`oauthAccount.emailAddress` from `$CLAUDE_CONFIG_DIR/.claude.json`, or
+Without `CLAUDE_STATUSLINE_ACCOUNT`, a profile with `CLAUDE_CONFIG_DIR` set
+shows `oauthAccount.emailAddress` from `$CLAUDE_CONFIG_DIR/.claude.json`, or
 `oauthAccount.organizationName` when there is no email address. The script
 removes control characters from that value and cuts it to 30 characters. To
-keep the address off your screen in that profile, set the variable. Without
-`CLAUDE_CONFIG_DIR`, the script does not read `.claude.json`, so the line has no
-label unless you set the variable.
+keep the address off your screen in that profile, set
+`CLAUDE_STATUSLINE_ACCOUNT`. Without `CLAUDE_CONFIG_DIR`, the script does not
+read `.claude.json`, so the line has no label unless you set
+`CLAUDE_STATUSLINE_ACCOUNT`.
 
 The label's colour comes from a hash of the label, so each account keeps its
 colour. If two accounts land on the same colour, change one label.

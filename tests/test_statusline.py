@@ -442,6 +442,13 @@ class StatuslineTest(unittest.TestCase):
         self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"organizationName": "Ö" * 40}}))
         self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{'Ö' * 29}…] M"))
 
+    def test_account_label_is_shortened_only_past_30_characters(self):
+        cases = [("n" * 30, "n" * 30), ("n" * 31, f"{'n' * 29}…")]
+        for name, label in cases:
+            with self.subTest(length=len(name)):
+                self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"organizationName": name}}))
+                self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{label}] M"))
+
     def test_account_env_var_is_not_shortened(self):
         self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "n" * 40
         self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{'n' * 40}] M"))

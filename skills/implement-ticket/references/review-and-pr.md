@@ -92,8 +92,8 @@ Resolve the immutable base and review commits, record `git diff <base_sha>...<re
 Set the review checkout's `HEAD` to `review_sha` so the skill's `...HEAD` command sees that tree.
 An empty diff means the [No-change outcome](#no-change-outcome) applies; review does not run.
 
-Pass the run directory, the main checkout path (`REPO`), `base_sha` as the fixed point, and an
-absolute path to the authoritative review scope.
+Pass the run directory, the main checkout path (`REPO`), `base_sha` as the fixed point,
+`review_sha` as the commit to review, and an absolute path to the authoritative review scope.
 For a solo ticket, that scope is `ticket-snapshot.md` in the run directory. The worker that
 completes step 1 saves the ticket's body, relevant comments, and acceptance criteria as its
 `## Requirements` section before implementation starts, so the enforced scope predates every

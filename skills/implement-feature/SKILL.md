@@ -132,8 +132,9 @@ Pass the verified SHA, coverage evidence, run record, and reports. A newly disco
 verification loop. Refresh tracker coverage before claiming the entire spec is complete.
 
 Update the same draft with actual results and evidence-backed closing lines, then mark it
-ready. Never merge it. Report the URL and any unexecuted checks. If publication is blocked,
-preserve the completed branch and PR body and report that limitation.
+ready. Never merge it. Report the URL, any unexecuted checks, and the friction workers
+returned, grouped by cause, as proposed follow-ups. If publication is blocked, preserve the
+completed branch and PR body and report that limitation.
 
 ## Failure and resume
 

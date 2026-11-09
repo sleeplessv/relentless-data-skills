@@ -61,6 +61,7 @@ class StatuslineTest(unittest.TestCase):
             "XDG_CACHE_HOME": str(self.tmp / "cache"),
             "CLAUDE_CONFIG_DIR": str(self.tmp),
             "CLAUDE_STATUSLINE_ACCOUNT": "",
+            "CLAUDE_STATUSLINE_HIDE_ACCOUNT": "",
         }
 
     def render(self, branch, prs, cache_age=0, stamp=True):
@@ -514,6 +515,53 @@ class StatuslineTest(unittest.TestCase):
     def test_account_env_var_is_not_shortened(self):
         self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "n" * 40
         self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{'n' * 40}] M"))
+
+    def test_hide_account_wins_over_the_env_var(self):
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "work"
+        self.env["CLAUDE_STATUSLINE_HIDE_ACCOUNT"] = "1"
+        self.assertTrue(self.first_line().startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+
+    def test_hide_account_wins_over_the_config_file(self):
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        self.env["CLAUDE_STATUSLINE_HIDE_ACCOUNT"] = "1"
+        line = self.first_line()
+        self.assertTrue(line.startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+        self.assertNotIn("user@example.com", line)
+
+    def test_hidden_account_renders_exactly_like_no_label(self):
+        no_label = self.first_line()
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "work"
+        self.env["CLAUDE_STATUSLINE_HIDE_ACCOUNT"] = "1"
+        self.assertEqual(self.first_line(), no_label)
+
+    def test_hide_account_does_not_read_the_config_file(self):
+        log = self.tmp / "jq-args.log"
+        spy = self.gh.parent / "jq"
+        spy.write_text(f'#!/bin/sh\nprintf \'%s\\n\' "$*" >>"{log}"\nexec "{shutil.which("jq")}" "$@"\n')
+        spy.chmod(0o755)
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        self.first_line()
+        self.assertIn(".claude.json", log.read_text())
+        log.unlink()
+        self.env["CLAUDE_STATUSLINE_HIDE_ACCOUNT"] = "1"
+        self.first_line()
+        self.assertNotIn(".claude.json", log.read_text())
+
+    def test_only_the_value_1_hides_the_account(self):
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        for value in (None, "", "0", "01", " 1", "1 ", "true", "off"):
+            with self.subTest(value=value):
+                self.env.pop("CLAUDE_STATUSLINE_HIDE_ACCOUNT", None)
+                if value is not None:
+                    self.env["CLAUDE_STATUSLINE_HIDE_ACCOUNT"] = value
+                self.assertTrue(ANSI.sub("", self.first_line()).startswith("[user@example.com] M"))
+
+    def test_hidden_account_with_a_corrupt_config_file_writes_no_stderr(self):
+        self.write_claude_json(self.tmp, "not json")
+        self.env["CLAUDE_STATUSLINE_HIDE_ACCOUNT"] = "1"
+        self.assertTrue(self.first_line().startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+        self.assertEqual(self.render_stderr(), "")
 
     def account_colour(self, label):
         self.env["CLAUDE_STATUSLINE_ACCOUNT"] = label

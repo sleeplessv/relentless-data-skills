@@ -92,9 +92,12 @@ sep=' \033[2m|\033[0m '
 # parses the whole file before the filter runs, so trailing garbage is invalid
 # JSON, and select drops a file that holds more than one document. The filter
 # removes control characters first. A newline would split the line, and an
-# escape sequence would reach the terminal.
+# escape sequence would reach the terminal. CLAUDE_STATUSLINE_HIDE_ACCOUNT=1
+# hides the label from every source and skips the read of .claude.json.
 account=$CLAUDE_STATUSLINE_ACCOUNT
-if [ -z "$account" ] && [ -n "$CLAUDE_CONFIG_DIR" ]; then
+if [ "$CLAUDE_STATUSLINE_HIDE_ACCOUNT" = 1 ]; then
+  account=
+elif [ -z "$account" ] && [ -n "$CLAUDE_CONFIG_DIR" ]; then
   account=$(jq -rs --argjson max "$ACCOUNT_MAX" '
     select(length == 1) | .[0] | .oauthAccount | first((.emailAddress, .organizationName) | strings | gsub("\\p{Cc}"; "") | select(length > 0))
     | if length > $max then .[:$max - 1] + "…" else . end

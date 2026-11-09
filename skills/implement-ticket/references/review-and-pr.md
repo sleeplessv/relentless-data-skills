@@ -27,7 +27,7 @@ git -C "$REPO" worktree add --detach "$RUN_DIR/$ROLE-$SHA/checkout" "$SHA"
 
 A worker that dispatches children, as `code-review` does, shares its checkout with them. That
 worker alone removes the checkout, after every child returns.
-The parent passes each child `RUN_DIR`, the checkout path, and a link to this section. A child
+The parent passes each child `RUN_DIR`, `SHA`, the checkout path, and a link to this section. A child
 writes under its own `$RUN_DIR/$ROLE-$SHA`, creates no checkout, and returns no `checkout:` line.
 
 **Removal.** Before returning, whatever the verdict, the worker runs both commands in order and

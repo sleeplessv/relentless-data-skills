@@ -499,6 +499,8 @@ class StatuslineTest(unittest.TestCase):
             '{"oauthAccount": "text"}',
             "[]",
             "not json",
+            '{"oauthAccount": {"emailAddress": "user@example.com"}} garbage',
+            '{"oauthAccount": {"emailAddress": "user@example.com"}}\n{"oauthAccount": {"emailAddress": "other@example.com"}}',
         ):
             with self.subTest(content=content):
                 self.write_claude_json(self.tmp, content)

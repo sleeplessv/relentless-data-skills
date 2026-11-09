@@ -88,13 +88,15 @@ sep=' \033[2m|\033[0m '
 # default profile keeps its email address off the line. The email comes first
 # because an organization name can be shared between accounts. With neither,
 # the line shows no label. A missing file or invalid JSON also gives no label,
-# because jq prints no value and 2>/dev/null discards its error. The filter
+# because jq prints no value and 2>/dev/null discards its error. With -s, jq
+# parses the whole file before the filter runs, so trailing garbage is invalid
+# JSON, and select drops a file that holds more than one document. The filter
 # removes control characters first. A newline would split the line, and an
 # escape sequence would reach the terminal.
 account=$CLAUDE_STATUSLINE_ACCOUNT
 if [ -z "$account" ] && [ -n "$CLAUDE_CONFIG_DIR" ]; then
-  account=$(jq -r --argjson max "$ACCOUNT_MAX" '
-    .oauthAccount | first((.emailAddress, .organizationName) | strings | gsub("\\p{Cc}"; "") | select(length > 0))
+  account=$(jq -rs --argjson max "$ACCOUNT_MAX" '
+    select(length == 1) | .[0] | .oauthAccount | first((.emailAddress, .organizationName) | strings | gsub("\\p{Cc}"; "") | select(length > 0))
     | if length > $max then .[:$max - 1] + "…" else . end
   ' "$CLAUDE_CONFIG_DIR/.claude.json" 2>/dev/null)
 fi

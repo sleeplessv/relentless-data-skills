@@ -32,8 +32,8 @@ worker alone removes the checkout, after every child returns.
 stops at the first non-zero exit.
 
 ```sh
-test "$(git -C "$RUN_DIR/$ROLE-$SHA/checkout" rev-parse HEAD)" = "$SHA"   # exit 0 = still at the pinned commit
-git -C "$REPO" worktree remove "$RUN_DIR/$ROLE-$SHA/checkout"             # exit 0 = removed
+test "$(git -C "$RUN_DIR/$ROLE-$SHA/checkout" rev-parse HEAD)" = "$SHA" && # exit 0 = still at the pinned commit
+git -C "$REPO" worktree remove "$RUN_DIR/$ROLE-$SHA/checkout"              # exit 0 = removed
 ```
 
 A non-zero exit leaves the checkout in place. Git refuses to remove a dirty tree, and the worker

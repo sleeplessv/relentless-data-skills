@@ -83,12 +83,17 @@ bar=$(awk -v u="$used" -v cell="$CELL" 'BEGIN{
 sep=' \033[2m|\033[0m '
 
 # The account label: CLAUDE_STATUSLINE_ACCOUNT, or else the signed-in account in
-# the active config dir. The email comes first because an organization name can
-# be shared between accounts. With neither, the line shows no label.
-account=${CLAUDE_STATUSLINE_ACCOUNT:-$(jq -r --argjson max "$ACCOUNT_MAX" '
-  .oauthAccount | first((.emailAddress, .organizationName) | select(length > 0))
-  | if length > $max then .[:$max - 1] + "…" else . end
-' "${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json" 2>/dev/null)}
+# $CLAUDE_CONFIG_DIR. Without that dir the script reads no .claude.json, so a
+# default profile keeps its email address off the line. The email comes first
+# because an organization name can be shared between accounts. With neither,
+# the line shows no label.
+account=$CLAUDE_STATUSLINE_ACCOUNT
+if [ -z "$account" ] && [ -n "$CLAUDE_CONFIG_DIR" ]; then
+  account=$(jq -r --argjson max "$ACCOUNT_MAX" '
+    .oauthAccount | first((.emailAddress, .organizationName) | select(length > 0))
+    | if length > $max then .[:$max - 1] + "…" else . end
+  ' "$CLAUDE_CONFIG_DIR/.claude.json" 2>/dev/null)
+fi
 if [ -n "$account" ]; then
   hash=$(printf '%s' "$account" | cksum | cut -d' ' -f1)
   set -- $ACCOUNT_COLOURS

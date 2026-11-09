@@ -414,11 +414,22 @@ class StatuslineTest(unittest.TestCase):
         self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "work"
         self.assertTrue(ANSI.sub("", self.first_line()).startswith("[work] M"))
 
-    def test_account_reads_home_without_a_config_dir(self):
+    def test_account_ignores_home_without_a_config_dir(self):
         self.write_claude_json(self.tmp / "home", json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
-        del self.env["CLAUDE_CONFIG_DIR"]
         self.env["HOME"] = str(self.tmp / "home")
-        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[user@example.com] M"))
+        for config_dir in (None, ""):
+            with self.subTest(config_dir=config_dir):
+                self.env.pop("CLAUDE_CONFIG_DIR", None)
+                if config_dir is not None:
+                    self.env["CLAUDE_CONFIG_DIR"] = config_dir
+                self.assertTrue(self.first_line().startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+
+    def test_account_env_var_shows_without_a_config_dir(self):
+        self.write_claude_json(self.tmp / "home", json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        self.env["HOME"] = str(self.tmp / "home")
+        del self.env["CLAUDE_CONFIG_DIR"]
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "work"
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[work] M"))
 
     def test_no_account_source_leaves_the_line_unchanged(self):
         for content in (None, "{}", '{"oauthAccount": null}', '{"oauthAccount": {}}', "not json"):

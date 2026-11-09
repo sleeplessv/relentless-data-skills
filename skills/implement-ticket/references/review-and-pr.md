@@ -27,6 +27,8 @@ git -C "$REPO" worktree add --detach "$RUN_DIR/$ROLE-$SHA/checkout" "$SHA"
 
 A worker that dispatches children, as `code-review` does, shares its checkout with them. That
 worker alone removes the checkout, after every child returns.
+The parent passes each child `RUN_DIR`, the checkout path, and a link to this section. A child
+writes under its own `$RUN_DIR/$ROLE-$SHA`, creates no checkout, and returns no `checkout:` line.
 
 **Removal.** Before returning, whatever the verdict, the worker runs both commands in order and
 stops at the first non-zero exit.
@@ -38,8 +40,9 @@ git -C "$REPO" worktree remove "$RUN_DIR/$ROLE-$SHA/checkout"              # exi
 
 A non-zero exit leaves the checkout in place. Git refuses to remove a dirty tree, and the worker
 runs this command without `--force`, because a clean tree does not need it. The return states
-`checkout: removed`, or `checkout: retained at <path>` with the reason. A worker handed a
-checkout it did not create leaves it in place and reports it as retained, naming its creator.
+`checkout: removed`, or `checkout: retained at <path>` with the reason. Apart from the children
+above, a worker handed a checkout it did not create leaves it in place and reports it as
+retained, naming its creator.
 The coordinator records each retained checkout in the findings artifact or run record.
 
 ## Independent verification

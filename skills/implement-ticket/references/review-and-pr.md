@@ -5,7 +5,7 @@ return implementation evidence through their dispatch contract.
 
 ## Review workspace
 
-These rules bind every worker that verifies or reviews: the verifier, each `code-review`
+These rules bind the workers whose briefs cite this section: the verifier, each `code-review`
 reviewer, and the final reviewer. Each brief names the run directory and links here.
 
 Set `REPO` to the main checkout, `RUN_DIR` to the run directory, `SHA` to the full commit SHA
@@ -47,9 +47,9 @@ The coordinator records each retained checkout in the findings artifact or run r
 The coordinator (the solo run's main thread) dispatches the verifier and the reviewers; a
 dispatch from the implementing worker would nest, spending capacity and weakening independence.
 Solo runs rerun the implementing worker's evidence before independent review. The verifier is
-a worker that wrote none of the change. Pass it the tested `head_sha`, the findings artifact
-path, the check commands from step 6, the smoke commands or script from step 7, and the
-implementing worker's resource allocation.
+a worker that wrote none of the change. Pass it the run directory, the main checkout path
+(`REPO`), the tested `head_sha`, the findings artifact path, the check commands from step 6, the
+smoke commands or script from step 7, and the implementing worker's resource allocation.
 
 Verifiers, reviewers, and fix workers return results inline and the coordinator saves them; the
 harness may block their report-file writes. Only implementers write the evidence artifact.
@@ -92,7 +92,8 @@ Resolve the immutable base and review commits, record `git diff <base_sha>...<re
 Set the review checkout's `HEAD` to `review_sha` so the skill's `...HEAD` command sees that tree.
 An empty diff means the [No-change outcome](#no-change-outcome) applies; review does not run.
 
-Pass `base_sha` as the fixed point and an absolute path to the authoritative review scope.
+Pass the run directory, the main checkout path (`REPO`), `base_sha` as the fixed point, and an
+absolute path to the authoritative review scope.
 For a solo ticket, that scope is `ticket-snapshot.md` in the run directory. The worker that
 completes step 1 saves the ticket's body, relevant comments, and acceptance criteria as its
 `## Requirements` section before implementation starts, so the enforced scope predates every
@@ -151,16 +152,15 @@ work. The trivial solo route and orchestrated ticket dispatches skip it; record 
 Feature runs take it once at integration
 ([Integration review](../../implement-feature/references/reference.md#integration-review)).
 
-Brief the reviewer with the run directory, the reviewed `head_sha` (or integration SHA) to check
-out, `base_sha` as the fixed point, the absolute path to the scope file (`ticket-snapshot.md` or
-`scope.md`) so lean findings respect what the ticket requires, and the instruction to run the
-installed `ponytail-review` skill on `git diff <base_sha>...HEAD`. The reviewer follows
-[Review workspace](#review-workspace), which limits its writes to its directory under the run
-directory and requires it to remove its checkout and report the result. The pass is blind:
+Brief the reviewer with the run directory, the main checkout path (`REPO`), the reviewed
+`head_sha` (or integration SHA) to check out, `base_sha` as the fixed point, the absolute path
+to the scope file (`ticket-snapshot.md` or `scope.md`) so lean findings respect what the ticket
+requires, and the instruction to run the installed `ponytail-review` skill on `git diff <base_sha>...HEAD`. The reviewer follows
+[Review workspace](#review-workspace). The pass is blind:
 those are its only inputs, and it receives no Standards or Spec report, findings artifact, or
-earlier disposition. The run directory is a place to write, and the scope file is the only file
-the reviewer reads there. An unavailable `ponytail-review` skips the gate; the findings artifact and PR
-body record "final review not run: skill missing" and readiness is unaffected.
+earlier disposition. The brief supplies the run directory only as a place to write. An
+unavailable `ponytail-review` skips the gate; the findings artifact and PR body record "final
+review not run: skill missing" and readiness is unaffected.
 
 The coordinator decides every finding and records the disposition itself, with no user prompt:
 

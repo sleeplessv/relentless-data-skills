@@ -59,6 +59,8 @@ class StatuslineTest(unittest.TestCase):
             **os.environ,
             "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             "XDG_CACHE_HOME": str(self.tmp / "cache"),
+            "CLAUDE_CONFIG_DIR": str(self.tmp),
+            "CLAUDE_STATUSLINE_ACCOUNT": "",
         }
 
     def render(self, branch, prs, cache_age=0, stamp=True):
@@ -386,6 +388,62 @@ class StatuslineTest(unittest.TestCase):
         line = self.render("main", [pr(97, closes=[5], branch="main", fork=True)])
         self.assertEqual(ANSI.sub("", line), "#97  5  | PRs ✓1")
 
+    def test_account_env_var_labels_the_start_of_the_first_line(self):
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "work"
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[work] M"))
+
+    def write_claude_json(self, directory, content):
+        directory.mkdir(exist_ok=True)
+        (directory / ".claude.json").write_text(content)
+
+    def test_account_comes_from_the_email_in_the_active_config_dir(self):
+        self.write_claude_json(
+            self.tmp,
+            json.dumps({"oauthAccount": {"emailAddress": "user@example.com", "organizationName": "Acme"}}),
+        )
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[user@example.com] M"))
+
+    def test_account_falls_back_to_the_organization_name(self):
+        for account in ({"organizationName": "Acme"}, {"emailAddress": "", "organizationName": "Acme"}):
+            with self.subTest(account=account):
+                self.write_claude_json(self.tmp, json.dumps({"oauthAccount": account}))
+                self.assertTrue(ANSI.sub("", self.first_line()).startswith("[Acme] M"))
+
+    def test_account_env_var_wins_over_the_config_file(self):
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "work"
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[work] M"))
+
+    def test_account_reads_home_without_a_config_dir(self):
+        self.write_claude_json(self.tmp / "home", json.dumps({"oauthAccount": {"emailAddress": "user@example.com"}}))
+        del self.env["CLAUDE_CONFIG_DIR"]
+        self.env["HOME"] = str(self.tmp / "home")
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith("[user@example.com] M"))
+
+    def test_no_account_source_leaves_the_line_unchanged(self):
+        for content in (None, "{}", '{"oauthAccount": null}', '{"oauthAccount": {}}', "not json"):
+            with self.subTest(content=content):
+                if content is not None:
+                    self.write_claude_json(self.tmp, content)
+                self.assertTrue(self.first_line().startswith("\x1b[1;38;2;215;119;87mM\x1b[0m"))
+
+    def test_long_account_from_the_config_file_is_shortened(self):
+        self.write_claude_json(self.tmp, json.dumps({"oauthAccount": {"organizationName": "Ö" * 40}}))
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{'Ö' * 29}…] M"))
+
+    def test_account_env_var_is_not_shortened(self):
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = "n" * 40
+        self.assertTrue(ANSI.sub("", self.first_line()).startswith(f"[{'n' * 40}] M"))
+
+    def account_colour(self, label):
+        self.env["CLAUDE_STATUSLINE_ACCOUNT"] = label
+        match = re.match(rf"\x1b\[1;(38;2;\d+;\d+;\d+)m\[{label}\]\x1b\[0m ", self.first_line())
+        self.assertIsNotNone(match)
+        return match[1]
+
+    def test_each_account_keeps_its_own_colour(self):
+        self.assertEqual(self.account_colour("work"), self.account_colour("work"))
+        self.assertNotEqual(self.account_colour("work"), self.account_colour("personal"))
 
     def test_counts_past_the_stale_age_show_how_old_they_are(self):
         line = self.render("main", [pr(97)], cache_age=5 * 60 + 10)

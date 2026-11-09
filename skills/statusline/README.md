@@ -53,6 +53,25 @@ The script refreshes the PR line in the background about every 20 seconds.
 When a refresh fails, the line keeps the last counts and shows their age once
 they are two minutes old, such as `(5m old)`.
 
+## Tell Claude accounts apart
+
+The first line can start with a label for the account, such as `[work]`. To
+choose the label, set `CLAUDE_STATUSLINE_ACCOUNT` where you start that profile:
+
+```bash
+CLAUDE_CONFIG_DIR=~/.claude-work CLAUDE_STATUSLINE_ACCOUNT=work claude
+```
+
+Without that variable, the label is `oauthAccount.emailAddress` from
+`${CLAUDE_CONFIG_DIR:-$HOME}/.claude.json`, or `oauthAccount.organizationName`
+when there is no email address, cut to 30 characters. This means a signed-in
+account shows its email address even with one profile. To keep the address off
+your screen, set the variable. With no variable and no signed-in account, the
+line has no label.
+
+The label's colour comes from a hash of the label, so each account keeps its
+colour. If two accounts land on the same colour, change one label.
+
 ## Install
 
 See the [repo root README](../../README.md) for the general install patterns.

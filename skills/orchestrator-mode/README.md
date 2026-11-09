@@ -6,10 +6,14 @@ until the user changes it. In that mode the main thread only dispatches, plans, 
 and talks to the user, and it passes worker artifacts on by path.
 
 Every workflow step ends on a completion criterion. Handoffs assume the worker starts with no
-conversation context, quote prior findings, and name one shared run directory. Parallel writers
+conversation context, quote prior findings, and name one shared run directory. Decisions go
+to a dated, append-only decision list in that directory, so they survive a compaction. Workers
+return environment friction (a missing check, information out of reach, a workaround taken)
+and the report lists it as proposed follow-ups. Parallel writers
 use isolated worktrees with pinned base commits, and cleanup requires recorded ownership and
 preservation evidence. The report step saves reusable research to the repo's `docs/research/`
-rather than only the session's run directory, and offers worktree and branch cleanup once the
+rather than only the session's run directory, with claims about code dated and tied to a
+commit, and offers worktree and branch cleanup once the
 run's PRs merge. Core rules live in [SKILL.md](SKILL.md); nesting, parallel writes, and
 harness limits live in [references/reference.md](references/reference.md).
 

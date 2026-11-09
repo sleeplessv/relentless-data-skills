@@ -3,6 +3,8 @@
 Read the section the current dispatch needs.
 
 - [Harness notes](#harness-notes): limits and defaults that tool schemas leave out.
+- [Decision list](#decision-list): where the run's decisions live and how entries are
+  written.
 - [Nesting sub-orchestrators](#nesting-sub-orchestrators): when and how a subtree gets its
   own coordinator.
 - [Parallel writes worktrees](#parallel-writes-worktrees): isolation, integration, and
@@ -37,6 +39,19 @@ named settings are the durable handle; check them when a number matters.
 - **Scripted fan-out.** When a scripted multi-agent workflow tool is exposed and its own
   opt-in rules are met, use it for a wide, uniform fan-out such as one check across many
   files; dispatch directly when each step depends on the last.
+
+## Decision list
+
+The coordinator's context is lost at compaction; the decision list is a file, so decisions
+survive it and reach workers by path. A lookup or a single wave carries its decisions in
+the handoff. Standing mode and any run of more than one wave keep the list in
+`decisions.md` in the run directory, or in the file a consumer skill names.
+
+- Append each decision as it is made: the date, the decision, its reason, and its source
+  (the user, the coordinator, or a worker's `decisions_made`).
+- A reversal is a new entry that names the entry it supersedes. Earlier entries stay as
+  written, so a worker briefed on one can be traced.
+- An entry about code cites the commit it held at.
 
 ## Nesting sub-orchestrators
 
@@ -87,7 +102,9 @@ coordinator returns its verification evidence with its other return fields.
    preserved integration history; unique WIP remains even if its behavior was superseded.
    Recheck the remote tip immediately before deletion and use an expected-tip lease where
    supported. Branch names, absence of an origin counterpart, and matching base tips do not
-   prove ownership. Report retained resources and cleanup failures with paths.
+   prove ownership. Report retained resources and cleanup failures with paths. For merged
+   PRs, a branch-cleanup skill such as `cleanup-merged-branches`, when installed, can run
+   this step.
 
 ## Worked example
 

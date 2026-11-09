@@ -76,6 +76,9 @@ reported as durable remote WIP. Write detailed evidence to an artifact and retur
 - `push_status`, `remote_sha`, `dirty_files`, and any saved prior WIP tip.
 - `files_changed`, compact `tests_run`, per-criterion evidence, relevant `decisions_made`,
   `open_questions`, `root_cause` on failure, and `artifact_path` for full details.
+- `friction`, omitted when there is none: what in the environment slowed or misled the work
+  (a missing check, information out of reach, a long search, a workaround taken). Report
+  it; fixing it is outside the ticket.
 
 Include before/after observations in the evidence artifact, with their commands, commits, and
 capture context. Preserve red-test output or prior artifacts when available. Mark an unavailable

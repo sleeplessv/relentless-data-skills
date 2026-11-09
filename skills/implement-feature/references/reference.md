@@ -79,13 +79,14 @@ on resume, updating snapshots while retaining earlier versions needed to explain
   Copy every enforceable obligation for that mode into a requirements section. Put parent-spec or
   unselected requirements that provide context in a separate context-only section.
 - `handoff.md` holds command/resource setup, original baseline, current verified integration tip,
-  branch identities, decision log, failures, and unresolved questions. Append decisions.
+  branch identities, decision log, failures, and unresolved questions. Append decisions; this
+  log is the run's decision list under orchestrator-mode, written to its entry rules.
 - A run record tracks exact owned worktrees/branches, initial and current SHAs, claim ownership,
   integration evidence per ticket, artifact paths, and push results. Store the feature PR identity,
   draft status, and last published head. Report the run record's absolute path.
 - For each ticket attempt, record the worker ID, branch, start-comment URL, stop-comment URL,
-  outcome, immutable dispatch SHA, prerequisite evidence, and state: ready, running, completed,
-  integrated, satisfied, failed, or blocked. `satisfied` is terminal for a validated
+  outcome, returned friction, immutable dispatch SHA, prerequisite evidence, and state: ready,
+  running, completed, integrated, satisfied, failed, or blocked. `satisfied` is terminal for a validated
   `already_satisfied` outcome and records the current integration tested SHA plus criterion and
   runtime evidence. It does not claim that a merge occurred. Distinguish worker completion from
   verified integration.

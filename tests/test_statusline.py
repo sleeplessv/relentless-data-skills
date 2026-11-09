@@ -123,6 +123,13 @@ class StatuslineTest(unittest.TestCase):
         ).stdout
         return out.split("\n")[0]
 
+    def render_stderr(self):
+        """Run the script with the test repo as the workspace. Return its stderr."""
+        stdin = json.dumps({"model": {"display_name": "M"}, "workspace": {"current_dir": str(self.repo)}})
+        return subprocess.run(
+            ["sh", str(SCRIPT)], input=stdin, capture_output=True, text=True, env=self.env, check=True
+        ).stderr
+
     def test_branch_diff_shows_committed_lines_added_and_removed(self):
         self.feature_repo()
         (self.repo / "a.txt").write_text("one\nTWO\nthree\nfour\n")
@@ -277,6 +284,9 @@ class StatuslineTest(unittest.TestCase):
 
     def test_branch_diff_is_hidden_outside_a_git_repo(self):
         self.assertTrue(ANSI.sub("", self.first_line()).endswith(" | repo"))
+
+    def test_render_outside_a_git_repo_writes_nothing_to_stderr(self):
+        self.assertEqual(self.render_stderr(), "")
 
     def test_branch_diff_falls_back_to_local_main_then_master(self):
         for default in ("main", "master"):

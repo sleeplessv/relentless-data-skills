@@ -127,7 +127,7 @@ if [ -n "$cwd" ]; then
   base=$(git --no-optional-locks -C "$cwd" symbolic-ref -q refs/remotes/origin/HEAD 2>/dev/null)
   git --no-optional-locks -C "$cwd" rev-parse -q --verify "$base^{commit}" >/dev/null 2>&1 || base=
   for b in main master; do
-    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" && base=refs/heads/$b
+    [ -z "$base" ] && git --no-optional-locks -C "$cwd" show-ref -q --verify "refs/heads/$b" 2>/dev/null && base=refs/heads/$b
   done
   base_branch=${base#refs/remotes/origin/}
   mb=$([ -n "$head_branch" ] && [ "$head_branch" != "${base_branch#refs/heads/}" ] \

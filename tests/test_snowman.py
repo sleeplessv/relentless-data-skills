@@ -462,6 +462,134 @@ class TestResolveTarget(SnowmanTestCase):
         self.assertEqual(target.env_file, root / ".env")
 
 
+class TestEnvAlias(SnowmanTestCase):
+    """`prd` and `prod` resolve to each other only when one is undefined."""
+
+    PROD_ONLY = MULTI_ENV_FRONTMATTER
+    PRD_ONLY = MULTI_ENV_FRONTMATTER.replace("  prod:\n", "  prd:\n")
+    BOTH = MULTI_ENV_FRONTMATTER.replace(
+        "default_env:", "  prd:\n    connection: acme_prd\ndefault_env:"
+    )
+
+    def resolve(self, frontmatter: str, env: str | None = None, **kwargs) -> tuple:
+        """Resolve in a temp project; return (connection, environment, stderr)."""
+        root = self.make_project(frontmatter)
+        stderr = io.StringIO()
+        with contextlib.redirect_stderr(stderr):
+            target = snowman.resolve_target(root, None, env, **kwargs)
+        return target.connection, target.environment, stderr.getvalue()
+
+    def test_prd_resolves_to_prod_when_only_prod_is_defined(self):
+        connection, environment, _ = self.resolve(self.PROD_ONLY, "prd")
+        self.assertEqual((connection, environment), ("acme_prod", "prod"))
+
+    def test_prod_resolves_to_prd_when_only_prd_is_defined(self):
+        connection, environment, _ = self.resolve(self.PRD_ONLY, "prod")
+        self.assertEqual((connection, environment), ("acme_prod", "prd"))
+
+    def test_alias_is_announced_in_one_stderr_line(self):
+        for frontmatter, requested, resolved in (
+            (self.PROD_ONLY, "prd", "prod"),
+            (self.PRD_ONLY, "prod", "prd"),
+        ):
+            with self.subTest(requested=requested):
+                _, _, err = self.resolve(frontmatter, requested)
+                self.assertEqual(err.count("\n"), 1, err)
+                self.assertTrue(err.startswith(f"# environment: '{requested}' is not defined"), err)
+                self.assertTrue(err.endswith(f"using its alias '{resolved}'\n"), err)
+
+    def test_exact_match_wins_when_both_are_defined(self):
+        for requested, connection in (("prd", "acme_prd"), ("prod", "acme_prod")):
+            with self.subTest(requested=requested):
+                self.assertEqual(
+                    self.resolve(self.BOTH, requested), (connection, requested, "")
+                )
+
+    def test_exact_match_prints_no_note(self):
+        self.assertEqual(self.resolve(self.PROD_ONLY, "prod"), ("acme_prod", "prod", ""))
+
+    def test_neither_defined_still_blocks(self):
+        root = self.make_project(
+            "---\nenvironments:\n  dev:\n    connection: acme_dev\ndefault_env: dev\n---\n"
+        )
+        for requested in ("prd", "prod"):
+            with self.subTest(requested=requested):
+                reason = self.assert_blocked(
+                    snowman.resolve_target, root, None, requested, match="unknown environment"
+                )
+                self.assertIn(repr(requested), reason)
+
+    def test_only_prd_and_prod_are_aliased(self):
+        root = self.make_project(self.PROD_ONLY)
+        for requested in ("production", "PRD", "development", "stg"):
+            with self.subTest(requested=requested):
+                self.assert_blocked(
+                    snowman.resolve_target, root, None, requested, match="unknown environment"
+                )
+
+    def test_default_env_resolves_through_the_alias(self):
+        frontmatter = self.PROD_ONLY.replace("default_env: dev", "default_env: prd")
+        connection, environment, err = self.resolve(frontmatter)
+        self.assertEqual((connection, environment), ("acme_prod", "prod"))
+        self.assertIn("using its alias 'prod'", err)
+
+    def test_aliased_default_env_does_not_satisfy_staging(self):
+        # Staging keeps requiring an explicit --env, whichever name default_env uses.
+        root = self.make_project(self.PROD_ONLY.replace("default_env: dev", "default_env: prd"))
+        self.assert_blocked(
+            snowman.resolve_target, root, None, None, for_stage=True, match="requires --env"
+        )
+
+    def test_staging_through_the_alias_matches_the_defined_name(self):
+        # The staged file must name the real target, so an alias cannot hide it.
+        fixed = datetime(2026, 1, 2, 3, 4, 5)
+        staged = {}
+        for requested in ("prod", "prd"):
+            root = self.enter(self.make_project(self.PROD_ONLY))
+            stderr = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
+                self.assertEqual(snowman.stage("DROP TABLE t", "teardown", requested, now=fixed), 0)
+            [path] = (root / ".snowman" / "staged").glob("*.sql")
+            staged[requested] = (path.name, path.read_text(encoding="utf-8"), stderr.getvalue())
+        self.assertEqual(staged["prd"][:2], staged["prod"][:2])
+        name, body, _ = staged["prd"]
+        self.assertIn("prod__teardown", name)
+        self.assertIn("-- target environment: prod (connection: acme_prod)", body)
+        self.assertIn("-- WARNING: contains DROP", body)
+        self.assertEqual(staged["prod"][2], "")
+        self.assertIn("using its alias 'prod'", staged["prd"][2])
+
+    def test_query_through_the_alias_keeps_the_read_only_guard(self):
+        self.enter(self.make_project(self.PROD_ONLY))
+        snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", snow):
+            self.assert_blocked(snowman.execute, "DROP TABLE t", env="prd", match="non-read-only")
+        self.assertEqual(snow.calls, [])
+
+    def test_main_queries_the_aliased_connection_and_says_so(self):
+        self.enter(self.make_project(self.PROD_ONLY))
+        snow = fake_snow({"sql": OK})
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(snowman, "run_snow", snow), \
+                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            code = snowman.main(["snowman.py", "--env", "prd", "SELECT 1"])
+        self.assertEqual(code, 0)
+        [(args, _)] = snow.calls
+        self.assertEqual(args[args.index("--connection") + 1], "acme_prod")
+        self.assertIn("using its alias 'prod'", stderr.getvalue())
+        self.assertNotIn("alias", stdout.getvalue())
+
+    def test_main_still_blocks_an_unknown_environment(self):
+        self.enter(self.make_project(self.PRD_ONLY))
+        snow = fake_snow({})
+        stderr = io.StringIO()
+        with mock.patch.object(snowman, "run_snow", snow), contextlib.redirect_stderr(stderr):
+            code = snowman.main(["snowman.py", "--env", "production", "SELECT 1"])
+        self.assertEqual(code, snowman.BLOCK)
+        self.assertTrue(stderr.getvalue().startswith("BLOCKED: unknown environment 'production'"))
+        self.assertEqual(snow.calls, [])
+
+
 class TestDotenv(SnowmanTestCase):
     def write_env(self, text: str) -> Path:
         root = self.make_bare_dir()

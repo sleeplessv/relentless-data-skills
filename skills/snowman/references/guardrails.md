@@ -35,7 +35,9 @@ string as `'F' || CHR(38) || 'W'` or filter with `LIKE 'F%W'`.
 
 After validation, the wrapper resolves the connection and `default_warehouse`
 from project context. An explicit environment selects its own settings.
-Queries fall back to `default_env`. Unknown environments, mixed context forms,
+Queries fall back to `default_env`. `prd` and `prod` are aliases: when the
+context defines only one, the other resolves to it and a `# environment:` note
+on stderr names both. Unknown environments, mixed context forms,
 and `--env` with a single-account context are rejected. `--connection` bypasses
 context for bootstrap and retains the named connection's warehouse setting.
 

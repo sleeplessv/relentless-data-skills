@@ -116,7 +116,7 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 
 A worker sees its dispatch prompt and the project instructions its harness loads, such as
 CLAUDE.md or AGENTS.md. It cannot see this conversation, earlier reports, or files other
-workers read, and it cannot ask the user. Write each handoff as its complete briefing:
+workers read, and usually cannot ask the user. Write each handoff as its complete briefing:
 
 - **Task** with its done-when, owned paths or resources, and permissions already granted.
 - **Goal**: why the work matters, for implementation and verification tasks.

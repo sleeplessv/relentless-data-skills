@@ -2,7 +2,7 @@
 
 Read the section the current dispatch needs.
 
-- [Harness notes](#harness-notes): limits and defaults that tool schemas leave out.
+- [Harness notes](#harness-notes): limits and defaults the tool schemas omit, by harness.
 - [Decision list](#decision-list): where the run's decisions live and how entries are
   written.
 - [Nesting sub-orchestrators](#nesting-sub-orchestrators): when and how a subtree gets its
@@ -13,32 +13,98 @@ Read the section the current dispatch needs.
 
 ## Harness notes
 
-Facts the tool schemas leave out, checked against vendor docs in September 2026. The
-named settings are the durable handle; check them when a number matters.
+Facts the tool schemas leave out, checked against vendor docs and source in November 2026.
+The named settings are the durable handle; check them when a number matters. Read the
+general notes, then the subsection for the harness this session runs in.
 
-- **Questions.** Claude Code withholds `AskUserQuestion` from subagents; only a fork keeps
-  the main conversation's tools. Treat workers in any harness as unable to ask; their
-  questions come back in `open_questions`.
-- **Concurrency.** Claude Code runs up to 20 subagents
-  (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`). Codex V2 defaults to 4 open threads
-  (`agents.max_concurrent_threads_per_session`). Cortex Code allows 50 background agents.
-  Cursor documents no cap.
-- **Depth.** Claude Code allows 3 layers below the main thread
-  (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`). Cursor allows 2; a grandchild cannot spawn.
-  Codex V1 allows 1 (`agents.max_depth`); V2 has no depth setting. A Cortex Code
-  background agent cannot spawn background agents.
-- **Forks.** A Claude Code fork runs the parent's model and ignores a model override; use a
-  clean worker when the task needs another model. A Codex spawn inherits the whole
-  conversation by default; pass `fork_turns: "none"` for a clean worker.
-- **Permission.** Codex's spawn tool does not count a request for depth or thoroughness as
-  permission to spawn. Activating this skill is that permission; say so in the dispatch.
-- **Worktree base.** Claude Code's native worktree isolation starts from `origin/<default>`
-  unless the `worktree.baseRef` setting is `head`.
-- **Completion.** Claude Code workers run in the background and report through completion
-  notifications, so the coordinator waits for those notifications.
+- **Project rules.** When a harness's subsection says a worker skips project instructions,
+  or says nothing about them, that worker's handoff carries the project rules it needs.
 - **Scripted fan-out.** When a scripted multi-agent workflow tool is exposed and its own
   opt-in rules are met, use it for a wide, uniform fan-out such as one check across many
   files; dispatch directly when each step depends on the last.
+
+### Claude Code
+
+- **Questions.** Only a fork can ask; other workers lose `AskUserQuestion`.
+- **Limits.** Up to 20 workers run at once (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`);
+  resuming a finished worker takes a slot without checking the limit, so resumes can push
+  the count past it. Workers nest 3 layers below the main thread
+  (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`), and a fork cannot start another fork.
+- **Model and effort.** The model comes from the per-call `model`, then the definition's
+  `model`, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the main thread's model.
+  `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` ignores definition models and refuses per-call ones;
+  `CLAUDE_CODE_EFFORT_LEVEL` overrides a per-call `effort`. A fork keeps the main thread's
+  model and effort, so a task that needs another gets a clean worker.
+- **Worktrees.** Native isolation starts from `origin/<default>` while `worktree.baseRef` is
+  `fresh` (the default), and from local HEAD when it is `head` or no remote is configured.
+- **Completion.** Workers the main thread spawns run in the background and report through
+  completion notifications. By default a worker gets its own workers' results before it
+  finishes; with fork mode off (`CLAUDE_CODE_FORK_SUBAGENT=0`) in `claude -p` or the Agent
+  SDK, they run in the background and report to the main thread if they outlast it.
+- **Resume, instructions and skills.** Built-in Explore and Plan workers cannot be resumed.
+  They skip CLAUDE.md and AGENTS.md, and so does a worker whose definition sets
+  `omitClaudeMd: true`; other workers load them. A worker the user stopped refuses
+  messages, and background workers keep the `Skill` tool.
+- **Scripted fan-out.** Workers other than forks never get the `Workflow` tool. A workflow
+  runs up to 16 agents at once by default, fewer on machines with fewer CPUs
+  (`CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS`, 1 to 256), apart from the 20-worker cap.
+
+### Codex
+
+Codex has two multi-agent versions, V1 and V2 (its source's names). It runs V2 on most
+current models, and on any model when `features.multi_agent_v2` is set; otherwise V1. A
+session is in V2 when `spawn_agent` requires `task_name` and takes `fork_turns`. The V2
+keys come from Codex's source, because its docs omit them.
+
+- **Questions.** `request_user_input` works only on the main thread.
+- **Limits.** V2 allows 4 open threads, the main thread included, so 3 workers
+  (`features.multi_agent_v2.max_concurrent_threads_per_session`); it unloads finished idle
+  workers to make room, so the limit binds on running ones.
+  `agents.max_concurrent_threads_per_session` counts workers only: V1's limit, default 6.
+  When V2's own key is unset and this one is set, V2 allows this value plus 1. V1 nests 1
+  layer (`agents.max_depth`); V2 sets no depth limit, but a nested worker can spawn only if
+  its own model's catalog entry is V2.
+- **Forks.** A V2 spawn inherits the whole conversation unless `fork_turns` is `"none"`
+  (default `all`), so set `fork_turns: "none"` on every spawn that is not meant as a fork
+  or that sets a model or effort; a V1 spawn starts clean unless `fork_context` is true.
+- **Permission.** Below Ultra effort, Codex is instructed to spawn only when the user,
+  AGENTS.md, or a skill explicitly asks for subagents, delegation, or parallel work; V1's
+  spawn tool adds that a request for depth or thoroughness does not count. Activating this
+  skill is that permission; say so in the dispatch.
+- **Model and effort.** Workers inherit their spawner's model and effort unless the spawn
+  sets them; `agents.default_subagent_model` and `agents.default_subagent_reasoning_effort`
+  set the defaults, and a V2 full-history fork rejects both overrides.
+- **Worktrees.** No native isolation: all workers share one working directory.
+- **Completion and resume.** V2 delivers a worker's final answer to its spawner
+  automatically; `wait_agent` reports only which workers have updates. `followup_task`
+  starts a new turn on an idle worker; `send_message` delivers without starting one.
+- **Project instructions and skills.** Workers inherit their spawner's AGENTS.md and skills.
+
+### Cursor
+
+- **Questions.** A custom worker can ask when its definition tells it to use the
+  ask-question tool.
+- **Limits.** No concurrency cap is documented; depth is 2, so a grandchild cannot spawn.
+- **Model.** The worker definition's `model` field, or `inherit`.
+- **Worktrees.** Isolation is opt-in, as a local worktree or a cloud VM, from an
+  undocumented base.
+- **Completion and resume.** A background worker writes its output to files under
+  `~/.cursor/subagents/`, which its spawner reads. A finished worker resumes by its ID.
+
+### Cortex Code
+
+- **Questions.** The tools page describes `RunSubagent` (the changelog's `task` tool) as
+  launching "an autonomous subagent", which never blocks for questions; the docs name no
+  setting for a non-autonomous one.
+- **Limits.** Up to 50 background workers run at once, with no setting documented; a
+  background worker cannot spawn background workers.
+- **Model.** The worker definition's `model` field, or `inherit`; the spawn call accepts
+  `model: "inherit"`.
+- **Worktrees.** A worker is isolated when the spawn prompt asks for a worktree, on branch
+  `agent/<agentId>`. `--worktree-base` sets its base (changelog 1.2.14); where the flag
+  goes and the default base are undocumented.
+- **Completion and resume.** The spawner fetches a worker's output, or resumes a killed
+  worker, by its ID.
 
 ## Decision list
 

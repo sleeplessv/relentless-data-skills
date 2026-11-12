@@ -33,8 +33,8 @@ in a worktree or the run directory: elsewhere the active account can differ and 
 `Could not resolve to a Repository`; the fix is to change directory and rerun. If a necessary command is blocked,
 use the available scoped escalation and report a denial accurately. A denied command with no escalation available
 is a blocked step: finish every step that does not depend on it, then take the stop path naming the exact command.
-The task's existing authorization governs external mutations. Reuse the user's authorization for lifecycle comments
-without asking again. Record which assignments and labels this run changes and alter only those on a stop path.
+Invoking this skill authorizes claiming the ticket, posting lifecycle comments, pushing the ticket branch (WIP included), and opening and updating its draft PR; name these in each handoff as permissions already granted.
+Rewriting a pushed branch, closing the issue, and installing skills need the user's go-ahead. Record which assignments and labels this run changes and alter only those on a stop path.
 
 ### Ticket lifecycle comments
 
@@ -87,7 +87,7 @@ Post and record the start comment before proceeding to step 4.
 
 ### 4. Explore before editing
 
-Grep/search for the modules the ticket touches. Read `AGENTS.md`, `GLOSSARY.md` (or the older `CONTEXT.md`), and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the ticket asks for it.
+Read `AGENTS.md`, `GLOSSARY.md` (or the older `CONTEXT.md`), and ADRs in `docs/adr/` for invariants. Match existing patterns; don't introduce new infrastructure (test framework, linter config) unless the ticket asks for it.
 
 For solo runs, identify the **feedback-loop commands**: the type-checker/linter (e.g. `mypy`, `pyright`, `ruff`) and the **test command** (e.g. `pytest`), plus the **run command** (`AGENTS.md`, `pyproject.toml`, `Makefile`, `package.json` scripts, CI workflows, `docker-compose.yml`). Run the configured type-check/lint and test commands on the pinned clean `base_sha` before editing, or reuse an original baseline with that proven SHA. On resume, use a separate checkout for this base check; failures on the WIP branch remain separate and cannot become baseline exemptions. Record commands, checked SHA, and original failures.
 
@@ -104,7 +104,6 @@ Throughout:
 
 - In solo runs, open a **draft PR within the first 1–2 commits**. Follow [PR body](references/review-and-pr.md#pr-body), including pending evidence and the closing line it chooses (`Closes #<N>` unless the repo's rule says otherwise). Push the branch, then use `gh pr create --draft --base <pr_base> --head <ticket_branch> --title "<title>" --body-file <body-file>`. Reuse an existing branch PR on resume. If publication fails, preserve the body, keep implementing locally, and report the error.
 - Capture before/after observations with their commands, commits, and artifact paths as you work. Preserve red-test output or the prior artifact for the PR's Evidence section.
-- Keep the loop **tight** while building: type-check and run the single test file you're touching as you go; save the full suite for step 6.
 - Keep commits scoped and conventional (`feat:`, `fix:`, `test:`, …).
 
 ### 6. Feedback loop: types + tests (REQUIRED before marking ready)

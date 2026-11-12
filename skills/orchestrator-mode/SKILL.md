@@ -63,7 +63,7 @@ Leave model and reasoning effort unset unless the user or a consumer skill sets 
 - Feature-sized work runs in waves, one per dependency level.
 
 Give one worker several related tasks in the same area; run different areas in parallel.
-Keep at most four workers running, nested ones included, unless
+Keep at most four agents running, the coordinator and nested workers included, unless
 [Harness notes](references/reference.md#harness-notes) gives this environment a higher
 limit. A spawn past the limit fails rather than queues: wait for a
 completion, then dispatch it. Keep dispatches flat; before giving a subtree its own

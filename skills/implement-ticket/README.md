@@ -36,8 +36,8 @@ bodies. `technical-writing` governs authored docs, commit messages, issue text, 
 [SKILL.md](SKILL.md) is the workflow. [Auto-pick](references/auto-pick.md) is loaded only for
 selection, [Session ticket](references/session.md) only for the `session` argument, and
 [Orchestrated dispatch](references/orchestrated.md) only for feature workers.
-Legacy `feat/ticket-*` and `feat/issue-*` branches remain recognizable; new branches follow
-the current environment's naming convention.
+Earlier `feat/issue-*` branches remain recognizable; new branches are named
+`<type>/ticket-<N>-<slug>` unless the repository's docs or merged PRs set another convention.
 
 ## Install
 

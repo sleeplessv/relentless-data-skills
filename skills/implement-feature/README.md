@@ -11,7 +11,8 @@ and one feature PR; upstream also supports trackers that close work without a PR
 Completed tickets merge into an integration branch as workers return. Verified, preserved
 integration unlocks dependants while unrelated tickets continue from their own pinned bases.
 Original baseline failures and decisions survive resume in a durable run record. Failed WIP
-remains recoverable. A draft PR opens once verified work provides a publishable diff. Integrated
+remains recoverable. The PR body stays local while tickets integrate; the PR is created at
+finalization, or earlier as a draft when the user asks. Integrated
 checks and independent review precede readiness. The agent never merges the feature PR.
 
 [SKILL.md](SKILL.md) defines the workflow and [references/reference.md](references/reference.md)

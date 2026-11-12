@@ -29,6 +29,7 @@ from typing import Dict, List, Optional, Set
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 IMPLEMENT_FEATURE_REF = REPO_ROOT / "skills" / "implement-feature" / "references" / "reference.md"
+REVIEW_AND_PR = REPO_ROOT / "skills" / "implement-ticket" / "references" / "review-and-pr.md"
 SHIP_SKILL = REPO_ROOT / "skills" / "ship" / "SKILL.md"
 SMART_COMMIT_SKILL = REPO_ROOT / "skills" / "smart-git-commit" / "SKILL.md"
 
@@ -755,6 +756,56 @@ class SmartGitCommitTests(unittest.TestCase):
         run = self.sb.run(self.work, self.push)
         self.assertFalse(run.completed)
         self.assertIn("rejected", run.steps[0].err)
+
+
+# --------------------------------------------------------------------------
+# implement-ticket: Review workspace
+# --------------------------------------------------------------------------
+
+@unittest.skipUnless(GIT and BASH, "git and bash are required")
+class ReviewWorkspaceTests(unittest.TestCase):
+    """Run the documented Removal block against a checkout made by the Checkout block."""
+
+    def setUp(self):
+        self.sb = Sandbox(self)
+        self.repo = self.sb.clone(self.sb.origin_with_main(), "repo")
+        self.sha = self.sb.git(self.repo, "rev-parse", "HEAD")
+        run_dir = self.sb.root / "run-dir"
+        run_dir.mkdir()
+        self.checkout = run_dir / f"verify-{self.sha}" / "checkout"
+        self.variables = {"REPO": str(self.repo), "RUN_DIR": str(run_dir),
+                          "ROLE": "verify", "SHA": self.sha}
+        add = doc_block(REVIEW_AND_PR, "Review workspace", "worktree add --detach")
+        created = self.sb.run(self.repo, split_commands(add), self.variables)
+        self.assertTrue(created.completed, created)
+
+    def removal(self) -> Step:
+        """Run the block as one script.
+
+        Passed as separate commands, `Sandbox.run` would stop at the first failure,
+        which hides a missing `&&` between the guard and the removal.
+        """
+        block = doc_block(REVIEW_AND_PR, "Review workspace", "worktree remove")
+        return self.sb.run(self.sb.root, [block], self.variables).steps[0]
+
+    def test_clean_checkout_at_pinned_commit_is_removed(self):
+        step = self.removal()
+        self.assertEqual(step.rc, 0, step)
+        self.assertFalse(self.checkout.exists())
+        self.assertNotIn(str(self.checkout), self.sb.git(self.repo, "worktree", "list", "--porcelain"))
+
+    def test_moved_head_keeps_checkout(self):
+        self.sb.commit_file(self.checkout, "moved.txt", "moved\n", "chore: move HEAD")
+        step = self.removal()
+        self.assertNotEqual(step.rc, 0, step)
+        self.assertTrue(self.checkout.exists())
+
+    def test_untracked_file_keeps_checkout(self):
+        stray = self.checkout / "stray.txt"
+        stray.write_text("stray\n", encoding="utf-8")
+        step = self.removal()
+        self.assertNotEqual(step.rc, 0, step)
+        self.assertTrue(stray.exists())
 
 
 if __name__ == "__main__":

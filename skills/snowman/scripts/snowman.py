@@ -46,6 +46,10 @@ DESTRUCTIVE_KEYWORDS = {
 
 BLOCK = 2  # exit code for a guardrail refusal
 
+# Projects name production either way. A requested name the context does not
+# define resolves to its counterpart here when the context defines that one.
+ENV_ALIASES = {"prd": "prod", "prod": "prd"}
+
 # A snow failure matching this is likely an auth problem, worth a hint but not
 # worth debugging the connection config. Deliberately broad (it only ever
 # adds a line to an already-failed query) but avoids bare "token", which
@@ -160,6 +164,11 @@ def resolve_connection(
     form (``environments:``): queries fall back to ``default_env``. Staging
     always needs an explicit ``--env`` because the staged file's run command
     targets a real account.
+
+    A name the context does not define resolves through ``ENV_ALIASES`` when
+    its counterpart is defined, with a one-line stderr note. The returned
+    environment is always the defined name, so everything downstream (staged
+    filename, header, run command) sees the real target.
     """
     top, environments = parse_frontmatter(context)
 
@@ -182,10 +191,18 @@ def resolve_connection(
                 "one to the frontmatter, or pass --env <name>."
             )
         if chosen not in environments:
-            raise Blocked(
-                f"unknown environment {chosen!r}. {context} defines: "
-                f"{', '.join(environments)}."
+            alias = ENV_ALIASES.get(chosen)
+            if alias not in environments:
+                raise Blocked(
+                    f"unknown environment {chosen!r}. {context} defines: "
+                    f"{', '.join(environments)}."
+                )
+            print(
+                f"# environment: {chosen!r} is not defined in {context}; "
+                f"using its alias {alias!r}",
+                file=sys.stderr,
             )
+            chosen = alias
         connection = environments[chosen].get("connection")
         if not connection:
             raise Blocked(f"environment {chosen!r} in {context} has no `connection:` value.")

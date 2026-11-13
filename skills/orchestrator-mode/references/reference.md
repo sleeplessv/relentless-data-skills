@@ -179,6 +179,7 @@ read-only search workers in one message. One lists callers of `foo()` as `file:l
 other lists configuration that sets the related timeouts. Each writes its findings to the
 run directory and returns a short index. Send one writer the quoted index entries, the
 agreed scope, and the decisions so far. A separate verifier runs the affected tests and
-reviews the diff. A failing check goes back to the writer, then to a verifier again. A
-single-file change keeps the same evidence, but its writer's diff and test output can
-stand as the verification.
+reviews the diff. A failing check goes back to the writer, resumed once with the
+verifier's report, then to a fresh verifier. If that fix fails too, a fresh writer gets
+the report, the diff, and the first writer's `decisions_made`. A single-file change keeps
+the same evidence, but its writer's diff and test output can stand as the verification.

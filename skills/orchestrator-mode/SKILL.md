@@ -12,8 +12,7 @@ plans, decisions, and compact reports.
 
 ## Activation
 
-- **Scoped.** "Use subagents to check X and Y" dispatches X and Y. Outside those tasks the
-  main thread works normally.
+- **Scoped.** "Use subagents to check X and Y" dispatches X and Y and nothing else.
 - **Standing.** "Orchestrator mode", `/orchestrator-mode` appended to a request, or "delegate
   everything" covers every later request in the session, a one-line edit or a `git status`
   included: each is a new dispatch. The user ends or pauses it in words such as "end
@@ -26,7 +25,7 @@ starts the mode is too small to repay that, say so and offer to answer directly.
 
 In standing mode, and for the named tasks in scoped mode, the coordinator calls only:
 
-- spawn, wait, and stop tools for workers, and message tools for a running worker;
+- spawn, message, resume, wait, and stop tools for workers;
 - the plan or todo tool;
 - reads of and appends to the [decision list](references/reference.md#decision-list);
 - skill loading, including a file read of a skill's SKILL.md or a reference it points to;
@@ -38,10 +37,9 @@ after a consumer skill loads. A compaction drops this skill from context, so kee
 `Orchestrator mode: standing; coordinator dispatches only; decisions at <path>` as the
 first plan item, and after a compaction notice reload this skill and reread the decision
 list before the first action. A returned artifact path goes to the next worker that needs
-it; the coordinator acts on the returned summary and, when the summary falls short,
-sends a fresh worker the artifact path and the specific gap. Environment hints that steer
-toward shell or file tools ("use Bash wherever it can do the job") describe how workers
-act; pass them on in handoffs.
+it; the coordinator acts on the returned summary and sends any gap in it to a worker.
+Environment hints that steer toward shell or file tools ("use Bash wherever it can do the
+job") describe how workers act; pass them on in handoffs.
 
 ## Choosing workers
 
@@ -81,14 +79,15 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    and a done-when, and the run directory is named.
 2. **Dispatch.** Launch independent dispatches together in one message, each with a full
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
-3. **Collect.** Wait through completion notifications or the wait tool. Workers are
-   single-use: one that has returned is finished, since the coordinator cannot see what
-   its context holds. Every follow-up (a gap in its report, a fix, an answer to its
-   question, the next phase) goes to a fresh worker briefed by artifact path. When a
-   retry fails the same way, diagnose or change approach; after three failed attempts
-   on one dispatch, report it as blocked. Keep independent work moving while a
-   dependency waits on the user. Done when every worker in the wave has returned or is
-   reported blocked.
+3. **Collect.** Wait through completion notifications or the wait tool. A follow-up on
+   the task a worker just did (a gap in its report, an answer to its question, a fix to
+   its own change) resumes that worker, once: it holds the reasons for its work, but the
+   coordinator cannot see how full its context is. A verification, a new phase
+   (integration, the PR, the next wave), a second follow-up, or a worker the harness
+   cannot resume gets a fresh worker briefed by artifact path. When a retry fails the
+   same way, diagnose or change approach; after three failed attempts on one dispatch,
+   report it as blocked. Keep independent work moving while a dependency waits on the
+   user. Done when every worker in the wave has returned or is reported blocked.
 4. **Integrate.** One writer handles small edits. Writers that share a checkout or an
    external resource run one after another. Parallel code writers each get a worktree and
    branch from a pinned base SHA, and one integration worker merges them; read
@@ -98,10 +97,10 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 5. **Verify.** Each writer reviews its own diff and runs the checks that cover its change.
    Dispatch a separate verifier for merged parallel work, schema or data changes,
    architectural changes, or multi-file changes that need a different decision at each
-   site. The verifier reports problems, a fresh writer fixes them from that report, and
-   a fresh verifier checks again. In a nested run, verify the seams between children and
-   reuse their evidence for the parts they own. Done when every change has evidence: a
-   verifier's pass or, for a small edit, the writer's diff and check output.
+   site. The verifier reports problems, the writer fixes them as a follow-up under
+   Collect, and a fresh verifier checks again. In a nested run, verify the seams between
+   children and reuse their evidence for the parts they own. Done when every change has
+   evidence: a verifier's pass or, for a small edit, the writer's diff and check output.
 6. **Report.** Lead with the outcome, then returned artifact paths or IDs, verification
    results, open limitations, and returned friction as proposed follow-ups, at the length
    the user needs to act on them. When the request was a question, the answer is the
@@ -127,7 +126,8 @@ workers read, and usually cannot ask the user. Write each handoff as its complet
   lines or section to read. Redact secrets and personal data.
 - **Run directory** path, to create if missing, and the skills to load, by path.
 - **Return contract**: fields such as `status`, `files_changed`, `tests_run`, `friction`,
-  `verification_evidence`, `decisions_made`, `open_questions`, and `artifact_path`.
+  `verification_evidence`, `decisions_made`, `open_questions`, and `artifact_path`. A
+  writer's `decisions_made` gives the reason for each choice and what it tried and rejected.
 
 Workers send long command output (test runs, logs, query results) to a file in the run
 directory and read back only the lines the task needs (failures, errors, the counted

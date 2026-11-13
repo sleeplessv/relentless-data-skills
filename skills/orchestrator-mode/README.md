@@ -5,9 +5,10 @@ artifacts. Scoped delegation applies to the named tasks; explicit orchestrator m
 until the user changes it. In that mode the main thread only dispatches, plans, loads skills,
 and talks to the user, and it passes worker artifacts on by path.
 
-Every workflow step ends on a completion criterion. Workers are single-use: one that has
-returned is finished, and every follow-up goes to a fresh worker briefed by artifact path.
-Handoffs assume the worker starts with no
+Every workflow step ends on a completion criterion. A follow-up on the task a worker just
+did resumes that worker once; a verification, a new phase, or a second follow-up goes to a
+fresh worker briefed by artifact path, and writers record their reasons and rejected
+approaches so that worker can take the change over. Handoffs assume the worker starts with no
 conversation context, quote prior findings, and name one shared run directory. Decisions go
 to a dated, append-only decision list in that directory, so they survive a compaction. Workers
 return environment friction (a missing check, information out of reach, a workaround taken)

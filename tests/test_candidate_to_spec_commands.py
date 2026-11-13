@@ -12,12 +12,15 @@ the worker to run it, so the tests see the block's own stop-on-failure behaviour
 rather than a guard the harness adds. The tests check that a block derives the
 issue number from the create URL, passes it to every later call, stops at the
 first failure, handles zero-or-many items, and names every variable it uses.
+Workers often sit in zsh, so the publish blocks also run from zsh through the
+quoted heredoc that workers.md prescribes.
 """
 from __future__ import annotations
 
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import unittest
 from dataclasses import dataclass
@@ -30,6 +33,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 SKILL_DIR = REPO_ROOT / "skills" / "candidate-to-spec"
 SPEC_TICKETS = SKILL_DIR / "references" / "spec-and-tickets.md"
 WORKERS = SKILL_DIR / "references" / "workers.md"
+ZSH = shutil.which("zsh")
 
 # Every argument is logged %q-quoted, one call per line, so argument boundaries
 # survive spaces. GH_FAIL="issue create" fails that subcommand; GH_CREATE_URL
@@ -116,6 +120,16 @@ class VariableNamingTests(unittest.TestCase):
                 if len(lines) > 1:
                     self.assertEqual(lines[0], "set -euo pipefail", f"{path.name}: {block}")
 
+    def test_no_block_relies_on_word_splitting(self):
+        """zsh keeps an unquoted `${VAR:+flag "$VAR"}` as one word, so a flag and its value fuse."""
+        for path in (SPEC_TICKETS, WORKERS):
+            for block in fenced_blocks(path.read_text(encoding="utf-8")):
+                self.assertIsNone(re.search(r"\$\{[A-Z_]+:\+[^}]*\s", block),
+                                  f"{path.name}: {block}")
+
+    def test_workers_prescribes_the_quoted_heredoc(self):
+        self.assertIn("bash <<'EOF'", WORKERS.read_text(encoding="utf-8"))
+
 
 @unittest.skipUnless(GIT and BASH, "git and bash are required")
 class GhSequenceTests(unittest.TestCase):
@@ -147,6 +161,7 @@ class GhSequenceTests(unittest.TestCase):
             "DEFERRED_DIR": str(self.deferred_dir),
             "TITLE": "Deepen X: y",
             "TICKET_TITLE": "Expand",
+            "TICKET_LABEL": "ready-for-agent",
             "EDGES": "native",
             "BLOCKED_BY": "",
             **self.files,
@@ -178,6 +193,24 @@ class GhSequenceTests(unittest.TestCase):
     def run_block(self, heading: str, marker: str, extra: Optional[Dict[str, str]] = None,
                   unset: Optional[List[str]] = None) -> ScriptRun:
         return self.run_script(doc_block(SPEC_TICKETS, heading, marker), extra, unset)
+
+    def run_from_zsh(self, block: str, variables: Dict[str, str]) -> ScriptRun:
+        """Run `block` as workers.md's Shell rule says: a quoted heredoc to bash, typed into zsh.
+
+        The block's variables are assigned inside the heredoc and are absent from the environment.
+        """
+        assigns = "\n".join(f"{name}={shlex.quote(value)}" for name, value in variables.items())
+        script = (f"bash <<'EOF'\ncd {shlex.quote(str(self.work))} || exit 1\n"
+                  f"export GH_REPO=o/r\n{assigns}\n{block}\nEOF\n")
+        env = dict(self.sb.env)
+        env.update({k: self.env[k] for k in ("PATH", "GH_LOG", "GH_COUNTER")})
+        proc = subprocess.run([ZSH, "-f", "-c", script], cwd=str(self.sb.root), env=env,
+                              capture_output=True, text=True)
+        calls = []
+        if self.log.exists():
+            calls = [shlex.split(line) for line in
+                     self.log.read_text(encoding="utf-8").splitlines() if line.strip()]
+        return ScriptRun(proc.returncode, proc.stdout, proc.stderr, calls)
 
     # Spec publish
 
@@ -319,6 +352,35 @@ class GhSequenceTests(unittest.TestCase):
         self.assertEqual(edit[edit.index("--add-blocked-by") + 1], "40,41")
         self.assertEqual(edit[edit.index("--parent") + 1], "17")
         self.assertEqual(run.calls[2][:3], ["issue", "view", "42"])
+
+    def test_ticket_publish_carries_the_human_label(self):
+        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17", "TICKET_LABEL": "needs-triage"})
+        self.assertEqual(run.rc, 0, run)
+        create = run.calls[0]
+        self.assertEqual(create[create.index("--label") + 1], "needs-triage")
+        self.assertEqual(create.count("--label"), 1)
+
+    def test_ticket_publish_fails_on_an_unset_label(self):
+        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17"}, unset=["TICKET_LABEL"])
+        self.assertNotEqual(run.rc, 0, run)
+        self.assertEqual(run.calls, [])
+
+    @unittest.skipUnless(ZSH, "zsh is required")
+    def test_ticket_publish_from_zsh_keeps_blockers_a_separate_argument(self):
+        run = self.run_from_zsh(doc_block(SPEC_TICKETS, *self.TICKET_BLOCK), {
+            "EDGES": "native", "TICKET_TITLE": "Expand", "TICKET_LABEL": "ready-for-agent",
+            "TICKET_BODY": self.files["TICKET_BODY"], "SPEC_N": "17", "BLOCKED_BY": "40,41"})
+        self.assertEqual(run.rc, 0, run)
+        self.assertEqual(run.calls[1], ["issue", "edit", "42", "--parent", "17",
+                                        "--add-blocked-by", "40,41"])
+
+    @unittest.skipUnless(ZSH, "zsh is required")
+    def test_spec_publish_from_zsh_survives_an_empty_deferred_directory(self):
+        run = self.run_from_zsh(doc_block(SPEC_TICKETS, "Spec", "gh issue create"), {
+            "RUN": str(self.run_dir), "LOG": self.files["LOG"], "BODY": self.files["BODY"],
+            "TITLE": "Deepen X: y", "DEFERRED_DIR": str(self.deferred_dir)})
+        self.assertEqual(run.rc, 0, run)
+        self.assertEqual(run.subcommands(), ["issue create", "issue comment"])
 
     def test_ticket_publish_with_edges_in_the_body_skips_the_edit(self):
         run = self.run_block(*self.TICKET_BLOCK,

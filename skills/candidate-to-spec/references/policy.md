@@ -4,12 +4,13 @@ Read when `<run>/setup.md` says the target project has no `docs/architecture-pol
 policy answers the taste questions a designer cannot answer from the code, once per project
 instead of once per candidate.
 
-Ask the user these five questions in one round, in plain English, each with its default in
-brackets. "Yes" accepts the default, an unanswered question takes its default, and "skip" takes
-every default.
+Ask the user these five questions in one round, once per run, in plain English, each with its
+default in brackets. An unanswered question takes its default, and "defaults" or "skip" takes
+every default. A reply that reads two ways, such as a bare "yes" to one question, is confirmed
+in one line before the file is written.
 
-1. **Dependencies**: may a refactor add a new library or service? [No: only the standard
-   library and what the project already depends on.]
+1. **Dependencies**: what may a refactor add? [Nothing new: only the standard library and what
+   the project already depends on.]
 2. **Off-limits areas**: which modules are under active change or frozen for a release, so a
    refactor must leave them alone for now? [None.]
 3. **Size**: how large may one refactor be before it should become separate specs? [One module
@@ -27,7 +28,10 @@ The worker writes the file below in the target project, uncommitted, from the an
 defaults, so the next run reads it instead of asking. Before writing, it runs each command an
 answer names (with `--version` or `--help`) and reports a command that fails back to the main
 thread, which confirms the answer with the user. The run report tells the user to commit the
-file.
+file: an uncommitted policy is lost with the working tree, and the next run asks again.
+
+When the user declines a policy file ("ignore the policy for now"), the worker writes the
+defaults to `<run>/policy.md`, the run reads that path, and the target project receives nothing.
 
 ```markdown
 # Architecture policy

@@ -10,7 +10,7 @@
       "name": "candidate-to-spec",
       "source": "./skills/candidate-to-spec",
       "description": "Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "author": {
         "name": "sleeplessv"
       },

@@ -26,7 +26,7 @@ starts the mode is too small to repay that, say so and offer to answer directly.
 
 In standing mode, and for the named tasks in scoped mode, the coordinator calls only:
 
-- spawn, message, resume, wait, and stop tools for workers;
+- spawn, wait, and stop tools for workers, and message tools for a running worker;
 - the plan or todo tool;
 - reads of and appends to the [decision list](references/reference.md#decision-list);
 - skill loading, including a file read of a skill's SKILL.md or a reference it points to;
@@ -39,9 +39,9 @@ after a consumer skill loads. A compaction drops this skill from context, so kee
 first plan item, and after a compaction notice reload this skill and reread the decision
 list before the first action. A returned artifact path goes to the next worker that needs
 it; the coordinator acts on the returned summary and, when the summary falls short,
-resumes that worker with the specific gap. Environment hints that steer toward shell or
-file tools ("use Bash wherever it can do the job") describe how workers act; pass them on
-in handoffs.
+sends a fresh worker the artifact path and the specific gap. Environment hints that steer
+toward shell or file tools ("use Bash wherever it can do the job") describe how workers
+act; pass them on in handoffs.
 
 ## Choosing workers
 
@@ -81,14 +81,14 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    and a done-when, and the run directory is named.
 2. **Dispatch.** Launch independent dispatches together in one message, each with a full
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
-3. **Collect.** Wait through completion notifications or the wait tool. Resume a worker
-   only for a narrow gap in the task it just did, at most twice: the coordinator cannot
-   see a worker's context, and a third resume usually lands past 100k tokens. A new
-   phase (integration, fixes, verification, the PR) or a third need gets a fresh worker
-   briefed by artifact path. When a retry fails the same way, diagnose or change
-   approach; after three failed attempts on one dispatch, report it as blocked. Keep
-   independent work moving while a dependency waits on the user. Done when every worker
-   in the wave has returned or is reported blocked.
+3. **Collect.** Wait through completion notifications or the wait tool. Workers are
+   single-use: one that has returned is finished, since the coordinator cannot see what
+   its context holds. Every follow-up (a gap in its report, a fix, an answer to its
+   question, the next phase) goes to a fresh worker briefed by artifact path. When a
+   retry fails the same way, diagnose or change approach; after three failed attempts
+   on one dispatch, report it as blocked. Keep independent work moving while a
+   dependency waits on the user. Done when every worker in the wave has returned or is
+   reported blocked.
 4. **Integrate.** One writer handles small edits. Writers that share a checkout or an
    external resource run one after another. Parallel code writers each get a worktree and
    branch from a pinned base SHA, and one integration worker merges them; read
@@ -98,10 +98,10 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 5. **Verify.** Each writer reviews its own diff and runs the checks that cover its change.
    Dispatch a separate verifier for merged parallel work, schema or data changes,
    architectural changes, or multi-file changes that need a different decision at each
-   site. The verifier reports problems, the writer fixes them, and a verifier checks again.
-   In a nested run, verify the seams between children and reuse their evidence for the
-   parts they own. Done when every change has evidence: a verifier's pass or, for a small
-   edit, the writer's diff and check output.
+   site. The verifier reports problems, a fresh writer fixes them from that report, and
+   a fresh verifier checks again. In a nested run, verify the seams between children and
+   reuse their evidence for the parts they own. Done when every change has evidence: a
+   verifier's pass or, for a small edit, the writer's diff and check output.
 6. **Report.** Lead with the outcome, then returned artifact paths or IDs, verification
    results, open limitations, and returned friction as proposed follow-ups, at the length
    the user needs to act on them. When the request was a question, the answer is the
@@ -131,16 +131,16 @@ workers read, and usually cannot ask the user. Write each handoff as its complet
 
 Workers send long command output (test runs, logs, query results) to a file in the run
 directory and read back only the lines the task needs (failures, errors, the counted
-result); large findings go there too, with a short summary and one index line per
-artifact entry returned. Those files and the harness's task-output file are for the next
-worker. Split findings meant for several workers into one artifact per recipient, so
-none reads the whole file. Workers put questions for the user in `open_questions` and
-continue independent work; in `friction` they name what in the environment slowed or
-misled the task (a missing check, information out of reach, a long search, a workaround
-taken). The coordinator settles each returned question it can from the user's earlier
-decisions, the repo's conventions, or one more worker check, records the answer in the
-decision list, and brings the user only what needs their authority (business choices,
-scope changes, destructive or paid actions), each with a recommended default.
+result); large findings go there too, with a short summary and one index line per artifact
+entry returned. Those files and the harness's task-output file are for the next worker, and
+say where unfinished work stopped. Split findings for several workers into one artifact per
+recipient, so none reads the whole file. Workers put questions for the user in
+`open_questions` and continue independent work; in `friction` they name what in the
+environment slowed or misled the task (a missing check, information out of reach, a long
+search, a workaround taken). The coordinator settles each returned question it can from the
+user's earlier decisions, the repo's conventions, or one more worker check, records the
+answer in the decision list, and brings the user only what needs their authority (business
+choices, scope changes, destructive or paid actions), each with a recommended default.
 
 ## Composition
 

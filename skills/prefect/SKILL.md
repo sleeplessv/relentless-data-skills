@@ -16,7 +16,8 @@ scope; recommend migrating up.
 the project's environment and check its lockfile pin. Verify version-sensitive
 claims against applicable fetched docs or local API/CLI evidence, and cite the
 source or command. Latest docs alone do not establish support in an older
-installation. If verification fails, state what remains unverified. For general
+installation; the release notes for a minor say when a behavior landed. If
+verification fails, state what remains unverified. For general
 questions without a project, state the version scope supported by the docs.
 For deployment incidents, check the affected worker, flow image, integration,
 or server version when relevant. The local CLI version does not establish those versions.
@@ -40,17 +41,23 @@ for current/best practice:
 3. If a URL 404s, re-fetch the index that listed it and re-resolve rather than guessing.
 4. If the fetch tool rejects Markdown, try the equivalent HTML page by removing
    the trailing `.md`. Either format is valid evidence once fetched.
-5. Use web search as a fallback when direct lookup fails.
-6. Prefer the agent's web-fetch capability over shell `curl` when shell network
-   access is restricted. Avoid `llms-full.txt`, which loads the whole corpus.
+5. When direct lookup fails, fall back to a connected Prefect MCP server's
+   documentation tools, then to web search.
 
-Anchors for the guardrails below:
+Fetch with the agent's web-fetch capability when shell network access is
+restricted. Fetch single pages; `llms-full.txt` loads the whole corpus.
 
-- states => https://www.prefect.io/docs/v3/concepts/states.md
-- deployments => https://www.prefect.io/docs/v3/concepts/deployments.md
-- prefect.yaml => https://www.prefect.io/docs/v3/how-to-guides/deployments/prefect-yaml.md
-- caching => https://www.prefect.io/docs/v3/concepts/caching.md
-- results => https://www.prefect.io/docs/v3/advanced/results.md
+Anchors, each under `https://www.prefect.io/docs/v3/`:
+
+- states => `concepts/states.md`
+- deployments => `concepts/deployments.md`
+- prefect.yaml => `how-to-guides/deployments/prefect-yaml.md`
+- caching => `concepts/caching.md`
+- results => `advanced/results.md`
+- transactions => `advanced/transactions.md`
+- 2.x-to-3.x changes => `how-to-guides/migrate/upgrade-to-prefect-3.md`
+- release notes, one page per minor => `release-notes/oss/version-3-<minor>.md`
+- CLI reference, one page per command group => `api-ref/cli/<group>.md`
 
 Fetch relevant anchors and apply the verify gate before advising.
 
@@ -60,7 +67,8 @@ When the answer lives in the Prefect instance, such as deployments, work
 pools, runs, blocks, or profiles, query it via the CLI. An already-connected
 Prefect MCP server can also supply read-only instance evidence; confirm its
 target before using it. Use a read-only SDK/API query when the CLI cannot provide
-the needed evidence, including pagination. Use the CLI or SDK for authorized mutations.
+the needed evidence, including pagination; `prefect api` sends one from the
+CLI. Use the CLI or SDK for authorized mutations.
 
 - **Invocation:** follow the project's documented dependency manager and
   environment. A `pyproject.toml` alone does not identify a uv project. Use
@@ -68,26 +76,15 @@ the needed evidence, including pagination. Use the CLI or SDK for authorized mut
   for Poetry projects, or `prefect ...` in the intended active environment.
   Keep inspection from changing dependencies or lockfiles; check runner options
   locally when needed, since `uv run` can synchronize the environment.
-- **Auth preflight:** inspect the effective API endpoint and active profile
-  through the selected environment. Output only allowlisted target fields and
-  strip credentials, query strings, and fragments from displayed URLs. Report
-  authentication settings by presence, never their values. Filter before output
-  reaches the transcript. `prefect config view` with default masking can expose
-  tokens in `PREFECT_CLIENT_CUSTOM_HEADERS`; do not capture its unfiltered output.
-  Account for overrides from environment variables, `.env`, `prefect.toml`, and
-  `pyproject.toml`; a profile change alone may not change the target. For remote
-  inspection, establish the matching endpoint before querying. An ephemeral
-  local server is not evidence about a remote instance. Confirm
-  access with a read-only query; displaying configuration does not verify auth.
-  For Cloud auth failures, use the configured API-key path or interactive
-  `prefect cloud login` when needed. For self-hosted servers, check the endpoint
-  and configured auth, including `PREFECT_API_AUTH_STRING` for basic auth.
-  A stray `PREFECT_API_KEY` takes precedence and can cause self-hosted auth to
-  fail. Resolve the target and auth cause before retrying; ask the user only
-  for missing target information or credentials they must supply.
-- **Useful queries:** `deployment ls` / `deployment inspect`, `work-pool ls` /
-  `work-pool inspect`, `flow-run ls` / `flow-run inspect <id>`, `block type ls`,
-  `variable ls`, `profile ls`. Verify flags via `--help` or the docs, not memory.
+- **Target first:** before the first instance query, establish the effective
+  API endpoint, active profile, and auth by following
+  [references/instance.md](references/instance.md#establish-the-target). Report
+  auth by presence, never by value. Keep unfiltered `prefect config view` output
+  out of the transcript: it prints `PREFECT_CLIENT_CUSTOM_HEADERS` tokens.
+- **Useful queries:** `deployment ls` / `inspect`, `work-pool ls` / `inspect`,
+  `flow-run ls` / `inspect <id>` / `logs <id>`, `block type ls`, `variable ls`,
+  `profile ls`. Add `--output json` for complete identifiers. Verify flags via
+  `--help` or the CLI reference anchor, not memory.
 - **Boundary:** read-only queries need no confirmation. Run state-changing
   commands only when they're the explicit task, and surface anything
   destructive or hard to reverse (pause, cancel, delete) before running it.
@@ -96,22 +93,13 @@ Two moves that aren't obvious. Both end in a report, not a fix: name the drift
 or the root cause and stop there. Changing deployments, pools, or flow code is
 in scope only when that change is the task (see Boundary, above).
 
-- **Auditing a project:** diff deployed reality (deployments, pools, schedules,
-  via read-only queries) against the repo's manifests. Check filters and pagination
-  before claiming an object is absent or the inventory is complete. Paginate via
-  SDK/API when necessary. Inspect expected deployments by identity to verify
-  missing claims; find unexpected deployments only from a complete inventory.
-  If coverage is incomplete, report that limit instead of asserting drift.
-- **Debugging a run:** inspect the run, state transitions, and logs before
-  classifying the cause. `Crashed` can include broken imports or syntax errors
-  during startup; the state alone does not establish an infrastructure cause.
-  For worker-backed pools, check worker health, pool/queue polling, concurrency,
-  and infrastructure logs. Process workers (3.8.3+) may launch runs via `uv run`;
-  confirm the run's environment rather than assuming the inspected one. Push and
-  Managed pools need no worker; inspect submission and infrastructure errors
-  instead. For `serve()`, check the serving process and its subprocess logs.
-  For zombie runs, confirm whether the execution process still exists before
-  concluding it is dead.
+- **Auditing a project:** diff deployed reality against the repo's manifests,
+  following [references/instance.md](references/instance.md#audit-a-project).
+  An object is absent only once the inventory is complete.
+- **Debugging a run:** read the run, its state transitions, and its logs before
+  classifying the cause, following
+  [references/instance.md](references/instance.md#diagnose-a-run) for the checks
+  each deployment mode needs and for zombie runs.
 
 For implementation tasks, verify the changed flow imports and exercise the changed
 behavior with suitable local inputs. Validate deployment configuration against the
@@ -124,7 +112,8 @@ limits. Match verification to the change; a live production run is not a default
 - Separate dev vs prod by distinct work pools / deployment manifests / blocks,
   never by branching inside flow code.
 - Keep flows importable via stable entrypoints (`module/path.py:flow_func`).
-- Deploy from CI/CD with pinned source, not from a laptop.
+- Deploy from CI/CD with pinned source, not from a laptop. Run
+  `prefect --no-prompt deploy` there, so a missing value fails instead of hanging.
 - Attach schedules (cron / interval / rrule) at the deployment, not in flow code.
 - Secrets live in Secret blocks / a secrets backend, never in code, parameters,
   or logs. Non-secret environment-varying values go in variables.
@@ -145,6 +134,17 @@ limits. Match verification to the change; a live production run is not a default
 - **No `Deployment` object.** Create deployments via `prefect.yaml`,
   `flow.deploy()`, `flow.from_source(...).deploy()`, or `flow.serve()`, not
   `prefect.deployments.Deployment` or `prefect deployment build`.
+- **A failed task does not fail its flow.** The flow fails only when an
+  exception propagates or its return value carries a failed state.
+- **Sync and async.** `.submit()` is synchronous, so it takes no `await`. An
+  async task called from a sync flow returns an unawaited coroutine and never
+  runs; make the flow async. Dual-mode methods such as `Secret.load` return a
+  coroutine in async code: `await` them, call `aload`, or pass `_sync=True`.
+- **Results are not persisted by default, and caching needs persistence.**
+  `persist_result=False` leaves a task without a cache. Locally persisted
+  results are out of reach of a retry on fresh infrastructure; use remote
+  result storage there. Inside a transaction, results are written at commit.
+  Fetch the caching, results, and transactions anchors before changing these.
 - **Don't guess `prefect.yaml` shape or CLI flags.** Check applicable docs or
-  the installed CLI's `--help` output.
-- **Results, caching, and transactions changed in 3.x.** Apply the verify gate.
+  the installed CLI's `--help` output. When `prefect deploy` selects several
+  deployments, explicit CLI options are ignored.

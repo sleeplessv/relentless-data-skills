@@ -19,7 +19,8 @@ or local API and CLI evidence for the project's installed version.
   established environment. An already-connected Prefect MCP server can also
   provide read-only evidence. Checks effective settings and confirms access
   with a read-only query, using the relevant Cloud or self-hosted auth path.
-  Filters authentication output before capture and checks inventory completeness
+  `scripts/target.py` prints the resolved target with secrets withheld, so
+  authentication output is filtered before capture. Checks inventory completeness
   before drift claims. Uses paginated read-only SDK or API queries when needed.
   Destructive or hard-to-reverse actions are surfaced before running.
 - **Run diagnosis.** Uses state transitions and logs to identify the cause,
@@ -82,6 +83,9 @@ It activates automatically when you do Prefect 3 work or ask about Prefect.
 
 - `SKILL.md`: the verify gate, doc-lookup and CLI-first protocols, standards, and guardrails.
 - `references/instance.md`: target and auth checks, project audits, and run diagnosis.
+- `scripts/target.py`: prints the Prefect target the project resolves to (version,
+  profile, API URL, auth by presence). It imports the project's Prefect, so it
+  runs under the project's Python rather than `uv run --python 3.13 --no-project`.
 
 ## Maintenance / CI
 
@@ -89,6 +93,10 @@ Repo CI lints this skill via **`scripts/lint_skill.py`** (frontmatter, "Use
 when" trigger in the description, line budget). There is no automated
 doc-URL liveness check for this skill. Its lookup protocol handles upstream
 page moves at use time; the linter does not validate Prefect API behavior.
+
+`tests/test_prefect_target.py` covers `scripts/target.py` against stand-in
+settings, asserting that no secret value reaches its output. It does not
+import Prefect.
 
 [Behavior scenarios](../../tests/dlt-prefect-scenarios.md) cover masked custom
 headers, complete inventories, target selection, version evidence, stale APIs,

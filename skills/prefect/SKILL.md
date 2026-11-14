@@ -76,11 +76,11 @@ CLI. Use the CLI or SDK for authorized mutations.
   for Poetry projects, or `prefect ...` in the intended active environment.
   Keep inspection from changing dependencies or lockfiles; check runner options
   locally when needed, since `uv run` can synchronize the environment.
-- **Target first:** before the first instance query, establish the effective
-  API endpoint, active profile, and auth by following
-  [references/instance.md](references/instance.md#establish-the-target). Report
-  auth by presence, never by value. Keep unfiltered `prefect config view` output
-  out of the transcript: it prints `PREFECT_CLIENT_CUSTOM_HEADERS` tokens.
+- **Target first:** before the first instance query, run
+  `<skill-dir>/scripts/target.py` with the project's Python, following
+  [references/instance.md](references/instance.md#establish-the-target). It
+  reports the endpoint, profile, and auth by presence. Keep `prefect config view`
+  output out of the transcript: it prints `PREFECT_CLIENT_CUSTOM_HEADERS` tokens.
 - **Useful queries:** `deployment ls` / `inspect`, `work-pool ls` / `inspect`,
   `flow-run ls` / `inspect <id>` / `logs <id>`, `block type ls`, `variable ls`,
   `profile ls`. Add `--output json` for complete identifiers. Verify flags via

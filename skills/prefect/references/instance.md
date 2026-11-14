@@ -5,18 +5,36 @@ auditing a project, and diagnosing a run. Each section is read-only work.
 
 ## Establish the target
 
-Do this through the selected environment before the first instance query.
+Before the first instance query, run the bundled script from the project root
+with the project's own Python, through the runner chosen for the CLI (for
+example `uv run python` in an established uv project). `<skill-dir>` is the
+directory that holds this skill's `SKILL.md`:
 
-- **Effective settings.** Inspect the effective API endpoint and active profile.
-  Account for overrides from environment variables, `.env`, `prefect.toml`, and
-  `pyproject.toml`, which outrank the profile in that order; a profile change
-  alone may not change the target. Setting names and their environment
-  variables: https://www.prefect.io/docs/v3/api-ref/settings-ref.md
-- **Redaction.** Output only allowlisted target fields and strip credentials,
-  query strings, and fragments from displayed URLs. Report authentication
-  settings by presence, never their values. Filter before output reaches the
-  transcript: `prefect config view` masks only settings typed as secrets, so it
-  prints tokens held in `PREFECT_CLIENT_CUSTOM_HEADERS`.
+```bash
+python <skill-dir>/scripts/target.py
+```
+
+It prints one `key: value` line per fact: the Prefect version, the active
+profile, the API URL, `target` (`cloud`, `server`, `ephemeral`, or `none`), and
+each auth setting by presence and source. Read the exit code:
+
+- `0`: the summary was printed. Its output is safe to keep in the transcript.
+- `2`: Prefect is not importable in that interpreter. Fix the runner; do not
+  fall back to another environment's Prefect.
+- `3`: this Prefect version's settings layout is not recognized. Establish the
+  same facts by hand under the redaction rule below.
+
+- **Effective settings.** Environment variables, `.env`, `prefect.toml`, and
+  `pyproject.toml` outrank the profile in that order, so a profile change alone
+  may not change the target. The script marks each value as `env` or `not env`.
+  Setting names and their environment variables:
+  https://www.prefect.io/docs/v3/api-ref/settings-ref.md
+- **Redaction.** When inspecting by hand, output only allowlisted target fields
+  and strip credentials, query strings, and fragments from displayed URLs.
+  Report authentication settings by presence, never their values. Filter before
+  output reaches the transcript: `prefect config view` masks only settings
+  typed as secrets, so it prints tokens held in `PREFECT_CLIENT_CUSTOM_HEADERS`
+  and credentials embedded in the API URL.
 - **Remote targets.** For remote inspection, establish the matching endpoint
   before querying. An ephemeral local server is not evidence about a remote
   instance.

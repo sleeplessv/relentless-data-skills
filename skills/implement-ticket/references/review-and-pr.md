@@ -106,7 +106,12 @@ Parent-spec context and a ticket body's own `## Context` section stay in `## Con
 Explicitly instruct this invocation to use the supplied snapshot, skip spec discovery and
 issue-tracker setup, enforce only `## Requirements`, and judge each author decision against
 them rather than as a requirement. Commit issue references must not replace that scope. Use
-context-only requirements for interpretation, not additional work.
+context-only requirements for interpretation, not additional work. Instruct it to report by
+class. When a finding is one instance of a pattern, such as one fact restated at several sites
+or a parser that reads input differently from the runtime it imitates, the reviewer names the
+pattern and the search that finds every instance. A finding that asks for a fix because of how a
+browser or other runtime behaves includes a probe or a doctored artifact that shows the
+behavior; without one, the reviewer reports it as unconfirmed.
 
 Choose review depth from the complete diff, recording the reason:
 
@@ -124,13 +129,22 @@ standards, and baseline. Keep reports, finding counts, dispositions, and the wor
 by axis. Baseline smells are judgement calls; repo rules take precedence. Count all reviewers
 against capacity. The full route may dispatch its axes directly using the loaded skill's prompts.
 
-Fix actionable in-scope findings. A finding that identifies a factual inaccuracy in prose (docs,
+Fix actionable in-scope findings. Fix a finding that names a class as the class. Its fix brief
+covers every instance the named search finds, and the fix worker returns a table of every site
+it considered with a verdict for each. A fix too large to close the class goes back to the
+coordinator as an open question with its size. Fix an unconfirmed runtime finding only after a
+probe confirms it. A finding that identifies a factual inaccuracy in prose (docs,
 comments, PR body, commit text) is a defect and gets fixed whatever severity label the reviewer
 gave it; "optional" covers preferences only. Record a reason for dismissing or deferring optional
 suggestions under their original axis. A preference alone does not require a refactor. Commit
 fixes; a code-touching fix returns through [Independent verification](#independent-verification),
 and a prose-only fix takes the lighter loop below. Follow-up review examines those fixes and their
-consequences, carrying forward unaffected findings and dispositions. Reopen a settled preference
+consequences, carrying forward unaffected findings and dispositions. In a follow-up review, a
+finding requires a fix (should-fix) only when it is a defect that the fix diff introduced or
+exposed, such as one that lets a check pass something weaker than its criterion, or a false
+statement in text the fix changed. A pre-existing defect in the class the fix addresses goes to
+the coordinator once, as a class with a proposed fix that closes it, and the coordinator decides
+whether it blocks. Other findings are nice-to-have and deferred. Reopen a settled preference
 only when new evidence changes the reasoning. A newly affected requirement or code path still
 needs review.
 
@@ -158,7 +172,10 @@ Feature runs take it once at integration
 Brief the reviewer with the run directory, the main checkout path (`REPO`), the reviewed
 `head_sha` (or integration SHA) to check out, `base_sha` as the fixed point, the absolute path
 to the scope file (`ticket-snapshot.md` or `scope.md`) so lean findings respect what the ticket
-requires, and the instruction to run the installed `ponytail-review` skill on `git diff <base_sha>...HEAD`. The reviewer follows
+requires, and the instruction to run the installed `ponytail-review` skill on `git diff <base_sha>...HEAD`.
+Add the two reporting instructions from [Independent review](#independent-review): report by
+class with the search for every instance, and back each runtime claim with a probe or a
+doctored artifact. The reviewer follows
 [Review workspace](#review-workspace). The pass is blind:
 those are its only inputs, and it receives no Standards or Spec report, findings artifact, or
 earlier disposition. The brief supplies the run directory only as a place to write. An
@@ -178,9 +195,11 @@ The coordinator decides every finding and records the disposition itself, with n
   (`base_sha...HEAD`) is escalated through `open_questions` with the proposed fix and its size. The PR stays
   draft and the stop comment names it.
 
-Accepted fixes go to the implementing worker (solo) or one fix worker (feature). A
+Accepted fixes go to the implementing worker (solo) or one fix worker (feature), under the class
+and runtime-finding fix rules in [Independent review](#independent-review). A
 code-touching fix returns through [Independent verification](#independent-verification) and
-follow-up `code-review` on both axes over the fix diff; a prose-only fix takes the
+follow-up `code-review` on both axes over the fix diff, with that section's follow-up severity
+rule; a prose-only fix takes the
 [prose-only loop](#independent-review) with no follow-up review. The final review runs once and
 is not repeated after its own fixes.
 

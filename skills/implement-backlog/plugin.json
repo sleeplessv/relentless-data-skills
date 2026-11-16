@@ -1,6 +1,6 @@
 {
   "name": "implement-backlog",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request.",
   "author": {
     "name": "sleeplessv"

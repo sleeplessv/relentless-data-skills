@@ -44,11 +44,11 @@ the stop comment. In feature runs, the coordinator posts them through its tracke
 
 - **Start:** after eligibility and workspace preflight, before implementation, post "Started
   work on #<N> on branch `<branch>`." Identify a resume and the integration branch when relevant.
-- **Stop:** before ending the attempt, post "Stopped work on #<N>: <outcome>." A solo attempt ends at the Ready
-  step of [Solo finalization](references/review-and-pr.md#solo-finalization), at the No-change outcome, or on the
-  stop path. The implementing worker's return after step 8 does not end the attempt. Cover completion, blockers, failure,
-  pause, cancellation, and handoff. Include the PR or preserved branch and HEAD, what remains, and any failed
-  checks or required decision. A successful worker return says "implementation complete, awaiting integration" until integration is verified.
+- **Stop:** before ending the attempt, post "Stopped work on #<N>: <outcome>." A solo attempt ends at the Ready part of
+  [Solo finalization](references/review-and-pr.md#solo-finalization), at the [No-change outcome](references/review-and-pr.md#no-change-outcome),
+  or on the stop path, not at the implementing worker's return after step 8. Cover completion, blockers, failure, pause,
+  cancellation, and handoff. Include the PR or preserved branch and HEAD, what remains, and any failed checks or required
+  decision. In feature runs, a successful worker return says "implementation complete, awaiting integration" until integration is verified.
 
 Use `gh issue comment <N> --repo <owner/repo> --body-file <comment-file>`. Record the returned comment URL in
 the findings or run record. A local draft or chat update does not satisfy this step. If posting is prohibited

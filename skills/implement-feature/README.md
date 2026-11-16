@@ -12,17 +12,17 @@ Completed tickets merge into an integration branch as workers return. Verified, 
 integration unlocks dependants while unrelated tickets continue from their own pinned bases.
 Original baseline failures and decisions survive resume in a durable run record. Failed WIP
 remains recoverable. The PR body stays local while tickets integrate; the PR is created at
-finalization, or earlier as a draft when the user asks. Integrated
-checks and independent review precede readiness. The agent never merges the feature PR.
+finalization, or earlier as a draft when the user asks. Independent
+review and one whole-feature verification precede readiness. The agent never merges the feature PR.
 
 [SKILL.md](SKILL.md) defines the workflow and [references/reference.md](references/reference.md)
 holds setup, integration, review, and publication contracts. Install `orchestrator-mode` and
-`implement-ticket` alongside it. The coordinator always runs both independent `code-review`
-reviewers in parallel on the integrated feature; ticket workers perform self-review.
-Follow-up review covers fixes, their consequences, and new evidence. Optional preferences can
-receive a reasoned disposition without another implementation cycle. Once both axes pass, a
-final review runs once: a blind `ponytail-review` pass whose must-fix and should-fix findings
-the coordinator fixes or escalates before the PR goes ready.
+`implement-ticket` alongside it. The coordinator runs both independent `code-review` reviewers
+and a blind `ponytail-review` final review together, as one check wave on the integrated
+feature; ticket workers perform self-review. Accepted findings go through at most two fix
+rounds, with each code fix re-checked on its diff. One verification of the whole feature then runs on the
+final head. A two-way door's PR is marked ready, and a one-way door's PR stays draft until the
+user's go-ahead.
 
 The installed `pr` skill supplies Summary, Evidence, and Merge Danger.
 `technical-writing` governs authored docs, commit messages, issue text, and PR prose.

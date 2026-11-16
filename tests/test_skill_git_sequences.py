@@ -808,5 +808,79 @@ class ReviewWorkspaceTests(unittest.TestCase):
         self.assertTrue(stray.exists())
 
 
+# --------------------------------------------------------------------------
+# implement-ticket: Closing verification
+# --------------------------------------------------------------------------
+
+@unittest.skipUnless(GIT and BASH, "git and bash are required")
+class ClosingVerificationDriftTests(unittest.TestCase):
+    """Run the documented drift check from a verifier checkout at the ticket head."""
+
+    ALLOW = {"merge-base --is-ancestor": {0, 1}, "merge-tree --write-tree": {0, 1}}
+
+    def setUp(self):
+        self.sb = Sandbox(self)
+        self.origin = self.sb.origin_with_main()
+        self.repo = self.sb.clone(self.origin, "repo")
+        self.sb.commit_file(self.repo, "version.txt", "1\n", "chore: version 1")
+        self.sb.git(self.repo, "push", "-q", "origin", "HEAD:refs/heads/main")
+        self.other = self.sb.clone(self.origin, "other")
+        self.sb.git(self.repo, "checkout", "-q", "-b", "feat/ticket-1")
+
+    def target_gains(self, name: str, content: str) -> None:
+        self.sb.commit_file(self.other, name, content, f"chore: target changes {name}")
+        self.sb.git(self.other, "push", "-q", "origin", "HEAD:refs/heads/main")
+
+    def check(self, ticket_file: str, ticket_content: str, pr_base: str = "main") -> Run:
+        sha = self.sb.commit_file(self.repo, ticket_file, ticket_content, "feat: ticket change")
+        checkout = self.sb.root / "run-dir" / f"verify-{sha}" / "checkout"
+        self.sb.git(self.repo, "worktree", "add", "-q", "--detach", str(checkout), sha)
+        guard = split_commands(doc_block(REVIEW_AND_PR, "Closing verification", "merge-base --is-ancestor"))
+        report = split_commands(doc_block(REVIEW_AND_PR, "Closing verification", "merge-tree --write-tree"))
+        variables = {"REMOTE": "origin", "PR_BASE": pr_base, "SHA": sha}
+        run = self.sb.run(checkout, guard, variables, self.ALLOW)
+        if run.ran("merge-base --is-ancestor") and run.step("merge-base --is-ancestor").rc == 1:
+            run = self.sb.run(checkout, guard + report, variables, self.ALLOW)
+        return run
+
+    def test_unmoved_target_is_no_drift(self):
+        run = self.check("feature.txt", "feature\n")
+        self.assertEqual(run.step("merge-base --is-ancestor").rc, 0, run)
+
+    def test_drift_on_another_path_merges_cleanly_with_no_shared_path(self):
+        self.target_gains("unrelated.txt", "unrelated\n")
+        run = self.check("feature.txt", "feature\n")
+        self.assertEqual(run.step("merge-base --is-ancestor").rc, 1, run)
+        self.assertIn("target changes unrelated.txt", run.step("git log --oneline").out)
+        self.assertEqual(run.step("merge-tree --write-tree").rc, 0, run)
+        self.assertEqual(run.step("comm -12").out.strip(), "")
+
+    def test_conflicting_drift_lists_the_path(self):
+        self.target_gains("version.txt", "2\n")
+        run = self.check("version.txt", "3\n")
+        self.assertEqual(run.step("merge-tree --write-tree").rc, 1, run)
+        self.assertIn("version.txt", run.step("merge-tree --write-tree").out)
+        self.assertEqual(run.step("comm -12").out.strip(), "version.txt")
+
+    def test_same_text_on_both_sides_merges_cleanly_but_is_a_shared_path(self):
+        self.target_gains("version.txt", "2\n")
+        run = self.check("version.txt", "2\n")
+        self.assertEqual(run.step("merge-tree --write-tree").rc, 0, run)
+        self.assertEqual(run.step("comm -12").out.strip(), "version.txt")
+
+    def test_target_rename_of_a_ticket_edited_path_is_a_shared_path(self):
+        self.sb.git(self.other, "mv", "version.txt", "release.txt")
+        self.sb.git(self.other, "commit", "-q", "-m", "chore: target renames version.txt")
+        self.sb.git(self.other, "push", "-q", "origin", "HEAD:refs/heads/main")
+        self.sb.commit_file(self.repo, "feature.txt", "feature\n", "feat: unrelated ticket file")
+        run = self.check("version.txt", "1\nticket line\n")
+        self.assertEqual(run.step("comm -12").out.strip(), "version.txt")
+
+    def test_missing_target_branch_stops_before_the_drift_verdict(self):
+        run = self.check("feature.txt", "feature\n", pr_base="no-such-branch")
+        self.assertNotIn(run.step("git fetch").rc, (0, 1), run)
+        self.assertFalse(run.ran("merge-base --is-ancestor"), run)
+
+
 if __name__ == "__main__":
     unittest.main()

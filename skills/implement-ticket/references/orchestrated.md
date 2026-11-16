@@ -81,7 +81,8 @@ reported as durable remote WIP. Write detailed evidence to an artifact and retur
   it; fixing it is outside the ticket.
 
 Include before/after observations in the evidence artifact, with their commands, commits, and
-capture context. Preserve red-test output or prior artifacts when available. Mark an unavailable
+capture context. When the harness blocks that write, return the artifact's content inline for
+the coordinator to save. Preserve red-test output or prior artifacts when available. Mark an unavailable
 before observation explicitly. The coordinator uses this evidence to author the feature PR.
 
 `success` requires every criterion and applicable check to be satisfied on `head_sha` plus

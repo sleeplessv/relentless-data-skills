@@ -39,15 +39,16 @@ Rewriting a pushed branch, closing the issue, and installing skills need the use
 ### Ticket lifecycle comments
 
 Post a comment on the ticket when starting work and when stopping work on each attempt, including resumes. In
-solo runs, the worker that completes step 3 posts the start comment and the worker that completes finalization or
-the stop path posts the stop comment. In feature runs, the coordinator posts them through its tracker worker on behalf of the implementing worker.
+solo runs, the worker that completes step 3 posts the start comment and the worker that ends the attempt posts
+the stop comment. In feature runs, the coordinator posts them through its tracker worker on behalf of the implementing worker.
 
 - **Start:** after eligibility and workspace preflight, before implementation, post "Started
   work on #<N> on branch `<branch>`." Identify a resume and the integration branch when relevant.
-- **Stop:** before ending the attempt, post "Stopped work on #<N>: <outcome>." Cover completion,
-  blockers, failure, pause, cancellation, and handoff. Include the PR or preserved branch and
-  HEAD, what remains, and any failed checks or required decision. A successful worker return
-  says "implementation complete, awaiting integration" until integration is verified.
+- **Stop:** before ending the attempt, post "Stopped work on #<N>: <outcome>." A solo attempt ends at the Ready part of
+  [Solo finalization](references/review-and-pr.md#solo-finalization), at the [No-change outcome](references/review-and-pr.md#no-change-outcome),
+  or on the stop path, not at the implementing worker's return after step 8. Cover completion, blockers, failure, pause,
+  cancellation, and handoff. Include the PR or preserved branch and HEAD, what remains, and any failed checks or required
+  decision. In feature runs, a successful worker return says "implementation complete, awaiting integration" until integration is verified.
 
 Use `gh issue comment <N> --repo <owner/repo> --body-file <comment-file>`. Record the returned comment URL in
 the findings or run record. A local draft or chat update does not satisfy this step. If posting is prohibited

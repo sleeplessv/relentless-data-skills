@@ -5,7 +5,8 @@ return implementation evidence through their dispatch contract.
 
 After step 8's self-review a solo run takes these sections in order: the [Check wave](#check-wave),
 [Fix rounds](#fix-rounds), then [Closing verification](#closing-verification) beside
-[Solo finalization](#solo-finalization). The [Door](#door) decides where a finding still open
+[Solo finalization](#solo-finalization). A [target merge](#target-merge) comes before the wave
+and before the closing verification. The [Door](#door) decides where a finding still open
 after the last round goes.
 
 ## Review workspace
@@ -100,10 +101,51 @@ closing-verification divergence, and the two kinds count together across the run
 findings on the first commit are not one. After a class escalation, the replacing worker is
 the worker that made the last commit wherever this file names one.
 
+## Target merge
+
+A **target merge** brings the PR target (`pr_base`) into the branch as a merge commit, with the
+branch never rewritten. The worker that made the last commit does it in its worktree:
+
+1. Run the drift commands of [Closing verification](#closing-verification) with the branch
+   head as `SHA`. No drift, or drift that merges cleanly with no shared path, ends here with
+   the head unchanged.
+2. Merge `TARGET_TIP` and compare both sides' diffs of each shared path: two sides can change
+   one line to the same text and merge cleanly, as when both bump a version to the same number.
+   Edit where the merged text no longer serves both (a version both sides bumped takes the next
+   number).
+3. Rerun steps 6 and 7, commit any edit, and return the new head, `TARGET_TIP`, and each edit.
+
+A solo run merges the target at two points and nowhere between, and a running check always
+finishes first:
+
+- **Before the wave**, as the implementing worker's last act of step 8. After a merge, the
+  coordinator passes `TARGET_TIP` as the wave's fixed point wherever
+  [Independent review](#independent-review) and [Final review](#final-review) name `base_sha`,
+  so the reviewed diff holds the branch's work without the commits the target gained.
+- **Before closing verification**, after the last fix round. The coordinator resumes the
+  implementing worker, which first waits for the PRs about to merge; the head it returns is
+  `final_sha`, and an edit makes the merge a [late fix](#fix-rounds).
+
+The PRs about to merge are the open PRs into `pr_base` that are not drafts, are not this run's
+own, and change a path the branch changes. The worker lists them from the main checkout:
+
+```sh
+gh pr list --base <pr_base> --state open --limit 200 --json number,isDraft,files   # exit 0 = listed; [] = none open
+```
+
+It repeats the listing until none remains or ten minutes have passed, then merges, so the
+verification runs once, on the result. Its return names each PR still open, the PR body's
+Evidence lists them, and the verifier's drift check covers a merge that lands later.
+
+A message mid-run that asks for nothing, such as news that the target moved, is information:
+whoever receives it notes it and carries on with its work, including waiting on its own
+workers. The target comes in at the next of the two points.
+
 ## Check wave
 
 The wave is every review of the change, dispatched together on one commit. It starts when the
-implementing worker returns step 8's self-review with steps 6 and 7 passing on a committed
+implementing worker returns step 8's self-review, and a solo run's pre-wave
+[target merge](#target-merge), with steps 6 and 7 passing on a committed
 `head_sha`; that recorded output is the wave's check evidence, and
 [Closing verification](#closing-verification) reruns it once at the end.
 
@@ -126,7 +168,12 @@ fixes go to [Fix rounds](#fix-rounds); a wave with none goes to
 A **round** is one fix dispatch and its re-check. A run takes at most two rounds.
 
 **Fix.** Every accepted finding goes in one brief to the implementing worker (solo) or one fix
-worker (feature). Fix a finding that names a class as the class. Its fix brief covers every
+worker (feature). Fix a finding that names a class as the class. Its fix brief passes on the
+reviewer's pattern, its search, and any class fix the reviewer proposed, as written. A brief
+that prescribes a narrower mechanism records it with its reason in the decision list as a
+narrowed class fix. The smallest-change rule limits the size of
+the code, not which class gets closed, and for a check that reads source in some language the
+default class fix is that language's own parser. The brief covers every
 instance the named search finds, and the fix worker returns a table of every site it considered
 with a verdict for each. A fix too large to close the class goes back to the coordinator as an
 open question with its size. Fix an unconfirmed runtime finding only after a probe confirms it.
@@ -199,7 +246,7 @@ finding is recorded with its tier, evidence, and door outcome.
 
 Closing verification is the one clean-checkout rerun of the change's checks, on the commit that
 ships. The coordinator dispatches it on the final committed head (`final_sha`) after the last
-fix round, beside [Solo finalization](#solo-finalization)'s publish steps. A pass holds for
+fix round and, in a solo run, the [target merge](#target-merge) that follows it, beside [Solo finalization](#solo-finalization)'s publish steps. A pass holds for
 that commit alone: a later commit voids it, and a fresh one runs on the new head. The verifier is a
 worker that wrote none of the change, and it reports without editing: its writes stay in its
 [Review workspace](#review-workspace). Pass it the run directory, the main checkout path
@@ -211,7 +258,8 @@ The verifier uses a clean checkout at `SHA`, confirms `HEAD` matches, reruns eve
 command changed only where a path must point at its own checkout or workspace, or as the
 wrong-record rule below allows, records each such substitution, captures each command's exit
 code before any pipe, and returns its own exit codes, output excerpts, and checked SHA. A command it
-cannot run is a blocked check reported with its reason. Reuse the implementing worker's ports
+cannot run is a blocked check reported with its reason. A performance-gate timeout gets step
+6's one rerun before it counts as a failure, and the return shows both runs. Reuse the implementing worker's ports
 and resources, or serialize with any still in use.
 
 It then checks the target branch for drift, from its checkout. A non-zero exit the comments
@@ -243,12 +291,9 @@ The coordinator acts on the return:
 - **A check diverges from the recorded result:** the output goes back to the worker that made
   the last commit. Its fix is a [late fix](#fix-rounds) that reruns steps 6 and 7, and the PR
   body's Evidence names it. A second divergence stops the run as blocked.
-- **Drift with a conflict or a shared path:** two sides can change one line to the same text
-  and merge cleanly, as when both bump a version to the same number. The worker that made the
-  last commit merges `TARGET_TIP` into the branch without rewriting it, compares both sides'
-  diffs of each shared path, and edits where the merged text no longer serves both (a version
-  both sides bumped takes the next number). It reruns steps 6 and 7, pushes, and returns the
-  new head with what it edited; an edit makes the merge a [late fix](#fix-rounds).
+- **Drift with a conflict or a shared path:** the worker that made the last commit does a
+  [target merge](#target-merge), pushes, and returns the new head with what it edited; an
+  edit makes the merge a [late fix](#fix-rounds).
 
 Readiness requires a passing closing verification on the final committed tree. Feature runs use
 the coordinator's Verify gate as theirs.
@@ -283,6 +328,10 @@ An empty diff means the [No-change outcome](#no-change-outcome) applies; review 
 
 Pass the run directory, the main checkout path (`REPO`), `base_sha` as the fixed point,
 `review_sha` as the commit to review, and an absolute path to the authoritative review scope.
+A reviewer's brief carries code and pointers, never the author's or coordinator's conclusions
+about the change (what it does, why it is right, where to look less); every brief built on
+this one, the re-check's included, keeps that rule. The scope file's `## Author decisions`
+are the one exception, and the reviewer judges them as below.
 For a solo ticket, that scope is `ticket-snapshot.md` in the run directory. The worker that
 completes step 1 saves the ticket's body, relevant comments, and acceptance criteria as its
 `## Requirements` section before implementation starts, so the enforced scope predates every
@@ -403,27 +452,31 @@ the ticket's previous behavior. Feature authors read worker evidence by path and
 dispatch-base observations from the original feature base and final integration results.
 
 Draft bodies describe intended scope and mark unexecuted evidence as pending. Final bodies use
-actual observations. If no before observation is available, say so instead of inventing one.
+actual observations. A claim about runtime behaviour covers only the variants the run built and
+observed, such as one build mode or one browser, never a combination it did not build. A fact corrected in the diff is corrected
+everywhere the run published it: the PR body, issues it filed, and its comments. If no before observation is available, say so instead of inventing one.
 Missing required checks keep the PR draft; a repo whose workflow files and `gh run list` for the
 head SHA show no CI has no required checks, and Evidence says so. Explain rollback cost and affected consumers in
 Merge Danger using the actual change. Its Door line states the recorded [Door](#door) and its
 reason. Under it, list each finding left open, by the round cap or as an
 [ADR-level fix](#fix-rounds), with its tier and the reviewer's evidence, and offer a follow-up
 issue for them. List there too each [reversal](#fix-rounds) of a decision of the user's, with
-the finding and why no fix kept the decision.
+the finding and why no fix kept the decision, and each narrowed class fix with its mechanism
+and reason.
 Replace stale draft claims on resume.
 
 ## Solo finalization
 
 The implementing worker owns this section, in two parts. Every dispatch this file sends it
-(fix rounds, a prose-only fix, late fixes, Publish, Ready) resumes it, replacing
+(fix rounds, a prose-only fix, the [target merge](#target-merge) before closing verification,
+late fixes, Publish, Ready) resumes it, replacing
 orchestrator-mode's one-resume rule. Where the harness cannot resume it, or a class escalation
 has replaced it, the replacing worker, briefed by artifact path, takes these dispatches.
 
-**Publish.** After the last fix round, push the checked head (`final_sha`) and confirm the
+**Publish.** After the last fix round and its target merge, push the checked head (`final_sha`) and confirm the
 remote tip. Author the PR body from the coordinator's brief, which carries the door with its
 reason, each finding's axis, tier, disposition, fixing commit, and, where it stays open, the
-reviewer's evidence, and each reversal entry a fix added to the decision list. Mark the closing verification pending. Update or reuse the ticket's draft
+reviewer's evidence, and each reversal entry and narrowed class fix in the decision list. Mark the closing verification pending. Update or reuse the ticket's draft
 PR with the closing line chosen in [PR body](#pr-body) and the observed results. After the
 push, run `gh pr checks <PR> --watch`; a failing required CI check is a defect, and a pending
 one counts as unexecuted evidence. Its fix is a [late fix](#fix-rounds).

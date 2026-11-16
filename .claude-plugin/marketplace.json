@@ -144,6 +144,27 @@
       ]
     },
     {
+      "name": "implement-backlog",
+      "source": "./skills/implement-backlog",
+      "description": "Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/implement-backlog",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "github",
+        "tickets",
+        "backlog",
+        "orchestration",
+        "subagents",
+        "pull-requests",
+        "workflow"
+      ]
+    },
+    {
       "name": "implement-feature",
       "source": "./skills/implement-feature",
       "description": "Implement a feature specification or selected tickets as one verified pull request.",

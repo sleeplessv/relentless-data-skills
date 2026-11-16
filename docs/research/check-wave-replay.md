@@ -6,7 +6,7 @@ Dated 2026-11-16. This note records the replay that tested the check restructuri
 
 - **The agreed pass test was not met.** It asked for lower active time and lower spend with every defect the original run fixed caught again or absent. Spend did not drop, and two of the originals' fixed defects were not fixed in the replays.
 - **Time after implementation fell where the two sides are comparable.** On the two tickets where the original pipeline also ran a final review on its own, the replay took 18% less time from the implementer's hand-back to the end.
-- **Against the runs as they happened, the review pipeline was 32% faster and 18% cheaper.** In two of the four originals the user asked for a final review by hand after the pipeline had finished, and it found the decisive defect both times. The wave runs that review on every full-route ticket.
+- **Against the runs as they happened, duplicated finalization legs included, the review pipeline was 32% faster and 18% cheaper** (27% and 12% on the per-ticket cut, which drops those legs). In two of the four originals the user asked for a final review by hand after the pipeline had finished, and it found the decisive defect both times. The wave runs that review on every full-route ticket.
 - **Against the originals' own pipeline, the review pipeline was 12% slower and 31% dearer,** because two of those four pipelines contained no final review.
 - **The implement leg, which the change does not touch, grew by 20% in time and 56% in cost,** and holds 56% of the replays' extra worker cost. The replay cannot say why.
 - **Rounds past the first mostly repaired the previous fix,** in the replays and in the originals.

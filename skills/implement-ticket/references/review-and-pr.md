@@ -112,7 +112,8 @@ with a verdict for each. A fix too large to close the class goes back to the coo
 open question with its size. Fix an unconfirmed runtime finding only after a probe confirms it.
 The fix worker probes first; where no probe can run, it returns the finding unfixed, and the
 coordinator accepts or defers it from the reviewer's reasoning and the size of the fix, recording
-it as unprobed. An accepted one joins the next fix.
+it as unprobed. An accepted one joins the next round's fix; with no round left it follows the
+[Door](#door).
 The fix worker commits, reruns steps 6 and 7 for the affected paths, and returns the commands,
 their output, and the checked `fix_sha`. For each factual sentence it changed in prose, it
 returns the file and line that back the sentence.
@@ -139,8 +140,8 @@ Publish and closing verification; one a late-fix re-check finds follows the [Doo
 
 A second round fixes every finding the first re-check leaves requiring a fix and is re-checked
 the same way, over `git diff <fix_sha>...<second fix_sha>`. After the second re-check the
-rounds are spent, and each should-fix or must-fix finding in code still open follows the
-[Door](#door). A step 6 or 7
+rounds are spent, and each should-fix or must-fix finding still open, except a false sentence
+a prose-only fix closes, follows the [Door](#door). A step 6 or 7
 command that fails after a fix is fixed before the fix worker returns; one that cannot be made
 to pass falls under SKILL.md's stop conditions and never takes a door outcome.
 Reassess review depth when fixes expand the change: a trivial change whose fix alters behavior
@@ -152,7 +153,7 @@ the user orders. A late fix that touches code gets one re-check under the rule a
 the two rounds, of its own diff or, for a target merge, of the merge's edits to the shared
 paths. A should-fix finding from that re-check follows the [Door](#door). Every late fix is
 pushed and voids the closing verification before it, so CI and closing verification rerun on
-the new head.
+the new head. A required CI check that fails again after its late fix stops the run as blocked.
 
 Done when no should-fix or must-fix finding is open, or the rounds are spent and each remaining
 finding is recorded with its tier, evidence, and door outcome.
@@ -170,8 +171,8 @@ recorded, the check commands from step 6, the smoke commands or script from step
 allocation, and `REMOTE` and `PR_BASE` (the remote name and the branch the PR targets).
 
 The verifier uses a clean checkout at `SHA`, confirms `HEAD` matches, reruns every recorded
-command changed only where a path must point at its own checkout or workspace, records each such
-substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
+command changed only where a path must point at its own checkout or workspace, or as the
+wrong-record rule below allows, records each such substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
 cannot run is a blocked check reported with its reason. Reuse the implementing worker's ports
 and resources, or serialize with any still in use.
 
@@ -194,8 +195,8 @@ comm -12 <(git diff --no-renames --name-only "$TARGET_TIP...$SHA" | sort) <(git 
 
 A recorded install or build command that fails on the unchanged tree, such as one that omits
 a dependency group, is a wrong record. The verifier reruns with the corrected command and
-reports both, and the coordinator records the correction with its reason. A check command is
-never corrected this way: its failure is a divergence.
+reports both, and the coordinator records the correction with its reason. A step 6 check or
+step 7 smoke command is never corrected this way: its failure is a divergence.
 
 The coordinator acts on the return:
 
@@ -374,8 +375,7 @@ reason and each finding's axis, tier, disposition, fixing commit, and, where it 
 reviewer's evidence. Mark the closing verification pending. Update or reuse the ticket's draft
 PR with the closing line chosen in [PR body](#pr-body) and the observed results. After the
 push, run `gh pr checks <PR> --watch`; a failing required CI check is a defect, and a pending
-one counts as unexecuted evidence. Its fix is a [late fix](#fix-rounds), and a required check
-that fails again after its late fix stops the run as blocked.
+one counts as unexecuted evidence. Its fix is a [late fix](#fix-rounds).
 Return the pushed head, the PR URL, and the check results. The coordinator dispatches
 [Closing verification](#closing-verification) beside this part.
 

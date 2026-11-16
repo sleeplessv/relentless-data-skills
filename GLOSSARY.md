@@ -23,6 +23,8 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Closing verification**: the clean-checkout rerun of a change's checks on the commit that will ship, by a worker that wrote none of the change. _Avoid_: independent verification, mop-up.
 - **One-way door**: a change whose effects reverting it would not undo, such as a data migration, a published release, or a permissions change. A change of uncertain type is treated as one-way.
 - **Two-way door**: a change that reverting fully undoes.
+- **Model class**: a level of model capability that a kind of work is assigned to, named by an alias that follows the level's newest version. The classes are session (the model the coordinator runs on), strong, and standard. _Avoid_: model tier, model version.
+- **Class escalation**: moving a task whose result failed its check to a fresh worker on the next model class up.
 - **Review workspace**: the directory a verifier or reviewer owns under the run directory. It holds the worker's detached checkout and scratch files. _Avoid_: reviewer worktree, scratch checkout.
 - **Frontier**: tickets with no active implementer whose blockers are satisfied in the verified, preserved integration tip. Assignment to the authenticated actor is advisory and does not make that actor an active implementer.
 - **Dispatch base**: the immutable integration commit assigned to a ticket attempt. Concurrent attempts can have different bases as integration advances.

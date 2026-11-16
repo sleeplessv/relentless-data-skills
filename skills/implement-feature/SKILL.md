@@ -29,7 +29,9 @@ Apply [Writing](../implement-ticket/references/setup.md#writing) using `technica
   implement-ticket's [Ticket lifecycle comments](../implement-ticket/SKILL.md#ticket-lifecycle-comments)
   for every attempt, within existing authorization and configured permissions.
 - Count the root and all active descendants against capacity. Use transient setup,
-  tracker, and integration roles. One worker owns each ticket without helper fan-out.
+  tracker, and integration roles, each on its
+  [model class](references/reference.md#model-classes). One worker owns each ticket without
+  helper fan-out.
 
 ## Workflow
 

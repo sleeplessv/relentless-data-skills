@@ -11,7 +11,7 @@ Implement a GitHub ticket with checks and a reviewed PR. Use the supplied ticket
 defaulting to the current `gh` remote and step 0's selection. With the `session` argument, the main thread first works
 [Session ticket](references/session.md) itself, drafting and filing the ticket from this conversation while it still holds it.
 Solo runs then load `orchestrator-mode` in standing mode: the main thread coordinates, and workers complete [Setup](references/setup.md), then steps 0
-through 8; the coordinator dispatches step 8's reviews and closing verification. Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
+through 8; the coordinator dispatches step 8's reviews and closing verification, and sets each dispatch's [model class](references/review-and-pr.md#model-classes). Workers cannot invoke a user-only skill, so each handoff names this skill's root by path and the
 steps the worker owns. A worker reports an auto-pick, a stop condition, or a question through `open_questions`; the coordinator puts it to the user and dispatches the answer.
 
 ## Orchestrated dispatch

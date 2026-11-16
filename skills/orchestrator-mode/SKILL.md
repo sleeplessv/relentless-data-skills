@@ -52,7 +52,7 @@ job") describe how workers act; pass them on in handoffs.
 - **Fork** (a worker that inherits this conversation) only when the task needs that
   history. It still gets a task, owned paths, and a return contract.
 
-Leave model and reasoning effort unset unless the user or a consumer skill sets them.
+Set each worker's model by [Model classes](references/reference.md#model-classes), and leave reasoning effort unset unless the user or a consumer skill sets it.
 
 ## Sizing
 

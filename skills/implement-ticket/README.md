@@ -21,7 +21,9 @@ check wave on the tested head. Trivial changes that preserve behavior use one re
 loaded `code-review` prompts and separate Standards and Spec reports. The coordinator triages
 the wave's findings into at most two fix rounds, with each code fix re-checked on its diff. A worker that
 wrote none of the change then reruns the recorded checks once on the final head and checks the
-PR base for drift. The ticket's door decides the ending. A two-way door's PR is marked ready,
+PR base for drift. The implementing worker and the reviewers run on the strong model class and
+that verification on the standard class; a one-way door moves the reviewers to the session's
+class. The ticket's door decides the ending. A two-way door's PR is marked ready,
 with any finding the rounds left open listed under Merge Danger. A one-way door's PR stays
 draft until the user's go-ahead.
 

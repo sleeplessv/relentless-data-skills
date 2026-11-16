@@ -28,6 +28,10 @@ its closing verification has passed on the head being merged and CI is green. `s
 withholds the merge. A change that would not revert cleanly keeps a draft PR until you give
 the go-ahead.
 
+The session keeps its files in the repository's `.agents/` folder, kept out of git: the wiki
+in `.agents/wiki/` and each ticket's run record in `.agents/runs/<ticket>/`. It does not ask
+where to store them.
+
 [SKILL.md](SKILL.md) is what the chief of staff follows.
 [The ticket owner brief](references/ticket-owner.md) is what each owner reads; the chief of
 staff sends its path with the ticket's facts.

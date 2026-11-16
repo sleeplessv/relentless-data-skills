@@ -147,7 +147,7 @@
       "name": "implement-backlog",
       "source": "./skills/implement-backlog",
       "description": "Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },

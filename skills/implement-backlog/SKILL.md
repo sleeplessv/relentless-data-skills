@@ -26,6 +26,11 @@ implement the repository's open tickets.
 3. Hold `implement-ticket`'s root path and nothing else of it. Its text addresses a
    coordinator, and a main thread that reads it starts coordinating each ticket's workers and
    reviews itself. The owner reads it.
+4. Keep every file the session writes in `.agents/` at the main checkout's root: the wiki in
+   `.agents/wiki/`, each ticket's run directory in `.agents/runs/<ticket>/`. This replaces
+   `chief-of-staff`'s search for a shared wiki and its question about where to keep one, so
+   never ask the user where to store anything. Use the wiki already there, or create it. When
+   git does not ignore `.agents/`, add it to `.git/info/exclude`, never to `.gitignore`.
 
 Done when the wiki is located and the first frontier is listed.
 
@@ -74,7 +79,7 @@ pointers and this ticket's facts:
 - The absolute path of this skill's `references/ticket-owner.md`, to read first.
 - The `implement-ticket` root from Start.
 - The repository (`<owner>/<repo>`), its main checkout path, and the ticket number.
-- `RUN_DIR`: a directory for this ticket under the session's scratch space.
+- `RUN_DIR`: the absolute path of `.agents/runs/<ticket>/` in the main checkout.
 - A resource block no other owner holds, such as a port range, and any limit on heavy
   checks running at once on this machine.
 - Owners in flight, with the paths their tickets touch.

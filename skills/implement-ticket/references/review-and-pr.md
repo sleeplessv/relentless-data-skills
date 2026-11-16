@@ -142,13 +142,18 @@ An **ADR-level fix** contradicts an ADR in `docs/adr/` or the repo's documented 
 makes a choice that is hard to reverse, surprising without context, and the result of a real
 trade-off. The fix worker takes a fix that closes the finding without being one. Where no such
 fix exists, it returns the finding unfixed, with the ADR or the choice and the fixes it ruled
-out, and fixes the rest of the brief. [Final review](#final-review) gives the finding's
-disposition.
+out, and fixes the rest of the brief. Its return names the ADRs it checked its fixes against, or
+says the repo keeps none. A finding returned this way leaves the rounds: the re-check's list of
+accepted findings omits it, and [Final review](#final-review) gives its disposition.
 
-The brief names the decision list. A fix keeps each decision the list records as the user's
-where a fix that does so closes the finding. Where none does, the fix worker makes the fix and
-returns the reversed decision under `decisions_made`, and the coordinator appends it as a
-reversal entry.
+The brief names the decision list and, beside each accepted finding, the entries recorded as
+the user's that the coordinator sees the finding touch. A fix keeps each decision the list
+records as the user's where a fix that does so closes the finding. Where none does, the fix
+worker makes the fix, unless it is an ADR-level fix, and returns the reversed decision under
+`decisions_made` with the fixes it ruled out, and the coordinator appends it as a reversal
+entry. The return says kept or reversed for each entry the brief named. The stop comment and
+the report to the user each name every reversal: the decision, the finding, and why no fix kept
+it.
 
 **Re-check.** A code-touching fix gets one fresh reviewer, briefed as
 [Independent review](#independent-review) describes, with the wave's `head_sha` as the fixed
@@ -351,12 +356,13 @@ including a finding whose fix reverses a decision the user made in this run:
   (`base_sha...HEAD`) is escalated through `open_questions` with the proposed fix and its size. The PR stays
   draft and the stop comment names it.
 - **ADR-level fix:** a must-fix that [Fix rounds](#fix-rounds) returns unfixed as an ADR-level
-  fix is escalated through `open_questions` with the ADR or the choice and a recommended
-  disposition. The PR stays draft and the stop comment names it. On the user's yes, the fix is a
-  [late fix](#fix-rounds), and its commit supersedes the ADR or, where the repo keeps ADRs, adds
-  one. On the user's no, the finding stays open with the answer as its reason. Any other finding
-  returned this way stays open with the ADR or the choice as its reason and follows the
-  [Door](#door).
+  fix is escalated through `open_questions` with the ADR or the choice, the fixes ruled out, and
+  a recommended disposition. The PR stays draft and the stop comment names it. On the user's
+  yes, the fix is a [late fix](#fix-rounds), and its commit records the decision: a new ADR that
+  supersedes the one contradicted, or, for a choice that would warrant one, a new ADR where the
+  repo keeps them. On the user's no, the finding stays open with the answer as its reason. Any
+  other finding returned this way stays open with the ADR or the choice as its reason and
+  follows the [Door](#door).
 
 Accepted fixes join the wave's one fix brief under [Fix rounds](#fix-rounds).
 
@@ -403,7 +409,8 @@ head SHA show no CI has no required checks, and Evidence says so. Explain rollba
 Merge Danger using the actual change. Its Door line states the recorded [Door](#door) and its
 reason. Under it, list each finding left open, by the round cap or as an
 [ADR-level fix](#fix-rounds), with its tier and the reviewer's evidence, and offer a follow-up
-issue for them. Evidence names each decision of the user's that a fix reversed, with the reason.
+issue for them. List there too each [reversal](#fix-rounds) of a decision of the user's, with
+the finding and why no fix kept the decision.
 Replace stale draft claims on resume.
 
 ## Solo finalization
@@ -430,6 +437,7 @@ The worker first writes the closing verification's result, any drift, and any la
 the body's Evidence.
 The report lists temporary code, post-merge manual steps, and deferred cleanup, and offers a
 follow-up issue with acceptance criteria for them.
-Post and record the stop comment with the PR URL and outcome, then report them to the user.
+Post and record the stop comment with the PR URL, the outcome, and each
+[reversal](#fix-rounds), then report them to the user.
 Leave merging to the human. A blocked or denied publication step preserves the branch and body,
 keeps the PR a draft, and takes the stop path with a stop comment that states what remains.

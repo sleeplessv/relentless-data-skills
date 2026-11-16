@@ -5,7 +5,9 @@ artifacts. Scoped delegation applies to the named tasks; explicit orchestrator m
 until the user changes it. In that mode the main thread only dispatches, plans, loads skills,
 and talks to the user, and it passes worker artifacts on by path.
 
-Every workflow step ends on a completion criterion. A follow-up on the task a worker just
+Each worker runs on a model class: strong for work that turns on judgement, standard for work
+a recorded procedure settles, and never above the session's own. A task whose result fails its
+check moves up a class. Every workflow step ends on a completion criterion. A follow-up on the task a worker just
 did resumes that worker once; a verification, a new phase, or a second follow-up goes to a
 fresh worker briefed by artifact path, and writers record their reasons and rejected
 approaches so that worker can take the change over. Handoffs assume the worker starts with no

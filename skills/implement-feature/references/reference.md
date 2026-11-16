@@ -55,6 +55,18 @@ Setup returns `completion_mode`, requirement coverage and gaps, proposed `work_s
 `resume_state`, integration candidate and default branch, each ticket's door and the feature's
 door, plus snapshot paths and any specific gate. The coordinator announces this before tree preparation.
 
+## Model classes
+
+The coordinator sets each dispatch's model by class, as the Model classes section of
+orchestrator-mode's `references/reference.md` defines them.
+
+- **Strong class**: the setup, exploration, ticket, and integration workers, a conflict
+  resolver, and every fix worker.
+- **Reviewers**: the class the Model classes section of implement-ticket's
+  `references/review-and-pr.md` gives them for the feature's door.
+- **Standard class**: the tracker worker, the worker that runs
+  [Post-resolution tests](#post-resolution-tests), Verify, and the PR worker.
+
 ## Tree preparation
 
 Read project conventions and discover install, lint/type-check, test, and run commands from

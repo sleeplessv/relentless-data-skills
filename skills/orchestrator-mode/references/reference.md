@@ -2,6 +2,8 @@
 
 Read the section the current dispatch needs.
 
+- [Model classes](#model-classes): which class of model each kind of worker runs on, and
+  when a task moves up a class.
 - [Harness notes](#harness-notes): limits and defaults the tool schemas omit, by harness.
 - [Decision list](#decision-list): where the run's decisions live and how entries are
   written.
@@ -10,6 +12,35 @@ Read the section the current dispatch needs.
 - [Parallel writes worktrees](#parallel-writes-worktrees): isolation, integration, and
   cleanup for parallel writers.
 - [Worked example](#worked-example): a refactor from search through verification.
+
+## Model classes
+
+A **class** is a level of model capability, named by an alias that follows the level's newest
+version. Pass the alias that this harness's subsection of [Harness notes](#harness-notes)
+gives, and an exact model id only where that subsection says the harness has no alias.
+
+- **Session class**: the model this coordinator runs on, which for a nested coordinator is
+  its own model. The coordinator stays on it, and no worker runs on a class above it.
+- **Strong class**: work that turns on judgement, such as writing or changing code, a
+  design, a review, an integration, or a fix.
+- **Standard class**: work a recorded procedure settles, such as rerunning recorded
+  commands, locating files, and tracker or git housekeeping.
+
+A model the user names wins, then a consumer skill's assignment, then this section. A worker
+whose class is the session's, or would be above it, gets no model, and so does a fork. A
+worker with no model runs on its spawner's, unless a worker definition or a harness default
+sets another. Where that subsection ranks model families and the session's model is in none
+of them, or an exact id is needed and the harness has shown no model list to take it from,
+no worker gets a model. A resumed worker keeps the model it started on.
+
+**Class escalation.** A task fails its check when a verifier, a re-check, or a rerun of its
+checks reports its done-when unmet; the worker that reports the failure has not failed. After
+a failure on the standard class, the next attempt goes to a fresh strong-class worker. After
+a second failure on the strong class, it goes to a fresh worker on the session class, where
+that is higher. Every attempt counts toward Collect's three, which still ends the dispatch,
+and the decision list records each move with the failed check. A worker that is stuck
+returns the obstacle and what it tried in `open_questions`; the coordinator answers from
+what it holds and resumes it.
 
 ## Harness notes
 
@@ -30,8 +61,11 @@ general notes, then the subsection for the harness this session runs in.
   resuming a finished worker takes a slot without checking the limit, so resumes can push
   the count past it. Workers nest 3 layers below the main thread
   (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`), and a fork cannot start another fork.
-- **Model and effort.** The model comes from the per-call `model`, then the definition's
-  `model`, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the main thread's model.
+- **Model and effort.** The per-call `model` takes an alias: `fable`, `opus`, `sonnet`,
+  `haiku`, highest first. Strong class is `opus` and
+  standard class is `sonnet`. On a third-party provider an alias can resolve to an older
+  version. The model comes from the per-call `model`, then the definition's
+  `model`, then `CLAUDE_CODE_SUBAGENT_MODEL`, then the spawner's model.
   `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` ignores definition models and refuses per-call ones;
   `CLAUDE_CODE_EFFORT_LEVEL` overrides a per-call `effort`. A fork keeps the main thread's
   model and effort, so a task that needs another gets a clean worker.
@@ -73,7 +107,12 @@ keys come from Codex's source, because its docs omit them.
   skill is that permission; say so in the dispatch.
 - **Model and effort.** Workers inherit their spawner's model and effort unless the spawn
   sets them; `agents.default_subagent_model` and `agents.default_subagent_reasoning_effort`
-  set the defaults, and a V2 full-history fork rejects both overrides.
+  set the defaults, and a V2 full-history fork rejects both overrides. A custom agent
+  file's model wins over the spawn's, and
+  `features.multi_agent_v2.expose_spawn_agent_model_overrides` set to false removes both
+  spawn parameters. No alias exists: the spawn takes an exact catalog id, and an unknown id
+  fails with a list of the available ones. The families are Astra, Sol, Terra, and Luna,
+  highest first. Strong class is the newest Sol id and standard class the newest Terra id.
 - **Worktrees.** No native isolation: all workers share one working directory.
 - **Completion and resume.** V2 delivers a worker's final answer to its spawner
   automatically; `wait_agent` reports only which workers have updates. `followup_task`
@@ -85,7 +124,11 @@ keys come from Codex's source, because its docs omit them.
 - **Questions.** A custom worker can ask when its definition tells it to use the
   ask-question tool.
 - **Limits.** No concurrency cap is documented; depth is 2, so a grandchild cannot spawn.
-- **Model.** The worker definition's `model` field, or `inherit`.
+- **Model.** The worker definition's `model` field, or `inherit`; the spawner can also name
+  a model at launch. Both take an exact id, and no alias exists. Families rank as the Claude
+  Code and Codex subsections give them. Within the session model's vendor, strong class is
+  the newest Opus or Sol id and standard class the newest Sonnet or Terra id. Team restrictions, plan limits, and the legacy Max Mode
+  setting make Cursor fall back to another model without an error.
 - **Worktrees.** Isolation is opt-in, as a local worktree or a cloud VM, from an
   undocumented base.
 - **Completion and resume.** A background worker writes its output to files under
@@ -99,7 +142,10 @@ keys come from Codex's source, because its docs omit them.
 - **Limits.** Up to 50 background workers run at once, with no setting documented; a
   background worker cannot spawn background workers.
 - **Model.** The worker definition's `model` field, or `inherit`; the spawn call accepts
-  `model: "inherit"`.
+  `model: "inherit"`, and no other spawn value is documented. A definition sets the class:
+  `auto-intelligent` for strong and `auto-efficient` for standard, which the account's
+  configuration maps to models. Without such a definition, or in a session that itself runs
+  on `auto-efficient`, leave the model unset.
 - **Worktrees.** A worker is isolated when the spawn prompt asks for a worktree, on branch
   `agent/<agentId>`. `--worktree-base` sets its base (changelog 1.2.14); where the flag
   goes and the default base are undocumented.

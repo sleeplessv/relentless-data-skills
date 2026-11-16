@@ -80,6 +80,26 @@ its door.
 On the user's yes to a one-way door, the coordinator dispatches a worker to mark the PR ready
 and update the stop comment. A fix the user orders instead is a [late fix](#fix-rounds).
 
+## Model classes
+
+The coordinator sets each dispatch's model by class. The Model classes section of
+orchestrator-mode's `references/reference.md` defines the classes, their alias in each
+harness, and class escalation.
+
+- **Strong class**: the implementing worker, with its fixes and finalization, and every
+  reviewer of the check wave and of a re-check.
+- **Session class**: those reviewers when the door is one-way. A solo run dispatches the
+  implementing worker before step 1 records the door, so the door changes the reviewers'
+  class and leaves the implementing worker's. A door raised to one-way after the wave moves
+  each later re-check to the session class and leaves the wave as it ran.
+- **Standard class**: the closing verification, and a fresh worker that marks a one-way
+  door's PR ready.
+
+A failed check, for class escalation, is a re-check that leaves an accepted finding open or a
+closing-verification divergence, and the two kinds count together across the run. The wave's
+findings on the first commit are not one. After a class escalation, the replacing worker is
+the worker that made the last commit wherever this file names one.
+
 ## Check wave
 
 The wave is every review of the change, dispatched together on one commit. It starts when the
@@ -172,7 +192,8 @@ allocation, and `REMOTE` and `PR_BASE` (the remote name and the branch the PR ta
 
 The verifier uses a clean checkout at `SHA`, confirms `HEAD` matches, reruns every recorded
 command changed only where a path must point at its own checkout or workspace, or as the
-wrong-record rule below allows, records each such substitution, and returns its own exit codes, output excerpts, and checked SHA. A command it
+wrong-record rule below allows, records each such substitution, captures each command's exit
+code before any pipe, and returns its own exit codes, output excerpts, and checked SHA. A command it
 cannot run is a blocked check reported with its reason. Reuse the implementing worker's ports
 and resources, or serialize with any still in use.
 
@@ -357,7 +378,8 @@ dispatch-base observations from the original feature base and final integration 
 
 Draft bodies describe intended scope and mark unexecuted evidence as pending. Final bodies use
 actual observations. If no before observation is available, say so instead of inventing one.
-Missing required checks keep the PR draft. Explain rollback cost and affected consumers in
+Missing required checks keep the PR draft; a repo whose workflow files and `gh run list` for the
+head SHA show no CI has no required checks, and Evidence says so. Explain rollback cost and affected consumers in
 Merge Danger using the actual change. Its Door line states the recorded [Door](#door) and its
 reason. Under it, list each finding the round cap left open, with its tier and the reviewer's
 evidence, and offer a follow-up issue for them. Replace stale draft claims on resume.
@@ -366,8 +388,8 @@ evidence, and offer a follow-up issue for them. Replace stale draft claims on re
 
 The implementing worker owns this section, in two parts. Every dispatch this file sends it
 (fix rounds, a prose-only fix, late fixes, Publish, Ready) resumes it, replacing
-orchestrator-mode's one-resume rule; where the harness cannot resume it, a fresh worker briefed
-by artifact path takes over.
+orchestrator-mode's one-resume rule. Where the harness cannot resume it, or a class escalation
+has replaced it, the replacing worker, briefed by artifact path, takes these dispatches.
 
 **Publish.** After the last fix round, push the checked head (`final_sha`) and confirm the
 remote tip. Author the PR body from the coordinator's brief, which carries the door with its

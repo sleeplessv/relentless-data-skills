@@ -236,7 +236,8 @@ with missing or incompatible instructions. Solo ticket use does not require `imp
 but both solo and feature runs require `orchestrator-mode`.
 
 The minimum compatible pair for this shared contract is `implement-feature`
-`0.5.0` with `implement-ticket` `0.7.0`. From `0.2.3`, `implement-ticket` is
+`0.6.0` with `implement-ticket` `0.8.0`. Both assign the model classes that
+`orchestrator-mode` defines from `0.8.0`. From `0.2.3`, `implement-ticket` is
 user-only and absent from the skill catalog, and `implement-feature` locates it
 by path. The skills keep independent version
 numbers. Matching source revisions are the preferred compatibility check.

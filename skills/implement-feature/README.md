@@ -21,7 +21,8 @@ holds setup, integration, review, and publication contracts. Install `orchestrat
 and a blind `ponytail-review` final review together, as one check wave on the integrated
 feature; ticket workers perform self-review. Accepted findings go through at most two fix
 rounds, with each code fix re-checked on its diff. One verification of the whole feature then runs on the
-final head. A two-way door's PR is marked ready, and a one-way door's PR stays draft until the
+final head. Writers and reviewers run on the strong model class; tracker work, reruns of
+recorded checks, and the PR worker run on the standard class. A two-way door's PR is marked ready, and a one-way door's PR stays draft until the
 user's go-ahead.
 
 The installed `pr` skill supplies Summary, Evidence, and Merge Danger.

@@ -111,7 +111,7 @@ Checked against vendor documentation and source on 2026-11-16. These facts are t
 - **No GitHub and no CI** in either arm, so the smoke-test failure in `final-catch` was found by the comparison and not by the run.
 - **The three replays of an arm ran at the same time** on one machine.
 - **The one-way-door ticket was not rerun,** so the rule that moves reviewers to the session's class on a one-way door is untested.
-- **No run used a session above the Opus class.** Until 0.8.0 a worker inherited the session's model. On such a session the implementing worker and the reviewers now move down to the strong class, and no run measured that.
+- **No run used a session above the Opus class.** Until 0.8.0 a worker inherited the session's model. On such a session the implementing worker and the reviewers now move down to the strong class, and no run measured that. The owner chose this: on a Fable session, workers run on the Opus class unless the prompt names a model.
 
 ## Source data
 

@@ -94,8 +94,8 @@ on resume, updating snapshots while retaining earlier versions needed to explain
   Copy every enforceable obligation for that mode into a requirements section. Put parent-spec or
   unselected requirements that provide context in a separate context-only section.
 - `handoff.md` holds command/resource setup, original baseline, current verified integration tip,
-  branch identities, decision log, failures, and unresolved questions. Append decisions; this
-  log is the run's decision list under orchestrator-mode, written to its entry rules.
+  branch identities, the run's decision list, failures, and unresolved questions. Append
+  decisions to that list under orchestrator-mode's entry rules.
 - A run record tracks exact owned worktrees/branches, initial and current SHAs, claim ownership,
   integration evidence per ticket, artifact paths, and push results. Store the feature PR identity,
   draft status, and last published head. Report the run record's absolute path.

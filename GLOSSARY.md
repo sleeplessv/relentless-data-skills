@@ -16,10 +16,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Work-set**: the resolved list of tickets a feature run will implement, announced before branch creation. An explicit ticket list controls this scope.
 - **Deepening candidate**: a proposed refactor, produced by an architecture review, that turns a shallow module into a deep one. It carries the files involved, the problem, the proposed solution, and a recommendation strength.
 - **Decision log**: the answered design tree for one deepening candidate, each decision paired with its evidence. The spec for that candidate is written from it.
+- **Decision list**: the record of one run's decisions, each with its reason and who made it: the user, the coordinator, or a worker. _Avoid_: decision log (the answered design tree for a deepening candidate).
 - **Final review**: the single-pass quality review run by a worker that wrote none of the change and sees none of the other reviews, as part of the check wave, whose findings the coordinator triages. _Avoid_: ponytail review (names the tool, not the gate), sanity check, last pass.
 - **Check wave**: the reviews of one change that run together on one commit after implementation. _Avoid_: review chain, review stages.
 - **Fix round**: one fix of the findings accepted so far, with the re-check of that fix when it needs one. _Avoid_: review loop, iteration.
 - **Late fix**: a change committed after the fix rounds are over.
+- **ADR-level fix**: a fix that contradicts a recorded architecture decision, or makes a choice that would warrant recording one. _Avoid_: architectural fix, one-way fix.
 - **Closing verification**: the clean-checkout rerun of a change's checks on the commit that will ship, by a worker that wrote none of the change. _Avoid_: independent verification, mop-up.
 - **One-way door**: a change whose effects reverting it would not undo, such as a data migration, a published release, or a permissions change. A change of uncertain type is treated as one-way.
 - **Two-way door**: a change that reverting fully undoes.

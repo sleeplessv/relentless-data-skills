@@ -16,6 +16,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`dossier`](skills/dossier/) | Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
 | [`gh-weekly-report`](skills/gh-weekly-report/) | Create interactive weekly reports of a GitHub user's activity across repositories. |
+| [`implement-backlog`](skills/implement-backlog/) | Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request. |
 | [`implement-feature`](skills/implement-feature/) | Implement a feature specification or selected tickets as one verified pull request. |
 | [`implement-ticket`](skills/implement-ticket/) | Implement a GitHub ticket, verify the result, and prepare a pull request for review. |
 | [`metabase`](skills/metabase/) | Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration. |
@@ -73,6 +74,7 @@ The rest we keep installed, by job:
   sessions.
 - Code: `triage`, `diagnosing-bugs`, `codebase-design`,
   `improve-codebase-architecture`, `domain-modeling`.
+- Long-running sessions: `chief-of-staff`, which `implement-backlog` starts, and `retro`.
 - Everything else: `research`, `wizard`, `wait-what`, `writing-for-agents`,
   `writing-great-skills`.
 
@@ -84,6 +86,7 @@ npx skills add mattpocock/skills -g -y \
   -s prototype -s handoff -s claude-handoff \
   -s triage -s diagnosing-bugs -s codebase-design \
   -s improve-codebase-architecture -s domain-modeling \
+  -s chief-of-staff -s retro \
   -s research -s wizard -s wait-what -s writing-for-agents -s writing-great-skills
 ```
 
@@ -241,6 +244,11 @@ The minimum compatible pair for this shared contract is `implement-feature`
 user-only and absent from the skill catalog, and `implement-feature` locates it
 by path. The skills keep independent version
 numbers. Matching source revisions are the preferred compatibility check.
+
+`implement-backlog` hands each ticket to a subagent that reads `implement-ticket` by path and
+coordinates a solo run of it. From `0.1.0` it needs `implement-ticket` `0.9.0` or later: its
+ticket owner brief replaces the "Leave merging to the human" rule of Solo finalization, and
+its frontier listing reuses the query in `references/auto-pick.md`.
 
 Select both skills in the same installation:
 

@@ -15,15 +15,15 @@ reads its files by path during [Setup](references/setup.md). A solo run loads `o
 in standing mode: the main thread coordinates, and workers set up, implement, check, and review.
 
 Tests and runtime or artifact checks provide completion evidence, recorded as commands a
-verifier can rerun. In solo runs a worker that wrote none of the change reruns them on the tested
-head before review. Every nonempty solo change then receives independent review against its
-ticket before the PR becomes ready. Trivial changes
-that preserve behavior can use one reviewer with the loaded `code-review` prompts and separate
-Standards and Spec reports. Behavioral changes or uncertainty require both parallel reviewers.
-Follow-up review covers fixes, their consequences, and new evidence. Optional preferences can
-receive a reasoned disposition without another implementation cycle. Once both axes pass, a
-final review runs once: a blind `ponytail-review` pass whose must-fix and should-fix findings
-the coordinator fixes or escalates before the PR goes ready.
+verifier can rerun. Every nonempty solo change receives independent review against its ticket.
+The Standards and Spec reviewers and a blind `ponytail-review` final review run together as one
+check wave on the tested head. Trivial changes that preserve behavior use one reviewer with the
+loaded `code-review` prompts and separate Standards and Spec reports. The coordinator triages
+the wave's findings into at most two fix rounds, with each code fix re-checked on its diff. A worker that
+wrote none of the change then reruns the recorded checks once on the final head and checks the
+PR base for drift. The ticket's door decides the ending. A two-way door's PR is marked ready,
+with any finding the rounds left open listed under Merge Danger. A one-way door's PR stays
+draft until the user's go-ahead.
 
 A feature-dispatched worker uses its own pinned dispatch base, reuses the recorded original
 baseline, and returns criterion evidence and preservation state. It performs self-review;

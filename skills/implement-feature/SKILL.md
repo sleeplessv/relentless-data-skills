@@ -37,16 +37,16 @@ Copy this checklist into `handoff.md` at step 0, with the per-ticket lines once 
 ticket, and tick each item when its evidence is recorded. On resume, reconcile it against the run record and continue from the first open item.
 
 ```text
-- [ ] 0. Work-set, completion mode, and coverage gaps announced
+- [ ] 0. Work-set, completion mode, door, and coverage gaps announced
 - [ ] 0. Original baseline recorded; integration branch and run record paths saved
 - [ ] 1. Per ticket: dispatch base pinned, claimed, start comment URL recorded
 - [ ] 1. Per ticket: result integrated or satisfied, VERIFIED_TIP pushed, stop comment URL recorded
 - [ ] 1. Owned worktrees and branches cleaned or retained with a reason
-- [ ] 2. Verify passed on the fixed integration SHA
-- [ ] 2. Integration review passed (Standards and Spec) on the same SHA
-- [ ] 2. Final review run once on the post-review SHA; every must-fix and should-fix fixed or escalated; nice-to-haves recorded
+- [ ] 2. Check wave returned on the fixed integration SHA (Standards, Spec, final review); every finding dispositioned
+- [ ] 2. Fix rounds closed or spent; open findings recorded with their door outcome
+- [ ] 3. Verify passed on the final integration SHA
 - [ ] 3. Tracker coverage refreshed; closing lines backed by current evidence
-- [ ] 3. Feature PR body published and marked ready; every started attempt has a stop comment
+- [ ] 3. Feature PR body published and the door outcome applied; every started attempt has a stop comment
 ```
 
 ### 0. Resolve scope and prepare
@@ -58,7 +58,7 @@ If the file is missing, report the paired update needed and continue scope disco
 Resolve cross-skill references from each installed skill's own root and pass absolute paths to workers.
 
 Dispatch setup using [Work-set resolution](references/reference.md#work-set-resolution).
-Announce the work-set, completion mode, and any missing spec coverage before continuing
+Announce the work-set, completion mode, door, and any missing spec coverage before continuing
 with [Tree preparation](references/reference.md#tree-preparation). Preserve unrelated dirty
 work through isolation. Resolve cycles, outside blockers, ambiguous ownership, and scope
 questions while continuing independent authorized work where possible.
@@ -103,38 +103,38 @@ worker logs. Done when all work-set tickets have evidence on the integration tip
 recorded as failed or blocked. Every started attempt has a stop-comment URL or a reported
 posting failure. Partial work stays draft and retains its remaining obligations.
 
-### 2. Verify and review the feature
+### 2. Review the feature
 
-Use fresh workers for Verify and [Integration review](references/reference.md#integration-review)
-on a fixed integration SHA. Verify runs configured lint, type checks, tests, and the applicable
-runtime or artifact check, rerunning the smoke commands recorded in each ticket's evidence
-artifact. Review runs in an isolated checkout at that SHA and receives the materialized
-`scope.md` as its one originating spec plus the fixed PR-base commit.
+Dispatch the check wave on a fixed integration SHA as
+[Integration review](references/reference.md#integration-review) describes: fresh Standards,
+Spec, and final reviewers together, each in an isolated checkout at that SHA, with the
+materialized `scope.md` as the one originating spec plus the fixed PR-base commit. The
+integration worker's recorded checks on that SHA are the wave's check evidence. Readers of a
+fixed SHA share no concurrent writer.
 
-On a four-slot runtime, finish Verify before a `code-review` worker that needs two children,
-or dispatch its Standards and Spec axes directly using the loaded skill's prompts and baseline.
-Readers of a fixed SHA share no concurrent writer.
+Triage the findings into one list and send accepted fixes to one fix worker, through the fix
+rounds that section sets. Resolve whole-spec coverage gaps before final completion. Report
+requirements outside an explicit ticket list without implementing them.
 
-Send actionable in-scope findings to one fix worker, then rerun affected gates on the new SHA.
-Once Verify and both axes pass, dispatch the final review once on that SHA as
-[Integration review](references/reference.md#integration-review) describes.
-Resolve whole-spec coverage gaps before final completion. Report requirements outside an
-explicit ticket list without implementing them. Diagnose repeated failures or change approach.
-For partial work, verify the preserved integration and report incomplete gates with the PR body, published as a draft PR when one exists.
+Done when every finding has a disposition, the fix rounds are closed or spent, each finding
+still open is recorded with its door outcome, and the recorded completion obligations are met.
 
-Done when Verify and both review axes pass on the preserved head, final-review findings are
-dispositioned, and the recorded completion obligations are met.
+### 3. Verify and finalize the feature PR
 
-### 3. Finalize the feature PR
+Dispatch two fresh workers together on the final integration SHA. Verify is the feature's
+closing verification: it runs configured lint, type checks, tests, and the applicable runtime
+or artifact check, reruns the smoke commands recorded in each ticket's evidence artifact, and
+checks the PR base for drift. The PR worker uses `pr` to author the body and finalizes the
+[Feature PR](references/reference.md#feature-pr). Pass both the SHA, coverage evidence, run
+record, and reports. A failed Verify or a newly discovered defect takes a late fix
+(implement-ticket's Fix rounds) and a fresh Verify. Refresh tracker coverage before claiming the entire spec is complete. For partial
+work, run Verify on the preserved integration and report the incomplete gates in the draft PR body.
 
-One worker uses `pr` to author the body and finalizes the [Feature PR](references/reference.md#feature-pr).
-Pass the verified SHA, coverage evidence, run record, and reports. A newly discovered defect returns to the fix and
-verification loop. Refresh tracker coverage before claiming the entire spec is complete.
-
-Update the same draft with actual results and evidence-backed closing lines, then mark it
-ready. Never merge it. Report the URL, any unexecuted checks, and the friction workers
-returned, grouped by cause, as proposed follow-ups. If publication is blocked, preserve the
-completed branch and PR body and report that limitation.
+Update the same draft with actual results and evidence-backed closing lines, then apply the
+door outcome as [Feature PR](references/reference.md#feature-pr) describes. Never merge it.
+Report the URL, any unexecuted checks, and the
+friction workers returned, grouped by cause, as proposed follow-ups. If publication is blocked,
+preserve the completed branch and PR body and report that limitation.
 
 ## Failure and resume
 

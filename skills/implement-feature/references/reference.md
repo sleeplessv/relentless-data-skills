@@ -29,6 +29,9 @@ a WIP branch alone does not prove agent-authored triage. An explicit current use
 resolve a prior agent stop. Track which lifecycle changes this run actually owns.
 
 Record pre-existing PRs in the ticket snapshots and evaluate current acceptance criteria.
+Classify each selected ticket's door from its text, under the Door section of implement-ticket's
+`references/review-and-pr.md`, and record `door:` with a one-line reason at the top of its
+snapshot. The feature is one-way when any ticket is; record the feature's door in `handoff.md`.
 
 Build the graph and detect cycles. An unresolved open blocker outside the selected set requires
 a dependency decision, not expansion of scope. Check that purportedly satisfied blockers are
@@ -49,8 +52,8 @@ closure. An explicit list remains authoritative even when its parent spec has un
 
 Setup returns `completion_mode`, requirement coverage and gaps, proposed `work_set`,
 `skipped_closed`, `spec_open_tickets`, coverage completeness, `graph`, eligibility evidence,
-`resume_state`, integration candidate and default branch, plus
-snapshot paths and any specific gate. The coordinator announces this before tree preparation.
+`resume_state`, integration candidate and default branch, each ticket's door and the feature's
+door, plus snapshot paths and any specific gate. The coordinator announces this before tree preparation.
 
 ## Tree preparation
 
@@ -269,27 +272,33 @@ and end-to-end behavior. Missing coverage blocks readiness; ticket completion al
 satisfy the spec. For `selected_tickets`, the requirements section contains every selected ticket
 criterion. Put the parent spec and unselected requirements in the context-only section. A no-spec
 run still materializes the selected ticket criteria in `scope.md`.
+Its first line records the feature's door with a one-line reason: the door from `handoff.md`,
+raised to one-way when the integrated diff shows an effect a revert would leave in place.
 
-Follow implement-ticket's [Independent review](../../implement-ticket/references/review-and-pr.md#independent-review)
-contract in an isolated checkout at the tested integration SHA. Pass the recorded PR-base commit
-as `base_sha`, that integration SHA as `review_sha`, and `scope.md` as the authoritative source.
-Retain separate Standards and Spec reports in the run record. Ticket workers perform self-review;
-this gate owns independent review of the complete feature.
+The sections named here are in implement-ticket's `references/review-and-pr.md`, resolved from
+its installed root. Dispatch its Check wave on the tested integration SHA: the Standards and
+Spec reviewers under its Independent review contract and the final reviewer under its Final
+review, together, each in an isolated checkout. Pass the recorded PR-base commit as `base_sha`,
+that integration SHA as `review_sha`, and `scope.md` as the authoritative source and the final
+review's scope file. Retain separate Standards, Spec, and final-review reports and dispositions
+in the run record. Ticket workers perform self-review; this gate owns independent review of the
+complete feature.
 
-After both axes pass, dispatch the
-[Final review](../../implement-ticket/references/review-and-pr.md#final-review) once on the same
-integration SHA, with `scope.md` as its scope file and one fix worker for accepted fixes. Retain
-the findings and dispositions in the run record.
+Accepted fixes go to one fix worker under its Fix rounds. Where that section names steps 6 and
+7, a feature run uses the feature's check commands and each ticket's recorded smoke commands,
+and where it names stop conditions, this skill's Failure and resume. A finding the rounds leave
+open follows the feature's Door. Step 3's Verify follows its Closing verification, drift check
+included.
 
-Reviewers in both passes follow the Review workspace section of `references/review-and-pr.md`,
-resolved from implement-ticket's installed root, with the feature run directory as `RUN_DIR`.
+Reviewers and the verifier follow its Review workspace section, with the feature run directory
+as `RUN_DIR`.
 
 ## Feature PR
 
 Prepare a draft body during setup with the intended scope and links to the spec and tickets.
 Every draft, update, and final body follows implement-ticket's shared
 [PR body](../../implement-ticket/references/review-and-pr.md#pr-body) contract and invokes `pr`.
-Keep the body local until step 3 and create the PR there, after the final check, unless the
+Keep the body local until step 3 and create the PR there, beside Verify, unless the
 user asks for an early draft; then create or reuse one draft PR once the verified, preserved
 integration branch has a publishable diff. Use explicit `--base`, `--head`, and `--body-file`. A branch with
 no diff may not support PR creation; record that pending state and retry after verified work
@@ -300,10 +309,12 @@ completed work, and update actual results as tickets integrate. Partial or block
 draft. On resume, inspect the existing PR and reconcile its head and readiness with current
 evidence; any incomplete or invalidated completion obligations require draft status.
 
-After all gates pass, refresh complete open-ticket coverage. Add closing
+After the fix rounds close, refresh complete open-ticket coverage. Add closing
 lines only for tickets with current satisfaction evidence in the integrated head. Add
 `Closes #<spec>` only when every open ticket is covered and every spec requirement has current
 completion evidence, including in a selected-ticket run that happens to cover the whole spec.
-Publish the `pr` body and run `gh pr checks <PR> --watch`; a failing required CI check goes back
-to the fix loop. Then mark the same PR ready for review. Preserve the current body locally
-if publication is blocked. Never merge the PR.
+Publish the `pr` body and run `gh pr checks <PR> --watch`; a failing required CI check takes a
+late fix (Fix rounds in implement-ticket's `references/review-and-pr.md`) and a fresh Verify. Once Verify and the required CI checks have passed on the same
+head, apply the feature's door outcome from the Door section of implement-ticket's
+`references/review-and-pr.md`. Preserve the current body locally if publication is blocked.
+Never merge the PR.

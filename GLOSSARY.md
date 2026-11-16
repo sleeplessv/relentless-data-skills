@@ -16,7 +16,13 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Work-set**: the resolved list of tickets a feature run will implement, announced before branch creation. An explicit ticket list controls this scope.
 - **Deepening candidate**: a proposed refactor, produced by an architecture review, that turns a shallow module into a deep one. It carries the files involved, the problem, the proposed solution, and a recommendation strength.
 - **Decision log**: the answered design tree for one deepening candidate, each decision paired with its evidence. The spec for that candidate is written from it.
-- **Final review**: the single-pass quality review run by a worker that wrote none of the change and saw none of the earlier reviews, after verification and independent review pass, whose findings the coordinator triages. _Avoid_: ponytail review (names the tool, not the gate), sanity check, last pass.
+- **Final review**: the single-pass quality review run by a worker that wrote none of the change and sees none of the other reviews, as part of the check wave, whose findings the coordinator triages. _Avoid_: ponytail review (names the tool, not the gate), sanity check, last pass.
+- **Check wave**: the reviews of one change that run together on one commit after implementation. _Avoid_: review chain, review stages.
+- **Fix round**: one fix of the findings accepted so far, with the re-check of that fix when it needs one. _Avoid_: review loop, iteration.
+- **Late fix**: a change committed after the fix rounds are over.
+- **Closing verification**: the clean-checkout rerun of a change's checks on the commit that will ship, by a worker that wrote none of the change. _Avoid_: independent verification, mop-up.
+- **One-way door**: a change whose effects reverting it would not undo, such as a data migration, a published release, or a permissions change. A change of uncertain type is treated as one-way.
+- **Two-way door**: a change that reverting fully undoes.
 - **Review workspace**: the directory a verifier or reviewer owns under the run directory. It holds the worker's detached checkout and scratch files. _Avoid_: reviewer worktree, scratch checkout.
 - **Frontier**: tickets with no active implementer whose blockers are satisfied in the verified, preserved integration tip. Assignment to the authenticated actor is advisory and does not make that actor an active implementer.
 - **Dispatch base**: the immutable integration commit assigned to a ticket attempt. Concurrent attempts can have different bases as integration advances.

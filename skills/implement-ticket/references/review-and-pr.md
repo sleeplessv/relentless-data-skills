@@ -114,6 +114,16 @@ pinned to `head_sha`: the Standards reviewer and the Spec reviewer under
 `code-review` prompts and baseline, so the wave fits four slots. The trivial route's wave is
 its one reviewer.
 
+In a solo run the coordinator takes the target just before dispatching the wave: it fetches
+`pr_base`, and when the target gained commits that change a path the branch changes, the
+implementing worker merges the target into the branch without rewriting it, reruns steps 6 and 7
+for the paths the target changed, and returns the new `head_sha` the wave pins. The target is
+taken at this point and just before [Closing verification](#closing-verification), never in
+between, and a running check is never stopped to merge. A message mid-run, such as news that
+the target moved, is information, not a request to report: the worker or coordinator that
+receives it notes it and carries on with what it was doing, including waiting on its own
+workers.
+
 When every reviewer has returned, the coordinator triages the reports into one list. Each
 finding keeps its axis (Standards, Spec, or Final), and a finding two reviewers raised is one
 item. Dispositions follow [Independent review](#independent-review) and the tiers in
@@ -126,7 +136,11 @@ fixes go to [Fix rounds](#fix-rounds); a wave with none goes to
 A **round** is one fix dispatch and its re-check. A run takes at most two rounds.
 
 **Fix.** Every accepted finding goes in one brief to the implementing worker (solo) or one fix
-worker (feature). Fix a finding that names a class as the class. Its fix brief covers every
+worker (feature). Fix a finding that names a class as the class. Its fix brief passes on the
+reviewer's class and proposed class fix as written; a brief that prescribes a narrower
+mechanism records why in the decision list, and the PR body names it. The smallest-change rule limits the size of
+the code, not which class gets closed, and for a check that reads source in some language the
+default class fix is that language's own parser. The brief covers every
 instance the named search finds, and the fix worker returns a table of every site it considered
 with a verdict for each. A fix too large to close the class goes back to the coordinator as an
 open question with its size. Fix an unconfirmed runtime finding only after a probe confirms it.
@@ -198,7 +212,10 @@ finding is recorded with its tier, evidence, and door outcome.
 ## Closing verification
 
 Closing verification is the one clean-checkout rerun of the change's checks, on the commit that
-ships. The coordinator dispatches it on the final committed head (`final_sha`) after the last
+ships. Just before dispatching it, the coordinator lists open non-draft PRs into `pr_base` that
+change a path this branch changes (`gh pr list --base <pr_base> --state open --json
+number,isDraft,files`). Each one is about to merge: wait until it merges or closes, then take
+the target as in the [Check wave](#check-wave), so verification runs once, on the result. The coordinator dispatches it on the final committed head (`final_sha`) after the last
 fix round, beside [Solo finalization](#solo-finalization)'s publish steps. A pass holds for
 that commit alone: a later commit voids it, and a fresh one runs on the new head. The verifier is a
 worker that wrote none of the change, and it reports without editing: its writes stay in its
@@ -283,6 +300,9 @@ An empty diff means the [No-change outcome](#no-change-outcome) applies; review 
 
 Pass the run directory, the main checkout path (`REPO`), `base_sha` as the fixed point,
 `review_sha` as the commit to review, and an absolute path to the authoritative review scope.
+A reviewer's brief carries code and pointers, never the author's or coordinator's conclusions
+about the change (what it does, why it is right, where to look less); every brief built on
+this one, the re-check's included, keeps that rule.
 For a solo ticket, that scope is `ticket-snapshot.md` in the run directory. The worker that
 completes step 1 saves the ticket's body, relevant comments, and acceptance criteria as its
 `## Requirements` section before implementation starts, so the enforced scope predates every
@@ -403,7 +423,9 @@ the ticket's previous behavior. Feature authors read worker evidence by path and
 dispatch-base observations from the original feature base and final integration results.
 
 Draft bodies describe intended scope and mark unexecuted evidence as pending. Final bodies use
-actual observations. If no before observation is available, say so instead of inventing one.
+actual observations. A claim about runtime behaviour lists exactly the forms the run built and
+observed, never a combination it did not build. A fact corrected in the diff is corrected
+everywhere the run published it: the PR body, issues it filed, and its comments. If no before observation is available, say so instead of inventing one.
 Missing required checks keep the PR draft; a repo whose workflow files and `gh run list` for the
 head SHA show no CI has no required checks, and Evidence says so. Explain rollback cost and affected consumers in
 Merge Danger using the actual change. Its Door line states the recorded [Door](#door) and its

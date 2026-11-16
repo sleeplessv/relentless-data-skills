@@ -19,7 +19,9 @@ verifier can rerun. Every nonempty solo change receives independent review again
 The Standards and Spec reviewers and a blind `ponytail-review` final review run together as one
 check wave on the tested head. Trivial changes that preserve behavior use one reviewer with the
 loaded `code-review` prompts and separate Standards and Spec reports. The coordinator triages
-the wave's findings into at most two fix rounds, with each code fix re-checked on its diff. A worker that
+the wave's findings into at most two fix rounds, with each code fix re-checked on its diff. It
+decides every finding without asking, except a must-fix whose only fix contradicts an ADR or
+makes a choice that would warrant one, which goes to the user first. A worker that
 wrote none of the change then reruns the recorded checks once on the final head and checks the
 PR base for drift. The implementing worker and the reviewers run on the strong model class and
 that verification on the standard class; a one-way door moves the reviewers to the session's

@@ -138,6 +138,18 @@ The fix worker commits, reruns steps 6 and 7 for the affected paths, and returns
 their output, and the checked `fix_sha`. For each factual sentence it changed in prose, it
 returns the file and line that back the sentence.
 
+An **ADR-level fix** contradicts an ADR in `docs/adr/` or the repo's documented equivalent, or
+makes a choice that is hard to reverse, surprising without context, and the result of a real
+trade-off. The fix worker takes a fix that closes the finding without being one. Where no such
+fix exists, it returns the finding unfixed, with the ADR or the choice and the fixes it ruled
+out, and fixes the rest of the brief. [Final review](#final-review) gives the finding's
+disposition.
+
+The brief names the decision list. A fix keeps each decision the list records as the user's
+where a fix that does so closes the finding. Where none does, the fix worker makes the fix and
+returns the reversed decision under `decisions_made`, and the coordinator appends it as a
+reversal entry.
+
 **Re-check.** A code-touching fix gets one fresh reviewer, briefed as
 [Independent review](#independent-review) describes, with the wave's `head_sha` as the fixed
 point, `fix_sha` as the commit to review, the same scope file and reporting instructions, and
@@ -326,7 +338,8 @@ disposition. The brief supplies the run directory only as a place to write. An
 unavailable `ponytail-review` skips the gate; the findings artifact and PR body record "final
 review not run: skill missing" and readiness is unaffected.
 
-The coordinator decides every finding and records the disposition itself, with no user prompt:
+The coordinator decides every finding and records the disposition itself, with no user prompt,
+including a finding whose fix reverses a decision the user made in this run:
 
 - **Must fix:** fix in this PR, including defects in pre-existing code the diff did not cause.
   This is the exception named by the scope rule at the top of SKILL.md's Workflow; the PR body
@@ -337,6 +350,13 @@ The coordinator decides every finding and records the disposition itself, with n
 - **Oversized fix:** a must-fix or should-fix whose fix would be larger than the reviewed diff
   (`base_sha...HEAD`) is escalated through `open_questions` with the proposed fix and its size. The PR stays
   draft and the stop comment names it.
+- **ADR-level fix:** a must-fix that [Fix rounds](#fix-rounds) returns unfixed as an ADR-level
+  fix is escalated through `open_questions` with the ADR or the choice and a recommended
+  disposition. The PR stays draft and the stop comment names it. On the user's yes, the fix is a
+  [late fix](#fix-rounds), and its commit supersedes the ADR or, where the repo keeps ADRs, adds
+  one. On the user's no, the finding stays open with the answer as its reason. Any other finding
+  returned this way stays open with the ADR or the choice as its reason and follows the
+  [Door](#door).
 
 Accepted fixes join the wave's one fix brief under [Fix rounds](#fix-rounds).
 
@@ -381,8 +401,10 @@ actual observations. If no before observation is available, say so instead of in
 Missing required checks keep the PR draft; a repo whose workflow files and `gh run list` for the
 head SHA show no CI has no required checks, and Evidence says so. Explain rollback cost and affected consumers in
 Merge Danger using the actual change. Its Door line states the recorded [Door](#door) and its
-reason. Under it, list each finding the round cap left open, with its tier and the reviewer's
-evidence, and offer a follow-up issue for them. Replace stale draft claims on resume.
+reason. Under it, list each finding left open, by the round cap or as an
+[ADR-level fix](#fix-rounds), with its tier and the reviewer's evidence, and offer a follow-up
+issue for them. Evidence names each decision of the user's that a fix reversed, with the reason.
+Replace stale draft claims on resume.
 
 ## Solo finalization
 
@@ -393,8 +415,8 @@ has replaced it, the replacing worker, briefed by artifact path, takes these dis
 
 **Publish.** After the last fix round, push the checked head (`final_sha`) and confirm the
 remote tip. Author the PR body from the coordinator's brief, which carries the door with its
-reason and each finding's axis, tier, disposition, fixing commit, and, where it stays open, the
-reviewer's evidence. Mark the closing verification pending. Update or reuse the ticket's draft
+reason, each finding's axis, tier, disposition, fixing commit, and, where it stays open, the
+reviewer's evidence, and each reversal entry a fix added to the decision list. Mark the closing verification pending. Update or reuse the ticket's draft
 PR with the closing line chosen in [PR body](#pr-body) and the observed results. After the
 push, run `gh pr checks <PR> --watch`; a failing required CI check is a defect, and a pending
 one counts as unexecuted evidence. Its fix is a [late fix](#fix-rounds).

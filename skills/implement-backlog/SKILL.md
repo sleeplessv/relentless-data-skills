@@ -38,10 +38,12 @@ argument, or said later, withholds merging: owners then end at a ready PR. Every
 
 ## Loop
 
-Repeat until the goal is met or the frontier stays empty.
+Repeat until the goal is met. A frontier that is empty with no owner in flight ends the loop:
+tell the user which tickets remain and what blocks each, or that none are open.
 
 - **Triage.** A subagent works the issues awaiting triage with the installed `triage` skill,
-  read by path. Without that skill, say so and work only tickets already marked ready.
+  read by path. Without that skill, say so and work only tickets already marked ready. Ticket
+  numbers in the argument skip triage.
 - **Frontier.** A subagent lists every eligible ticket: the query in `implement-ticket`'s
   `references/auto-pick.md` without its final single pick, each ticket's open blockers, and
   the paths it expects to touch. The frontier is the eligible tickets with no owner in
@@ -54,6 +56,9 @@ Repeat until the goal is met or the frontier stays empty.
   as the owner wrote it, then resume that owner with the answer, so the ticket stays in its
   thread. Dispatch a fresh owner, pointed at the run directory, only when the first cannot be
   resumed.
+- **Report.** Check an owner's final report against the PR and the ticket, then record it in
+  the wiki, its lessons on the owner notes page. Offer the user the follow-up issues owners
+  drafted together, when the loop ends.
 - **Merge fallback.** An owner that reports `ready, merge denied` leaves the merge to you:
   run [Merge](references/ticket-owner.md#merge) on its `final_sha` from the main checkout.
 - **No nesting.** An owner that reports `nested dispatch unavailable` has changed nothing.

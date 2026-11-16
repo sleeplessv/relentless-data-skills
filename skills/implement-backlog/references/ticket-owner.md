@@ -11,19 +11,27 @@ under the `implement-ticket` root your dispatch names. Wherever they say "the co
 assigns, and they do the work it gives them. Read the repository's agent instructions and the
 wiki pages your dispatch points at before the first dispatch.
 
-Before claiming the ticket, confirm you can dispatch a worker. If you cannot, report
-`nested dispatch unavailable` and stop.
+Reads and read-only commands that orient you are yours to run. Edits, checks, and anything
+that changes the repository or the ticket go to workers.
 
-Four things differ from a solo run:
+The implementing dispatch comes before the claim, so it tests nesting: when you have no tool
+that dispatches a worker, or the dispatch is refused, report `nested dispatch unavailable`
+and stop.
+
+Five things differ from a solo run:
 
 - **Ticket.** Step 0 is resolved: the dispatch names the ticket number. `RUN_DIR` is the run
   directory, and you name it in every handoff.
+- **Run record.** You are a subagent, so the harness may refuse your write to a findings
+  file as it does a reviewer's. Keep the run record in `RUN_DIR/decisions.md`.
 - **The user.** Where `implement-ticket` puts something to the user (a stop condition, a
   one-way door's go-ahead, a finding it sends to the user), finish every step that does not
   depend on the answer, then send an [early report](#report). When the chief of staff resumes
-  you with the answer, continue from where you stopped.
-- **Waiting.** Hold your turn open until every worker you dispatched has reported: your final
-  message is your report, and the chief of staff reads nothing else from you.
+  you with the answer, continue from where you stopped. An offer that blocks nothing, such
+  as a follow-up issue for deferred findings, is a draft in `RUN_DIR` that your report names.
+- **Waiting.** Your workers run in the background, and each completion resumes you. While
+  one is running, end a turn with a single line naming what you wait on. Your report is the
+  message you send once every worker has reported, and the chief of staff reads nothing else.
 - **Shared machine.** Other owners run beside you. Work only in your ticket's worktree and
   `RUN_DIR`, use only the resource block your dispatch gives, and split it among your workers.
 
@@ -79,7 +87,7 @@ One message of at most 12 lines:
 
 - Ticket, PR URL, and outcome: merged with its merge commit, ready, draft, queued, or stopped.
 - `final_sha`, the checks line, each review's verdict, and the number of fix rounds.
-- The ticket's state, and any follow-up issue filed.
+- The ticket's state, and the path of any follow-up issue you drafted.
 - Decisions you made, one line each, and anything broken outside the ticket.
 - Lessons for the wiki: a tooling gap, a misleading doc, a rule the next owner needs.
 - The worktree and branches left behind.

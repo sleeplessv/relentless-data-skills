@@ -15,7 +15,9 @@ reads its files by path during [Setup](references/setup.md). A solo run loads `o
 in standing mode: the main thread coordinates, and workers set up, implement, check, and review.
 
 Tests and runtime or artifact checks provide completion evidence, recorded as commands a
-verifier can rerun. Every nonempty solo change receives independent review against its ticket.
+verifier can rerun. A data or BI change is checked by querying the built result through the
+installed `dbt-runner`, `snowman`, `pbi`, `metabase`, or `prefect` skill
+([Verification tools](references/verification-tools.md)). Every nonempty solo change receives independent review against its ticket.
 The Standards and Spec reviewers and a blind `ponytail-review` final review run together as one
 check wave on the tested head. Trivial changes that preserve behavior use one reviewer with the
 loaded `code-review` prompts and separate Standards and Spec reports. The coordinator triages

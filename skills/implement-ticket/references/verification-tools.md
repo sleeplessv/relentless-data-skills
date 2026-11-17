@@ -10,7 +10,7 @@ takes it.
 | --- | --- | --- |
 | A dbt model, seed, test or macro | `dbt-runner` | The build of the changed selection in the working target: which models built and which tests passed |
 | A Snowflake relation, including one a dbt build writes | `snowman` | Read-only SQL over that relation: counts, key uniqueness, a criterion's number |
-| A Power BI measure, table, column or relationship | `pbi` (ships with the `pbi-toolkit` CLI, outside this repo) | A DAX query against a published dataset; see [Power BI](#power-bi) |
+| A Power BI measure, table, column or relationship | `pbi` (installed from the `sleeplessv/pbi-toolkit` repo, not this one) | A DAX query against a published dataset; see [Power BI](#power-bi) |
 
 Setup does not resolve these. Invoke a skill the session lists; otherwise locate its installed
 `SKILL.md` on disk as [Setup](setup.md) locates companions and read it as a file. Record the

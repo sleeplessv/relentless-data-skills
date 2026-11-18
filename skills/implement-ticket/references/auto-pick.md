@@ -14,10 +14,11 @@ gh api --paginate --slurp 'repos/<owner>/<repo>/issues?state=open&labels=ready-f
 ```
 
 These headings identify spec templates even where the spec itself has `ready-for-agent`
-and no `spec` label. Leave out spec headings that ticket templates also use, such as
-`Out of Scope`, `Solution` and `Further Notes`: matching them drops well-formed tickets.
-Strip fenced examples before matching. Keep line-anchored,
-case-insensitive regex flags. `gh api` rejects `--slurp` together with `--jq`, so the filter
-runs in a piped `jq`; without `jq`, drop `--slurp` and filter one page at a time. Confirm the resulting body has concrete ticket criteria.
-A command failure is a lookup error, not an empty candidate set. A successful null result
-means no eligible ticket. Exclude user-declined numbers before selecting the next result.
+and no `spec` label. Match only headings unique to spec templates: tickets carry
+`Out of Scope` too, and matching it drops well-formed tickets. Strip fenced examples
+before matching. Keep line-anchored, case-insensitive regex flags. `gh api` rejects
+`--slurp` together with `--jq`, so the filter runs in a piped `jq`; without `jq`, drop
+`--slurp` and filter one page at a time. Confirm the resulting body has concrete ticket
+criteria. A command failure is a lookup error, not an empty candidate set. A successful
+null result means no eligible ticket. Exclude user-declined numbers before selecting the
+next result.

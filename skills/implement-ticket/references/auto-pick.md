@@ -9,13 +9,16 @@ gh api --paginate --slurp 'repos/<owner>/<repo>/issues?state=open&labels=ready-f
         | map(select(has("pull_request") | not))
         | map(select((.assignees | length) == 0))
         | map(select([.labels[].name] | any(. == "spec" or . == "prd" or . == "needs-info" or . == "wontfix" or . == "needs-triage" or . == "blocked") | not))
-        | map(select(((.body // "") | gsub("(?s)```.*?```"; "")) | test("(?im)^#{2,3} (Problem Statement|User Stories|Implementation Decisions|Testing Decisions|Out of Scope)") | not))
+        | map(select(((.body // "") | gsub("(?s)```.*?```"; "")) | test("(?im)^#{2,3} (Problem Statement|User Stories|Implementation Decisions|Testing Decisions)") | not))
         | sort_by(.number) | .[0]'
 ```
 
 These headings identify spec templates even where the spec itself has `ready-for-agent`
-and no `spec` label. Strip fenced examples before matching. Keep line-anchored,
-case-insensitive regex flags. `gh api` rejects `--slurp` together with `--jq`, so the filter
-runs in a piped `jq`; without `jq`, drop `--slurp` and filter one page at a time. Confirm the resulting body has concrete ticket criteria.
-A command failure is a lookup error, not an empty candidate set. A successful null result
-means no eligible ticket. Exclude user-declined numbers before selecting the next result.
+and no `spec` label. Match only headings unique to spec templates: tickets carry
+`Out of Scope` too, and matching it drops well-formed tickets. Strip fenced examples
+before matching. Keep line-anchored, case-insensitive regex flags. `gh api` rejects
+`--slurp` together with `--jq`, so the filter runs in a piped `jq`; without `jq`, drop
+`--slurp` and filter one page at a time. Confirm the resulting body has concrete ticket
+criteria. A command failure is a lookup error, not an empty candidate set. A successful
+null result means no eligible ticket. Exclude user-declined numbers before selecting the
+next result.

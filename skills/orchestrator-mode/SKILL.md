@@ -97,10 +97,10 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 5. **Verify.** Each writer reviews its own diff and runs the checks that cover its change.
    Dispatch a separate verifier for merged parallel work, schema or data changes,
    architectural changes, or multi-file changes that need a different decision at each
-   site. The verifier reports problems, the writer fixes them as a follow-up under
-   Collect, and a fresh verifier checks again. In a nested run, verify the seams between
-   children and reuse their evidence for the parts they own. Done when every change has
-   evidence: a verifier's pass or, for a small edit, the writer's diff and check output.
+   site. The verifier reports problems, the writer fixes them as a follow-up under Collect,
+   and a fresh verifier checks again. Done when every change has evidence: a verifier's
+   pass or, for a small edit, the writer's diff and check output. A promotion also passes
+   its checks: read [Promotion checks](references/reference.md#promotion-checks) first.
 6. **Report.** Lead with the outcome, then returned artifact paths or IDs, verification
    results, open limitations, and returned friction as proposed follow-ups, at the length
    the user needs to act on them. When the request was a question, the answer is the

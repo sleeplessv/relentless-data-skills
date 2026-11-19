@@ -11,6 +11,8 @@ Read the section the current dispatch needs.
   own coordinator.
 - [Parallel writes worktrees](#parallel-writes-worktrees): isolation, integration, and
   cleanup for parallel writers.
+- [Promotion checks](#promotion-checks): which checks a promotion requires, who runs them,
+  and what must pass before it goes ahead.
 - [Worked example](#worked-example): a refactor from search through verification.
 
 ## Model classes
@@ -181,7 +183,9 @@ fallback is authorized; otherwise it returns the missing capability for the pare
 Designate a coordinator with a general worker; read-only search agents cannot dispatch.
 Open its handoff with "Load the orchestrator-mode skill and coordinate this scope". Where
 workers cannot load skills, paste this skill's SKILL.md into the handoff instead. The
-coordinator returns its verification evidence with its other return fields.
+coordinator returns its verification evidence with its other return fields. At Verify, a
+parent coordinator verifies the seams between its children and reuses their evidence for
+the parts they own.
 
 ## Parallel writes worktrees
 
@@ -217,6 +221,27 @@ coordinator returns its verification evidence with its other return fields.
    prove ownership. Report retained resources and cleanup failures with paths. For merged
    PRs, a branch-cleanup skill such as `cleanup-merged-branches`, when installed, can run
    this step.
+
+## Promotion checks
+
+A **promotion** moves one version of the work (a commit, a build, or a package version) to
+its next stage, such as a release branch, a test deployment, or production. Its
+**promotion checks** are the checks that the user, the project's release process, or a
+consumer skill requires before that move. Each one names the place it must pass, such as a
+database, a workspace, a CI runner, or a live deployment.
+
+1. **List.** Take the promotion checks from those three sources and put them in the plan,
+   each with its place. When no source names one, confirm with the user that the promotion
+   needs none.
+2. **Assign.** Give each promotion check to a worker that can run it in that place, with
+   the access and tools the check needs there. The handoff names the check, the place, and
+   the version. Report a check that no worker can run there as blocked.
+3. **Return.** The worker's `verification_evidence` gives the check, the place it ran, the
+   version it ran on (a commit SHA or version id), the command, and its exit code or output.
+4. **Gate.** Promote once every listed check has a passing result from its place for the
+   version being promoted. A failing, pending, or missing result holds the promotion, and so
+   does a result from another place or for another version. A failure goes back to the
+   writer as Verify describes, and the fixed version runs every promotion check again.
 
 ## Worked example
 

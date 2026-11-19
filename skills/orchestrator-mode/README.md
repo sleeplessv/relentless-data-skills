@@ -19,8 +19,11 @@ use isolated worktrees with pinned base commits, and cleanup requires recorded o
 preservation evidence. The report step saves reusable research to the repo's `docs/research/`
 rather than only the session's run directory, with claims about code dated and tied to a
 commit, and offers worktree and branch cleanup once the
-run's PRs merge. Core rules live in [SKILL.md](SKILL.md); nesting, parallel writes, and
-harness limits live in [references/reference.md](references/reference.md).
+run's PRs merge. A run that promotes a version lists the checks the promotion requires,
+gives each to a worker that can run it where it must pass, and promotes once every check
+passes on that version. Core rules live in [SKILL.md](SKILL.md); nesting, parallel writes,
+promotion checks, and harness limits live in
+[references/reference.md](references/reference.md).
 
 ## Install
 

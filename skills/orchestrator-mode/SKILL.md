@@ -95,8 +95,8 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    worktrees. Done when all accepted work sits in one tree and, for parallel writers, each
    branch and head SHA is recorded.
 5. **Verify.** Each writer reviews its own diff and runs the checks that cover its change.
-   When work moves between environments, assign each required check to a worker in the environment where it must pass.
-   Before advancing, collect the result for the version being promoted. Dispatch a separate verifier for merged parallel
+   Assign each required promotion check to a worker in the environment where the check must pass.
+   Before advancing, collect each check's result for the version being promoted. Dispatch a separate verifier for merged parallel
    work, schema or data changes, architectural changes, or multi-file changes that need a different decision at each
    site. The verifier reports problems, the writer fixes them as a follow-up under Collect, and a fresh verifier checks
    again. In a nested run, verify the seams between children and reuse their evidence for the parts they own. Done when

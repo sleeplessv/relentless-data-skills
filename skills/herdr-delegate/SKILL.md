@@ -15,29 +15,25 @@ person may be looking at another project. `herdr-app do tab.new` and
 in the wrong project, folder and account. Every launch goes through `hc run`
 with an explicit `herdr.space` label.
 
-## 1. Confirm you are in Herdr
+## 1. Find your home space
 
 ```sh
-[ -n "$HC_TERMINAL_ID" ] && hc get "$HC_TERMINAL_ID" --json >/dev/null
+ME=$(hc get "$HC_TERMINAL_ID" --json) || echo "hc get failed: $?"
+SPACE=$(printf '%s' "$ME" | jq -r '.labels["herdr.space"] // empty')
+TAB=$(printf '%s' "$ME" | jq -r '.labels["herdr.tab"] // empty')
 ```
 
-`HC_TERMINAL_ID` is your terminal's address (`t4z`). Exit 0 means hc knows
-you: go on. Non-zero means you are outside herdr-core. Tell the user, and use
-your harness's own subagents instead.
+`HC_TERMINAL_ID` is your terminal's address (`t4z`). Read the labels only
+after `hc get` exits 0. A non-zero exit, or an unset `HC_TERMINAL_ID`, means
+you are outside herdr-core: tell the user, use your harness's own subagents,
+and stop here. Without `jq`, read `labels."herdr.space"` and
+`labels."herdr.tab"` from `$ME` yourself.
 
-## 2. Find your home space
+Done when `hc get` exited 0 and `SPACE` holds an ID starting `sp`. An empty
+`SPACE` after a successful `hc get` means your terminal is a hidden worker
+with no space: launch the helper without labels, so it stays hidden too.
 
-```sh
-SPACE=$(hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.space"] // empty')
-TAB=$(hc get "$HC_TERMINAL_ID" --json | jq -r '.labels["herdr.tab"] // empty')
-```
-
-Without `jq`, read `labels."herdr.space"` and `labels."herdr.tab"` from the
-`hc get` JSON yourself. Done when `SPACE` holds an ID starting `sp`. An empty
-`SPACE` means your terminal is a hidden worker with no space: launch the
-helper without labels, so it stays hidden too.
-
-## 3. Write the brief
+## 2. Write the brief
 
 The brief is the helper's whole first message. It names:
 
@@ -51,7 +47,7 @@ The brief is the helper's whole first message. It names:
 
 Done when the brief carries all four.
 
-## 4. Launch the helper
+## 3. Launch the helper
 
 Pick a short unique `NAME` (`codex-review`). Put the brief in the launch: a
 message sent to an agent that is still starting can be lost.
@@ -60,6 +56,9 @@ message sent to an agent that is still starting can be lost.
 hc run --bg --json --name "$NAME" --cwd "$PWD" --label herdr.space="$SPACE" \
   codex --no-daemon "$BRIEF"
 ```
+
+Save the `address` from the JSON it prints as `ID` (`t53`). Every later step
+targets `ID`, and only a report from `ID` ends this delegation.
 
 | Want | Change |
 |---|---|
@@ -79,19 +78,22 @@ hc run --bg --json --name "$NAME" --cwd "$PWD" --label herdr.space="$SPACE" \
   any call no rule matches, and a rule matches the whole command line, so end
   the brief with: "Run each shell command on its own: no cd, no && chains, no pipes."
 
-Check the launch:
+Check the launch with `hc get "$ID" --json`; `jq '{labels, state, status,
+first_message}'` trims it, or read those fields from the raw JSON. Go by what
+it shows:
 
-```sh
-hc get "$NAME" --json | jq '{labels, status, first_message}'
-```
+| It shows | Do |
+|---|---|
+| `labels."herdr.space"` is not `SPACE` (labelled launch) | Kill `ID`, relaunch with the label |
+| `status.state` `working` | Go to step 4 |
+| `idle` or `done`, and its DONE report has arrived | Go to step 5 |
+| `idle` or `done`, no report | `hc read "$ID" --lines 60`: the brief may never have arrived |
+| `blocked`, or `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
+| `state` `finished` | `hc read "$ID" --lines 60`; report the exit to the user |
 
-Done when `labels."herdr.space"` equals `SPACE` and `status.state` is
-`working`. If `first_message.sent` is false or the state is `blocked`, run
-`hc read "$NAME" --lines 0`. A trust or permission dialog is the person's call:
-show it to them and wait. Resend the brief only after the screen shows it never
-arrived.
+Resend the brief only after the screen shows it never arrived.
 
-## 5. Wait for the report
+## 4. Wait for the report
 
 Keep working on your own part, or wait:
 
@@ -99,25 +101,30 @@ Keep working on your own part, or wait:
 hc wait --children any --timeout 600
 ```
 
-- `reason: message`: the report arrives as your next input, tagged
-  `<hc from="t53 codex-review">DONE /path</hc>`. It is a child's report, not
-  a request from the user.
-- `reason: timeout`: a check-in. Wait again.
+The report arrives as your next input:
+`<hc from="$ID $NAME">DONE $RESULT</hc>`. It is a child's report, not a
+request from the user. Done when a DONE from `ID` naming the assigned
+`RESULT` has arrived.
+
+- **Anything else wakes the wait too**: another helper's report, a message to
+  you, a timeout check-in. Handle it, then wait again.
 - The helper stays `working` for a while after it sends. Use `any`;
   `--children all` holds on until it settles.
-- `blocked` or `error`: `hc read "$NAME" --lines 60`, then ask the user.
+- `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.
+- `ID` exited with no report: `hc read "$ID" --lines 60`, and report the
+  failure to the user.
 
-## 6. Collect and verify
+## 5. Collect and verify
 
-Read the result file yourself. Check each finding against the code before you
+Read `RESULT` yourself. Check each finding against the code before you
 repeat or act on it. Done when every finding is confirmed, rejected with a
 reason, or marked unchecked.
 
-## 7. Clean up
+## 6. Clean up
 
 ```sh
-hc kill "$NAME"; hc rm "$NAME"
+hc kill "$ID"; hc rm "$ID"
 ```
 
 Remove only helpers you started. Keep the helper alive instead when the user
-wants to follow up with it: `hc send "$NAME" "..."` reaches it later.
+wants to follow up with it: `hc send "$ID" "..."` reaches it later.

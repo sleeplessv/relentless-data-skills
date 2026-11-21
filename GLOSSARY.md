@@ -36,6 +36,8 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Orchestrated dispatch**: a ticket worker invocation with an assigned immutable base commit, inherited original baseline, satisfied blockers, and coordinator-owned issue and PR actions.
 - **Baseline**: the original base commit and its recorded check results. Later dispatch commits and integration failures remain distinct from this original evidence.
 - **Handoff files**: durable shared artifacts containing scope, ticket snapshots, exploration notes, commands, and decisions. Workers exchange their paths and update the run record as work completes and integrates.
+- **Generation one**: the implementation and orchestration skills in use before the redesign: orchestrator-mode, implement-ticket, implement-feature and implement-backlog. _Avoid_: v1, the old stack.
+- **Generation two**: the skills built beside generation one to replace it. _Avoid_: v2, the new stack.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

@@ -41,6 +41,9 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Harness**: the agent program a session runs in, such as Claude Code, Cortex Code, Codex or Cursor. A harness is distinct from the model it runs. _Avoid_: tool, agent, IDE.
 - **Supported harness**: a harness on which every generation-two skill must reach the same result and pass the same checks as on any other supported harness.
 - **Adapter**: the instructions that let one supported harness carry out the steps it does differently from the harness a skill is written for. _Avoid_: harness notes.
+- **Check**: in generation two, a command run against a change that ends in pass or fail, such as a test, a build, or a run of the changed thing. _Avoid_: verification, verifier; check for a reading of a change (generation one's check wave is made of reviews).
+- **Review**: in generation two, a reading of a change against stated criteria by an agent that wrote none of it. _Avoid_: verifier, verification, check.
+- **Check plan**: the list written before a change is made that pairs each of its requirements with the check or review that will prove it. _Avoid_: test plan.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

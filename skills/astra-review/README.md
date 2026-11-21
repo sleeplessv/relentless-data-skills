@@ -3,8 +3,8 @@
 Send a change to Astra for a second opinion and act on what comes back. Astra
 is the Codex CLI on an Astra model. It runs a `ponytail-review` of the change
 in a Herdr tab next to your agent. Your agent then checks each finding against
-the code, fixes the ones that hold, declines the ones that don't with a reason,
-and asks you about the ones that are your call.
+the code and fixes it by default. It declines a finding that does not hold,
+with a reason, and asks you first when a fix is your call.
 
 ## Use
 

@@ -1,0 +1,18 @@
+{
+  "name": "astra-review",
+  "version": "0.1.1",
+  "description": "Get a ponytail review of a change from Astra, the Codex CLI on an Astra model, in a Herdr tab, then fix the findings that hold up.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/astra-review",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "herdr",
+    "codex",
+    "code-review",
+    "delegation",
+    "multi-agent"
+  ]
+}

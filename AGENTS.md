@@ -8,6 +8,7 @@
 - **Installed copies.** A skill invoked by name runs from its installed copy (such as `~/.claude/skills/<name>`), which merging leaves at its old version until it is updated ([Install](README.md#install)). To exercise an edit, follow `skills/<name>/SKILL.md` from this tree, or hand a subagent that path.
 - **Shared checkout.** Several sessions use this checkout at once. If your session finds it on a branch other than `main`, or holding uncommitted changes outside your task, those belong to another session: leave them in place and work in a new git worktree cut from `origin/main`.
 - **Scratch.** Notes and logs meant to outlive the session go in `.scratch/` (git-ignored).
+- **Generation one.** orchestrator-mode, implement-ticket, implement-feature and implement-backlog take repairs only while generation two is built. Repair a rule that gives wrong instructions or stops a run. Add no new rules. Put a retro lesson that would have become a new rule on issue #183.
 
 ## Agent skills
 

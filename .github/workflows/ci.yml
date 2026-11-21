@@ -8,16 +8,32 @@ on:
     - cron: "0 6 * * 1"  # Mondays 06:00 UTC — catch upstream doc moves over time
   workflow_dispatch:
 
+# Jobs read the repo and nothing else; a job that needs more asks for it.
+permissions:
+  contents: read
+
+# A newer push to the same PR or branch supersedes the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Actions are pinned to a commit SHA, with the release tag beside it;
+# .github/dependabot.yml keeps the pins current.
+#
+# Every job here is light (stdlib Python, one npm install), so each runs on
+# ubuntu-slim: a 1-vCPU container runner that starts faster and bills less
+# than ubuntu-latest. Slim jobs are capped at 15 minutes.
+
 jobs:
   skill-version-check:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       - name: Check skill versions and generated registry
@@ -34,25 +50,31 @@ jobs:
           python scripts/sync_registry.py --check
 
   tests:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
     strategy:
       matrix:
         # 3.13 = the repo floor (CODING_STANDARDS.md PY1). The tests are
         # stdlib-only, so no installs.
         python-version: ["3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python-version }}
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
 
   skill-lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       - name: Lint SKILL.md files
@@ -62,24 +84,33 @@ jobs:
   # main ruleset requires, so it is not duplicated in a separate job.
 
   plugin-validate:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
+    env:
+      # Pinned so a CLI release cannot change the verdict unannounced; bump it
+      # by hand (Dependabot does not see global npm installs).
+      CLAUDE_CODE_VERSION: "2.1.330"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          node-version: "22"
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "24"
+          package-manager-cache: false
       - name: Install Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
       - name: Validate marketplace and plugin manifests
         run: claude plugin validate .
 
   doc-url-liveness:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.13"
       - name: Check skill doc URLs

@@ -47,6 +47,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Small edit**: in generation two, a two-way door change that stays within the line limit and has a low blast radius. It is the size of change that needs no review. _Avoid_: trivial change, quick fix.
 - **Blast radius**: everything else that can break or give wrong results if a change is wrong. It is high when the change touches a critical path, or when more depends on what it changes than the limit allows. _Avoid_: impact, risk level.
 - **Critical path**: a part of a repo where every change gets a review, whatever its size. _Avoid_: protected path, sensitive file.
+- **Author**: in generation two, the agent that takes a request and writes the change itself. _Avoid_: implementer, implementing worker.
+- **Requirements review**: in generation two, the review of a change against its requirements and the repo's written standards. _Avoid_: code review (names the tool), spec review, standards review.
+- **Defect review**: in generation two, the review of a change for defects no requirement names and for size, by a reviewer that sees no other review of the change. _Avoid_: ponytail review (names the tool), final review (generation one's term).
+- **Proven finding**: a review finding that is shown failing, or that names the line and the rule or requirement it breaks. A requirement the reviewer cannot confirm counts as one. _Avoid_: must-fix.
+- **Follow-up ticket**: a ticket filed for a proven finding about code the change did not touch, or one that asks for more than the change's requirements. _Avoid_: tech-debt ticket.
+- **Call-back**: a reviewer's second reading of a change, limited to the lines a fix changed. _Avoid_: re-check (a check is a command), re-review, follow-up review.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

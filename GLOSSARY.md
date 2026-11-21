@@ -11,12 +11,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Integration branch** — the branch created off the default branch (`main` in most repos) for a whole feature; all per-ticket work for that feature lands here before anything reaches the default branch.
 - **Session ticket**: a ticket drafted from the current Claude Code session's discussion, confirmed by the user, and filed as an issue before implementation starts. Once filed it is an ordinary ticket. _Avoid_: chat ticket, ad-hoc ticket, ticket-less run.
 - **Ticket branch**: a branch for one ticket. Each feature dispatch starts from a pinned integration commit. Its temporary branch remains until verified integration preserves its commits and cleanup proves ownership.
-- **Feature PR** — the single pull request from the integration branch into the default branch; the only PR a feature produces.
+- **Feature PR** — the single pull request from the integration branch into the default branch. In generation one it is the only PR a feature produces; in generation two each ticket also has a ticket PR into the integration branch.
 - **Spec**: a specification stored as an issue, labelled `spec` or the older `prd`. Tickets divide its implementation. A spec-only feature run promises its full requirements; an explicit ticket set uses it as context.
-- **Work-set**: the resolved list of tickets a feature run will implement, announced before branch creation. An explicit ticket list controls this scope.
+- **Work-set**: the resolved list of tickets a run will implement, announced before work starts. An explicit ticket list controls this scope.
 - **Deepening candidate**: a proposed refactor, produced by an architecture review, that turns a shallow module into a deep one. It carries the files involved, the problem, the proposed solution, and a recommendation strength.
 - **Decision log**: the answered design tree for one deepening candidate, each decision paired with its evidence. The spec for that candidate is written from it.
-- **Decision list**: the record of one run's decisions, each with its reason and who made it: the user, the coordinator, or a worker. _Avoid_: decision log (the answered design tree for a deepening candidate).
+- **Decision list**: in generation one, the record of one run's decisions, each with its reason and who made it: the user, the coordinator, or a worker. Generation two keeps a run record. _Avoid_: decision log (the answered design tree for a deepening candidate).
 - **Final review**: the single-pass quality review run by a worker that wrote none of the change and sees none of the other reviews, as part of the check wave, whose findings the coordinator triages. _Avoid_: ponytail review (names the tool, not the gate), sanity check, last pass.
 - **Check wave**: the reviews of one change that run together on one commit after implementation. _Avoid_: review chain, review stages.
 - **Fix round**: one fix of the findings accepted so far, with the re-check of that fix when it needs one. _Avoid_: review loop, iteration.
@@ -30,7 +30,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Promotion**: moving one version of the work to its next stage, such as a release branch, a deployment stage, or production. _Avoid_: advancing.
 - **Promotion check**: a check required before a promotion, tied to the place where it must pass.
 - **Review workspace**: the directory a verifier or reviewer owns under the run directory. It holds the worker's detached checkout and scratch files. _Avoid_: reviewer worktree, scratch checkout.
-- **Frontier**: tickets with no active implementer whose blockers are satisfied in the verified, preserved integration tip. Assignment to the authenticated actor is advisory and does not make that actor an active implementer.
+- **Frontier**: in generation one, tickets with no active implementer whose blockers are satisfied in the verified, preserved integration tip; assignment to the authenticated actor is advisory there and does not make that actor an active implementer. In generation two, the tickets of a work-set that are open, unclaimed and have no open blocker.
 - **Dispatch base**: the immutable integration commit assigned to a ticket attempt. Concurrent attempts can have different bases as integration advances.
 - **Completion mode**: the obligations a feature run must satisfy. A whole-spec run covers every spec requirement; a selected-ticket run covers its explicit work-set.
 - **Orchestrated dispatch**: a ticket worker invocation with an assigned immutable base commit, inherited original baseline, satisfied blockers, and coordinator-owned issue and PR actions.
@@ -53,6 +53,13 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Proven finding**: a review finding that is shown failing, or that names the line and the rule or requirement it breaks. A requirement the reviewer cannot confirm counts as one. _Avoid_: must-fix.
 - **Follow-up ticket**: a ticket filed for a proven finding about code the change did not touch, or one that asks for more than the change's requirements. _Avoid_: tech-debt ticket.
 - **Call-back**: a reviewer's second reading of a change, limited to the lines a fix changed. _Avoid_: re-check (a check is a command), re-review, follow-up review.
+- **Multi-ticket run**: in generation two, one run that takes two or more tickets from request to their PRs under a coordinator. _Avoid_: orchestrated run.
+- **Feature run**: a multi-ticket run whose work-set comes from one spec. Its ticket PRs land on an integration branch, and it ends in a feature PR.
+- **Backlog run**: a multi-ticket run over tickets that share no spec. Each ticket PR targets the default branch, and no feature PR follows.
+- **Coordinator**: in generation two, the session that runs a multi-ticket run. It starts an author for each ticket, merges ticket PRs into the integration branch and keeps the run record. It changes no tracked file. _Avoid_: orchestrator, chief of staff, ticket owner.
+- **Ticket PR**: in generation two, the pull request one author opens for one ticket. In a feature run it targets the integration branch; in a backlog run, the default branch.
+- **Run record**: the durable record of one multi-ticket run: its work-set, the state of each ticket, and the decisions that cross tickets, each with its reason and who made it. _Avoid_: decision list (generation one's record, which holds decisions only), handoff file.
+- **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

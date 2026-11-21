@@ -44,6 +44,9 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Check**: in generation two, a command run against a change that ends in pass or fail, such as a test, a build, or a run of the changed thing. _Avoid_: verification, verifier; check for a reading of a change (generation one's check wave is made of reviews).
 - **Review**: in generation two, a reading of a change against stated criteria by an agent that wrote none of it. _Avoid_: verifier, verification, check.
 - **Check plan**: the list written before a change is made that pairs each of its requirements with the check or review that will prove it. _Avoid_: test plan.
+- **Small edit**: in generation two, a two-way door change that stays within the line limit and has a low blast radius. It is the size of change that needs no review. _Avoid_: trivial change, quick fix.
+- **Blast radius**: everything else that can break or give wrong results if a change is wrong. It is high when the change touches a critical path, or when more depends on what it changes than the limit allows. _Avoid_: impact, risk level.
+- **Critical path**: a part of a repo where every change gets a review, whatever its size. _Avoid_: protected path, sensitive file.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

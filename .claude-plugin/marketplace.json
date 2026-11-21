@@ -144,6 +144,25 @@
       ]
     },
     {
+      "name": "herdr-delegate",
+      "source": "./skills/herdr-delegate",
+      "description": "Hand a task to Codex, Claude or another coding agent from inside Herdr, open it in the caller's own space, and collect its result.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/herdr-delegate",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "herdr",
+        "delegation",
+        "codex",
+        "code-review",
+        "multi-agent"
+      ]
+    },
+    {
       "name": "implement-backlog",
       "source": "./skills/implement-backlog",
       "description": "Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request.",

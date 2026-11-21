@@ -38,6 +38,9 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Handoff files**: durable shared artifacts containing scope, ticket snapshots, exploration notes, commands, and decisions. Workers exchange their paths and update the run record as work completes and integrates.
 - **Generation one**: the implementation and orchestration skills in use before the redesign: orchestrator-mode, implement-ticket, implement-feature and implement-backlog. _Avoid_: v1, the old stack.
 - **Generation two**: the skills built beside generation one to replace it. _Avoid_: v2, the new stack.
+- **Harness**: the agent program a session runs in, such as Claude Code, Cortex Code, Codex or Cursor. A harness is distinct from the model it runs. _Avoid_: tool, agent, IDE.
+- **Supported harness**: a harness on which every generation-two skill must reach the same result and pass the same checks as on any other supported harness.
+- **Adapter**: the instructions that let one supported harness carry out the steps it does differently from the harness a skill is written for. _Avoid_: harness notes.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

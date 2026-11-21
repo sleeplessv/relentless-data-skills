@@ -10,6 +10,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 <!-- skills-table:begin -->
 | Skill | What it does |
 | --- | --- |
+| [`astra-review`](skills/astra-review/) | Get a ponytail review of a change from Astra, the Codex CLI on an Astra model, in a Herdr tab, then fix the findings that hold up. |
 | [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions. |

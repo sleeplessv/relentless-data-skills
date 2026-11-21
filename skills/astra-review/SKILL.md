@@ -8,7 +8,8 @@ argument-hint: "[what to review]"
 
 Astra is the Codex CLI on an Astra model. It reviews the change with
 `ponytail-review` in a Herdr tab beside yours. You check its findings against
-the code, fix the ones that hold, and report the rest.
+the code and fix them by default. The few you decline or leave to the user go
+in your report.
 
 ## 1. Fix the scope
 
@@ -81,21 +82,20 @@ review by one of your own subagents is not an Astra review.
 
 Done when Astra's `DONE` report naming `RESULT` has arrived.
 
-## 4. Give every finding a disposition
+## 4. Fix by default, with two exceptions
 
 Run the `SNAP` command again. The review was read-only, so a different
 value means the checkout changed under it: show the user
 `git -C "$DIR" status --short` and ask before you edit anything.
 
 Read `RESULT` and check each finding against the code, as
-`herdr-delegate`'s collect step says. Then give each numbered finding the
-first disposition that applies:
+`herdr-delegate`'s collect step says. Every numbered finding's disposition
+is **Fix**, unless one of two exceptions applies. Take the first that does:
 
-| Disposition | When |
+| Exception | When |
 |---|---|
 | **Decline** | It does not hold, or its fix costs more than the problem it removes. Give the reason in one line |
 | **Ask** | The fix is the user's call: it changes behaviour they chose, or reaches outside the reviewed change |
-| **Fix** | Every other finding |
 
 Done when every numbered finding in `RESULT` has one disposition.
 

@@ -16,6 +16,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`dossier`](skills/dossier/) | Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
 | [`gh-weekly-report`](skills/gh-weekly-report/) | Create interactive weekly reports of a GitHub user's activity across repositories. |
+| [`herdr-delegate`](skills/herdr-delegate/) | Hand a task to Codex, Claude or another coding agent from inside Herdr, open it in the caller's own space, and collect its result. |
 | [`implement-backlog`](skills/implement-backlog/) | Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request. |
 | [`implement-feature`](skills/implement-feature/) | Implement a feature specification or selected tickets as one verified pull request. |
 | [`implement-ticket`](skills/implement-ticket/) | Implement a GitHub ticket, verify the result, and prepare a pull request for review. |

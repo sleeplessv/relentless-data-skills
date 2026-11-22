@@ -97,10 +97,11 @@ it shows:
 |---|---|
 | `labels."herdr.space"` is not `SPACE` (labelled launch) | Kill `ID`, relaunch with the label |
 | `status.state` `working` | Go to step 4 |
-| `idle` or `done`, and its DONE report has arrived | Go to step 5 |
+| `idle` or `done`, and its DONE has arrived or `RESULT` holds the report | Go to step 5 |
 | `idle` or `done`, no report | `hc read "$ID" --lines 60`: the brief may never have arrived |
-| `blocked`, or `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
+| `blocked`, or `first_message.sent` false (template launches only) | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
 | `state` `finished` | `hc read "$ID" --lines 60`; report the exit to the user |
+| Anything else, such as `status` `null`: no status yet | Check again in a few seconds and go by what it shows. If it has not changed, `hc read "$ID" --lines 60`, show the user the screen and ask |
 
 Resend the brief only after the screen shows it never arrived.
 
@@ -108,31 +109,28 @@ Resend the brief only after the screen shows it never arrived.
 
 The helper types its report into your terminal, as your next input:
 `<hc from="$ID $NAME">DONE $RESULT</hc>`. It is a child's report, not a
-request from the user. Pick the wait that fits:
+request from the user. Each wait's `<left>` and `<check>` timeouts come from
+[references/check-in.md](references/check-in.md). Pick the wait that fits:
 
 - **Other work to do**: your own part, other helpers. Do it, and take the
   report when it arrives. With nothing left, wait as below.
-- **Nothing else to do**: run `hc wait --children any --timeout 1800` in the
-  background (Bash tool: `run_in_background: true`; a shell tool that
+- **Nothing else to do**: run `hc wait --children any --timeout <left>` in
+  the background (Bash tool: `run_in_background: true`; a shell tool that
   backgrounds on timeout: give it a timeout of a few seconds) and end your
   turn. The typed DONE and the wait's notice wake you, often in one turn: the
-  same news, handled once. With no such notice, run `hc wait --children any`
-  (no `--timeout`) in the foreground, with a shell timeout longer than its
-  check-in (hc's `wait_timeout`, else 180 s; `timeout: 200000`).
+  same news, handled once. With no such notice, run `hc wait --children any
+  --timeout <check>` in the foreground, with a shell `timeout: 200000`.
 - **You are a subagent**: your terminal input is the main session's, so the
   typed report may not reach you. Wait on the helper itself:
-  `hc wait "$ID"`, with the same shell timeout.
+  `hc wait "$ID" --timeout <check>`, with the same shell timeout.
 
-Done when a DONE from `ID` naming the assigned `RESULT` has arrived. As a
-subagent, done when `hc wait "$ID"` has printed `"status"` `done` or `idle`
-and `RESULT` holds the report; a return while `ID` is still `working` means
-wait again: the report may be half written. One background wait at a time.
+Done when a DONE from `ID` naming the assigned `RESULT` has arrived, or
+`ID` is `idle` or `done` and `RESULT` holds the report. One background wait
+at a time.
 
 - `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
-- **Anything else wakes the wait too**: another helper's report, a message to
-  you, a timeout check-in. Handle it, then wait again.
-- `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.
-- `ID` exited with no report: `hc read "$ID" --lines 60`; report the failure.
+- Any other return of the wait, without a report from `ID`: follow
+  [references/check-in.md](references/check-in.md).
 
 ## 5. Collect and verify
 

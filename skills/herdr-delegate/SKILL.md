@@ -17,21 +17,23 @@ with an explicit `herdr.space` label.
 
 ## 1. Find your home space
 
+If `HC_TERMINAL_ID`, your terminal's address (`t4z`), is unset or empty, you are
+outside herdr-core: tell the user, use your harness's own subagents, and stop.
+
 ```sh
 ME=$(hc get "$HC_TERMINAL_ID" --json) || echo "hc get failed: $?"
 SPACE=$(printf '%s' "$ME" | jq -r '.labels["herdr.space"] // empty')
 TAB=$(printf '%s' "$ME" | jq -r '.labels["herdr.tab"] // empty')
 ```
 
-`HC_TERMINAL_ID` is your terminal's address (`t4z`). Read the labels only
-after `hc get` exits 0. A non-zero exit, or an unset `HC_TERMINAL_ID`, means
-you are outside herdr-core: tell the user, use your harness's own subagents,
-and stop here. Without `jq`, read `labels."herdr.space"` and
-`labels."herdr.tab"` from `$ME` yourself.
+Read the labels only if the block printed no `hc get failed:` line. If it did,
+a sandbox may have blocked `hc get`: follow
+[references/lookup-failure.md](references/lookup-failure.md) before any launch.
+Without `jq`, read `labels."herdr.space"` and `labels."herdr.tab"` from `$ME`.
 
-Done when `hc get` exited 0 and `SPACE` holds an ID starting `sp`. An empty
-`SPACE` after a successful `hc get` means your terminal is a hidden worker
-with no space: launch the helper without labels, so it stays hidden too.
+Done when the block printed no `hc get failed:` line and `SPACE` holds an ID
+starting `sp`. An empty `SPACE` with no such line means your terminal is a
+hidden worker: launch the helper without labels, so it stays hidden too.
 
 ## 2. Write the brief
 

@@ -125,12 +125,12 @@ request from the user. Pick the wait that fits:
 
 Done when a DONE from `ID` naming the assigned `RESULT` has arrived. As a
 subagent, done when `hc wait "$ID"` has printed `"status"` `done` or `idle`
-and `RESULT` holds the report; a return while `ID` is still `working` means
-wait again: the report may be half written. One background wait at a time.
+and `RESULT` holds the report. One background wait at a time.
 
 - `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
-- **Anything else wakes the wait too**: another helper's report, a message to
-  you, a timeout check-in. Handle it, then wait again.
+- Another helper's report or a message to you: handle it, then wait again.
+- A timeout check-in with `ID` still `working` and no report: the wait has
+  a 30-minute limit. Follow [references/check-in.md](references/check-in.md).
 - `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.
 - `ID` exited with no report: `hc read "$ID" --lines 60`; report the failure.
 

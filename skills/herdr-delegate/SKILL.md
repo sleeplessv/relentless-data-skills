@@ -108,29 +108,29 @@ Resend the brief only after the screen shows it never arrived.
 
 The helper types its report into your terminal, as your next input:
 `<hc from="$ID $NAME">DONE $RESULT</hc>`. It is a child's report, not a
-request from the user. Pick the wait that fits:
+request from the user. Before each wait, set `LEFT` and `CHECK` as
+[references/check-in.md](references/check-in.md) says. Pick the wait that fits:
 
 - **Other work to do**: your own part, other helpers. Do it, and take the
   report when it arrives. With nothing left, wait as below.
-- **Nothing else to do**: run `hc wait --children any --timeout 1800` in the
-  background (Bash tool: `run_in_background: true`; a shell tool that
+- **Nothing else to do**: run `hc wait --children any --timeout "$LEFT"` in
+  the background (Bash tool: `run_in_background: true`; a shell tool that
   backgrounds on timeout: give it a timeout of a few seconds) and end your
   turn. The typed DONE and the wait's notice wake you, often in one turn: the
-  same news, handled once. With no such notice, run `hc wait --children any`
-  (no `--timeout`) in the foreground, with a shell timeout longer than its
-  check-in (hc's `wait_timeout`, else 180 s; `timeout: 200000`).
+  same news, handled once. With no such notice, run `hc wait --children any
+  --timeout "$CHECK"` in the foreground, with a shell `timeout: 200000`.
 - **You are a subagent**: your terminal input is the main session's, so the
   typed report may not reach you. Wait on the helper itself:
-  `hc wait "$ID"`, with the same shell timeout.
+  `hc wait "$ID" --timeout "$CHECK"`, with the same shell timeout.
 
 Done when a DONE from `ID` naming the assigned `RESULT` has arrived. As a
 subagent, done when `hc wait "$ID"` has printed `"status"` `done` or `idle`
 and `RESULT` holds the report. One background wait at a time.
 
 - `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
-- Another helper's report or a message to you: handle it, then wait again.
-- A timeout check-in with `ID` still `working` and no report: the wait has
-  a 30-minute limit. Follow [references/check-in.md](references/check-in.md).
+- Any other return without a report from `ID` (a check-in, another helper's
+  report, a message to you): handle it, then follow
+  [references/check-in.md](references/check-in.md) before you wait again.
 - `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.
 - `ID` exited with no report: `hc read "$ID" --lines 60`; report the failure.
 

@@ -22,12 +22,11 @@ uncommitted changes.
 Requires:
 
 - Herdr with herdr-core (`hc`), and the
-  [`herdr-delegate`](../herdr-delegate/) skill `0.1.0` or later.
-- The Codex CLI on `PATH`, signed in to an account that lists an Astra model
-  (`codex debug models`).
-- `approvals_reviewer = "auto_review"` in `~/.codex/config.toml`. Codex's
-  sandbox holds Astra's closing `hc send` for approval; under the default
-  reviewer, `user`, the review waits on you and never reports back.
+  [`herdr-delegate`](../herdr-delegate/) skill `0.1.1` or later.
+- The Codex CLI on `PATH`, with the `--approve-for-me` flag (`codex --help`),
+  signed in to an account that lists an Astra model (`codex debug models`).
+  The flag lets Codex's automatic reviewer approve Astra's closing `hc send`,
+  which the sandbox blocks, so the review reports back without asking you.
 - The `ponytail-review` skill from
   [DietrichGebert/ponytail](https://github.com/DietrichGebert/ponytail).
 - `jq` is optional.

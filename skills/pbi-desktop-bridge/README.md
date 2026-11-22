@@ -13,7 +13,8 @@ person for report and measure edits.
   unapplied (seen in Desktop 2.159). `scripts/sync-model.ps1` writes measure edits into Desktop's local
   Analysis Services model, the path external tools use. Without `-Apply` it is a dry run.
 - **A reload that protects unsaved work.** `safe-reload` refuses (exit 3) when Desktop holds unsaved
-  changes the wrapper did not cause.
+  changes the wrapper did not cause. `safe-reload --check` asks the same question before an edit, and a
+  bare `reload` is refused.
 - **One setup command for the VM.** `pbi-vm.sh setup` installs the Bridge CLI and the TOM library.
 
 ## Limits

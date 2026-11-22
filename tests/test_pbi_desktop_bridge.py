@@ -184,6 +184,27 @@ class PbiVmTest(unittest.TestCase):
         self.assertEqual(len(self.calls("bridge.ps1 reload")), 3)
         self.assertFalse(self.marker().exists())
 
+    def test_a_marker_for_another_project_or_vm_does_not_count(self):
+        self.assertEqual(self.run_vm("safe-reload").returncode, 0)
+        self.answers(status=[instance(100, True, path="\\\\Mac\\Home\\proj\\Other.pbip")])
+        self.assertEqual(self.run_vm("safe-reload").returncode, 3)
+        self.answers(vms="Windows 11\nUbuntu\n", status=[instance(100, True)])
+        self.assertEqual(self.run_vm("safe-reload", PBI_VM="Ubuntu").returncode, 3)
+        self.assertEqual(len(self.calls("bridge.ps1 reload")), 1)
+
+    def test_check_reloads_nothing(self):
+        self.assertEqual(self.run_vm("safe-reload", "--check").returncode, 0)
+        self.assertFalse(self.marker().exists())
+        self.answers(status=[instance(100, True)])
+        self.assertEqual(self.run_vm("safe-reload", "--check").returncode, 3)
+        self.assertEqual(self.calls("bridge.ps1 reload") + self.calls("sync-model.ps1"), [])
+
+    def test_a_bare_reload_is_refused(self):
+        result = self.run_vm("reload", "--pid", "100")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("safe-reload", result.stderr)
+        self.assertEqual(self.calls("bridge.ps1 reload"), [])
+
     def test_several_open_files_need_a_pid(self):
         self.answers(status=[instance(100, False), instance(200, False), instance(300, False, path="")])
         result = self.run_vm("safe-reload")
@@ -196,6 +217,11 @@ class PbiVmTest(unittest.TestCase):
     def test_an_unknown_pid_is_refused(self):
         result = self.run_vm("safe-reload", "--pid", "999")
         self.assertEqual(result.returncode, 3)
+        self.assertEqual(self.calls("bridge.ps1 reload"), [])
+
+    def test_pid_without_a_number_is_a_usage_error(self):
+        result = self.run_vm("safe-reload", "--pid")
+        self.assertEqual(result.returncode, 2)
         self.assertEqual(self.calls("bridge.ps1 reload"), [])
 
     # --- model write
@@ -213,6 +239,12 @@ class PbiVmTest(unittest.TestCase):
         self.assertEqual(result.returncode, 5)
         self.assertIn("No msmdsrv.exe child", result.stdout)
         self.assertEqual(self.calls("bridge.ps1 reload"), [])
+
+    def test_a_model_write_that_exits_nonzero_stops_the_reload_whatever_it_printed(self):
+        self.answers(sync_exit=1)
+        self.assertEqual(self.run_vm("safe-reload", "--model").returncode, 5)
+        self.assertEqual(self.calls("bridge.ps1 reload"), [])
+        self.assertEqual(self.run_vm("sync-model").returncode, 5)
 
     def test_table_differences_warn_and_still_reload(self):
         self.answers(sync={"status": "ok", "changes": [], "unsupported": ["table only in files: Budget"]})
@@ -253,6 +285,16 @@ class PbiVmTest(unittest.TestCase):
             result.stdout.split(),
             [str(self.work / "shots" / "run2" / name) for name in ("AWS.png", "Azure.png")],
         )
+
+    def test_an_earlier_png_under_the_same_label_does_not_count(self):
+        run = self.work / "shots" / "run1"
+        run.mkdir(parents=True)
+        for name in ("missing.png", "Deleted.png"):
+            (run / name).write_text("old")
+        self.assertEqual(self.run_vm("shot", "missing", "run1").returncode, 5)
+        result = self.run_vm("shots", "run1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.split(), [str(run / name) for name in ("AWS.png", "Azure.png")])
 
 
 if __name__ == "__main__":

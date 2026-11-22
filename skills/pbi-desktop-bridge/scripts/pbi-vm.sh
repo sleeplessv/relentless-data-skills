@@ -6,9 +6,10 @@
 #   pbi-vm.sh sync-model [--pid N]              dry run: measure differences between the TMDL files and Desktop
 #   pbi-vm.sh safe-reload [--model] [--pid N]   reload Desktop from the files; --model first writes measure edits
 #                                               into the running model
+#   pbi-vm.sh safe-reload --check [--pid N]     reload nothing: exit 0 when a safe-reload would run, 3 when not
 #   pbi-vm.sh shot <page-id> <run> [--pid N]    one page; prints the PNG's Mac path
 #   pbi-vm.sh shots <run> [--pid N]             every page; prints each PNG's Mac path
-#   pbi-vm.sh <other Bridge CLI command> [args] passed through unchanged
+#   pbi-vm.sh <other Bridge CLI command> [args] passed through unchanged (reload is refused: use safe-reload)
 #
 # Environment:
 #   PBI_VM           VM name (default: the only running Parallels VM)
@@ -24,13 +25,14 @@
 # reload failed.
 #
 # safe-reload: a reload itself leaves hasUnsavedChanges=true, and the Bridge has no save. So each successful
-# reload writes a marker for that Desktop pid under $PBI_WORK/state. The next reload runs when the flag is
-# false, or when it is true and the marker exists (the flag came from this script). Anything changed in
-# Desktop after that reload and not saved is lost on the next one; a save in Desktop clears the marker.
+# reload writes a marker for that Desktop pid under $PBI_WORK/state, naming the VM and the open project. The
+# next reload runs when the flag is false, or when it is true and the marker matches (the flag came from this
+# script). Anything changed in Desktop after that reload and not saved is lost on the next one; a save in
+# Desktop clears the marker.
 set -euo pipefail
 
 die() { local code="$1"; shift; echo "pbi-vm: $*" >&2; exit "$code"; }
-if [[ $# -eq 0 || "$1" == -h || "$1" == --help ]]; then sed -n '2,24p' "$0" | sed 's/^# \{0,1\}//'; exit 2; fi
+if [[ $# -eq 0 || "$1" == -h || "$1" == --help ]]; then sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 2; fi
 for tool in prlctl jq; do command -v "$tool" >/dev/null 2>&1 || die 2 "$tool is not on PATH"; done
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
@@ -91,7 +93,7 @@ pick_pid() {  # $1 = status JSON, $2 = optional pid
   echo "$pids"
 }
 field()    { jq -r --argjson p "$2" --arg f "$3" '.instances[] | select(.pid == $p) | .[$f]' <<<"$1"; }
-pid_arg()  { local p=""; while (($#)); do if [[ "$1" == --pid ]]; then p="${2:-}"; shift; fi; shift || true; done; echo "$p"; }
+pid_arg()  { local p=""; while (($#)); do if [[ "$1" == --pid ]]; then p="${2:-missing}"; shift; fi; shift || true; done; echo "$p"; }
 has_flag() { local f="$1" a; shift; for a in "$@"; do [[ "$a" == "$f" ]] && return 0; done; return 1; }
 sync() {  # $1 = status JSON, $2 = pid, rest = extra arguments for sync-model.ps1
   local pbip; pbip="$(field "$1" "$2" currentFilePath)"
@@ -111,25 +113,28 @@ case "$cmd" in
     ;;
   sync-model)
     st="$(get_status)"; pid="$(pick_pid "$st" "$(pid_arg "$@")")"
-    s="$(sync "$st" "$pid")" || true
+    rc=0; s="$(sync "$st" "$pid")" || rc=$?
     echo "$s"
-    [[ "$(jq -r '.status' <<<"$s" 2>/dev/null)" == ok ]] || exit 5
+    [[ "$rc" == 0 && "$(jq -r '.status' <<<"$s" 2>/dev/null)" == ok ]] || exit 5
     ;;
   safe-reload)
     st="$(get_status)"; pid="$(pick_pid "$st" "$(pid_arg "$@")")"
     unsaved="$(field "$st" "$pid" hasUnsavedChanges)"
     marker="$WORK/state/reloaded-$pid"
+    # Windows reuses pids, so the marker counts only for the VM and the project it was written for.
+    key="$VM|$(field "$st" "$pid" currentFilePath)"
     if [[ "$unsaved" == false ]]; then
       rm -f "$marker"
-    elif [[ "$unsaved" == true && -f "$marker" ]]; then
-      echo "pbi-vm: the unsaved flag comes from this script's reload at $(cat "$marker"); reloading" >&2
+    elif [[ "$unsaved" == true && -f "$marker" && "$(sed -n 1p "$marker")" == "$key" ]]; then
+      echo "pbi-vm: the unsaved flag comes from this script's reload at $(sed -n 2p "$marker")" >&2
     else
       die 3 "REFUSED. Desktop pid $pid has unsaved changes this script did not cause (hasUnsavedChanges: '${unsaved:-pid not found}'). Save in Desktop (Ctrl+S), then run this again."
     fi
+    if has_flag --check "$@"; then exit 0; fi
     if has_flag --model "$@"; then
-      s="$(sync "$st" "$pid" -Apply)" || true
+      rc=0; s="$(sync "$st" "$pid" -Apply)" || rc=$?
       echo "$s"
-      [[ "$(jq -r '.status' <<<"$s" 2>/dev/null)" == ok ]] || die 5 "the model write failed; Desktop was not reloaded"
+      [[ "$rc" == 0 && "$(jq -r '.status' <<<"$s" 2>/dev/null)" == ok ]] || die 5 "the model write failed (exit $rc); Desktop was not reloaded"
       jq -e '.unsupported | length == 0' <<<"$s" >/dev/null || echo "pbi-vm: WARNING: table differences the model write does not apply (listed above)" >&2
     fi
     # Desktop can be busy for a few seconds after a model write, so the reload gets three attempts.
@@ -137,7 +142,7 @@ case "$cmd" in
     for try in 1 2 3; do
       if out="$(bridge reload --pid "$pid" 2>&1 | json)" && [[ "$(jq -r '.result.success // false' <<<"$out" 2>/dev/null)" == true ]]; then
         echo "$out"
-        date '+%Y-%m-%d %H:%M:%S' > "$marker"
+        printf '%s\n%s\n' "$key" "$(date '+%Y-%m-%d %H:%M:%S')" > "$marker"
         exit 0
       fi
       echo "pbi-vm: reload attempt $try failed: ${out:-no JSON output}" >&2
@@ -148,6 +153,7 @@ case "$cmd" in
   shot)
     page="${1:?usage: pbi-vm.sh shot <page-id> <run>}"; run="${2:?usage: pbi-vm.sh shot <page-id> <run>}"; shift 2
     mkdir -p "$WORK/shots/$run"
+    rm -f "$WORK/shots/$run/$page.png"   # an earlier capture under this label is not this one
     sleep $(( SETTLE_MS / 1000 ))
     bridge screenshot "$page" --output "$GWORK\\shots\\$run\\$page.png" --scale 1 "$@" >&2
     [[ -s "$WORK/shots/$run/$page.png" ]] || die 5 "no screenshot at $WORK/shots/$run/$page.png"
@@ -156,8 +162,10 @@ case "$cmd" in
   shots)
     run="${1:?usage: pbi-vm.sh shots <run>}"; shift
     mkdir -p "$WORK/shots/$run"
+    rm -f "$WORK/shots/$run"/*.png   # an earlier capture under this label is not this one
     bridge screenshot-all --output-dir "$GWORK\\shots\\$run" --scale 1 --settle "$SETTLE_MS" "$@" >&2
     ls "$WORK/shots/$run"/*.png 2>/dev/null || die 5 "no screenshots in $WORK/shots/$run"
     ;;
+  reload) die 2 "use 'pbi-vm.sh safe-reload': a bare reload discards unsaved work in Desktop without checking whose it is" ;;
   *) bridge "$cmd" "$@" ;;
 esac

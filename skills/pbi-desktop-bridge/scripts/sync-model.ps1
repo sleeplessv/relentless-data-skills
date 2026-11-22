@@ -51,10 +51,12 @@ try {
           if ($Apply) { $lt.Measures.Add($fm.Clone()) }
           continue
         }
-        $diff = @($props | Where-Object { [string]$lm.$_ -ne [string]$fm.$_ })
+        # -cne: a change of letter case alone is a change. FormatStringDefinition is the dynamic format string.
+        $diff = @($props | Where-Object { [string]$lm.$_ -cne [string]$fm.$_ })
+        if ([string]$lm.FormatStringDefinition.Expression -cne [string]$fm.FormatStringDefinition.Expression) { $diff += 'FormatStringDefinition' }
         if ($diff.Count) {
           $changes += [pscustomobject]@{ action = 'change'; table = $ft.Name; measure = $fm.Name; properties = $diff }
-          if ($Apply) { foreach ($p in $diff) { $lm.$p = $fm.$p } }
+          if ($Apply) { foreach ($p in $diff) { $lm.$p = if ($p -eq 'FormatStringDefinition' -and $fm.$p) { $fm.$p.Clone() } else { $fm.$p } } }
         }
       }
       foreach ($lm in @($lt.Measures)) {

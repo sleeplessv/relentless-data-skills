@@ -35,11 +35,13 @@ limit:
 
    | The screen shows | Do |
    |---|---|
-   | The same output repeating, or no change since the last check-in: the helper is stuck | Run `hc interrupt "$ID"`. Show the user the screen and ask what to do |
+   | The same output repeating, or no change since the last check-in: the helper is stuck | Run `hc interrupt "$ID" --json`. Show the user the screen and ask what to do |
    | Progress, 30 or more minutes since launch | Show the user the screen and ask whether to keep waiting. Do not interrupt the helper |
    | Progress, under 30 minutes since launch | Wait again with the same wait |
 
 `hc interrupt` presses the helper's stop key and watches 10 s for an effect.
-It ends the helper's turn and keeps the helper alive with its context, so the
-user can steer it with `hc send "$ID" "..."`. Kill the helper only when the
-user says so: a kill throws its context away.
+It prints `"outcome":"stopped"` when the turn ended, and `hc get "$ID" --json`
+then shows `status.state` `idle`. Any other outcome goes to the user with the
+screen. The helper stays alive with its context, so the user can steer it with
+`hc send "$ID" "..."`. Kill the helper only when the user says so: a kill
+throws its context away.

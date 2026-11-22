@@ -112,9 +112,13 @@ request from the user. Pick the wait that fits:
 
 - **Other work to do**: your own part, other helpers. Do it, and take the
   report when it arrives. With nothing left, wait as below.
-- **Nothing else to do**: `hc wait --children any`. It checks in after hc's
-  `wait_timeout` setting, else 180 s. Give your shell tool a longer timeout
-  than the wait's (Claude Code's Bash tool: `timeout: 200000`).
+- **Nothing else to do**: start `hc wait --children any --timeout 1800` in
+  the background (Bash tool: `run_in_background: true`; a shell tool that
+  backgrounds on timeout: a timeout of a few seconds) and end your turn. The
+  typed report and the wait's completion notice both wake you, often in one
+  turn: the same news, handled once. Without such a notice, wait in the
+  foreground; the wait checks in after hc's `wait_timeout` setting, else
+  180 s, so give your shell tool a longer timeout (`timeout: 200000`).
 - **You are a subagent**: your terminal input is the main session's, so the
   typed report may not reach you. Wait on the helper itself:
   `hc wait "$ID"`, with the same shell timeout.
@@ -122,15 +126,13 @@ request from the user. Pick the wait that fits:
 Done when a DONE from `ID` naming the assigned `RESULT` has arrived or, as
 a subagent, `hc wait "$ID"` has printed `"status"` `done` or `idle` and
 `RESULT` holds the report. A return while `ID` is still `working` (its
-report, a check-in) means wait again: the report may be half written.
+report, a check-in) means wait again: the report may be half written. In
+the background form, start a new wait only after the last one has ended.
 
 - **Anything else wakes the wait too**: another helper's report, a message to
   you, a timeout check-in. Handle it, then wait again.
-- The helper stays `working` for a while after it sends. Use `any`;
-  `--children all` holds on until it settles.
 - `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.
-- `ID` exited with no report: `hc read "$ID" --lines 60`, and report the
-  failure to the user.
+- `ID` exited with no report: `hc read "$ID" --lines 60`; report the failure.
 
 ## 5. Collect and verify
 

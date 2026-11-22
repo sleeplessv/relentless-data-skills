@@ -14,7 +14,8 @@ limit:
 - The background wait, `hc wait --children any --timeout 1800`, checks in
   at the limit.
 - The foreground wait and the subagent's `hc wait "$ID"` check in every
-  180 s (hc's `wait_timeout`), so about the tenth check-in passes the limit.
+  `wait_timeout` (180 s by default), so about the tenth check-in passes the
+  limit.
 
 ## At each check-in
 
@@ -27,9 +28,10 @@ limit:
 
    While `ID` is `working`, `hc read` returns only the visible screen, so
    ask for no history. Without `jq`, subtract `created_ms` (Unix time in
-   milliseconds) from the current time yourself. A non-zero exit from either
-   command means hc cannot reach `ID`: report that to the user. Keep the
-   screen, so that the next check-in can compare against it.
+   milliseconds) from the current time yourself. A non-zero exit from
+   `hc read`, or no number from the second command, means hc cannot reach
+   `ID`: report that to the user. Keep the screen, so that the next check-in
+   can compare against it.
 
 2. Take the first row that fits:
 

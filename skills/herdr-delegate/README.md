@@ -2,8 +2,8 @@
 
 Have an agent running in the Herdr desktop app hand a task to another agent,
 such as Codex reviewing Claude's change. The helper opens in the caller's own
-Herdr space, whatever space the person is looking at, and sends its result back
-as a message pointing at a findings file.
+Herdr space, whatever space the person is looking at, and writes its result to a
+findings file that the caller collects.
 
 ## Use
 

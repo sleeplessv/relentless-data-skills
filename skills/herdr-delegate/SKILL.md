@@ -6,8 +6,7 @@ description: Hand a task to another coding agent (Codex, Claude) from inside the
 # Delegate to another agent in Herdr
 
 Start a helper agent with `hc` (herdr-core), labelled with your **home space**:
-the Herdr space your own terminal lives in. The helper opens there, and its
-result comes back to you.
+the Herdr space your own terminal lives in. The helper opens there.
 
 The home space comes from your terminal's labels, never from the window. The
 person may be looking at another project. `herdr-app do tab.new` and
@@ -42,7 +41,8 @@ The brief is the helper's whole first message. It names:
 - **Scope**: the exact files, commit or diff, and whether the helper may edit.
 - **Limits**: no subagents, no further agents.
 - **Result file**: a path in a new folder of its own, so no other run writes
-  it and no stale file passes for this run's result. Long answers go there:
+  it and no stale file passes for this run's result. Long answers go there.
+  Tell the helper to end the file with the line `END OF REPORT`:
 
   ```sh
   D=$(mktemp -d) && RESULT="$(cd "$D" && pwd -P)/<name>-review.md"
@@ -76,6 +76,7 @@ targets `ID`, and only a report from `ID` ends this delegation.
 | Cortex as the helper | `cortex --bypass -- "$BRIEF"` |
 | A split in your own tab | add `--label herdr.tab="$TAB"` |
 | A hidden helper | drop both labels |
+| You are a subagent | add `--no-notify`, so hc types no notes about the helper into the main session; drop `Bash(hc send …)` from Claude's grant |
 | A template from `hc templates` | `<template> "$BRIEF"` in place of the program |
 
 - **Codex needs `--no-daemon`.** Without it, its commands run outside hc.
@@ -89,8 +90,8 @@ targets `ID`, and only a report from `ID` ends this delegation.
   the brief with: "Run each shell command on its own: no cd, no && chains, no pipes."
   Claude's grant covers only the last step: `hc send` to your terminal and
   the write to `RESULT` (`/$RESULT` makes the `//` prefix Claude Code uses
-  for an absolute path). A subagent drops the `Bash` rule. The brief goes
-  before `--allowedTools`, which takes every argument after it.
+  for an absolute path). The brief goes before `--allowedTools`, which takes
+  every argument after it.
 
 Check the launch with `hc get "$ID" --json`; `jq '{labels, state, status,
 first_message}'` trims it, or read those fields from the raw JSON. Take the
@@ -99,12 +100,12 @@ first row that fits:
 | It shows | Do |
 |---|---|
 | `labels."herdr.space"` is not `SPACE` (labelled launch) | Kill `ID`, relaunch with the label |
-| `idle` or `done`, and its DONE has arrived or `RESULT` holds the report | Go to step 5 |
+| `idle` or `done`, and its DONE has arrived or `RESULT` ends with `END OF REPORT` | Go to step 5 |
 | `state` `finished` | `hc read "$ID" --lines 60`; report the exit to the user |
-| `status.state` `blocked`, or a template launch with `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
+| `status.state` `blocked`, or an `idle` template launch with `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
 | `status.state` `working` | Go to step 4 |
 | `idle` or `done` | `hc read "$ID" --lines 60`: the brief may never have arrived |
-| Anything else, such as `status` `null`: no status yet | Run `hc get "$ID" --json` once more and take the first row that fits. Still no status: `hc read "$ID" --lines 60`, show the user the screen and ask |
+| Anything else, such as `status` `null`: no status yet | Run `hc get "$ID" --json` once more and take the first row that fits. Still in this row: `hc read "$ID" --lines 60`, show the user the screen and ask |
 
 Resend the brief only after the screen shows it never arrived.
 
@@ -126,9 +127,8 @@ from [references/check-in.md](references/check-in.md). Take the first wait that 
   same news, handled once. With no such notice, run `hc wait --children any
   --timeout <check>` in the foreground, with a shell `timeout: 200000`.
 
-Done when a DONE from `ID` naming the assigned `RESULT` has arrived, or
-`ID` is `idle` or `done` and `RESULT` holds the report. One background wait
-at a time.
+Done when a DONE from `ID` naming the assigned `RESULT` has arrived, or `ID` is
+`idle` or `done` and `RESULT` ends with `END OF REPORT`. One background wait at a time.
 
 - `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
 - Any other return of the wait, without a report from `ID`: follow

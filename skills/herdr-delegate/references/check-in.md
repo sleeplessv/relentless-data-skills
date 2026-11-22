@@ -61,8 +61,8 @@ hc get "$ID" --json | jq 'now - .created_ms / 1000 | floor'
 ```
 
 No number means hc cannot reach `ID`: tell the user. Otherwise add the
-time the user names, or 1800, and write the sum in place of the limit (1800
-at first) in the command under "Set the timeout".
+time the user names, in seconds, or 1800, and write the sum in place of the
+limit (1800 at first) in the command under "Set the timeout".
 
 `hc interrupt` presses the helper's stop key and watches 10 s for an effect.
 It exits 0 and prints `"outcome":"stopped"` when the turn ended; then

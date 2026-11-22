@@ -99,8 +99,9 @@ it shows:
 | `status.state` `working` | Go to step 4 |
 | `idle` or `done`, and its DONE has arrived or `RESULT` holds the report | Go to step 5 |
 | `idle` or `done`, no report | `hc read "$ID" --lines 60`: the brief may never have arrived |
-| `blocked`, or `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
+| `blocked`, or `first_message.sent` false (template launches only) | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
 | `state` `finished` | `hc read "$ID" --lines 60`; report the exit to the user |
+| Anything else, such as `status` `null`: no status yet | Check again in a few seconds and go by what it shows. If it has not changed, `hc read "$ID" --lines 60`, show the user the screen and ask |
 
 Resend the brief only after the screen shows it never arrived.
 

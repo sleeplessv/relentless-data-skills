@@ -23,6 +23,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`implement-ticket`](skills/implement-ticket/) | Implement a GitHub ticket, verify the result, and prepare a pull request for review. |
 | [`metabase`](skills/metabase/) | Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration. |
 | [`orchestrator-mode`](skills/orchestrator-mode/) | Coordinate work through subagents with scoped delegation, shared evidence, and verification. |
+| [`pbi-desktop-bridge`](skills/pbi-desktop-bridge/) | Reload Power BI Desktop in a Parallels Windows VM from a Mac and screenshot report pages, so an agent sees its PBIP edits rendered. |
 | [`prefect`](skills/prefect/) | Build, review, and debug Prefect 3 projects using documentation and live instance evidence. |
 | [`qualify-delegation`](skills/qualify-delegation/) | Qualify assignments for human colleagues or contractors and produce clear handoffs with explicit outcomes, authority, and constraints. |
 | [`review-pbi-diff`](skills/review-pbi-diff/) | Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings. |

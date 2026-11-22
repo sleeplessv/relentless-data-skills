@@ -36,7 +36,7 @@ or a message to you. It does not move the limit. Then run
 | `hc get` exits non-zero (3, `not_found`) | hc cannot reach `ID`: tell the user |
 | `state` `finished`: it exited | `hc read "$ID" --lines 60`; report the exit to the user |
 | `status.state` `blocked` or `error` | `hc read "$ID" --lines 60`, then ask the user |
-| `status.state` `idle` or `done` | `hc read "$ID" --lines 60`. If `RESULT` holds the helper's report, go to step 5; a DONE that arrives later is the same news. Otherwise show the user the screen and ask |
+| `status.state` `idle` or `done` | `hc read "$ID" --lines 60`. If `RESULT` ends with `END OF REPORT`, go to step 5; a DONE that arrives later is the same news. Otherwise show the user the screen and ask |
 | `status.state` `working` | Print `<left>` again. If the wait's `reason` is `timeout`, or `<left>` is 0 or less, take the check-in. Otherwise set the timeout and wait again |
 | Anything else, such as `status` `null`: no agent status | `hc read "$ID" --lines 60`; show the user the screen and ask |
 

@@ -55,18 +55,26 @@ Done when `MODEL` holds a slug and `REVIEW` names a readable file.
 ## 3. Hand the review to Astra
 
 ```sh
-SNAP=$({ git -C "$DIR" rev-parse HEAD; git -C "$DIR" status --porcelain; git -C "$DIR" diff HEAD; } | git hash-object --stdin)
+SNAP=$( export GIT_INDEX_FILE="$(mktemp -u)"; trap 'rm -f "$GIT_INDEX_FILE"' EXIT; git -C "$DIR" rev-parse HEAD && git -C "$DIR" read-tree HEAD && git -C "$DIR" add -A && git -C "$DIR" write-tree ) || echo "snapshot failed: $?"
 RESULT="$(mktemp -d)/astra-review.md"
 ```
 
-`SNAP` is a fingerprint of the checkout before Astra starts; step 4 takes it
-again. `RESULT` sits in a folder of its own, so no other run can write it.
+`SNAP` is the checkout before Astra starts: its `HEAD`, then the tree
+`git add -A` would commit, built in a throwaway index so yours is untouched.
+It covers untracked files' contents, names, modes and symlinks. Step 4 takes
+it again. `snapshot failed` means a git step failed: show its error and stop.
+`RESULT` sits in a folder of its own, so no other run can write it.
 
 Follow the `herdr-delegate` skill up to and including its wait for the
 report, with these inputs:
 
 - **Name**: `astra-review`, with a suffix when a live terminal has that name.
-- **Program**: `codex --no-daemon -m "$MODEL" "$BRIEF"`, started in `DIR`.
+- **Program**: `codex --no-daemon -m "$MODEL" --approve-for-me -c model_reasoning_effort=high "$BRIEF"`,
+  started in `DIR`. `--approve-for-me` runs Astra in the `workspace-write`
+  sandbox and sends its approval requests to Codex's automatic reviewer. The
+  sandbox blocks Astra's closing `hc send`; the reviewer approves the retry,
+  so the report arrives without waiting on the user. Codex refuses `-s`
+  beside this flag.
 - **Result file**: `RESULT`.
 - **Brief**: the four parts `herdr-delegate` asks for, where the scope is
   `DIR` and step 1's commands, read-only (no edits, commits or pushes), plus:
@@ -80,7 +88,7 @@ An Astra review needs Herdr and `herdr-delegate`. Where `herdr-delegate`
 is not installed, or it finds you outside Herdr, tell the user and stop: a
 review by one of your own subagents is not an Astra review.
 
-Done when Astra's `DONE` report naming `RESULT` has arrived.
+Done when `herdr-delegate`'s wait step is done.
 
 ## 4. Fix by default, with two exceptions
 

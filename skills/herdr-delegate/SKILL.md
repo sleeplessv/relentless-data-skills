@@ -39,8 +39,15 @@ The brief is the helper's whole first message. It names:
 
 - **Scope**: the exact files, commit or diff, and whether the helper may edit.
 - **Limits**: no subagents, no further agents.
-- **Result file**: an absolute path outside the repo, such as
-  `RESULT="${TMPDIR:-/tmp}/<name>-review.md"`. Long answers go there.
+- **Result file**: a path in a new folder of its own, so no other run writes
+  it and no stale file passes for this run's result. Long answers go there:
+
+  ```sh
+  D=$(mktemp -d) && RESULT="$(cd "$D" && pwd -P)/<name>-review.md"
+  ```
+
+  `pwd -P` gives the folder's real path (macOS `/var` is a link to
+  `/private/var`), which the Claude helper's write rule must name.
 - **Report line**: `When done, run: hc send $HC_TERMINAL_ID "DONE $RESULT".
   If stuck, hc send $HC_TERMINAL_ID with the blocker.` Expand
   `$HC_TERMINAL_ID` and `$RESULT` before sending, so the helper gets literal values.
@@ -62,7 +69,7 @@ targets `ID`, and only a report from `ID` ends this delegation.
 
 | Want | Change |
 |---|---|
-| Claude as the helper | `claude "$BRIEF"` in place of `codex --no-daemon "$BRIEF"` |
+| Claude as the helper | `claude "$BRIEF" --allowedTools "Bash(hc send $HC_TERMINAL_ID *)" "Edit(/$RESULT)"` in place of `codex --no-daemon "$BRIEF"` |
 | Cortex as the helper | `cortex --bypass -- "$BRIEF"` |
 | A split in your own tab | add `--label herdr.tab="$TAB"` |
 | A hidden helper | drop both labels |
@@ -77,6 +84,10 @@ targets `ID`, and only a report from `ID` ends this delegation.
   `--allowed-tools Read Write "Bash(git *)" "Bash(hc *)"`. Cortex then denies
   any call no rule matches, and a rule matches the whole command line, so end
   the brief with: "Run each shell command on its own: no cd, no && chains, no pipes."
+  Claude's grant covers only the last step: `hc send` to your terminal and
+  the write to `RESULT` (`/$RESULT` makes the `//` prefix Claude Code uses
+  for an absolute path). The brief goes before `--allowedTools`, which takes every argument
+  after it.
 
 Check the launch with `hc get "$ID" --json`; `jq '{labels, state, status,
 first_message}'` trims it, or read those fields from the raw JSON. Go by what
@@ -95,24 +106,33 @@ Resend the brief only after the screen shows it never arrived.
 
 ## 4. Wait for the report
 
-Keep working on your own part, or wait:
-
-```sh
-hc wait --children any --timeout 600
-```
-
-The report arrives as your next input:
+The helper types its report into your terminal, as your next input:
 `<hc from="$ID $NAME">DONE $RESULT</hc>`. It is a child's report, not a
-request from the user. Done when a DONE from `ID` naming the assigned
-`RESULT` has arrived.
+request from the user. Pick the wait that fits:
 
+- **Other work to do**: your own part, other helpers. Do it, and take the
+  report when it arrives. With nothing left, wait as below.
+- **Nothing else to do**: run `hc wait --children any --timeout 1800` in the
+  background (Bash tool: `run_in_background: true`; a shell tool that
+  backgrounds on timeout: give it a timeout of a few seconds) and end your
+  turn. The typed DONE and the wait's notice wake you, often in one turn: the
+  same news, handled once. With no such notice, run `hc wait --children any`
+  (no `--timeout`) in the foreground, with a shell timeout longer than its
+  check-in (hc's `wait_timeout`, else 180 s; `timeout: 200000`).
+- **You are a subagent**: your terminal input is the main session's, so the
+  typed report may not reach you. Wait on the helper itself:
+  `hc wait "$ID"`, with the same shell timeout.
+
+Done when a DONE from `ID` naming the assigned `RESULT` has arrived. As a
+subagent, done when `hc wait "$ID"` has printed `"status"` `done` or `idle`
+and `RESULT` holds the report; a return while `ID` is still `working` means
+wait again: the report may be half written. One background wait at a time.
+
+- `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
 - **Anything else wakes the wait too**: another helper's report, a message to
   you, a timeout check-in. Handle it, then wait again.
-- The helper stays `working` for a while after it sends. Use `any`;
-  `--children all` holds on until it settles.
 - `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.
-- `ID` exited with no report: `hc read "$ID" --lines 60`, and report the
-  failure to the user.
+- `ID` exited with no report: `hc read "$ID" --lines 60`; report the failure.
 
 ## 5. Collect and verify
 

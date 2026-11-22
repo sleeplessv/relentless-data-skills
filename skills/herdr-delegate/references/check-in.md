@@ -1,53 +1,52 @@
-# Wait deadline and check-ins
+# Waiting on a helper
 
-A helper gets 30 minutes from its launch to report. Step 4 reads this file
-before each wait, and again each time a wait returns without a report from
-`ID`. `ID` is the helper's address from step 3.
+A helper gets 30 minutes from its launch to report. Read this before each
+wait in step 4, and each time a wait returns without a report from `ID`.
+`ID` is the helper's address from step 3.
 
-## Before each wait
+## Set the timeout
 
-Set the seconds left before the deadline, and the check-in for the
-foreground and subagent waits:
+Print the seconds left before the limit:
 
 ```sh
-LEFT=$(hc get "$ID" --json | jq --argjson limit "${LIMIT:-1800}" '$limit - (now - .created_ms / 1000 | floor)')
-CHECK=$(( LEFT < 180 ? LEFT : 180 ))
+hc get "$ID" --json | jq '1800 - (now - .created_ms / 1000 | floor)'
 ```
 
-- `LIMIT` is the deadline in seconds after launch: 1800 unless the user
-  extended it (step 2 below).
-- `created_ms` is the helper's launch time in Unix milliseconds. `LEFT`
-  counts from it, not from the wait, so a wait that starts late, or that runs
-  again after a wake-up, keeps the same deadline.
-- The background wait takes `--timeout "$LEFT"`. The foreground and subagent
-  waits take `--timeout "$CHECK"`, so they check in at least every 180 s
-  and never after the deadline.
-- An empty `LEFT` means hc cannot reach `ID`: `hc get` exits 3 with its
-  error on stderr, and `jq` prints nothing. Report that to the user.
-  Without `jq`, work out `LEFT` from `created_ms` yourself.
-- `LEFT` at 0 or less: the deadline has passed. Do not wait; go to the
-  check-in below.
+- `created_ms` is the helper's launch time in Unix milliseconds. The count
+  runs from it, so a wait that starts late, or that runs again after a
+  wake-up, keeps the same limit.
+- Write the number into the wait as `<left>`. The background wait takes
+  `--timeout <left>`. The foreground and subagent waits take
+  `--timeout <check>`, the smaller of `<left>` and 180, so they check in at
+  least every 180 s and never after the limit.
+- Without `jq`, work out `<left>` from `created_ms` yourself. With `jq`,
+  no number means hc cannot reach `ID`: tell the user.
+- At 0 or less the limit has passed: do not wait; take the check-in below.
 
-## Each time a wait returns without the report
+## When a wait returns without a report
 
-1. Set `LEFT` again. If the wait returned for another helper's report or a
-   message to you, and `LEFT` is above 0, wait again. Otherwise this is a
-   check-in: continue.
-2. Read the helper's screen with `hc read "$ID" --lines 0`. While `ID` is
-   `working`, it returns only the visible screen, so ask for no history. A
-   non-zero exit means hc cannot reach `ID`: report that to the user. Keep
-   the screen, so that the next check-in can compare against it. Then take
-   the first row that fits:
+Run `hc get "$ID" --json` and take the first row that fits:
 
-   | The screen shows | Do |
-   |---|---|
-   | The same output repeating, or no change since the last check-in: the helper is stuck | Run `hc interrupt "$ID" --json`. Show the user the screen and ask what to do |
-   | Progress, `LEFT` at 0 or less | Show the user the screen and ask whether to keep waiting. Do not interrupt the helper. If they say keep waiting, set `LIMIT` to the seconds since launch plus the time they name, or plus 1800, and wait again |
-   | Progress, `LEFT` above 0 | Wait again with the same wait |
+| `ID` | Do |
+|---|---|
+| `hc get` exits non-zero (3, `not_found`) | hc cannot reach `ID`: tell the user |
+| `state` `finished`: it exited | `hc read "$ID" --lines 60`; report the exit to the user |
+| `status.state` `blocked` or `error` | `hc read "$ID" --lines 60`, then ask the user |
+| `status.state` `idle` or `done` | `hc read "$ID" --lines 60`. If the screen shows the helper's report `hc send`, wait again: the report is on its way. Otherwise show the user the screen and ask |
+| `status.state` `working` | Set the timeout again. If the wait's `reason` is not `timeout` (another helper's report, a message to you) and `<left>` is above 0, handle it and wait again. Otherwise take the check-in |
 
-   When you compare screens, ignore elapsed-time counters such as
-   `Running… (16s)`. At the first check-in there is no earlier screen, so
-   only repeating output counts as stuck.
+## Check-in
+
+Read the screen with `hc read "$ID" --lines 0`. While `ID` is `working`,
+it returns only the visible screen, so ask for no history. Keep the screen,
+so that the next check-in can compare against it. When you compare, ignore
+elapsed-time counters such as `Running… (16s)`. Take the first row that fits:
+
+| The screen shows | Do |
+|---|---|
+| The same output repeating, or, after the first check-in, no change since the last one: the helper is stuck | Run `hc interrupt "$ID" --json`. Show the user the screen and ask what to do |
+| Anything else, `<left>` at 0 or less | Show the user the screen and ask whether to keep waiting. Do not interrupt the helper. If they say keep waiting, write a new limit in place of 1800 in every later timeout command: the seconds since launch (the current limit minus `<left>`) plus the time they name, or plus 1800 |
+| Anything else, `<left>` above 0 | Wait again with the same wait |
 
 `hc interrupt` presses the helper's stop key and watches 10 s for an effect.
 It exits 0 and prints `"outcome":"stopped"` when the turn ended; then

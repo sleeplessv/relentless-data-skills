@@ -17,16 +17,18 @@ with an explicit `herdr.space` label.
 
 ## 1. Find your home space
 
+If `HC_TERMINAL_ID`, your terminal's address (`t4z`), is unset or empty, you are
+outside herdr-core: tell the user, use your harness's own subagents, and stop.
+
 ```sh
 ME=$(hc get "$HC_TERMINAL_ID" --json) || echo "hc get failed: $?"
 SPACE=$(printf '%s' "$ME" | jq -r '.labels["herdr.space"] // empty')
 TAB=$(printf '%s' "$ME" | jq -r '.labels["herdr.tab"] // empty')
 ```
 
-`HC_TERMINAL_ID` is your terminal's address (`t4z`). Read the labels only
-after `hc get` exits 0. A non-zero exit, or an unset `HC_TERMINAL_ID`, means
-you are outside herdr-core: tell the user, use your harness's own subagents,
-and stop here. Without `jq`, read `labels."herdr.space"` and
+Read the labels only after `hc get` exits 0. If it fails, a sandbox may have
+blocked it: follow [references/lookup-failure.md](references/lookup-failure.md)
+before any launch. Without `jq`, read `labels."herdr.space"` and
 `labels."herdr.tab"` from `$ME` yourself.
 
 Done when `hc get` exited 0 and `SPACE` holds an ID starting `sp`. An empty

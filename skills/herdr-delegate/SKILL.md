@@ -112,13 +112,12 @@ request from the user. Pick the wait that fits:
 
 - **Other work to do**: your own part, other helpers. Do it, and take the
   report when it arrives. With nothing left, wait as below.
-- **Nothing else to do**: start `hc wait --children any --timeout 1800` in
-  the background (Bash tool: `run_in_background: true`; a shell tool that
-  backgrounds on timeout: a timeout of a few seconds) and end your turn. The
-  typed report and the wait's completion notice both wake you, often in one
-  turn: the same news, handled once. Without such a notice, wait in the
-  foreground; the wait checks in after hc's `wait_timeout` setting, else
-  180 s, so give your shell tool a longer timeout (`timeout: 200000`).
+- **Nothing else to do**: run `hc wait --children any --timeout 1800` in the
+  background (Bash tool: `run_in_background: true`; a shell that backgrounds
+  on timeout: a few seconds) and end your turn. The typed DONE and the wait's
+  notice wake you, often in one turn: the same news, handled once. With no
+  such notice, wait in the foreground, with a shell timeout longer than its
+  check-in (hc's `wait_timeout`, else 180 s; `timeout: 200000`).
 - **You are a subagent**: your terminal input is the main session's, so the
   typed report may not reach you. Wait on the helper itself:
   `hc wait "$ID"`, with the same shell timeout.
@@ -129,6 +128,7 @@ a subagent, `hc wait "$ID"` has printed `"status"` `done` or `idle` and
 report, a check-in) means wait again: the report may be half written. In
 the background form, start a new wait only after the last one has ended.
 
+- `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
 - **Anything else wakes the wait too**: another helper's report, a message to
   you, a timeout check-in. Handle it, then wait again.
 - `ID` `blocked` or `error`: `hc read "$ID" --lines 60`, then ask the user.

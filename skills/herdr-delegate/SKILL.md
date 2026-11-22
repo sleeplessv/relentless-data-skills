@@ -97,7 +97,7 @@ it shows:
 |---|---|
 | `labels."herdr.space"` is not `SPACE` (labelled launch) | Kill `ID`, relaunch with the label |
 | `status.state` `working` | Go to step 4 |
-| `idle` or `done`, and its DONE report has arrived | Go to step 5 |
+| `idle` or `done`, and its DONE has arrived or `RESULT` holds the report | Go to step 5 |
 | `idle` or `done`, no report | `hc read "$ID" --lines 60`: the brief may never have arrived |
 | `blocked`, or `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
 | `state` `finished` | `hc read "$ID" --lines 60`; report the exit to the user |
@@ -123,9 +123,9 @@ request from the user. Each wait's `<left>` and `<check>` timeouts come from
   typed report may not reach you. Wait on the helper itself:
   `hc wait "$ID" --timeout <check>`, with the same shell timeout.
 
-Done when a DONE from `ID` naming the assigned `RESULT` has arrived. As a
-subagent, done when `hc wait "$ID"` has printed `"status"` `done` or `idle`
-and `RESULT` holds the report. One background wait at a time.
+Done when a DONE from `ID` naming the assigned `RESULT` has arrived, or
+`ID` is `idle` or `done` and `RESULT` holds the report. One background wait
+at a time.
 
 - `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
 - Any other return of the wait, without a report from `ID`: follow

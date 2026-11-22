@@ -55,18 +55,21 @@ Done when `MODEL` holds a slug and `REVIEW` names a readable file.
 ## 3. Hand the review to Astra
 
 ```sh
-SNAP=$({ git -C "$DIR" rev-parse HEAD; git -C "$DIR" status --porcelain; git -C "$DIR" diff HEAD; } | git hash-object --stdin)
+SNAP=$({ git -C "$DIR" rev-parse HEAD; git -C "$DIR" status --porcelain; git -C "$DIR" diff HEAD; git -C "$DIR" ls-files -z --others --exclude-standard | xargs -0 git -C "$DIR" hash-object --; } | git hash-object --stdin)
 RESULT="$(mktemp -d)/astra-review.md"
 ```
 
-`SNAP` is a fingerprint of the checkout before Astra starts; step 4 takes it
-again. `RESULT` sits in a folder of its own, so no other run can write it.
+`SNAP` is a fingerprint of the checkout before Astra starts, untracked
+files' contents included; step 4 takes it again. `RESULT` sits in a folder
+of its own, so no other run can write it.
 
 Follow the `herdr-delegate` skill up to and including its wait for the
 report, with these inputs:
 
 - **Name**: `astra-review`, with a suffix when a live terminal has that name.
-- **Program**: `codex --no-daemon -m "$MODEL" "$BRIEF"`, started in `DIR`.
+- **Program**: `codex --no-daemon -m "$MODEL" -s workspace-write -c model_reasoning_effort=high "$BRIEF"`,
+  started in `DIR`. Keep `workspace-write`: `read-only` would block Astra's
+  write to `RESULT` and its `hc send` report.
 - **Result file**: `RESULT`.
 - **Brief**: the four parts `herdr-delegate` asks for, where the scope is
   `DIR` and step 1's commands, read-only (no edits, commits or pushes), plus:
@@ -80,7 +83,14 @@ An Astra review needs Herdr and `herdr-delegate`. Where `herdr-delegate`
 is not installed, or it finds you outside Herdr, tell the user and stop: a
 review by one of your own subagents is not an Astra review.
 
-Done when Astra's `DONE` report naming `RESULT` has arrived.
+It also needs `approvals_reviewer = "auto_review"` in the user's Codex
+config (`~/.codex/config.toml`). Codex's sandbox holds Astra's `hc send`
+for approval, and under the default reviewer, `user`, Astra sits `blocked`
+at its last step. Where the setting is missing, tell the user before the
+launch.
+
+Done when `herdr-delegate`'s wait step is done: Astra's report naming
+`RESULT` has arrived.
 
 ## 4. Fix by default, with two exceptions
 

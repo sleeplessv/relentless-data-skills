@@ -71,6 +71,10 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
 - **Upstream dependency**: a skill this repo does not own or version that a generation-two path reads during a run, or whose output it works from. _Avoid_: fixed neighbour, companion skill.
 - **Upstream contract**: the record of what generation two takes from each upstream dependency, and of what it supplies where that skill expects a person to answer. _Avoid_: pin, lock file.
+- **Preflight**: in generation two, the checks a run makes on its environment before the edit. Each ends in a stop or a warning. _Avoid_: setup check, environment check; check alone (a check is run against a change).
+- **Guard**: in generation two, a limit the environment applies to a command, whatever the agent's instructions say. The command is refused, or it waits for the owner's answer. _Avoid_: hook (one harness's mechanism), guardrail (the snowman wrapper's), permission rule.
+- **Reach command**: a command a repo names that proves an environment its runs depend on can be reached. _Avoid_: health check, connection test.
+- **Run grant**: in generation two, the writes other people can see that starting a run permits without asking. _Avoid_: permissions already granted (generation one's handoff phrase).
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner filter** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner filter applies. _Avoid_: owner (in generation two, the person who started a run).
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

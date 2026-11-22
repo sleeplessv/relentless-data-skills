@@ -21,19 +21,22 @@ hc get "$ID" --json | jq '1800 - (now - .created_ms / 1000 | floor)'
   least every 180 s and never after the limit.
 - Without `jq`, work out `<left>` from `created_ms` yourself. With `jq`,
   no number means hc cannot reach `ID`: tell the user.
-- At 0 or less the limit has passed: do not wait; take the check-in below.
+- At 0 or less the limit has passed: do not wait. Take the rows below, as
+  for a wait that returned with `reason` `timeout`.
 
 ## When a wait returns without a report
 
-Run `hc get "$ID" --json` and take the first row that fits:
+First handle anything else that woke you, such as another helper's report
+or a message to you. It does not move the limit. Then run
+`hc get "$ID" --json` and take the first row that fits:
 
 | `ID` | Do |
 |---|---|
 | `hc get` exits non-zero (3, `not_found`) | hc cannot reach `ID`: tell the user |
 | `state` `finished`: it exited | `hc read "$ID" --lines 60`; report the exit to the user |
 | `status.state` `blocked` or `error` | `hc read "$ID" --lines 60`, then ask the user |
-| `status.state` `idle` or `done` | `hc read "$ID" --lines 60`. If the screen shows the helper's report `hc send`, wait again: the report is on its way. Otherwise show the user the screen and ask |
-| `status.state` `working` | Set the timeout again. If the wait's `reason` is not `timeout` (another helper's report, a message to you) and `<left>` is above 0, handle it and wait again. Otherwise take the check-in |
+| `status.state` `idle` or `done` | `hc read "$ID" --lines 60`. If `RESULT` holds the helper's report, go to step 5; a DONE that arrives later is the same news. Otherwise show the user the screen and ask |
+| `status.state` `working` | Set the timeout again. If the wait's `reason` is `timeout`, or `<left>` is 0 or less, take the check-in. Otherwise wait again |
 
 ## Check-in
 
@@ -45,7 +48,7 @@ elapsed-time counters such as `Running… (16s)`. Take the first row that fits:
 | The screen shows | Do |
 |---|---|
 | The same output repeating, or, after the first check-in, no change since the last one: the helper is stuck | Run `hc interrupt "$ID" --json`. Show the user the screen and ask what to do |
-| Anything else, `<left>` at 0 or less | Show the user the screen and ask whether to keep waiting. Do not interrupt the helper. If they say keep waiting, write a new limit in place of 1800 in every later timeout command: the seconds since launch (the current limit minus `<left>`) plus the time they name, or plus 1800 |
+| Anything else, `<left>` at 0 or less | Show the user the screen and ask whether to keep waiting. Do not interrupt the helper. If they say keep waiting, write a new limit in place of 1800 in the `jq` command above: the seconds since launch (the current limit minus `<left>`), plus the time they name or plus 1800. Then set the timeout and wait again |
 | Anything else, `<left>` above 0 | Wait again with the same wait |
 
 `hc interrupt` presses the helper's stop key and watches 10 s for an effect.

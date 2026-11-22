@@ -48,10 +48,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Small edit**: in generation two, a two-way door change that stays within the line limit and has a low blast radius. It is the size of change that needs no review. _Avoid_: trivial change, quick fix.
 - **Blast radius**: everything else that can break or give wrong results if a change is wrong. It is high when the change touches a critical path, or when more depends on what it changes than the limit allows. _Avoid_: impact, risk level.
 - **Critical path**: a part of a repo where every change gets a review, whatever its size. _Avoid_: protected path, sensitive file.
+- **Owner**: in generation two, the person who started a run and answers its questions. _Avoid_: user, human, operator.
 - **Author**: in generation two, the agent that takes a request and writes the change itself. _Avoid_: implementer, implementing worker.
 - **Requirements review**: in generation two, the review of a change against its requirements and the repo's written standards. _Avoid_: code review (names the tool), spec review, standards review.
 - **Defect review**: in generation two, the review of a change for defects no requirement names and for size, by a reviewer that sees no other review of the change. _Avoid_: ponytail review (names the tool), final review (generation one's term).
 - **Proven finding**: a review finding that is shown failing, or that names the line and the rule or requirement it breaks. A requirement the reviewer cannot confirm counts as one. _Avoid_: must-fix.
+- **Unsettled finding**: a review finding about the change itself that no check could prove or disprove. _Avoid_: unproven finding (a finding the author has not yet tried to settle), concern, nit.
 - **Follow-up ticket**: a ticket filed for a proven finding about code the change did not touch, or one that asks for more than the change's requirements. _Avoid_: tech-debt ticket.
 - **Call-back**: a reviewer's second reading of a change, limited to the lines a fix changed. _Avoid_: re-check (a check is a command), re-review, follow-up review.
 - **Miss**: a change that was not right first time. It is judged from the moment its PR is marked ready. _Avoid_: failure, rework.
@@ -63,12 +65,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Multi-ticket run**: in generation two, one run that takes two or more tickets from request to their PRs under a coordinator. _Avoid_: orchestrated run.
 - **Feature run**: a multi-ticket run whose work-set comes from one spec. Its ticket PRs land on an integration branch, and it ends in a feature PR.
 - **Backlog run**: a multi-ticket run over tickets that share no spec. Each ticket PR targets the default branch, and no feature PR follows.
-- **Coordinator**: in generation two, the session that runs a multi-ticket run. It starts an author for each ticket, merges ticket PRs into the integration branch and keeps the run record. It changes no tracked file. _Avoid_: orchestrator, chief of staff, ticket owner.
+- **Coordinator**: in generation two, the session that runs a multi-ticket run. It starts an author for each ticket, merges ready ticket PRs into the branch they target and keeps the run record. It changes no tracked file. _Avoid_: orchestrator, chief of staff, ticket owner.
 - **Ticket PR**: in generation two, the pull request one author opens for one ticket. In a feature run it targets the integration branch; in a backlog run, the default branch.
 - **Run record**: the durable record of one multi-ticket run: its work-set, the state of each ticket, and the decisions that cross tickets, each with its reason and who made it. _Avoid_: decision list (generation one's record, which holds decisions only), handoff file.
 - **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
-- **Owner** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner is involved.
+- **Owner filter** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner filter applies. _Avoid_: owner (in generation two, the person who started a run).
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.
 - **Target**: the resolved connection, environment, project root, snowman dir, and `.env` file for one snowman run, produced by `resolve_target`.
 - **Branch diff**: the lines the checked-out branch adds and removes, measured from the point where it split from the default branch to the working tree. It is what the branch's PR would show if everything were committed now. _Avoid_: session lines, PR diff.

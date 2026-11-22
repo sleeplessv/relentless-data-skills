@@ -113,20 +113,20 @@ request from the user. Pick the wait that fits:
 - **Other work to do**: your own part, other helpers. Do it, and take the
   report when it arrives. With nothing left, wait as below.
 - **Nothing else to do**: run `hc wait --children any --timeout 1800` in the
-  background (Bash tool: `run_in_background: true`; a shell that backgrounds
-  on timeout: a few seconds) and end your turn. The typed DONE and the wait's
-  notice wake you, often in one turn: the same news, handled once. With no
-  such notice, wait in the foreground, with a shell timeout longer than its
+  background (Bash tool: `run_in_background: true`; a shell tool that
+  backgrounds on timeout: give it a timeout of a few seconds) and end your
+  turn. The typed DONE and the wait's notice wake you, often in one turn: the
+  same news, handled once. With no such notice, run `hc wait --children any`
+  (no `--timeout`) in the foreground, with a shell timeout longer than its
   check-in (hc's `wait_timeout`, else 180 s; `timeout: 200000`).
 - **You are a subagent**: your terminal input is the main session's, so the
   typed report may not reach you. Wait on the helper itself:
   `hc wait "$ID"`, with the same shell timeout.
 
-Done when a DONE from `ID` naming the assigned `RESULT` has arrived or, as
-a subagent, `hc wait "$ID"` has printed `"status"` `done` or `idle` and
-`RESULT` holds the report. A return while `ID` is still `working` (its
-report, a check-in) means wait again: the report may be half written. In
-the background form, start a new wait only after the last one has ended.
+Done when a DONE from `ID` naming the assigned `RESULT` has arrived. As a
+subagent, done when `hc wait "$ID"` has printed `"status"` `done` or `idle`
+and `RESULT` holds the report; a return while `ID` is still `working` means
+wait again: the report may be half written. One background wait at a time.
 
 - `ID` stays `working` seconds after its DONE: normal; use `any`, not `all`.
 - **Anything else wakes the wait too**: another helper's report, a message to

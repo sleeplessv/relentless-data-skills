@@ -69,7 +69,7 @@ targets `ID`, and only a report from `ID` ends this delegation.
 
 | Want | Change |
 |---|---|
-| Claude as the helper | `claude "$BRIEF" --allowedTools "Bash(hc send *)" "Edit(/$RESULT)"` in place of `codex --no-daemon "$BRIEF"` |
+| Claude as the helper | `claude "$BRIEF" --allowedTools "Bash(hc send $HC_TERMINAL_ID *)" "Edit(/$RESULT)"` in place of `codex --no-daemon "$BRIEF"` |
 | Cortex as the helper | `cortex --bypass -- "$BRIEF"` |
 | A split in your own tab | add `--label herdr.tab="$TAB"` |
 | A hidden helper | drop both labels |
@@ -84,9 +84,9 @@ targets `ID`, and only a report from `ID` ends this delegation.
   `--allowed-tools Read Write "Bash(git *)" "Bash(hc *)"`. Cortex then denies
   any call no rule matches, and a rule matches the whole command line, so end
   the brief with: "Run each shell command on its own: no cd, no && chains, no pipes."
-  Claude's grant covers only the last step: `hc send` and the write to
-  `RESULT` (`/$RESULT` makes the `//` prefix Claude Code uses for an absolute
-  path). The brief goes before `--allowedTools`, which takes every argument
+  Claude's grant covers only the last step: `hc send` to your terminal and
+  the write to `RESULT` (`/$RESULT` makes the `//` prefix Claude Code uses
+  for an absolute path). The brief goes before `--allowedTools`, which takes every argument
   after it.
 
 Check the launch with `hc get "$ID" --json`; `jq '{labels, state, status,
@@ -120,7 +120,9 @@ request from the user. Pick the wait that fits:
   `hc wait "$ID"`, with the same shell timeout.
 
 Done when a DONE from `ID` naming the assigned `RESULT` has arrived or, as
-a subagent, `hc wait "$ID"` has returned and `RESULT` holds the report.
+a subagent, `hc wait "$ID"` has printed `"status"` `done` or `idle` and
+`RESULT` holds the report. A return while `ID` is still `working` (its
+report, a check-in) means wait again: the report may be half written.
 
 - **Anything else wakes the wait too**: another helper's report, a message to
   you, a timeout check-in. Handle it, then wait again.

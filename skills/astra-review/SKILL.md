@@ -68,9 +68,13 @@ it again. `snapshot failed` means a git step failed: show its error and stop.
 Follow the `herdr-delegate` skill up to and including its wait for the
 report, with these inputs:
 
-- **Name**: `astra-review`, with a suffix when a live terminal has that name.
-- **Program**: `codex --no-daemon -m "$MODEL" --approve-for-me -c model_reasoning_effort=high "$BRIEF"`,
-  started in `DIR`. `--approve-for-me` runs Astra in the `workspace-write`
+- **Name**: `astra-review`. When a live terminal holds that name, `hc run`
+  exits 1 and prints an error whose `kind` is `name_taken`; launch again as
+  `astra-review-2`, then `astra-review-3`, until one starts.
+- **Folder**: launch with `--cwd "$DIR"` in place of herdr-delegate's
+  `--cwd "$PWD"`, so Astra starts in `DIR` whatever folder your shell is in.
+- **Program**: `codex --no-daemon -m "$MODEL" --approve-for-me -c model_reasoning_effort=high "$BRIEF"`.
+  `--approve-for-me` runs Astra in the `workspace-write`
   sandbox and sends its approval requests to Codex's automatic reviewer. The
   sandbox blocks Astra's closing `hc send`; the reviewer approves the retry,
   so the report arrives without waiting on the user. Codex refuses `-s`

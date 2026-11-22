@@ -35,7 +35,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Dispatch base**: the immutable integration commit assigned to a ticket attempt. Concurrent attempts can have different bases as integration advances.
 - **Completion mode**: the obligations a feature run must satisfy. A whole-spec run covers every spec requirement; a selected-ticket run covers its explicit work-set.
 - **Orchestrated dispatch**: a ticket worker invocation with an assigned immutable base commit, inherited original baseline, satisfied blockers, and coordinator-owned issue and PR actions.
-- **Baseline**: the original base commit and its recorded check results. Later dispatch commits and integration failures remain distinct from this original evidence.
+- **Baseline**: in generation one, the original base commit and its recorded check results. Later dispatch commits and integration failures remain distinct from this original evidence. _Avoid_: baseline for a comparison group (that is the single-agent baseline).
 - **Handoff files**: durable shared artifacts containing scope, ticket snapshots, exploration notes, commands, and decisions. Workers exchange their paths and update the run record as work completes and integrates.
 - **Generation one**: the implementation and orchestration skills in use before the redesign: orchestrator-mode, implement-ticket, implement-feature and implement-backlog. _Avoid_: v1, the old stack.
 - **Generation two**: the skills built beside generation one to replace it. _Avoid_: v2, the new stack.
@@ -54,6 +54,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Proven finding**: a review finding that is shown failing, or that names the line and the rule or requirement it breaks. A requirement the reviewer cannot confirm counts as one. _Avoid_: must-fix.
 - **Follow-up ticket**: a ticket filed for a proven finding about code the change did not touch, or one that asks for more than the change's requirements. _Avoid_: tech-debt ticket.
 - **Call-back**: a reviewer's second reading of a change, limited to the lines a fix changed. _Avoid_: re-check (a check is a command), re-review, follow-up review.
+- **Miss**: a change that was not right first time. It is judged from the moment its PR is marked ready. _Avoid_: failure, rework.
+- **Direct run**: one agent taking a request to its PR with no generation-one or generation-two skill and no reviewer. _Avoid_: baseline run, direct session, solo run.
+- **Single-agent baseline**: the set of direct runs a comparison is made against. _Avoid_: baseline alone (generation one's term for a base commit).
+- **Measurement record**: what is recorded about one finished unit of work: the facts its run knows and the cost and outcome found afterwards. _Avoid_: run record (the record of a multi-ticket run), metrics, telemetry.
+- **Replay set**: the fixed set of finished tickets that every comparison between ways of working reruns. _Avoid_: benchmark, eval set.
+- **Replay**: one run of a replay-set ticket from the commit before its merged PR. Its result is judged and never merged. _Avoid_: rerun, shadow run.
 - **Multi-ticket run**: in generation two, one run that takes two or more tickets from request to their PRs under a coordinator. _Avoid_: orchestrated run.
 - **Feature run**: a multi-ticket run whose work-set comes from one spec. Its ticket PRs land on an integration branch, and it ends in a feature PR.
 - **Backlog run**: a multi-ticket run over tickets that share no spec. Each ticket PR targets the default branch, and no feature PR follows.

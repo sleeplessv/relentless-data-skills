@@ -81,9 +81,10 @@ Still old after these: the edit did not land. Go back to the step 3 output and t
 
 ## Hand back to the user
 
-- **Save first.** A reload leaves Desktop marked as unsaved, and the next reload replaces whatever the
-  user changed in Desktop since. Tell the user to save in Desktop (Ctrl+S) before they work there and
-  before they ask for the next edit.
+- **A push replaces unsaved work in Desktop.** A reload leaves Desktop marked as unsaved, so the next
+  push takes the user's later changes for its own and replaces them. Tell the user once per session:
+  looking, paging and slicer clicks need no save, and a change they make in Desktop and want to keep
+  needs Ctrl+S before they ask for the next edit.
 - **A save rewrites the project.** Desktop's save touches files you did not edit: schema versions,
   `cultures/` synonyms, annotations, saved slicer state and, after a refresh, column data types. Show the
   user `git status` in two groups: the files you edited, and the rest as Desktop's changes. A commit the

@@ -7,7 +7,7 @@ description: Hand a task to another coding agent (Codex, Claude) from inside the
 
 Start a helper agent with `hc` (herdr-core), labelled with your **home space**:
 the Herdr space your own terminal lives in. The helper opens there, and its
-result comes back to you as a message.
+result comes back to you.
 
 The home space comes from your terminal's labels, never from the window. The
 person may be looking at another project. `herdr-app do tab.new` and
@@ -51,8 +51,9 @@ The brief is the helper's whole first message. It names:
   `pwd -P` gives the folder's real path (macOS `/var` is a link to
   `/private/var`), which the Claude helper's write rule must name.
 - **Report line**: `When done, run: hc send $HC_TERMINAL_ID "DONE $RESULT".
-  If stuck, hc send $HC_TERMINAL_ID with the blocker.` Expand
-  `$HC_TERMINAL_ID` and `$RESULT` before sending, so the helper gets literal values.
+  If stuck, hc send $HC_TERMINAL_ID with the blocker.` A subagent shares the
+  main session's terminal, so it uses `Write your findings or blocker to $RESULT.`
+  Expand `$HC_TERMINAL_ID` and `$RESULT` first, so the helper gets literal values.
 
 Done when the brief carries all four.
 
@@ -88,32 +89,34 @@ targets `ID`, and only a report from `ID` ends this delegation.
   the brief with: "Run each shell command on its own: no cd, no && chains, no pipes."
   Claude's grant covers only the last step: `hc send` to your terminal and
   the write to `RESULT` (`/$RESULT` makes the `//` prefix Claude Code uses
-  for an absolute path). The brief goes before `--allowedTools`, which takes every argument
-  after it.
+  for an absolute path). A subagent drops the `Bash` rule. The brief goes
+  before `--allowedTools`, which takes every argument after it.
 
 Check the launch with `hc get "$ID" --json`; `jq '{labels, state, status,
-first_message}'` trims it, or read those fields from the raw JSON. Go by what
-it shows:
+first_message}'` trims it, or read those fields from the raw JSON. Take the
+first row that fits:
 
 | It shows | Do |
 |---|---|
 | `labels."herdr.space"` is not `SPACE` (labelled launch) | Kill `ID`, relaunch with the label |
-| `status.state` `working` | Go to step 4 |
 | `idle` or `done`, and its DONE has arrived or `RESULT` holds the report | Go to step 5 |
-| `idle` or `done`, no report | `hc read "$ID" --lines 60`: the brief may never have arrived |
-| `blocked`, or `first_message.sent` false (template launches only) | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
 | `state` `finished` | `hc read "$ID" --lines 60`; report the exit to the user |
-| Anything else, such as `status` `null`: no status yet | Check again in a few seconds and go by what it shows. If it has not changed, `hc read "$ID" --lines 60`, show the user the screen and ask |
+| `status.state` `blocked`, or a template launch with `first_message.sent` false | `hc read "$ID" --lines 0`; a trust or permission dialog is the person's call: show it to them and wait |
+| `status.state` `working` | Go to step 4 |
+| `idle` or `done` | `hc read "$ID" --lines 60`: the brief may never have arrived |
+| Anything else, such as `status` `null`: no status yet | Run `hc get "$ID" --json` once more and take the first row that fits. Still no status: `hc read "$ID" --lines 60`, show the user the screen and ask |
 
 Resend the brief only after the screen shows it never arrived.
 
 ## 4. Wait for the report
 
-The helper types its report into your terminal, as your next input:
-`<hc from="$ID $NAME">DONE $RESULT</hc>`. It is a child's report, not a
-request from the user. Each wait's `<left>` and `<check>` timeouts come from
-[references/check-in.md](references/check-in.md). Pick the wait that fits:
+In the main session, the helper types its report into your terminal, as your
+next input: `<hc from="$ID $NAME">DONE $RESULT</hc>`. It is a child's report,
+not a request from the user. Each wait's `<left>` and `<check>` timeouts come
+from [references/check-in.md](references/check-in.md). Take the first wait that fits:
 
+- **You are a subagent**: your helper only writes `RESULT`. After your own part,
+  run `hc wait "$ID" --timeout <check>`, with a shell `timeout: 200000`.
 - **Other work to do**: your own part, other helpers. Do it, and take the
   report when it arrives. With nothing left, wait as below.
 - **Nothing else to do**: run `hc wait --children any --timeout <left>` in
@@ -122,9 +125,6 @@ request from the user. Each wait's `<left>` and `<check>` timeouts come from
   turn. The typed DONE and the wait's notice wake you, often in one turn: the
   same news, handled once. With no such notice, run `hc wait --children any
   --timeout <check>` in the foreground, with a shell `timeout: 200000`.
-- **You are a subagent**: your terminal input is the main session's, so the
-  typed report may not reach you. Wait on the helper itself:
-  `hc wait "$ID" --timeout <check>`, with the same shell timeout.
 
 Done when a DONE from `ID` naming the assigned `RESULT` has arrived, or
 `ID` is `idle` or `done` and `RESULT` holds the report. One background wait
@@ -136,9 +136,9 @@ at a time.
 
 ## 5. Collect and verify
 
-Read `RESULT` yourself. Check each finding against the code before you
-repeat or act on it. Done when every finding is confirmed, rejected with a
-reason, or marked unchecked.
+Read `RESULT` yourself. A blocker there goes to the user as a blocker.
+Check each finding against the code before you repeat or act on it. Done
+when every finding is confirmed, rejected with a reason, or marked unchecked.
 
 ## 6. Clean up
 

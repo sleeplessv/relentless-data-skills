@@ -18,10 +18,23 @@ resolved path in the findings artifact.
 
 **When a skill is not installed, or the project's warehouse or BI tool has no row**, take the
 same observation through a read path the project documents, and record the substitution. In a
-dbt project that is the project's own dbt runner, with `<runner> show --inline "<SQL>" --limit <N>`
-for a query (`show` appends its own limit, so the SQL carries none). With no documented read
-path, or with credentials or network missing, the observation is a blocked check as step 7
-defines it.
+dbt project that is the project's own dbt runner. Read the query into `SQL` with a quoted heredoc
+in the same shell call, so the shell keeps its quotes and `$` (`show` appends its own limit, so
+the SQL carries none):
+
+```bash
+unset SQL && { IFS= read -r -d '' SQL || [ -n "$SQL" ]; } <<'SQL' &&
+<SQL>
+SQL
+<runner> show --inline "$SQL" --limit <N>
+```
+
+`unset` fails on a read-only `SQL`, and `IFS=` keeps leading spaces. `read` exits 1 at the
+end of input, so the runner runs only when `SQL` is set. No line may be exactly `SQL`. If one
+is, choose another delimiter and change both markers, keeping the opening one quoted.
+
+With no documented read path, or with credentials or network missing, the observation is a
+blocked check as step 7 defines it.
 
 **Verification is reads plus builds into the working target.** Every other command here is a
 read. An observation that needs a write to shared state (a production build, a staged script, a

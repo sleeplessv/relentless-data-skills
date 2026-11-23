@@ -120,10 +120,10 @@ Read it before any write.
 
 ## Ad-hoc SQL is read-only
 
-`mb sql "<SQL>" --db <id>` runs one statement. The wrapper strips comments and
-string literals (including dollar-quoted and `E''` forms), then rejects
-multi-statements, non-read-only leading keywords, write/DDL keywords anywhere,
-`SELECT … INTO`, and functions with side effects.
+`mb sql "$SQL" --db <id>` runs one statement, with `SQL` read by the
+[quoted heredoc](references/api-reference.md#pass-sql-through-a-quoted-heredoc). The wrapper strips
+comments and string literals (including dollar-quoted and `E''` forms), then rejects multi-statements,
+non-read-only leading keywords, write/DDL keywords anywhere, `SELECT … INTO`, and functions with side effects.
 
 **This is a speed bump, not a sandbox.** A string-level check cannot cover every
 volatile function or user-defined write. The durable control is a **read-only

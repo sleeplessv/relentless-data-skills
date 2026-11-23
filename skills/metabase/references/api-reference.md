@@ -15,7 +15,7 @@ API is versioned with the app and changes between releases.
 | Command | Does |
 | ------- | ---- |
 | `uv run --python 3.13 --no-project $M bootstrap [--force]` | Write `.metabase/context.md`. Refuses to clobber a file with no generated marker; `--force` keeps a copy first |
-| `uv run --python 3.13 --no-project $M sql "<SQL>" --db <id> [--limit N]` | Run one **read-only** statement, rows as JSON (default 200-row print cap) |
+| `uv run --python 3.13 --no-project $M sql "$SQL" --db <id> [--limit N]` | Run one **read-only** statement, read into `SQL` by the [quoted heredoc](#pass-sql-through-a-quoted-heredoc), rows as JSON (default 200-row print cap) |
 | `uv run --python 3.13 --no-project $M card <id>` | Full card definition JSON |
 | `uv run --python 3.13 --no-project $M sql-of <id> [--compiled]` | Card's SQL, native verbatim, MBQL compiled. `--compiled` substitutes template tags so the output is runnable |
 | `uv run --python 3.13 --no-project $M run <id> [--count] [--limit N]` | Execute card. `--count` counts **server-side** where possible, falling back to client-side |
@@ -42,6 +42,21 @@ change it can also undo: `dataset_query`, `name`, `description`, `display`,
 Restore-point filenames encode the kind (`…__card139.json`,
 `…__dashboard19.json`) because the two shapes are not interchangeable and
 restoring one over the other would be silent damage.
+
+### Pass SQL through a quoted heredoc
+
+Read the SQL into `SQL` with a quoted heredoc and run `sql` in the same shell call, so
+the shell keeps `"`, `$`, `'`, backticks, and backslashes:
+
+```bash
+unset SQL && { IFS= read -r -d '' SQL || [ -n "$SQL" ]; } <<'SQL' &&
+<SQL>
+SQL
+uv run --python 3.13 --no-project "$M" sql "$SQL" --db <id>
+```
+
+`unset` fails on a read-only `SQL`, and `IFS=` keeps leading spaces. `read` exits 1 at the
+end of input, so the wrapper runs only when `SQL` is set. No line may be exactly `SQL`.
 
 ## Auth
 

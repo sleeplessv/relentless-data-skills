@@ -37,7 +37,8 @@ captures a restore point first.
   at the old database. The dashboard renders, the card runs, only the filter is
   dead. `mb wiring <dashboard-id>` resolves every id in every mapping, flags any
   belonging to another database than its card, and exits 1 on a finding.
-- **Read-only ad-hoc SQL.** `mb sql "<SQL>" --db <id>` strips comments and
+- **Read-only ad-hoc SQL.** `mb sql "$SQL" --db <id>`, with `SQL` read from a
+  [quoted heredoc](references/api-reference.md#pass-sql-through-a-quoted-heredoc), strips comments and
   string literals (dollar-quoted and `E''` forms included), then rejects
   multi-statements, non-read-only leading keywords, write/DDL keywords anywhere,
   `SELECT … INTO`, and side-effecting functions. It is documented honestly as a

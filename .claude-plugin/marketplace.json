@@ -228,7 +228,7 @@
       "name": "implement-ticket",
       "source": "./skills/implement-ticket",
       "description": "Implement a GitHub ticket, verify the result, and prepare a pull request for review.",
-      "version": "0.11.1",
+      "version": "0.11.2",
       "author": {
         "name": "sleeplessv"
       },
@@ -249,7 +249,7 @@
       "name": "metabase",
       "source": "./skills/metabase",
       "description": "Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },
@@ -420,7 +420,7 @@
       "name": "snowman",
       "source": "./skills/snowman",
       "description": "Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution.",
-      "version": "0.1.17",
+      "version": "0.1.18",
       "author": {
         "name": "sleeplessv"
       },

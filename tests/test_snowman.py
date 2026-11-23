@@ -79,6 +79,17 @@ def fake_snow(outcomes: dict[str, Outcome]):
     return run
 
 
+def write_fake_executable(path: Path, body: str, python: str = sys.executable) -> None:
+    """Write an executable that runs ``body`` as Python with its arguments.
+
+    A ``#!`` line cannot hold a path with spaces, so ``/bin/sh`` execs the
+    interpreter instead.
+    """
+    path.write_text(f'#!/bin/sh\nexec {shlex.quote(python)} -c {shlex.quote(body)} "$@"\n',
+                    encoding="utf-8")
+    path.chmod(0o700)
+
+
 def connection_listing(connection: str, parameters: dict) -> Outcome:
     """A successful `snow connection list --format JSON` outcome."""
     return Outcome(
@@ -2018,12 +2029,12 @@ class TestMainCli(SnowmanTestCase):
                 calls = root / "calls.txt"
                 calls.unlink(missing_ok=True)
                 binary = root / "snow"
-                binary.write_text(
-                    f"#!{sys.executable}\nimport sys\n"
+                write_fake_executable(
+                    binary,
+                    "import sys\n"
                     f"with open({str(calls)!r}, 'a') as out: out.write('call\\n')\n"
-                    f"sys.stdout.buffer.write({payload!r})\n"
+                    f"sys.stdout.buffer.write({payload!r})\n",
                 )
-                binary.chmod(0o700)
                 stdout, stderr = io.StringIO(), io.StringIO()
                 with mock.patch.dict(os.environ, {"PATH": str(root)}), \
                         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
@@ -2214,7 +2225,10 @@ class TestDocumentedInvocation(unittest.TestCase):
         return {p.name: p.read_text(encoding="utf-8") for p in paths}
 
     def run_block(self, prefix: str = "") -> dict:
-        """Run the Run queries block under bash and zsh with a fake `uv`; map shell to result."""
+        """Run the Run queries block under bash and zsh with a fake `uv`; map shell to result.
+
+        The fake `uv` runs through a Python path with a space, which a `#!` line cannot hold.
+        """
         run_queries = self.docs()["SKILL.md"].split("## Run queries", 1)[1]
         block = re.search(r"```bash\n(.*?)```", run_queries, re.S).group(1)
         self.assertIn("<SQL>", block)
@@ -2223,12 +2237,12 @@ class TestDocumentedInvocation(unittest.TestCase):
         if not shells:
             self.skipTest("neither bash nor zsh on PATH")
         with tempfile.TemporaryDirectory() as tmp:
+            python = Path(tmp) / "py dir" / "python3"
+            python.parent.mkdir()
+            python.symlink_to(sys.executable)
             uv = Path(tmp) / "uv"
-            uv.write_text(
-                f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n",
-                encoding="utf-8",
-            )
-            uv.chmod(0o755)
+            write_fake_executable(uv, "import json, sys\nprint(json.dumps(sys.argv[1:]))\n",
+                                  python=str(python))
             env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"}
             return {
                 sh: subprocess.run([sh, "-c", script], env=env, capture_output=True, text=True, check=False)
@@ -2264,6 +2278,12 @@ class TestDocumentedInvocation(unittest.TestCase):
                 with self.subTest(doc=name, line=i + 1):
                     self.assertTrue("#run-queries)" in window or "<<'SQL'" in window, line)
         self.assertIn("(../SKILL.md#run-queries)", self.docs()["workflows.md"])
+
+    def test_examples_quote_the_script_path(self):
+        for name, text in self.docs().items():
+            with self.subTest(doc=name):
+                self.assertEqual(text.count("<skill-dir>/scripts/snowman.py"),
+                                 text.count('"<skill-dir>/scripts/snowman.py"'))
 
     def test_ampersand_workaround_is_gone(self):
         guardrails = self.docs()["guardrails.md"]

@@ -15,7 +15,10 @@ Lints every ``skills/*/SKILL.md`` for its own integrity:
 - outward side effects: a skill whose files (SKILL.md and everything under its
   folder) contain a command that acts on shared state (``SIDE_EFFECT_COMMANDS``,
   e.g. ``gh pr merge``, ``git push``) must set ``disable-model-invocation: true``
-  or be listed in ``SIDE_EFFECT_ALLOWLIST`` with a reason.
+  or be listed in ``SIDE_EFFECT_ALLOWLIST`` with a reason;
+- no argument placeholder (``$`` and a digit, or ``$ARGUMENTS``) in SKILL.md,
+  because Claude Code substitutes skill arguments there. Files under
+  ``references/`` are not substituted and not checked.
 
 Standard library only.
 
@@ -88,6 +91,9 @@ SIDE_EFFECT_ALLOWLIST = {
 
 SKIP_DIRS = frozenset({"node_modules", "__pycache__", ".venv", "venv"})
 
+# Claude Code substitutes skill arguments for these in a SKILL.md body, not in references/.
+ARGUMENT_PLACEHOLDER_RE = re.compile(r"\$(?:[0-9]|ARGUMENTS)")
+
 
 def parse_frontmatter(text: str, where: str) -> dict[str, str]:
     if not text.startswith("---"):
@@ -158,6 +164,14 @@ def lint(skill_md: Path, skills_dir: Path = SKILLS_DIR) -> list[str]:
     n_lines = len(text.splitlines())
     if n_lines > LINE_BUDGET:
         errors.append(f"SKILL.md is {n_lines} lines (budget {LINE_BUDGET})")
+
+    for n, line in enumerate(text.splitlines(), 1):
+        for m in ARGUMENT_PLACEHOLDER_RE.finditer(line):
+            errors.append(
+                f"line {n}: {m.group()} is an argument placeholder. Claude Code substitutes "
+                "skill arguments for it when the skill runs with arguments. Reword the line, "
+                "or move the literal text to a file under references/"
+            )
 
     skill_name = skill_md.parent.name
     if not user_only and skill_name not in SIDE_EFFECT_ALLOWLIST:

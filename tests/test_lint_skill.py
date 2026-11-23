@@ -1,4 +1,4 @@
-"""Exercise the SKILL.md linter's frontmatter-key and side-effect rules on temporary skill trees."""
+"""Exercise the SKILL.md linter's frontmatter-key, side-effect and argument-placeholder rules on temporary skill trees."""
 from __future__ import annotations
 
 import contextlib
@@ -82,6 +82,37 @@ class TestLintSkill(unittest.TestCase):
         name = next(iter(lint_skill.SIDE_EFFECT_ALLOWLIST))
         skill_md = self.add_skill(name, f"description: {DESC}\n", body="git push\n")
         self.assertEqual(self.lint(skill_md), [])
+
+    def test_positional_placeholder_in_skill_md_fails(self) -> None:
+        skill_md = self.add_skill(
+            "projector",
+            f"description: {DESC}\n",
+            body='# Skill\n\nRun `SHOW ROLES ->> SELECT "name" FROM $1`.\n',
+        )
+        errors = self.lint(skill_md)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("line 8", errors[0])
+        self.assertIn("$1", errors[0])
+        self.assertIn("substitutes skill arguments", errors[0])
+        self.assertEqual(self.lint_dir(), 1)
+
+    def test_arguments_placeholder_in_skill_md_fails(self) -> None:
+        skill_md = self.add_skill(
+            "echoer", f"description: {DESC}\n", body="# Skill\n\nAct on $ARGUMENTS.\n"
+        )
+        errors = self.lint(skill_md)
+        self.assertEqual(len(errors), 1)
+        self.assertIn("line 8", errors[0])
+        self.assertIn("$ARGUMENTS", errors[0])
+        self.assertEqual(self.lint_dir(), 1)
+
+    def test_placeholder_in_reference_file_passes(self) -> None:
+        skill_md = self.add_skill("projector", f"description: {DESC}\n")
+        refs = skill_md.parent / "references"
+        refs.mkdir()
+        (refs / "install.md").write_text('SHOW ROLES ->> SELECT "name" FROM $1\n', encoding="utf-8")
+        self.assertEqual(self.lint(skill_md), [])
+        self.assertEqual(self.lint_dir(), 0)
 
     def test_allowlist_entries_carry_reasons(self) -> None:
         for name, reason in lint_skill.SIDE_EFFECT_ALLOWLIST.items():

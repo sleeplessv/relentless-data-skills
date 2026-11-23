@@ -155,7 +155,11 @@ It does not execute or clean up scripts.
 
 `.snowman/results/` and `.snowman/staged/` each hold a `.gitignore`. The wrapper
 creates it as `*`. If one already exists, the wrapper keeps its rules and appends
-`*` unless `*` is already the last rule, because git applies the last matching rule.
+a `*` line unless the last line is exactly `*`. Git applies the last matching
+rule, so the appended line wins over an earlier `!*.json`.
+Git does not read a `.gitignore` that is a symbolic link. If either one is a link,
+the wrapper blocks before it queries or stages and leaves the link unchanged.
+Replace the link with a regular file that contains `*`.
 Each run sets the directory to `0700`. Every saved file, bootstrap results
 included, is created `0600`. A write that fails removes the file, so no partial
 artifact keeps the final name.

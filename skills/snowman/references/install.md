@@ -15,10 +15,11 @@ user chooses several accounts, also ask for their environment names.
 If no connection exists, ask the user to run `snow connection add` in their own
 terminal. The user owns credential setup. Snowman does not create connections.
 
-Before context exists, run discovery with:
+Before context exists, set `SQL` as in
+[Run queries](../SKILL.md#run-queries) and run discovery with:
 
 ```bash
-uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --connection <chosen> "<SQL>"
+uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --connection <chosen> "$SQL"
 ```
 
 Stop passing `--connection` after writing context. The override uses the named

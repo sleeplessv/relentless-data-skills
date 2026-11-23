@@ -14,7 +14,10 @@ import contextlib
 import io
 import json
 import os
+import re
 import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -24,7 +27,8 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "skills" / "snowman" / "scripts"))
+SKILL_DIR = REPO_ROOT / "skills" / "snowman"
+sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
 import snowman  # noqa: E402
 
@@ -1759,6 +1763,58 @@ class TestMainCli(SnowmanTestCase):
                 0,
             )
         self.assertTrue(list((root / ".snowman" / "staged").glob("*.sql")))
+
+
+
+class TestDocumentedInvocation(unittest.TestCase):
+    """The docs' query invocation hands SQL to the wrapper unchanged."""
+
+    # Double quotes, $1, an odd apostrophe, an ampersand, a backtick and a backslash.
+    SQL = """SHOW TABLES ->> SELECT "name" FROM $1 WHERE "name" <> 'F&W' -- it's `x` \\n"""
+
+    def docs(self) -> dict[str, str]:
+        paths = [SKILL_DIR / "SKILL.md", *sorted((SKILL_DIR / "references").glob("*.md"))]
+        return {p.name: p.read_text(encoding="utf-8") for p in paths}
+
+    def test_run_queries_block_passes_sql_unchanged(self):
+        run_queries = self.docs()["SKILL.md"].split("## Run queries", 1)[1]
+        block = re.search(r"```bash\n(.*?)```", run_queries, re.S).group(1)
+        self.assertIn("<SQL>", block)
+        script = block.replace("<SQL>", self.SQL).replace("<skill-dir>", "/skill")
+        shells = [sh for sh in ("bash", "zsh") if shutil.which(sh)]
+        if not shells:
+            self.skipTest("neither bash nor zsh on PATH")
+        with tempfile.TemporaryDirectory() as tmp:
+            uv = Path(tmp) / "uv"
+            uv.write_text(
+                f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+            uv.chmod(0o755)
+            env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"}
+            for sh in shells:
+                with self.subTest(shell=sh):
+                    done = subprocess.run(
+                        [sh, "-c", script], env=env, capture_output=True, text=True, check=False,
+                    )
+                    self.assertEqual(done.returncode, 0, done.stderr)
+                    self.assertEqual(
+                        json.loads(done.stdout),
+                        ["run", "--python", "3.13", "--no-project",
+                         "/skill/scripts/snowman.py", self.SQL + "\n"],
+                    )
+
+    def test_other_examples_point_to_run_queries(self):
+        docs = self.docs()
+        for name, text in docs.items():
+            with self.subTest(doc=name):
+                self.assertNotIn('"<SQL>"', text)
+        self.assertIn("(../SKILL.md#run-queries)", docs["workflows.md"])
+
+    def test_ampersand_workaround_is_gone(self):
+        guardrails = self.docs()["guardrails.md"]
+        self.assertNotIn("LIKE 'F%W'", guardrails)
+        self.assertNotIn("CHR(38)", guardrails)
 
 
 if __name__ == "__main__":

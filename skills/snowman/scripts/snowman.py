@@ -795,18 +795,20 @@ def stage(
     warning = (f"WARNING: contains {', '.join(destructive)}. Review carefully before running"
                if destructive else "")
     header = [
-        "-- staged by snowman, NOT executed",
-        f"-- purpose: {slug}",
+        "staged by snowman, NOT executed",
+        f"purpose: {slug}",
     ]
     if env_name:
-        header.append(f"-- target environment: {env_name} (connection: {connection})")
+        header.append(f"target environment: {env_name} (connection: {connection})")
     header += [
-        f"-- staged at: {now:%Y-%m-%d %H:%M:%S}",
-        f"-- run with: {run_cmd}",
+        f"staged at: {now:%Y-%m-%d %H:%M:%S}",
+        f"run with: {run_cmd}",
     ]
     if warning:
-        header.append(f"-- {warning}")
-    path.write_text("\n".join(header) + "\n\n" + sql.strip() + "\n", encoding="utf-8")
+        header.append(warning)
+    # A line break inside a value (a path, an env name) must not end the comment.
+    comment = "\n".join(f"-- {line}" for entry in header for line in entry.splitlines())
+    path.write_text(comment + "\n\n" + sql.strip() + "\n", encoding="utf-8")
 
     print(f"STAGED (not executed): {path}")
     print(f"run with: {run_cmd}")

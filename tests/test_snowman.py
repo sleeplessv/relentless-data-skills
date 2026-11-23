@@ -776,6 +776,16 @@ class TestStage(SnowmanTestCase):
     def staged_files(self, root: Path) -> list:
         return sorted((root / ".snowman" / "staged").glob("*.sql"))
 
+    def make_named_project(self, name: str, frontmatter: str = SINGLE_CONN_FRONTMATTER) -> Path:
+        """Create a project in a directory called `name`; skip if the filesystem refuses it."""
+        root = self.make_bare_dir() / name
+        try:
+            (root / ".snowman").mkdir(parents=True)
+        except OSError as exc:
+            self.skipTest(f"filesystem refuses {name!r}: {exc}")
+        (root / ".snowman" / "context.md").write_text(frontmatter, encoding="utf-8")
+        return root
+
     def test_stages_file_without_executing(self):
         root = self.enter(self.make_project())
         output = self.run_stage("CREATE TABLE t (id INT)", "create-t", None)
@@ -800,7 +810,8 @@ class TestStage(SnowmanTestCase):
         self.assertIn(f"-- run with: {shlex.join(run_args)}", body)
 
     def test_printed_path_is_absolute_from_a_subdirectory(self):
-        root = self.make_project()
+        # The space makes the run command's path need shell quoting.
+        root = self.make_named_project("my project")
         (root / "models").mkdir()
         self.enter(root / "models")
         output = self.run_stage("SELECT 1", "noop", None)
@@ -809,6 +820,14 @@ class TestStage(SnowmanTestCase):
         run_line = next(line for line in output.splitlines() if line.startswith("run with: "))
         run_args = shlex.split(run_line.removeprefix("run with: "))
         self.assertEqual(run_args[run_args.index("-f") + 1], str(staged))
+
+    def test_line_break_in_the_path_stays_inside_the_header_comment(self):
+        root = self.enter(self.make_named_project("Quarter\nOne"))
+        self.run_stage("SELECT 1", "noop", None)
+        header, sql = self.staged_files(root)[0].read_text(encoding="utf-8").split("\n\n", 1)
+        self.assertIn("Quarter", header)
+        self.assertTrue(all(line.startswith("-- ") for line in header.split("\n")), header)
+        self.assertEqual(sql, "SELECT 1\n")
 
     def test_accepts_multi_statement_dml(self):
         root = self.enter(self.make_project())

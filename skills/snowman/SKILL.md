@@ -125,7 +125,7 @@ source rows and, separately, the keys in the staged file. Relay the path and bot
 ## Explore efficiently
 
 - Start from the narrowest known scope. Take column and schema names from a
-  `DESCRIBE TABLE ... ->> SELECT "name","type" FROM $1`, `INFORMATION_SCHEMA.COLUMNS`,
+  `DESCRIBE TABLE` projected to `"name","type"` with [`->>`](references/workflows.md#explore-objects), `INFORMATION_SCHEMA.COLUMNS`,
   or the dbt model's SQL and `schema` config before the first SELECT on a table;
   a name inferred from the model's purpose fails with `invalid identifier` and
   costs a round trip. Discover databases or schemas only when their names are missing.
@@ -133,7 +133,7 @@ source rows and, separately, the keys in the staged file. Relay the path and bot
   reduce output, not query cost. Use smaller samples and tighter filters in prod.
   Before a heavy query, state the configured warehouse or verify
   `CURRENT_WAREHOUSE()` when no warehouse is configured in context.
-- Prefer `SHOW TERSE` and project metadata with `->> SELECT "col" FROM $1`.
+- Prefer `SHOW TERSE` and project metadata with `->>`, as [install](references/install.md#discover-and-resolve-preferences) shows.
   Use plain `SHOW` for `rows` and `bytes`, which TERSE omits. Project columns
   explicitly when TERSE does not shrink an object's output. Project only
   columns you have seen in that SHOW's output; run it once with

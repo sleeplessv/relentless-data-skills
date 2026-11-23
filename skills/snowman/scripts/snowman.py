@@ -111,21 +111,26 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
     Returns ``(top, environments)``: top-level scalar keys, and the
     ``environments:`` map of env name -> {key: value}. Only the shapes the
     snowman templates produce are understood. Anything nested deeper is
-    ignored.
+    ignored. An environment's settings are its direct fields only.
     """
-    text = context.read_text(encoding="utf-8")
-    if not text.startswith("---"):
+    lines = context.read_text(encoding="utf-8").splitlines()
+    if not lines or lines[0] != "---":
         raise Blocked(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
-    _, _, rest = text.partition("---")
-    front, _, _ = rest.partition("---")
+    if "---" not in lines[1:]:
+        raise Blocked(
+            f"{context} frontmatter has no closing `---` line, so the wrapper "
+            "cannot tell the settings from the notes. Add one after the last setting."
+        )
+    front = lines[1:lines.index("---", 1)]
 
     top: dict[str, str] = {}
     environments: dict[str, dict[str, str]] = {}
     in_environments = False
     current_env: str | None = None
     env_indent: int | None = None
+    field_indent: int | None = None
 
-    for raw in front.splitlines():
+    for raw in front:
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         indent = len(raw) - len(raw.lstrip(" "))
@@ -145,10 +150,15 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
         elif in_environments:
             if not value and (env_indent is None or indent <= env_indent):
                 env_indent = indent
+                field_indent = None
                 current_env = key
                 environments[key] = {}
-            elif value and current_env is not None and env_indent is not None and indent > env_indent:
-                environments[current_env][key] = value
+            elif current_env is not None and env_indent is not None and indent > env_indent:
+                # The first line under the environment sets its field indentation.
+                if field_indent is None:
+                    field_indent = indent
+                if value and indent == field_indent:
+                    environments[current_env][key] = value
     return top, environments
 
 
@@ -240,7 +250,8 @@ def resolve_target(
 ) -> Target:
     """Resolve where one run goes, walking up from `start`.
 
-    A ``connection`` override skips the context file (bootstrap mode).
+    A ``connection`` override skips the context file (bootstrap mode), and
+    blocks once a context file exists at or above ``start``.
     Otherwise the nearest ``.snowman/context.md`` supplies the connection,
     with ``env`` choosing among its environments. The ``.env`` is the nearest
     one at or above the project root, or above ``start`` in bootstrap mode.
@@ -248,6 +259,13 @@ def resolve_target(
     """
     warehouse = None
     if connection:
+        context = find_up(start, ".snowman/context.md")
+        if context is not None:
+            raise Blocked(
+                f"--connection is for bootstrap only, but {context} exists. "
+                "Drop --connection: the context sets the connection, and "
+                "--env <name> picks an environment in a multi-environment project."
+            )
         environment = project_root = snowman_dir = None
     else:
         context = find_context(start)
@@ -932,7 +950,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--connection", metavar="NAME",
         help="connection name override for bootstrap, before "
-        ".snowman/context.md exists (execute mode only)",
+        ".snowman/context.md exists; blocks once it does (execute mode only)",
     )
     parser.add_argument(
         "--env", metavar="NAME",

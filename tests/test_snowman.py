@@ -339,6 +339,36 @@ class TestParseFrontmatter(SnowmanTestCase):
         context = self.write_context("# just a heading\n")
         self.assert_blocked(snowman.parse_frontmatter, context, match="frontmatter")
 
+    def test_dashes_inside_a_value_do_not_close_the_frontmatter(self):
+        context = self.write_context("---\nconnection: analytics---dev\n---\n")
+        top, _ = snowman.parse_frontmatter(context)
+        self.assertEqual(top.get("connection"), "analytics---dev")
+
+    def test_missing_closing_line_blocks(self):
+        context = self.write_context(
+            "---\nconnection: analytics\n# Notes\nconnection: from_the_notes\n"
+        )
+        self.assert_blocked(snowman.parse_frontmatter, context, match="no closing `---`")
+
+    def test_nested_keys_do_not_replace_environment_fields(self):
+        context = self.write_context(
+            "---\n"
+            "environments:\n"
+            "  dev:\n"
+            "    extras:\n"
+            "      connection: nested_dev\n"
+            "    connection: acme_dev\n"
+            "  prod:\n"
+            "    connection: acme_prod\n"
+            "    extras:\n"
+            "      connection: nested_prod\n"
+            "default_env: dev\n"
+            "---\n"
+        )
+        _, environments = snowman.parse_frontmatter(context)
+        self.assertEqual(environments["dev"], {"connection": "acme_dev"})
+        self.assertEqual(environments["prod"], {"connection": "acme_prod"})
+
 
 class TestResolveTarget(SnowmanTestCase):
     """resolve_target: context lookup, frontmatter, connection choice, .env."""
@@ -430,6 +460,16 @@ class TestResolveTarget(SnowmanTestCase):
         root = self.make_bare_dir()
         target = snowman.resolve_target(root, "bootstrap_conn", None)
         self.assertEqual(target, snowman.Target("bootstrap_conn", None, None, None, None))
+
+    def test_connection_override_blocks_in_a_configured_project(self):
+        root = self.make_project()
+        nested = root / "models" / "marts"
+        nested.mkdir(parents=True)
+        for start in (root, nested):
+            with self.subTest(start=start):
+                self.assert_blocked(
+                    snowman.resolve_target, start, "other_conn", None, match="bootstrap only"
+                )
 
     def test_env_file_at_project_root(self):
         root = self.make_project()

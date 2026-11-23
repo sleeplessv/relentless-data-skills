@@ -38,8 +38,10 @@ from project context. An explicit environment selects its own settings.
 Queries fall back to `default_env`. `prd` and `prod` are aliases: when the
 context defines only one, the other resolves to it and a `# environment:` note
 on stderr names both. Unknown environments, mixed context forms,
-and `--env` with a single-account context are rejected. `--connection` bypasses
-context for bootstrap and retains the named connection's warehouse setting.
+and `--env` with a single-account context are rejected. `--connection` is for
+bootstrap only. It bypasses context and retains the named connection's warehouse
+setting, and it blocks when a `.snowman/context.md` exists at or above the
+working directory.
 
 The CLI call uses `--format JSON_EXT --enhanced-exit-codes` and appends
 `DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. This second

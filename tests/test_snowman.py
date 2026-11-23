@@ -648,7 +648,7 @@ class TestEnvAlias(SnowmanTestCase):
         self.assertIn("prod__teardown", name)
         self.assertIn("-- target environment: prod (connection: acme_prod)", body)
         self.assertIn("-- WARNING: contains DROP", body)
-        self.assertEqual(staged["prod"][2], "")
+        self.assertNotIn("alias", staged["prod"][2])
         self.assertIn("using its alias 'prod'", staged["prd"][2])
 
     def test_query_through_the_alias_keeps_the_read_only_guard(self):
@@ -765,10 +765,13 @@ class TestFindUp(SnowmanTestCase):
 
 class TestStage(SnowmanTestCase):
     def run_stage(self, *args, **kwargs) -> str:
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        return self.run_stage_with_stderr(*args, **kwargs)[0]
+
+    def run_stage_with_stderr(self, *args, **kwargs) -> tuple[str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             self.assertEqual(snowman.stage(*args, **kwargs), 0)
-        return stdout.getvalue()
+        return stdout.getvalue(), stderr.getvalue()
 
     def staged_files(self, root: Path) -> list:
         return sorted((root / ".snowman" / "staged").glob("*.sql"))
@@ -814,17 +817,18 @@ class TestStage(SnowmanTestCase):
 
     def test_destructive_keywords_warn_but_never_block(self):
         root = self.enter(self.make_project())
-        self.run_stage("DROP TABLE old; TRUNCATE TABLE older;", "teardown", None)
+        _, err = self.run_stage_with_stderr("DROP TABLE old; TRUNCATE TABLE older;", "teardown", None)
         body = self.staged_files(root)[0].read_text(encoding="utf-8")
-        self.assertIn("WARNING", body)
-        self.assertIn("DROP", body)
-        self.assertIn("TRUNCATE", body)
+        warning = "WARNING: contains DROP, TRUNCATE. Review carefully before running"
+        self.assertIn(f"-- {warning}", body)
+        self.assertEqual(err, f"{warning}\n")
 
     def test_non_destructive_script_has_no_warning(self):
         root = self.enter(self.make_project())
-        self.run_stage("INSERT INTO t VALUES (1)", "insert-row", None)
+        _, err = self.run_stage_with_stderr("INSERT INTO t VALUES (1)", "insert-row", None)
         body = self.staged_files(root)[0].read_text(encoding="utf-8")
         self.assertNotIn("WARNING", body)
+        self.assertEqual(err, "")
 
     def test_maintains_gitignore(self):
         root = self.enter(self.make_project())

@@ -786,6 +786,8 @@ def stage(
         run_args += ["--warehouse", warehouse]
     run_cmd = shlex.join(run_args)
     destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
+    warning = (f"WARNING: contains {', '.join(destructive)}. Review carefully before running"
+               if destructive else "")
     header = [
         "-- staged by snowman, NOT executed",
         f"-- purpose: {slug}",
@@ -796,14 +798,14 @@ def stage(
         f"-- staged at: {now:%Y-%m-%d %H:%M:%S}",
         f"-- run with: {run_cmd}",
     ]
-    if destructive:
-        header.append(
-            f"-- WARNING: contains {', '.join(destructive)}. Review carefully before running"
-        )
+    if warning:
+        header.append(f"-- {warning}")
     path.write_text("\n".join(header) + "\n\n" + sql.strip() + "\n", encoding="utf-8")
 
     print(f"STAGED (not executed): {path}")
     print(f"run with: {run_cmd}")
+    if warning:
+        print(warning, file=sys.stderr)
     return 0
 
 

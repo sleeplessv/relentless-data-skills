@@ -719,9 +719,11 @@ def gitignored_dir(path: Path) -> Path:
     """Create `path` (if needed) with a `.gitignore` ignoring everything in it.
 
     An existing `.gitignore` keeps its rules. Unless its last rule is `*`,
-    a `*` line is appended: git applies the last matching rule.
+    a `*` line is appended: git applies the last matching rule. The directory
+    is owner-only (0700), since its files can hold warehouse rows.
     """
     path.mkdir(exist_ok=True)
+    path.chmod(0o700)
     gitignore = path / ".gitignore"
     text = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
     rules = [line.strip() for line in text.splitlines()
@@ -744,7 +746,7 @@ def reserve_path(directory: Path, base: str, suffix: str, now: datetime) -> Path
     bump = 1
     while True:
         try:
-            path.open("x").close()
+            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
             return path
         except FileExistsError:
             path = directory / f"{stem}-{bump}{suffix}"

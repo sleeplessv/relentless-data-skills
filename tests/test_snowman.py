@@ -122,6 +122,10 @@ class SnowmanTestCase(unittest.TestCase):
         os.chdir(path)
         return path
 
+    def umask_022(self) -> None:
+        """Set umask 022, the common default, for the rest of the test."""
+        self.addCleanup(os.umask, os.umask(0o022))
+
     def assert_git_ignores(self, root: Path, path: Path) -> None:
         """Assert `git check-ignore` in a repo at `root` reports `path` ignored."""
         if shutil.which("git") is None:
@@ -880,6 +884,15 @@ class TestStage(SnowmanTestCase):
         self.assert_git_ignores(root, staged)
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*.tmp\n*\n")
 
+    def test_staged_file_and_directory_are_owner_only(self):
+        self.umask_022()
+        root = self.enter(self.make_project())
+        (root / ".snowman" / "staged").mkdir(mode=0o755)
+        self.run_stage("SELECT 1", "noop", None)
+        [staged] = self.staged_files(root)
+        self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(staged.parent.stat().st_mode & 0o777, 0o700)
+
     def test_empty_script_blocks(self):
         self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "   ", "noop", None, match="empty")
@@ -1191,6 +1204,12 @@ class TestSpillFullResult(SnowmanTestCase):
         path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
         self.assert_git_ignores(root, path)
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n!*.json\n*\n")
+
+    def test_result_file_and_directory_are_owner_only(self):
+        self.umask_022()
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", self.make_project() / ".snowman")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
 
     def test_same_sql_in_the_same_second_keeps_both_results(self):
         snowman_dir = self.make_project() / ".snowman"

@@ -117,6 +117,7 @@ that the submitted SQL was a write.
 Unexpected CLI output, preview-processing failures, and artifact-save failures
 exit with code 1 and `ERROR: query already ran; ...`. Stdout stays empty.
 The wrapper rejects inconsistent row shapes rather than dropping fields.
+CLI output that is not valid UTF-8 is unexpected output, even inside a JSON string.
 
 For these failures, the wrapper saves received CLI stdout unchanged to a private
 temporary file with mode `0600`. The `# raw CLI stdout:` notice gives its absolute

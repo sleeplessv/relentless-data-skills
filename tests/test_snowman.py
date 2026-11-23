@@ -63,6 +63,7 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
     ``outcomes`` maps ``"sql"`` or ``"connection"`` to the result run_snow
     would return, so tests describe results instead of scripting call order.
+    A str stdout is encoded as UTF-8, the bytes snow would print.
     A subcommand with no outcome raises KeyError. ``fake.calls`` records
     every ``(args, env)`` pair.
     """
@@ -70,7 +71,10 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
     def run(args: list[str], env: dict, *, timeout=None) -> Outcome:
         calls.append((args, env))
-        return outcomes[args[0]]
+        outcome = outcomes[args[0]]
+        if isinstance(outcome.stdout, str):
+            outcome = outcome._replace(stdout=outcome.stdout.encode())
+        return outcome
 
     run.calls = calls
     return run
@@ -1375,13 +1379,12 @@ class TestSpillFullResult(SnowmanTestCase):
 class TestRunSnow(SnowmanTestCase):
     """The one place subprocess.run is patched: run_snow owns the snow argv."""
 
-    def test_prepends_snow_and_decodes_output(self):
+    def test_prepends_snow_keeps_stdout_bytes_and_decodes_stderr(self):
         completed = types.SimpleNamespace(returncode=5, stdout=b"[]\n", stderr=b"bad \xff\n")
         with mock.patch.object(snowman.subprocess, "run", return_value=completed) as run:
             result = snowman.run_snow(["sql", "-q", "SELECT 1"], {"A": "1"})
-        self.assertEqual(result.returncode, 5)
-        self.assertEqual(result.stdout, "[]\n")
-        self.assertEqual(result.stderr, "bad �\n")
+        self.assertEqual(result, (5, b"[]\n", "bad �\n"))
+        self.assertIs(result.stdout, completed.stdout)
         self.assertEqual(run.call_args[0][0], ["snow", "sql", "-q", "SELECT 1"])
         self.assertEqual(run.call_args[1]["env"], {"A": "1"})
         self.assertTrue(run.call_args[1]["capture_output"])

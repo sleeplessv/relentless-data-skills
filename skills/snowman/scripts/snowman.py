@@ -334,18 +334,17 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
 
 
 class SnowResult(NamedTuple):
-    """Decoded CLI result plus original stdout bytes for lossless recovery."""
+    """CLI result: stdout as received, for strict parsing and lossless recovery."""
 
     returncode: int
-    stdout: str
+    stdout: bytes
     stderr: str
-    stdout_bytes: bytes | None = None
 
 
 def run_snow(
     args: list[str], env: dict[str, str], *, timeout: float | None = None
 ) -> SnowResult:
-    """Run ``snow <args>`` and return its decoded result.
+    """Run ``snow <args>`` and return its result with stderr decoded.
 
     ``args`` is the argv after the binary name, so ``args[0]`` is the snow
     subcommand. This is the only place the wrapper touches ``subprocess``,
@@ -358,12 +357,7 @@ def run_snow(
         )
     except FileNotFoundError:
         raise Blocked("`snow` CLI not found on PATH.")
-    return SnowResult(
-        result.returncode,
-        result.stdout.decode(errors="replace"),
-        result.stderr.decode(errors="replace"),
-        result.stdout,
-    )
+    return SnowResult(result.returncode, result.stdout, result.stderr.decode(errors="replace"))
 
 
 def connection_params(connection: str, env: dict[str, str]) -> dict | None:
@@ -896,7 +890,7 @@ def split_result(parsed) -> tuple[list | None, list[dict] | None]:
     return None, None
 
 
-def preserve_failed_result(raw: str | bytes, reason: str) -> ResultProcessingError:
+def preserve_failed_result(raw: bytes, reason: str) -> ResultProcessingError:
     """Keep received CLI stdout privately when parsing, rendering or spilling fails."""
     if not raw.strip():
         return ResultProcessingError(f"{reason} no result output received; nothing to recover.")
@@ -904,7 +898,7 @@ def preserve_failed_result(raw: str | bytes, reason: str) -> ResultProcessingErr
     try:
         fd, path = tempfile.mkstemp(prefix="snowman-recovery-", suffix=".txt")
         with os.fdopen(fd, "wb") as out:
-            out.write(raw if isinstance(raw, bytes) else raw.encode("utf-8"))
+            out.write(raw)
     except OSError:
         if path is not None:
             try:
@@ -955,9 +949,9 @@ def execute(
             print(hint, file=sys.stderr)
         return result.returncode
 
-    raw = result.stdout_bytes if result.stdout_bytes is not None else result.stdout
+    raw = result.stdout
     try:
-        rows, types = split_result(json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw))
+        rows, types = split_result(json.loads(raw.decode("utf-8")))
     except (ValueError, RecursionError):
         rows = types = None
     if not isinstance(rows, list):

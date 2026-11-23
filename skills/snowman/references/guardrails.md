@@ -103,6 +103,7 @@ Any row, cell, data-byte, or type-note truncation saves the complete CLI result:
 The artifact preserves all returned rows and `DESCRIBE RESULT` records.
 Project queries save to gitignored `.snowman/results/<timestamp>__<sql-hash>.json`.
 Bootstrap saves to a private `snowman-results-*` temporary directory.
+[Saved files](#saved-files) covers their `.gitignore`, permissions, and failed writes.
 The stderr `# full result:` notice gives the path relative to the current
 working directory for project results, or an absolute bootstrap path.
 Inspect only needed fields locally. The wrapper does not delete artifacts.
@@ -136,7 +137,8 @@ with the [Run queries](../SKILL.md#run-queries) heredoc in the same shell call.
 It requires context and, for multiple environments, an explicit `--env`.
 It accepts DML, DDL, and multiple statements. Empty scripts are rejected.
 
-Files are gitignored under `.snowman/staged/<timestamp>__<slug>.sql`.
+Files are gitignored under `.snowman/staged/<timestamp>__<slug>.sql`, as
+[Saved files](#saved-files) describes.
 Multi-environment filenames also contain the environment name, slugged like the
 purpose, when that slug is not empty. The header identifies the target, with the
 environment name unchanged, and includes a shell-quoted `snow sql -f ... --connection ... --enable-templating NONE`
@@ -148,3 +150,12 @@ Destructive keywords add a `-- WARNING:` header and print the same warning to
 stderr, but do not prevent staging.
 Stage mode prints `STAGED (not executed): <path>` and `run with: <command>`.
 It does not execute or clean up scripts.
+
+## Saved files
+
+`.snowman/results/` and `.snowman/staged/` each hold a `.gitignore`. The wrapper
+creates it as `*`. If one already exists, the wrapper keeps its rules and appends
+`*` unless `*` is already the last rule, because git applies the last matching rule.
+Each run sets the directory to `0700`. Every saved file, bootstrap results
+included, is created `0600`. A write that fails removes the file, so no partial
+artifact keeps the final name.

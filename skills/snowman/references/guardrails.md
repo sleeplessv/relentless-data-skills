@@ -117,6 +117,7 @@ that the submitted SQL was a write.
 Unexpected CLI output, preview-processing failures, and artifact-save failures
 exit with code 1 and `ERROR: query already ran; ...`. Stdout stays empty.
 The wrapper rejects inconsistent row shapes rather than dropping fields.
+Query result stdout that is not valid UTF-8 is unexpected output, even inside a JSON string.
 
 For these failures, the wrapper saves received CLI stdout unchanged to a private
 temporary file with mode `0600`. The `# raw CLI stdout:` notice gives its absolute
@@ -161,6 +162,8 @@ Git does not read a `.gitignore` that is a symbolic link. A query blocks before
 it runs when `.snowman/results/.gitignore` is a link. Staging blocks before it
 writes when `.snowman/staged/.gitignore` is a link. Neither changes the link.
 Replace the link with a regular file that contains `*`.
+Git drops every rule in a `.gitignore` of 100 MiB or more, the appended `*`
+included. The wrapper does not check the size, so keep each `.gitignore` small.
 Each run sets the directory to `0700`. Every saved file, bootstrap results
 included, is created `0600`. A write that fails removes the file, so no partial
 artifact keeps the final name.

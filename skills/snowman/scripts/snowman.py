@@ -334,18 +334,17 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
 
 
 class SnowResult(NamedTuple):
-    """Decoded CLI result plus original stdout bytes for lossless recovery."""
+    """CLI result with stdout kept as received, for strict parsing and lossless recovery."""
 
     returncode: int
-    stdout: str
+    stdout: bytes
     stderr: str
-    stdout_bytes: bytes | None = None
 
 
 def run_snow(
     args: list[str], env: dict[str, str], *, timeout: float | None = None
 ) -> SnowResult:
-    """Run ``snow <args>`` and return its decoded result.
+    """Run ``snow <args>`` and return its result with stderr decoded.
 
     ``args`` is the argv after the binary name, so ``args[0]`` is the snow
     subcommand. This is the only place the wrapper touches ``subprocess``,
@@ -358,12 +357,7 @@ def run_snow(
         )
     except FileNotFoundError:
         raise Blocked("`snow` CLI not found on PATH.")
-    return SnowResult(
-        result.returncode,
-        result.stdout.decode(errors="replace"),
-        result.stderr.decode(errors="replace"),
-        result.stdout,
-    )
+    return SnowResult(result.returncode, result.stdout, result.stderr.decode(errors="replace"))
 
 
 def connection_params(connection: str, env: dict[str, str]) -> dict | None:
@@ -375,7 +369,7 @@ def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     """
     try:
         result = run_snow(["connection", "list", "--format", "JSON"], env, timeout=30)
-        for item in json.loads(result.stdout):
+        for item in json.loads(result.stdout.decode(errors="replace")):
             if item.get("connection_name") == connection:
                 params = item.get("parameters")
                 return params if isinstance(params, dict) else {}
@@ -756,22 +750,24 @@ def create_private_file(
     stem = f"{now:%Y%m%d-%H%M%S}__{base}"
     path = directory / f"{stem}{suffix}"
     bump = 1
-    fd = out = None  # fd is set only once this call has created `path`
+    fd = None  # set only once this call has created `path`
     try:
-        while True:
-            try:
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                break
-            except FileExistsError:
-                path = directory / f"{stem}-{bump}{suffix}"
-                bump += 1
-        out = open(fd, "w", encoding="utf-8")
-        with out:
-            yield path, out
+        try:
+            while True:
+                try:
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    break
+                except FileExistsError:
+                    path = directory / f"{stem}-{bump}{suffix}"
+                    bump += 1
+            # closefd=False: open() would close fd itself if building the stream failed.
+            with open(fd, "w", encoding="utf-8", closefd=False) as out:
+                yield path, out
+        finally:
+            if fd is not None:
+                os.close(fd)
     except BaseException:
         if fd is not None:
-            if out is None:
-                os.close(fd)
             path.unlink(missing_ok=True)
         raise
 
@@ -896,7 +892,7 @@ def split_result(parsed) -> tuple[list | None, list[dict] | None]:
     return None, None
 
 
-def preserve_failed_result(raw: str | bytes, reason: str) -> ResultProcessingError:
+def preserve_failed_result(raw: bytes, reason: str) -> ResultProcessingError:
     """Keep received CLI stdout privately when parsing, rendering or spilling fails."""
     if not raw.strip():
         return ResultProcessingError(f"{reason} no result output received; nothing to recover.")
@@ -904,7 +900,7 @@ def preserve_failed_result(raw: str | bytes, reason: str) -> ResultProcessingErr
     try:
         fd, path = tempfile.mkstemp(prefix="snowman-recovery-", suffix=".txt")
         with os.fdopen(fd, "wb") as out:
-            out.write(raw if isinstance(raw, bytes) else raw.encode("utf-8"))
+            out.write(raw)
     except OSError:
         if path is not None:
             try:
@@ -955,14 +951,14 @@ def execute(
             print(hint, file=sys.stderr)
         return result.returncode
 
-    raw = result.stdout_bytes if result.stdout_bytes is not None else result.stdout
+    raw = result.stdout
     try:
-        rows, types = split_result(json.loads(result.stdout))
+        rows, types = split_result(json.loads(raw.decode("utf-8")))
     except (ValueError, RecursionError):
         rows = types = None
     if not isinstance(rows, list):
         raise preserve_failed_result(raw, "unexpected snow output; expected JSON row arrays.")
-    if rows and any(row.keys() != rows[0].keys() for row in rows[1:]):
+    if rows and any(row.keys() != rows[0].keys() for row in rows):
         raise preserve_failed_result(raw, "inconsistent result columns; cannot safely render these rows.")
     if types is not None and any(
         not isinstance(row.get("name"), str) or not isinstance(row.get("type"), str)

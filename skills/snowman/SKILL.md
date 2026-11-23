@@ -111,16 +111,16 @@ When the user asks for DML or DDL, stage it with the [Run queries](#run-queries)
 uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --stage "$SQL" --name <purpose-slug>
 ```
 
-Add the chosen `--env` for multi-environment projects. Staging requires context
-and accepts several statements. Name the script for its purpose in kebab-case.
-The wrapper writes a gitignored file under `.snowman/staged/` and prints its path
-and manual run command, including the connection and configured warehouse.
-Relay both and any destructive-keyword warning. The user executes and cleans up
-the script. Snowman does neither.
+Add the chosen `--env` for multi-environment projects. Staging requires context and accepts several statements.
+Name the script for its purpose in kebab-case. The wrapper writes a gitignored file under `.snowman/staged/`
+and prints its path and manual run command, including the connection and configured warehouse. Relay both and
+any destructive-keyword warning. The user executes and cleans up the script. Snowman does neither.
 
-Compose staged SQL only from complete values: a full `--json` result file or the
-saved `# full result:` artifact, never a preview. Before relaying the path, run
-`grep -c '…(+' <file>`, with `<file>` copied verbatim from the printed run command's shell-quoted `-f` argument: `0` (exit 1) passes; any other count is a truncated value and the script is not ready.
+A preview is never a source. Build staged SQL only from the saved `# full result:` JSON or from a run with
+`--max-rows 0 --max-cell 0 --max-output 0` whose stderr has no truncation notice: `# showing N of M rows`
+for dropped rows, `# some cells truncated`, `# data preview limited`, `[type notes shortened]`, or
+`# full result:`. If the change writes one row per key, such as a backfill or an `IN` list of IDs, count the
+source rows and, separately, the keys in the staged file. Relay the path and both counts only if they match.
 
 ## Explore efficiently
 

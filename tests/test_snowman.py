@@ -10,7 +10,9 @@ executes by design.
 """
 from __future__ import annotations
 
+import codecs
 import contextlib
+import errno
 import io
 import json
 import os
@@ -20,6 +22,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 import types
 import unittest
 from datetime import datetime
@@ -63,6 +66,7 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
     ``outcomes`` maps ``"sql"`` or ``"connection"`` to the result run_snow
     would return, so tests describe results instead of scripting call order.
+    A str stdout is encoded as UTF-8, the bytes snow would print.
     A subcommand with no outcome raises KeyError. ``fake.calls`` records
     every ``(args, env)`` pair.
     """
@@ -70,7 +74,10 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
     def run(args: list[str], env: dict, *, timeout=None) -> Outcome:
         calls.append((args, env))
-        return outcomes[args[0]]
+        outcome = outcomes[args[0]]
+        if isinstance(outcome.stdout, str):
+            outcome = outcome._replace(stdout=outcome.stdout.encode())
+        return outcome
 
     run.calls = calls
     return run
@@ -145,7 +152,8 @@ class SnowmanTestCase(unittest.TestCase):
         self.assertEqual([p.name for p in directory.iterdir()], [".gitignore"])
 
     def assert_git_ignores(self, root: Path, path: Path) -> None:
-        """Assert `git check-ignore` in a repo at `root` reports `path` ignored."""
+        """Assert `path` is a file and `git check-ignore` in a repo at `root` reports it ignored."""
+        self.assertTrue(path.is_file(), f"{path} is not a file")  # git ignores an absent path too
         if shutil.which("git") is None:
             self.skipTest("git is not installed")
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -1247,6 +1255,39 @@ class TestCreatePrivateFile(SnowmanTestCase):
         with self.assertRaises(OSError):
             os.fstat(opened[0])  # the descriptor was closed
 
+    def test_interrupted_encoder_setup_closes_once_and_removes_the_file(self):
+        # open() closes a descriptor it owns when building the stream fails.
+        root = self.make_bare_dir()
+        closed = []
+
+        def recording_close(fd):
+            closed.append(fd)
+            real_close(fd)
+
+        real_close = os.close
+        with mock.patch.object(snowman.os, "close", recording_close), \
+                mock.patch.object(codecs.IncrementalEncoder, "__init__", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            with snowman.create_private_file(root, "noop", ".sql", datetime.now()):
+                pass
+        self.assertEqual(list(root.iterdir()), [])
+        self.assertEqual(len(closed), 1)
+        with self.assertRaises(OSError):
+            os.fstat(closed[0])  # the descriptor was closed
+
+    def test_close_that_raises_after_a_clean_block_removes_the_file(self):
+        root = self.make_bare_dir()
+
+        def failing_close(fd):
+            real_close(fd)
+            raise OSError(errno.EIO, "close failed")
+
+        real_close = os.close
+        with mock.patch.object(snowman.os, "close", failing_close), self.assertRaises(OSError):
+            with snowman.create_private_file(root, "noop", ".sql", datetime.now()) as (_, out):
+                out.write("SELECT 1")
+        self.assertEqual(list(root.iterdir()), [])
+
 
 class TestSpillFullResult(SnowmanTestCase):
     def test_writes_full_untruncated_json_and_gitignore(self):
@@ -1293,6 +1334,7 @@ class TestSpillFullResult(SnowmanTestCase):
         gitignore.write_bytes(b"*.tmp\n*")
         gitignore.chmod(0o400)
         path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["rows"], [{"N": 1}])
         self.assert_git_ignores(root, path)
         self.assertEqual(gitignore.read_bytes(), b"*.tmp\n*")
 
@@ -1375,13 +1417,12 @@ class TestSpillFullResult(SnowmanTestCase):
 class TestRunSnow(SnowmanTestCase):
     """The one place subprocess.run is patched: run_snow owns the snow argv."""
 
-    def test_prepends_snow_and_decodes_output(self):
+    def test_prepends_snow_keeps_stdout_bytes_and_decodes_stderr(self):
         completed = types.SimpleNamespace(returncode=5, stdout=b"[]\n", stderr=b"bad \xff\n")
         with mock.patch.object(snowman.subprocess, "run", return_value=completed) as run:
             result = snowman.run_snow(["sql", "-q", "SELECT 1"], {"A": "1"})
-        self.assertEqual(result.returncode, 5)
-        self.assertEqual(result.stdout, "[]\n")
-        self.assertEqual(result.stderr, "bad �\n")
+        self.assertEqual(result, (5, b"[]\n", "bad �\n"))
+        self.assertIs(result.stdout, completed.stdout)
         self.assertEqual(run.call_args[0][0], ["snow", "sql", "-q", "SELECT 1"])
         self.assertEqual(run.call_args[1]["env"], {"A": "1"})
         self.assertTrue(run.call_args[1]["capture_output"])
@@ -1663,6 +1704,28 @@ class TestExecute(SnowmanTestCase):
         self.assertRegex(rel, r"^\.snowman/results/\d{8}-\d{6}__[0-9a-f]{8}\.json$")
         self.assertEqual(json.loads((root / rel).read_text())["rows"], rows)
 
+    def test_one_row_preview_holds_no_copy_of_the_row_list(self):
+        # A copy of the row list costs one 8-byte pointer per row. From the
+        # moment the JSON is parsed, the run may not add half that.
+        self.enter(self.make_project())
+        rows = 100_000
+        payload = json.dumps([{"N": i} for i in range(rows)]).encode()
+        split_result, parsed = snowman.split_result, []
+
+        def split_and_mark(result):
+            parsed.append(tracemalloc.get_traced_memory()[0])
+            tracemalloc.reset_peak()
+            return split_result(result)
+
+        if not tracemalloc.is_tracing():  # A runner started with -X tracemalloc keeps its tracing.
+            tracemalloc.start()
+            self.addCleanup(tracemalloc.stop)
+        with mock.patch.object(snowman, "split_result", split_and_mark):
+            code, _, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1", max_rows=1)
+        after_parse_peak = tracemalloc.get_traced_memory()[1]
+        self.assertEqual(code, 0)
+        self.assertLess(after_parse_peak - parsed[0], rows * 4)
+
     def test_spill_path_is_relative_to_cwd(self):
         root = self.enter(self.make_project())
         sub = root / "analysis" / "q1"
@@ -1861,6 +1924,17 @@ class TestAuthHintFor(SnowmanTestCase):
                 self.assertIn("snow connection test -c analytics", hint)
                 self.assertNotIn("PRIVATE_KEY_PASSPHRASE", hint)
 
+    def test_bad_byte_in_another_field_still_classifies(self):
+        listing = connection_listing("analytics", {"authenticator": "EXTERNALBROWSER", "user": "X"})
+        listing = listing._replace(stdout=listing.stdout.replace('"X"', '"\xff"').encode("latin-1"))
+        self.assertIn(b"\xff", listing.stdout)
+        with mock.patch.object(snowman, "run_snow", fake_snow({"connection": listing})):
+            params = snowman.connection_params("analytics", {})
+        self.assertEqual(params, {"authenticator": "EXTERNALBROWSER", "user": "�"})
+        hint = self.hint("OAuth access token expired", listing)
+        self.assertIn("authenticates in a browser", hint)
+        self.assertNotIn("PRIVATE_KEY_PASSPHRASE", hint)
+
     def test_keypair_connection(self):
         for params in ({"authenticator": "SNOWFLAKE_JWT"}, {"private_key_file": "/k.pem"}):
             with self.subTest(params=params):
@@ -1940,28 +2014,33 @@ class TestMainCli(SnowmanTestCase):
 
     def test_subprocess_recovery_preserves_invalid_utf8_bytes(self):
         root = self.enter(self.make_project())
-        payload = b"not json \xff\r\n"
-        calls = root / "calls.txt"
-        binary = root / "snow"
-        binary.write_text(
-            f"#!{sys.executable}\nimport sys\n"
-            f"with open({str(calls)!r}, 'a') as out: out.write('call\\n')\n"
-            f"sys.stdout.buffer.write({payload!r})\n"
-        )
-        binary.chmod(0o700)
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with mock.patch.dict(os.environ, {"PATH": str(root)}), \
-                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            code = snowman.main(["snowman.py", "SELECT 1"])
-        self.assertEqual(code, 1)
-        self.assertEqual(calls.read_text(), "call\n")
-        self.assertEqual(stdout.getvalue(), "")
-        self.assertNotIn("not json", stderr.getvalue())
-        self.assertNotIn("�", stderr.getvalue())
-        path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-        self.addCleanup(path.unlink)
-        self.assertEqual(path.read_bytes(), payload)
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        # Not JSON, then valid JSON whose string holds a bad byte or an encoded surrogate.
+        for payload in (b"not json \xff\r\n", b'[{"A":"secret \xe9"}]\n',
+                        b'[{"A":"secret \xed\xa0\x80"}]\n'):
+            with self.subTest(payload=payload):
+                calls = root / "calls.txt"
+                calls.unlink(missing_ok=True)
+                binary = root / "snow"
+                binary.write_text(
+                    f"#!{sys.executable}\nimport sys\n"
+                    f"with open({str(calls)!r}, 'a') as out: out.write('call\\n')\n"
+                    f"sys.stdout.buffer.write({payload!r})\n"
+                )
+                binary.chmod(0o700)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with mock.patch.dict(os.environ, {"PATH": str(root)}), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = snowman.main(["snowman.py", "SELECT 1"])
+                self.assertEqual(code, 1)
+                self.assertEqual(calls.read_text(), "call\n")
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertNotIn("not json", stderr.getvalue())
+                self.assertNotIn("secret", stderr.getvalue())
+                self.assertNotIn("�", stderr.getvalue())
+                path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
+                self.addCleanup(path.unlink)
+                self.assertEqual(path.read_bytes(), payload)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_empty_cli_output_reports_no_payload_to_recover(self):
         self.enter(self.make_project())

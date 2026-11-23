@@ -59,8 +59,8 @@ Done when the brief carries all four.
 
 ## 3. Launch the helper
 
-Pick a short unique `NAME` (`codex-review`). Put the brief in the launch: a
-message sent to an agent that is still starting can be lost.
+Pick a `NAME` of at most 30 characters ending in your address (`codex-review-t4z`); names are unique
+machine-wide (32 at most), so on `name_taken` add `-2`, up to `-9`; all taken: tell the user, stop. Put the brief in the launch: a message to a starting agent can be lost.
 
 ```sh
 hc run --bg --json --name "$NAME" --cwd "$PWD" --label herdr.space="$SPACE" \

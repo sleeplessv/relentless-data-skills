@@ -39,9 +39,9 @@ on stderr names both. Unknown environments, mixed context forms,
 and `--env` with a single-account context are rejected.
 
 `--connection <name>` is for bootstrap only. It bypasses context and uses the
-named connection's warehouse setting. It works only when executing a query
-without `--env`, and it blocks when a `.snowman/context.md` exists at or above
-the working directory.
+named connection's warehouse setting unless you pass `--warehouse`. It works
+only when executing a query without `--env`, and it blocks when a
+`.snowman/context.md` exists at or above the working directory.
 
 The CLI call uses `--format JSON_EXT --enhanced-exit-codes --enable-templating NONE`
 and appends `DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. This second

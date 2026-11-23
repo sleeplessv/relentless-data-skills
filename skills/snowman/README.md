@@ -58,5 +58,8 @@ Create one with `snow connection add` if needed. Authentication setup is in
   result formats, limits, errors, and staging behavior.
 - [Workflows](references/workflows.md) provides focused SQL examples.
 - [snowman.py](scripts/snowman.py) implements the standard-library-only wrapper.
+- [snow_guard.py](hooks/snow_guard.py) is the hook that refuses
+  [direct `snow` calls](references/guardrails.md#direct-snow-calls). The Claude
+  Code plugin install registers it; Cortex Code and Codex need a manual entry.
 
 Repository CI checks the skill with `python3 scripts/lint_skill.py`.

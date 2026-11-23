@@ -77,9 +77,9 @@ Read the reason after `BLOCKED:`. It describes a refusal before querying,
 including SQL, context, or configuration problems. Fix setup failures or
 reformulate an authorized read. For a blocked `LIST`, `SYSTEM$`, or `USE`, use
 the [substitutes](references/guardrails.md#blocked-reads-and-substitutes).
-Stage changes only when the user requested them. Never bypass the wrapper to
-evade a refusal. If `snow` is missing from PATH, install Snowflake CLI before
-retrying.
+Stage changes only when the user requested them. Never bypass the wrapper; run
+`snow` directly only as [allowed](references/guardrails.md#direct-snow-calls). If `snow`
+is missing from PATH, install Snowflake CLI before retrying.
 
 After a query-processing failure, inspect the reported `# raw CLI stdout:` file
 locally. It preserves received output for recovery. Do not rerun automatically.

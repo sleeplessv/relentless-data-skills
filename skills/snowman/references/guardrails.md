@@ -29,10 +29,6 @@ keyword, while `update_date` does not. `SYSTEM$` reads are blocked as a group.
 | `SYSTEM$CLUSTERING_INFORMATION`, other `SYSTEM$` reads | `SHOW TABLES LIKE '<t>' IN SCHEMA <db>.<schema> ->> SELECT "cluster_by", "automatic_clustering" FROM $1` for clustering; otherwise stage the statement for the user. |
 | `USE WAREHOUSE`, `USE ROLE`, `USE DATABASE` | `--warehouse <name>` for one call; the role comes from the connection, so pick the `--env` whose connection holds the access, or stage the check for the user. Qualify object names fully instead of `USE DATABASE`. |
 
-A literal `&name` in SQL, such as `'F&W'`, fails with `ERROR: SQL rendering error`:
-the CLI resolves SnowSQL-style `&variables` before sending the query. Build the
-string as `'F' || CHR(38) || 'W'` or filter with `LIKE 'F%W'`.
-
 After validation, the wrapper resolves the connection and `default_warehouse`
 from project context. An explicit environment selects its own settings.
 Queries fall back to `default_env`. `prd` and `prod` are aliases: when the
@@ -41,9 +37,10 @@ on stderr names both. Unknown environments, mixed context forms,
 and `--env` with a single-account context are rejected. `--connection` bypasses
 context for bootstrap and retains the named connection's warehouse setting.
 
-The CLI call uses `--format JSON_EXT --enhanced-exit-codes` and appends
-`DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. This second
-statement provides schema metadata for the preview and saved result.
+The CLI call uses `--format JSON_EXT --enhanced-exit-codes --enable-templating NONE`
+and appends `DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. This second
+statement provides schema metadata for the preview and saved result. With templating off,
+the CLI sends `&name` and `<% name %>` text, such as `'F&W'`, unchanged.
 
 ## Output
 
@@ -132,15 +129,16 @@ a hint matched to the connection's authenticator. See
 
 ## Staging
 
-`--stage "<SQL>" --name <purpose-slug>` writes SQL for manual execution.
+`--stage "$SQL" --name <purpose-slug>` writes SQL for manual execution.
 It requires context and, for multiple environments, an explicit `--env`.
 It accepts DML, DDL, and multiple statements. Empty scripts are rejected.
 
 Files are gitignored under `.snowman/staged/<timestamp>__<slug>.sql`.
 Multi-environment filenames also contain the environment. The header identifies
-the target and includes a shell-quoted `snow sql -f ... --connection ...` command
-with `--warehouse` from the flag, or from context when it specifies one. Run commands use paths relative
-to the project root.
+the target and includes a shell-quoted `snow sql -f ... --connection ... --enable-templating NONE`
+command, with `--warehouse` from the flag, or from context when it specifies one.
+Templating stays off, so the file runs as reviewed. Run commands use paths
+relative to the project root.
 
 Destructive keywords add a `-- WARNING:` header, but do not prevent staging.
 Stage mode prints `STAGED (not executed): <path>` and `run with: <command>`.

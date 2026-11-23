@@ -752,7 +752,8 @@ def stage(
     path = reserve_path(staged_dir, f"{env_part}{slug}", ".sql", now)
     rel = path.relative_to(target.project_root)
 
-    run_args = ["snow", "sql", "-f", str(rel), "--connection", connection]
+    run_args = ["snow", "sql", "-f", str(rel), "--connection", connection,
+                "--enable-templating", "NONE"]
     warehouse = warehouse or target.warehouse
     if warehouse:
         run_args += ["--warehouse", warehouse]
@@ -866,7 +867,7 @@ def execute(
 
     sub_env = snow_env(env_file)
     query_args = ["sql", "-q", with_describe(sql), "--connection", connection,
-                  "--format", "JSON_EXT", "--enhanced-exit-codes"]
+                  "--format", "JSON_EXT", "--enhanced-exit-codes", "--enable-templating", "NONE"]
     warehouse = warehouse or target.warehouse
     if warehouse:
         query_args += ["--warehouse", warehouse]

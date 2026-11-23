@@ -14,6 +14,7 @@ import contextlib
 import io
 import json
 import os
+import shlex
 import sys
 import tempfile
 import types
@@ -690,6 +691,16 @@ class TestStage(SnowmanTestCase):
         self.assertIn("--connection analytics", body)
         self.assertIn("CREATE TABLE t (id INT)", body)
 
+    def test_run_command_disables_templating_and_keeps_ampersand(self):
+        root = self.enter(self.make_project())
+        output = self.run_stage("UPDATE t SET brand = 'F&W'", "fix-brand", None)
+        body = self.staged_files(root)[0].read_text(encoding="utf-8")
+        self.assertIn("UPDATE t SET brand = 'F&W'", body)
+        run_line = next(line for line in output.splitlines() if line.startswith("run with: "))
+        run_args = shlex.split(run_line.removeprefix("run with: "))
+        self.assertEqual(run_args[run_args.index("--enable-templating") + 1], "NONE")
+        self.assertIn(f"-- run with: {shlex.join(run_args)}", body)
+
     def test_accepts_multi_statement_dml(self):
         root = self.enter(self.make_project())
         self.run_stage("INSERT INTO t VALUES (1); UPDATE t SET x = 2;", "backfill", None)
@@ -1192,15 +1203,16 @@ class TestExecute(SnowmanTestCase):
                 with self.assertRaisesRegex(snowman.ResultProcessingError, "unexpected snow output"):
                     self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
 
-    def test_runs_snow_with_resolved_connection(self):
+    def test_runs_snow_with_resolved_connection_and_no_templating(self):
+        # Without --enable-templating NONE, snow renders &W in 'F&W' and fails.
         self.enter(self.make_project())
-        code, _, _ = self.run_execute({"sql": OK}, "SELECT 1")
+        code, _, _ = self.run_execute({"sql": OK}, "SELECT 'F&W'")
         self.assertEqual(code, 0)
         self.assertEqual(
             self.sql_args(),
-            ["sql", "-q", "SELECT 1\n;DESCRIBE RESULT LAST_QUERY_ID()",
+            ["sql", "-q", "SELECT 'F&W'\n;DESCRIBE RESULT LAST_QUERY_ID()",
              "--connection", "analytics",
-             "--format", "JSON_EXT", "--enhanced-exit-codes"],
+             "--format", "JSON_EXT", "--enhanced-exit-codes", "--enable-templating", "NONE"],
         )
 
     def test_context_warehouse_is_applied_for_selected_environment(self):

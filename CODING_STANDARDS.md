@@ -81,4 +81,3 @@ Each rule is one statement followed by why it exists or an example. The backgrou
   read it; long packed lines that fit the line budget count as that material.**
   Why: `implement-ticket` fit its 150-line budget only by packing 120-word paragraphs into single lines.
 - **CN4. General skills hold no client- or project-specific names or paths.**
-  Why: hard-coded `dataops/modelling/.env` could make `metabase` read another project's API key.

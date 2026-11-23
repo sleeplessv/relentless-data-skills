@@ -716,52 +716,53 @@ def clean_snow_stderr(text: str) -> str:
     return "\n".join(out) + ("\n" if out else "")
 
 
-def gitignored_dir(path: Path) -> Path:
-    """Create `path` (if needed) with a `.gitignore` ignoring everything in it.
+def refuse_linked_gitignore(path: Path) -> None:
+    """Block when `path/.gitignore` is a symbolic link, which git does not read."""
+    gitignore = path / ".gitignore"
+    if gitignore.is_symlink():
+        raise Blocked(f"{gitignore} is a symbolic link, and git does not read a linked "
+                      ".gitignore, so saved files there would not be ignored. "
+                      "Replace the link with a regular file that contains the line *.")
 
-    An existing `.gitignore` keeps its rules. Unless its last rule is `*`,
-    a `*` line is appended: git applies the last matching rule. The directory
-    is owner-only (0700), since its files can hold warehouse rows.
+
+def gitignored_dir(path: Path) -> Path:
+    """Create `path` (if needed) as an owner-only (0700) directory whose
+    `.gitignore` ignores every file in it and keeps any existing rules.
     """
     path.mkdir(exist_ok=True)
     path.chmod(0o700)
+    refuse_linked_gitignore(path)
     gitignore = path / ".gitignore"
-    # Bytes, so a .gitignore in any encoding is kept as it is. Git ignores
-    # trailing spaces but not leading ones.
-    data = gitignore.read_bytes() if gitignore.is_file() else b""
-    rules = [line.rstrip() for line in data.splitlines()
-             if line.strip() and not line.startswith(b"#")]
-    if rules[-1:] != [b"*"]:
-        separator = b"\n" if data and not data.endswith(b"\n") else b""
-        gitignore.write_bytes(data + separator + b"*\n")
+    data = gitignore.read_bytes() if gitignore.exists() else b""
+    if data.split(b"\n")[-2:] not in ([b"*", b""], [b"*\r", b""]):
+        with gitignore.open("ab") as out:
+            out.write((b"\n" if data and not data.endswith(b"\n") else b"") + b"*\n")
     return path
 
 
-def reserve_path(directory: Path, base: str, suffix: str, now: datetime) -> Path:
-    """Create an empty ``<directory>/<timestamp>__<base><suffix>``; return it.
+@contextlib.contextmanager
+def create_private_file(
+    directory: Path, base: str, suffix: str, now: datetime,
+) -> Iterator[tuple[Path, TextIO]]:
+    """Create ``<directory>/<timestamp>__<base><suffix>`` (0600); yield it and its stream.
 
     The timestamp is ``now`` to the second. A clash appends ``-1``, ``-2``
     and so on to ``base``. Creation is exclusive, so parallel callers never
-    get the same file.
+    get the same file. If the block or the close raises, the file is removed.
     """
     stem = f"{now:%Y%m%d-%H%M%S}__{base}"
     path = directory / f"{stem}{suffix}"
     bump = 1
     while True:
         try:
-            os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600))
-            return path
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            break
         except FileExistsError:
             path = directory / f"{stem}-{bump}{suffix}"
             bump += 1
-
-
-@contextlib.contextmanager
-def filling(path: Path) -> Iterator[TextIO]:
-    """Open the file `reserve_path` created for writing. If writing fails, remove it."""
     try:
-        with path.open("w", encoding="utf-8") as out:
-            yield out
+        with open(fd, "w", encoding="utf-8") as out:
+            yield path, out
     except BaseException:
         path.unlink(missing_ok=True)
         raise
@@ -775,8 +776,7 @@ def spill_full_result(
     results_dir = (gitignored_dir(snowman_dir / "results") if snowman_dir
                    else Path(tempfile.mkdtemp(prefix="snowman-results-")))
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
-    path = reserve_path(results_dir, digest, ".json", now or datetime.now())
-    with filling(path) as out:
+    with create_private_file(results_dir, digest, ".json", now or datetime.now()) as (path, out):
         json.dump({"rows": rows, "types": types or []}, out, separators=(",", ":"), ensure_ascii=False)
         out.write("\n")
     return path
@@ -807,35 +807,34 @@ def stage(
     now = now or datetime.now()
     env_slug = slugify(env_name) if env_name else ""
     env_part = f"{env_slug}__" if env_slug else ""
-    path = reserve_path(staged_dir, f"{env_part}{slug}", ".sql", now)
-
-    run_args = ["snow", "sql", "-f", str(path), "--connection", connection,
-                "--enable-templating", "NONE"]
-    warehouse = warehouse or target.warehouse
-    if warehouse:
-        run_args += ["--warehouse", warehouse]
-    run_cmd = shlex.join(run_args)
     destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
     warning = (f"WARNING: contains {', '.join(destructive)}. Review carefully before running"
                if destructive else "")
-    header = [
-        "staged by snowman, NOT executed",
-        f"purpose: {slug}",
-    ]
-    if env_name:
-        header.append(f"target environment: {env_name} (connection: {connection})")
-    header += [
-        f"staged at: {now:%Y-%m-%d %H:%M:%S}",
-        f"run with: {run_cmd}",
-    ]
-    if warning:
-        header.append(warning)
-    # A line break inside a value (a path, an env name) must not end the comment.
-    # Split only on the breaks that end a SQL comment; keep U+2028 and the like.
-    comment = "\n".join(
-        f"-- {line}" for entry in header for line in re.split(r"\r\n|\r|\n", entry)
-    )
-    with filling(path) as out:
+    # The header names the file, so it is built inside the block that owns cleanup.
+    with create_private_file(staged_dir, f"{env_part}{slug}", ".sql", now) as (path, out):
+        run_args = ["snow", "sql", "-f", str(path), "--connection", connection,
+                    "--enable-templating", "NONE"]
+        warehouse = warehouse or target.warehouse
+        if warehouse:
+            run_args += ["--warehouse", warehouse]
+        run_cmd = shlex.join(run_args)
+        header = [
+            "staged by snowman, NOT executed",
+            f"purpose: {slug}",
+        ]
+        if env_name:
+            header.append(f"target environment: {env_name} (connection: {connection})")
+        header += [
+            f"staged at: {now:%Y-%m-%d %H:%M:%S}",
+            f"run with: {run_cmd}",
+        ]
+        if warning:
+            header.append(warning)
+        # A line break inside a value (a path, an env name) must not end the comment.
+        # Split only on the breaks that end a SQL comment; keep U+2028 and the like.
+        comment = "\n".join(
+            f"-- {line}" for entry in header for line in re.split(r"\r\n|\r|\n", entry)
+        )
         out.write(comment + "\n\n" + sql.strip() + "\n")
 
     print(f"STAGED (not executed): {path}")
@@ -929,6 +928,8 @@ def execute(
 
     target = resolve_target(Path.cwd(), connection_override, env)
     connection, env_file = target.connection, target.env_file
+    if target.snowman_dir:
+        refuse_linked_gitignore(target.snowman_dir / "results")
 
     sub_env = snow_env(env_file)
     query_args = ["sql", "-q", with_describe(sql), "--connection", connection,

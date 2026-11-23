@@ -126,6 +126,14 @@ class SnowmanTestCase(unittest.TestCase):
         """Set umask 022, the common default, for the rest of the test."""
         self.addCleanup(os.umask, os.umask(0o022))
 
+    def link_gitignore(self, directory: Path) -> Path:
+        """Make `directory/.gitignore` a symlink to a `*` file elsewhere; return the target."""
+        target = self.make_bare_dir() / "shared-ignore"
+        target.write_bytes(b"*\n")
+        directory.mkdir(parents=True)
+        (directory / ".gitignore").symlink_to(target)
+        return target
+
     def assert_git_ignores(self, root: Path, path: Path) -> None:
         """Assert `git check-ignore` in a repo at `root` reports `path` ignored."""
         if shutil.which("git") is None:
@@ -901,6 +909,21 @@ class TestStage(SnowmanTestCase):
         self.assertEqual(sorted(p.name for p in (root / ".snowman" / "staged").iterdir()),
                          [".gitignore"])
 
+    def test_interrupt_before_the_first_write_leaves_no_staged_file(self):
+        root = self.enter(self.make_project())
+        with mock.patch.object(snowman.shlex, "join", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            snowman.stage("SELECT 1", "noop", None)
+        self.assertEqual(self.staged_files(root), [])
+
+    def test_linked_gitignore_blocks_staging_and_is_left_alone(self):
+        root = self.enter(self.make_project())
+        target = self.link_gitignore(root / ".snowman" / "staged")
+        self.assert_blocked(snowman.stage, "SELECT 1", "noop", None, match="symbolic link")
+        self.assertEqual(self.staged_files(root), [])
+        self.assertTrue((root / ".snowman" / "staged" / ".gitignore").is_symlink())
+        self.assertEqual(target.read_bytes(), b"*\n")
+
     def test_empty_script_blocks(self):
         self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "   ", "noop", None, match="empty")
@@ -1171,10 +1194,11 @@ class TestCleanSnowStderr(SnowmanTestCase):
         self.assertEqual(snowman.clean_snow_stderr(""), "")
 
 
-class TestReservePath(SnowmanTestCase):
+class TestCreatePrivateFile(SnowmanTestCase):
     def test_timestamp_base_and_suffix(self):
         root = self.make_bare_dir()
-        path = snowman.reserve_path(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5))
+        with snowman.create_private_file(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5)) as (path, _):
+            pass
         self.assertEqual(path, root / "20260102-030405__noop.sql")
         self.assertEqual(path.read_text(encoding="utf-8"), "")
 
@@ -1183,7 +1207,8 @@ class TestReservePath(SnowmanTestCase):
         now = datetime(2026, 1, 2, 3, 4, 5)
         (root / "20260102-030405__noop.sql").touch()
         (root / "20260102-030405__noop-1.sql").touch()
-        path = snowman.reserve_path(root, "noop", ".sql", now)
+        with snowman.create_private_file(root, "noop", ".sql", now) as (path, _):
+            pass
         self.assertEqual(path.name, "20260102-030405__noop-2.sql")
         self.assertEqual(path.read_text(encoding="utf-8"), "")
 
@@ -1212,6 +1237,56 @@ class TestSpillFullResult(SnowmanTestCase):
         path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
         self.assert_git_ignores(root, path)
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n!*.json\n*\n")
+
+    def test_gitignore_whose_last_line_only_looks_like_a_catch_all_gets_one(self):
+        # Git keeps a trailing tab, and a bare CR does not end a line for it.
+        for data in (b"*.tmp\n*\t\n", b"*.tmp\r*\n"):
+            with self.subTest(data=data):
+                root = self.make_project()
+                gitignore = root / ".snowman" / "results" / ".gitignore"
+                gitignore.parent.mkdir()
+                gitignore.write_bytes(data)
+                path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+                self.assert_git_ignores(root, path)
+                self.assertEqual(gitignore.read_bytes(), data + b"*\n")
+
+    def test_crlf_catch_all_is_left_as_is(self):
+        root = self.make_project()
+        gitignore = root / ".snowman" / "results" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_bytes(b"*.tmp\r\n*\r\n")
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assert_git_ignores(root, path)
+        self.assertEqual(gitignore.read_bytes(), b"*.tmp\r\n*\r\n")
+
+    @unittest.skipIf(sys.platform == "win32", "needs RLIMIT_FSIZE and SIGXFSZ")
+    def test_failed_gitignore_append_keeps_the_existing_rules(self):
+        # A file-size limit of 0 makes any write fail with EFBIG, in a child process.
+        results = self.make_project() / ".snowman" / "results"
+        results.mkdir()
+        (results / ".gitignore").write_bytes(b"*.tmp\n")
+        child = subprocess.run([sys.executable, "-c", (
+            "import resource, signal, sys\n"
+            "from pathlib import Path\n"
+            f"sys.path.insert(0, {str(SKILL_DIR / 'scripts')!r})\n"
+            "import snowman\n"
+            "signal.signal(signal.SIGXFSZ, signal.SIG_IGN)\n"
+            "resource.setrlimit(resource.RLIMIT_FSIZE, (0, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))\n"
+            "try:\n"
+            "    snowman.gitignored_dir(Path(sys.argv[1]))\n"
+            "except OSError as exc:\n"
+            "    print(type(exc).__name__)\n"
+        ), str(results)], capture_output=True, text=True)
+        self.assertEqual(child.stdout, "OSError\n", child.stderr)
+        self.assertEqual((results / ".gitignore").read_bytes(), b"*.tmp\n")
+
+    def test_interrupt_before_the_first_write_leaves_no_result_file(self):
+        root = self.make_project()
+        with mock.patch.object(snowman.json, "dump", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assertEqual(sorted(p.name for p in (root / ".snowman" / "results").iterdir()),
+                         [".gitignore"])
 
     def test_result_file_and_directory_are_owner_only(self):
         self.umask_022()
@@ -1553,6 +1628,15 @@ class TestExecute(SnowmanTestCase):
         self.assertTrue(rel.startswith("../../.snowman/results/"), rel)
         self.assertEqual((Path.cwd() / rel).resolve(), root / ".snowman" / "results" / Path(rel).name)
         self.assertTrue((Path.cwd() / rel).is_file())
+
+    def test_linked_results_gitignore_blocks_before_querying(self):
+        root = self.enter(self.make_project())
+        target = self.link_gitignore(root / ".snowman" / "results")
+        self.snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", self.snow):
+            self.assert_blocked(snowman.execute, "SELECT 1", match="symbolic link")
+        self.assertEqual(self.snow.calls, [])
+        self.assertEqual(target.read_bytes(), b"*\n")
 
     def test_bootstrap_truncation_saves_in_private_temporary_directory(self):
         root = self.enter(self.make_bare_dir())

@@ -1012,7 +1012,7 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--connection", metavar="NAME",
         help="connection to query during bootstrap, before a context file "
-        "exists. See references/guardrails.md#connection-resolution.",
+        "exists. See Connection resolution in references/guardrails.md.",
     )
     parser.add_argument(
         "--env", metavar="NAME",

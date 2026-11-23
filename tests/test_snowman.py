@@ -2412,13 +2412,11 @@ class TestDocumentedInvocation(unittest.TestCase):
 
     def test_connection_help_points_to_guardrails(self):
         stdout = io.StringIO()
-        # Wide enough that argparse does not wrap the link at its hyphen.
-        with mock.patch.dict(os.environ, {"COLUMNS": "500"}), \
-                contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit):
+        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit):
             snowman.main(["snowman.py", "--help"])
         self.assertIn(
             "connection to query during bootstrap, before a context file exists. See "
-            "references/guardrails.md#connection-resolution.",
+            "Connection resolution in references/guardrails.md.",
             " ".join(stdout.getvalue().split()),
         )
 

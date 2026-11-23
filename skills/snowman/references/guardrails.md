@@ -50,13 +50,26 @@ Agents never run `snow` or `snowsql` themselves. The only direct calls are
 `snow connection list`, `snow connection test`, `snow --version` and `snow --help`.
 A staged script is run by the user, not the agent.
 
-On Claude Code, the snowman plugin's `PreToolUse` hook
-([`hooks/snow_guard.py`](../hooks/snow_guard.py)) refuses any other direct call,
-including after `&&`, `;` or a pipe, inside `$(...)`, `bash -c` or `eval`, and
-behind wrappers such as `env`, `uvx` or `xargs`. It ships only with the plugin
-install (`/plugin install snowman@relentless-data-skills`), not with
-`npx skills add`, and it fires inside helpers too. Cortex Code, Codex and Cursor
-rely on this rule alone for now.
+A `PreToolUse` hook, [`hooks/snow_guard.py`](../hooks/snow_guard.py), refuses
+any other direct call, including after `&&`, `;` or a pipe, inside `$(...)`,
+`bash -c` or `eval`, and behind wrappers such as `env`, `uvx` or `xargs`.
+Where it runs:
+
+| Harness | How the hook is registered |
+| --- | --- |
+| Claude Code | Comes with the plugin install (`/plugin install snowman@relentless-data-skills`) and fires inside helpers. `npx skills add` does not register it. |
+| Cortex Code CLI | Add the entry below to `~/.snowflake/cortex/hooks.json`, or to `~/.claude/settings.json`, which Cortex also reads. Its shell tool is lowercase `bash`. |
+| Codex | Add the entry below to `~/.codex/hooks.json`, then trust it in `/hooks`. Snowman ships no Codex plugin. |
+| Cursor and others | No hook; this rule alone applies. |
+
+For a manual entry, set `<skill-dir>` to the installed skill's directory:
+
+```json
+{"hooks": {"PreToolUse": [{"matcher": "Bash|bash", "hooks": [
+  {"type": "command", "command": "python3 \"<skill-dir>/hooks/snow_guard.py\""}]}]}}
+```
+
+Merge it into any `hooks` already in the file, and re-point it if the skill moves.
 
 The hook catches a mistake, such as running the printed staged command. It does
 not stop a deliberate bypass, such as Python with the Snowflake connector. The

@@ -114,9 +114,12 @@ class TestHookProcess(unittest.TestCase):
         result = self.call("snow connection list")
         self.assertEqual((result.returncode, result.stderr), (0, ""))
 
-    def test_other_tools_and_malformed_input_pass(self):
-        self.assertEqual(self.call("snow sql", tool="Read").returncode, 0)
+    def test_cortex_lowercase_bash_is_checked(self):
+        self.assertEqual(self.call("snow sql", tool="bash").returncode, 2)
+
+    def test_malformed_input_passes(self):
         self.assertEqual(run_hook("not json").returncode, 0)
+        self.assertEqual(run_hook('{"tool_name": "Read", "tool_input": {"file_path": "x"}}').returncode, 0)
         self.assertEqual(run_hook('{"tool_name": "Bash"}').returncode, 0)
 
 
@@ -124,7 +127,7 @@ class TestHookRegistration(unittest.TestCase):
     def test_hooks_json_runs_the_guard_on_bash(self):
         config = json.loads((HOOKS_DIR / "hooks.json").read_text(encoding="utf-8"))
         [entry] = config["hooks"]["PreToolUse"]
-        self.assertEqual(entry["matcher"], "Bash")
+        self.assertEqual(set(entry["matcher"].split("|")), {"Bash", "bash"})
         [hook] = entry["hooks"]
         self.assertIn("${CLAUDE_PLUGIN_ROOT}/hooks/snow_guard.py", hook["command"])
 

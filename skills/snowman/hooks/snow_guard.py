@@ -1,7 +1,12 @@
 #!/usr/bin/env python3
-"""Claude Code PreToolUse hook: refuse direct `snow` and `snowsql` calls.
+"""PreToolUse hook: refuse direct `snow` and `snowsql` calls.
 
-Snowflake work goes through scripts/snowman.py. This hook reads the Bash tool
+Runs on Claude Code, Codex and Cortex Code, which all pass the shell command as
+a string in `tool_input.command` and block on exit 2. The registration's
+matcher picks the shell tool (`Bash`, or `bash` on Cortex), so the tool name is
+not checked here.
+
+Snowflake work goes through scripts/snowman.py. This hook reads the shell tool
 call on stdin and exits 2, with the reason on stderr, when the command runs
 `snow` or `snowsql` itself. Allowed: `snow connection list`, `snow connection
 test`, `snow --version` and `snow --help`/`-h`. The wrapper's own `snow`
@@ -172,7 +177,7 @@ def main() -> int:
         command = payload["tool_input"]["command"]
     except (ValueError, KeyError, TypeError):
         return 0
-    if payload.get("tool_name") != "Bash" or not isinstance(command, str):
+    if not isinstance(command, str):
         return 0
     found = blocked_call(command)
     if found:

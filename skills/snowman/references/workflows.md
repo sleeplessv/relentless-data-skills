@@ -1,8 +1,8 @@
 # snowman workflows
 
 Use the playbook matching the request. Pass each query below to the wrapper
-through the heredoc in [Run queries](../SKILL.md#run-queries), which keeps its
-`"` and `$` unchanged. Start from the narrowest known scope and inspect saved
+through the heredoc in [Run queries](../SKILL.md#run-queries), which passes
+`"` and `$` to the wrapper unchanged. Start from the narrowest known scope and inspect saved
 result artifacts when a preview truncates.
 
 ## Explore objects

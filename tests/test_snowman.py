@@ -344,6 +344,74 @@ class TestParseFrontmatter(SnowmanTestCase):
         context = self.write_context("# just a heading\n")
         self.assert_blocked(snowman.parse_frontmatter, context, match="frontmatter")
 
+    def test_dashes_inside_a_value_do_not_close_the_frontmatter(self):
+        context = self.write_context("---\nconnection: analytics---dev\n---\n")
+        top, _ = snowman.parse_frontmatter(context)
+        self.assertEqual(top.get("connection"), "analytics---dev")
+
+    def test_missing_closing_line_blocks(self):
+        context = self.write_context(
+            "---\nconnection: analytics\n# Notes\nconnection: from_the_notes\n"
+        )
+        self.assert_blocked(snowman.parse_frontmatter, context, match="no closing `---`")
+
+    def test_delimiters_must_equal_three_dashes(self):
+        cases = {
+            "opening ---suffix": ("---suffix\nconnection: analytics\n---\n", "no YAML frontmatter"),
+            "closing with a trailing space": ("---\nconnection: analytics\n--- \n", "no closing `---`"),
+        }
+        for name, (text, match) in cases.items():
+            with self.subTest(name):
+                context = self.write_context(text)
+                self.assert_blocked(snowman.parse_frontmatter, context, match=match)
+
+    def test_crlf_line_endings_parse(self):
+        context = self.write_context("---\r\nconnection: analytics\r\n---\r\n# notes\r\n")
+        top, _ = snowman.parse_frontmatter(context)
+        self.assertEqual(top.get("connection"), "analytics")
+
+    def test_line_separator_in_a_comment_does_not_start_a_line(self):
+        cases = {
+            "closes the frontmatter": "---\n# pasted\u2028---\nconnection: analytics\n---\n",
+            "sets the connection": "---\nconnection: analytics\n# pasted\u2028connection: prod\n---\n",
+        }
+        for name, text in cases.items():
+            with self.subTest(name):
+                top, _ = snowman.parse_frontmatter(self.write_context(text))
+                self.assertEqual(top.get("connection"), "analytics")
+
+    def test_nested_keys_do_not_replace_environment_fields(self):
+        context = self.write_context(
+            "---\n"
+            "environments:\n"
+            "  dev:\n"
+            "    extras:\n"
+            "      connection: nested_dev\n"
+            "    connection: acme_dev\n"
+            "  prod:\n"
+            "    connection: acme_prod\n"
+            "    extras:\n"
+            "      connection: nested_prod\n"
+            "default_env: dev\n"
+            "---\n"
+        )
+        _, environments = snowman.parse_frontmatter(context)
+        self.assertEqual(environments["dev"], {"connection": "acme_dev"})
+        self.assertEqual(environments["prod"], {"connection": "acme_prod"})
+
+    def test_environment_name_with_a_value_blocks(self):
+        context = self.write_context(
+            "---\n"
+            "environments:\n"
+            "  dev:\n"
+            "    connection: acme_dev\n"
+            "  prod: &production\n"
+            "    connection: acme_prod\n"
+            "default_env: dev\n"
+            "---\n"
+        )
+        self.assert_blocked(snowman.parse_frontmatter, context, match="'prod'")
+
 
 class TestResolveTarget(SnowmanTestCase):
     """resolve_target: context lookup, frontmatter, connection choice, .env."""
@@ -435,6 +503,24 @@ class TestResolveTarget(SnowmanTestCase):
         root = self.make_bare_dir()
         target = snowman.resolve_target(root, "bootstrap_conn", None)
         self.assertEqual(target, snowman.Target("bootstrap_conn", None, None, None, None))
+
+    def test_connection_override_blocks_in_a_configured_project(self):
+        root = self.make_project()
+        nested = root / "models" / "marts"
+        nested.mkdir(parents=True)
+        for start in (root, nested):
+            with self.subTest(start=start):
+                self.assert_blocked(
+                    snowman.resolve_target, start, "other_conn", None, match="bootstrap only"
+                )
+
+    def test_empty_connection_override_blocks(self):
+        root = self.make_project()
+        self.assert_blocked(snowman.resolve_target, root, "", None, match="--connection")
+
+    def test_empty_connection_override_blocks_without_context(self):
+        root = self.make_bare_dir()
+        self.assert_blocked(snowman.resolve_target, root, "", None, match="empty name")
 
     def test_env_file_at_project_root(self):
         root = self.make_project()
@@ -638,6 +724,10 @@ class TestDotenv(SnowmanTestCase):
         env_file = self.write_env("no_equals_sign\n123BAD=x\nGOOD=1\n")
         parsed = snowman.load_dotenv(env_file)
         self.assertEqual(parsed, {"GOOD": "1"})
+
+    def test_line_separator_in_a_comment_does_not_start_a_line(self):
+        env_file = self.write_env("# pasted\u2028SNOWFLAKE_ACCOUNT=other\nGOOD=1\r\n")
+        self.assertEqual(snowman.load_dotenv(env_file), {"GOOD": "1"})
 
     def test_process_env_wins_over_dotenv(self):
         env_file = self.write_env("SNOWMAN_TEST_VAR=from_dotenv\nSNOWMAN_ONLY=relayed\n")
@@ -1427,6 +1517,13 @@ class TestExecute(SnowmanTestCase):
             self.assert_blocked(snowman.execute, "SELECT 1", match="bootstrap")
         self.assertEqual(snow.calls, [])
 
+    def test_empty_connection_override_never_reaches_snow(self):
+        self.enter(self.make_project())
+        snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", snow):
+            self.assert_blocked(snowman.execute, "SELECT 1", connection_override="")
+        self.assertEqual(snow.calls, [])
+
     def test_dotenv_relayed_to_snow_process_env_wins(self):
         root = self.enter(self.make_project())
         (root / ".env").write_text(
@@ -1690,6 +1787,20 @@ class TestMainCli(SnowmanTestCase):
         self.assert_usage_error(
             ["--connection", "c", "--env", "dev", "SELECT 1"], "use one"
         )
+
+    def test_empty_connection_is_still_a_given_flag(self):
+        # A bare dir keeps a run that slips past the parser away from real files.
+        self.enter(self.make_bare_dir())
+        cases = {
+            "with --stage": (
+                ["--stage", "--name", "noop", "--connection", "", "SELECT 1"],
+                "--connection is not valid with --stage",
+            ),
+            "with --env": (["--connection", "", "--env", "dev", "SELECT 1"], "use one"),
+        }
+        for name, (argv, match) in cases.items():
+            with self.subTest(name):
+                self.assert_usage_error(argv, match)
 
     def test_json_invalid_with_stage(self):
         self.assert_usage_error(

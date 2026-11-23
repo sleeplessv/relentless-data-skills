@@ -116,11 +116,11 @@ Name the script for its purpose in kebab-case. The wrapper writes a gitignored f
 and prints its path and manual run command, including the connection and configured warehouse. Relay both and
 any destructive-keyword warning. The user executes and cleans up the script. Snowman does neither.
 
-Build staged SQL only from the saved `# full result:` JSON or from a run with
+A preview is never a source. Build staged SQL only from the saved `# full result:` JSON or from a run with
 `--max-rows 0 --max-cell 0 --max-output 0` whose stderr has no truncation notice: `# showing N of M rows`
 for dropped rows, `# some cells truncated`, `# data preview limited`, `[type notes shortened]`, or
-`# full result:`. A preview is never a source. If the change writes one row per key, such as a backfill
-or an `IN` list of IDs, relay the path only when the source row count equals the staged SQL's key count.
+`# full result:`. If the change writes one row per key, such as a backfill or an `IN` list of IDs, count the
+source rows and, separately, the keys in the staged file. Relay the path and both counts only if they match.
 
 ## Explore efficiently
 

@@ -96,6 +96,11 @@ class SnowmanTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._original_cwd = os.getcwd()
         self.addCleanup(os.chdir, self._original_cwd)
+        # Recovery copies go to tempfile's default dir; keep them in one this test removes.
+        self.temp_root = self.make_bare_dir()
+        patcher = mock.patch.object(tempfile, "tempdir", str(self.temp_root))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def assert_blocked(self, fn, *args, match: str = "", **kwargs) -> str:
         """Assert `fn(...)` raises Blocked; return the reason for further checks."""
@@ -1121,15 +1126,11 @@ class TestRenderRows(SnowmanTestCase):
 
     def test_row_cap_footer(self):
         rows = [{"N": i} for i in range(1203)]
-        text, footers, _ = snowman.render_rows(
-            rows, fmt="csv", max_rows=50, max_cell=200,
-            full_note="full result: .snowman/results/20260903-181200__ab12cd34.csv",
-        )
+        text, footers, _ = snowman.render_rows(rows, fmt="csv", max_rows=50, max_cell=200)
         self.assertEqual(text.count("\n"), 51)  # header + 50 rows
         self.assertEqual(
             footers,
-            ["# showing 50 of 1203 rows; full result: "
-             ".snowman/results/20260903-181200__ab12cd34.csv; narrow the query or raise --max-rows/--max-output"],
+            ["# showing 50 of 1203 rows; narrow the query or raise --max-rows/--max-output"],
         )
 
     def test_max_rows_zero_is_unlimited(self):
@@ -1141,7 +1142,7 @@ class TestRenderRows(SnowmanTestCase):
     def test_footer_order_types_null_truncation_cap(self):
         rows = [{"S": "abcdefghij", "N": None}] * 3
         _, footers, _ = snowman.render_rows(
-            rows, fmt="csv", max_rows=2, max_cell=4, full_note="full result: x.csv",
+            rows, fmt="csv", max_rows=2, max_cell=4,
             types=[{"name": "N", "type": "DATE"}],
         )
         self.assertEqual(
@@ -1151,6 +1152,7 @@ class TestRenderRows(SnowmanTestCase):
              "# some cells truncated to 4 chars",
              "# showing 2 of 3 rows"],
         )
+        self.assertEqual(footers[-1], "# showing 2 of 3 rows; narrow the query or raise --max-rows/--max-output")
 
     def test_json_output_is_compact_and_parseable(self):
         rows = [{"O": {"k": 1}, "S": "abcdefghij", "N": None}]
@@ -1753,7 +1755,6 @@ class TestExecute(SnowmanTestCase):
         )
         self.assertIn("# showing 50 of 60 rows", err)
         path = Path(err.split("full result: ")[1].splitlines()[0])
-        self.addCleanup(self._rmtree, path.parent)
         self.assertTrue(path.is_absolute())
         self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
@@ -1992,11 +1993,10 @@ class TestMainCli(SnowmanTestCase):
                     b'[[1],[]]', b'[[{"A":1}],[{"name":42,"type":"DATE"}]]',
                     json.dumps([{"A": chr(0xD800)}]).encode()]
         for payload in payloads:
-            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as recovery_root:
+            with self.subTest(payload=payload):
                 snow = fake_snow({"sql": Outcome(0, payload, "")})
                 stdout, stderr = io.StringIO(), io.StringIO()
                 with mock.patch.object(snowman, "run_snow", snow), \
-                        mock.patch.object(tempfile, "tempdir", recovery_root), \
                         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                     code = snowman.main(["snowman.py", "SELECT 1"])
                 self.assertEqual(code, 1)
@@ -2035,9 +2035,15 @@ class TestMainCli(SnowmanTestCase):
                 self.assertNotIn("secret", stderr.getvalue())
                 self.assertNotIn("�", stderr.getvalue())
                 path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-                self.addCleanup(path.unlink)
                 self.assertEqual(path.read_bytes(), payload)
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_recovery_copy_lands_in_the_test_owned_temp_dir(self):
+        error = snowman.preserve_failed_result(b"payload", "reason.")
+        path = Path(str(error).split("# raw CLI stdout: ")[1].splitlines()[0])
+        self.assertEqual(path.parent, self.temp_root)
+        self.doCleanups()
+        self.assertFalse(path.exists())
 
     def test_empty_cli_output_reports_no_payload_to_recover(self):
         self.enter(self.make_project())
@@ -2078,7 +2084,6 @@ class TestMainCli(SnowmanTestCase):
         self.assertTrue(stderr.getvalue().startswith("ERROR: query already ran;"))
         self.assertIn("cannot save full result", stderr.getvalue())
         path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-        self.addCleanup(path.unlink)
         self.assertEqual(json.loads(path.read_text()), [{"DDL": "x" * 500}])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertNotIn("BLOCKED:", stderr.getvalue())
@@ -2264,6 +2269,19 @@ class TestDocumentedInvocation(unittest.TestCase):
         guardrails = self.docs()["guardrails.md"]
         self.assertNotIn("LIKE 'F%W'", guardrails)
         self.assertNotIn("CHR(38)", guardrails)
+
+    def test_list_substitute_prefers_directory_table(self):
+        row = next(line for line in self.docs()["guardrails.md"].splitlines()
+                   if line.startswith("| `LIST @stage/path` |"))
+        substitute = row.split("|")[2]
+        queries = re.findall(r"`(SELECT [^`]+)`", substitute)
+        self.assertEqual(len(queries), 2, substitute)
+        self.assertIn("FROM DIRECTORY(@stage) WHERE STARTSWITH(RELATIVE_PATH, 'path')", queries[0])
+        self.assertIn("METADATA$FILENAME", queries[1])
+        self.assertIn(". The row scan omits empty files. ", substitute.split(queries[1], 1)[1] + " ")
+        for sql in queries:
+            with self.subTest(sql=sql):
+                snowman.enforce_read_only(sql)
 
 
 if __name__ == "__main__":

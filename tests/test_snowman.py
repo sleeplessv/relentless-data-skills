@@ -90,20 +90,6 @@ def write_fake_executable(path: Path, body: str, python: str = sys.executable) -
     path.chmod(0o700)
 
 
-class TestWriteFakeExecutable(unittest.TestCase):
-    def test_runs_when_the_python_path_has_spaces(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            python = Path(tmp) / "py dir" / "python3"
-            python.parent.mkdir()
-            python.symlink_to(sys.executable)
-            fake = Path(tmp) / "uv"
-            write_fake_executable(fake, "import json, sys\nprint(json.dumps(sys.argv[1:]))\n",
-                                  python=str(python))
-            done = subprocess.run([str(fake), "a b", "$1"], capture_output=True, text=True, check=False)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), ["a b", "$1"])
-
-
 def connection_listing(connection: str, parameters: dict) -> Outcome:
     """A successful `snow connection list --format JSON` outcome."""
     return Outcome(
@@ -2226,6 +2212,20 @@ class TestMainCli(SnowmanTestCase):
             )
         self.assertTrue(list((root / ".snowman" / "staged").glob("*.sql")))
 
+
+
+class TestWriteFakeExecutable(unittest.TestCase):
+    def test_runs_when_the_python_path_has_spaces(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            python = Path(tmp) / "py dir" / "python3"
+            python.parent.mkdir()
+            python.symlink_to(sys.executable)
+            fake = Path(tmp) / "uv"
+            write_fake_executable(fake, "import json, sys\nprint(json.dumps(sys.argv[1:]))\n",
+                                  python=str(python))
+            done = subprocess.run([str(fake), "a b", "$1"], capture_output=True, text=True, check=False)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), ["a b", "$1"])
 
 
 class TestDocumentedInvocation(unittest.TestCase):

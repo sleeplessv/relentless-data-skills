@@ -137,12 +137,14 @@ It requires context and, for multiple environments, an explicit `--env`.
 It accepts DML, DDL, and multiple statements. Empty scripts are rejected.
 
 Files are gitignored under `.snowman/staged/<timestamp>__<slug>.sql`.
-Multi-environment filenames also contain the environment. The header identifies
-the target and includes a shell-quoted `snow sql -f ... --connection ... --enable-templating NONE`
+Multi-environment filenames also contain the environment name, slugged like the
+purpose. The header identifies the target, with the environment name unchanged,
+and includes a shell-quoted `snow sql -f ... --connection ... --enable-templating NONE`
 command, with `--warehouse` from the flag, or from context when it specifies one.
-Templating stays off, so the file runs as reviewed. Run commands use paths
-relative to the project root.
+Templating stays off, so the file runs as reviewed. The path and run command use
+the file's absolute path, so they work from any directory.
 
-Destructive keywords add a `-- WARNING:` header, but do not prevent staging.
+Destructive keywords add a `-- WARNING:` header and print the same warning to
+stderr, but do not prevent staging.
 Stage mode prints `STAGED (not executed): <path>` and `run with: <command>`.
 It does not execute or clean up scripts.

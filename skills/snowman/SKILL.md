@@ -16,8 +16,8 @@ Find and load `.snowman/context.md` by walking up from the working directory, so
 run the wrapper from inside the project (`cd <project> && uv run --python 3.13 --no-project ...`), not from
 a scratchpad or temp directory, which has no context above it.
 If absent, follow [the bootstrap](references/install.md) before proceeding.
-Queries require context, except bootstrap discovery with `--connection <name>`.
-Once context exists, let the wrapper resolve the connection from it.
+Queries require context. Before it exists, the bootstrap uses the
+[`--connection` override](references/guardrails.md#connection-resolution).
 
 Context records project architecture and connection names, never credentials.
 Keep it in version control. Database scope is a focus hint, not an access

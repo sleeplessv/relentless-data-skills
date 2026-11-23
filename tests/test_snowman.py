@@ -2278,7 +2278,7 @@ class TestDocumentedInvocation(unittest.TestCase):
         self.assertEqual(len(queries), 2, substitute)
         self.assertIn("FROM DIRECTORY(@stage) WHERE STARTSWITH(RELATIVE_PATH, 'path')", queries[0])
         self.assertIn("METADATA$FILENAME", queries[1])
-        self.assertIn("omits empty files", substitute.split(queries[1], 1)[1])
+        self.assertIn(". The row scan omits empty files. ", substitute.split(queries[1], 1)[1] + " ")
         for sql in queries:
             with self.subTest(sql=sql):
                 snowman.enforce_read_only(sql)

@@ -58,7 +58,7 @@ default_env: dev
 
 Outcome = snowman.SnowResult
 
-OK = Outcome(0, "[]", "")
+OK = Outcome(0, b"[]", "")
 
 
 def fake_snow(outcomes: dict[str, Outcome]):
@@ -66,7 +66,6 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
     ``outcomes`` maps ``"sql"`` or ``"connection"`` to the result run_snow
     would return, so tests describe results instead of scripting call order.
-    A str stdout is encoded as UTF-8, the bytes snow would print.
     A subcommand with no outcome raises KeyError. ``fake.calls`` records
     every ``(args, env)`` pair.
     """
@@ -74,10 +73,7 @@ def fake_snow(outcomes: dict[str, Outcome]):
 
     def run(args: list[str], env: dict, *, timeout=None) -> Outcome:
         calls.append((args, env))
-        outcome = outcomes[args[0]]
-        if isinstance(outcome.stdout, str):
-            outcome = outcome._replace(stdout=outcome.stdout.encode())
-        return outcome
+        return outcomes[args[0]]
 
     run.calls = calls
     return run
@@ -86,7 +82,7 @@ def fake_snow(outcomes: dict[str, Outcome]):
 def connection_listing(connection: str, parameters: dict) -> Outcome:
     """A successful `snow connection list --format JSON` outcome."""
     return Outcome(
-        0, json.dumps([{"connection_name": connection, "parameters": parameters}]), ""
+        0, json.dumps([{"connection_name": connection, "parameters": parameters}]).encode(), ""
     )
 
 
@@ -1470,7 +1466,7 @@ class TestExecute(SnowmanTestCase):
         schema = [{"name": "V", "type": "VARIANT"}]
         for rows in ([{"V": {"a": 1}}], []):
             with self.subTest(rows=rows):
-                payload = json.dumps([rows, schema])
+                payload = json.dumps([rows, schema]).encode()
                 code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1", fmt="json")
                 self.assertEqual(code, 0)
                 self.assertEqual(json.loads(out), rows)
@@ -1482,7 +1478,7 @@ class TestExecute(SnowmanTestCase):
         for fmt, expected in (("csv", "ID,NAME\n"), ("json", "[]\n")):
             with self.subTest(fmt=fmt):
                 _, out, err = self.run_execute(
-                    {"sql": Outcome(0, json.dumps([[], schema]), "")}, "SELECT 1", fmt=fmt,
+                    {"sql": Outcome(0, json.dumps([[], schema]).encode(), "")}, "SELECT 1", fmt=fmt,
                 )
                 self.assertEqual(out, expected)
                 self.assertIn("# types: ID NUMBER(38,0), NAME VARCHAR", err)
@@ -1493,7 +1489,7 @@ class TestExecute(SnowmanTestCase):
         import csv
 
         self.enter(self.make_project())
-        payload = json.dumps([{"V": "first\n# 0 rows\nlast", "N": None}])
+        payload = json.dumps([{"V": "first\n# 0 rows\nlast", "N": None}]).encode()
         _, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(list(csv.reader(io.StringIO(out))), [["V", "N"], ["first\n# 0 rows\nlast", ""]])
         self.assertEqual(err, "# empty cells are NULL\n")
@@ -1504,7 +1500,7 @@ class TestExecute(SnowmanTestCase):
         schema = [{"name": "V", "type": "VARIANT"}, {"name": "DDL", "type": "VARCHAR"}]
         for fmt in ("csv", "json"):
             with self.subTest(fmt=fmt):
-                _, out, err = self.run_execute({"sql": Outcome(0, json.dumps([rows, schema]), "")}, "SELECT 1", fmt=fmt)
+                _, out, err = self.run_execute({"sql": Outcome(0, json.dumps([rows, schema]).encode(), "")}, "SELECT 1", fmt=fmt)
                 self.assertLessEqual(len(out.encode("utf-8")), 16000)
                 if fmt == "json":
                     self.assertEqual(len(json.loads(out)), 1)
@@ -1519,7 +1515,7 @@ class TestExecute(SnowmanTestCase):
         rows = [{f"C{i}": "é" * 200 for i in range(100)}] * 50
         for fmt in ("csv", "json"):
             with self.subTest(fmt=fmt):
-                _, out, err = self.run_execute({"sql": Outcome(0, json.dumps(rows), "")}, "SELECT 1", fmt=fmt)
+                _, out, err = self.run_execute({"sql": Outcome(0, json.dumps(rows).encode(), "")}, "SELECT 1", fmt=fmt)
                 self.assertLessEqual(len(out.encode("utf-8")), 16000)
                 if fmt == "json":
                     self.assertEqual(json.loads(out), [])
@@ -1531,7 +1527,7 @@ class TestExecute(SnowmanTestCase):
     def test_large_schema_notes_are_bounded_and_preserved_in_artifact(self):
         root = self.enter(self.make_project())
         schema = [{"name": "é" * 200 + str(i), "type": "VARIANT"} for i in range(100)]
-        _, out, err = self.run_execute({"sql": Outcome(0, json.dumps([[], schema]), "")}, "SELECT 1", fmt="json")
+        _, out, err = self.run_execute({"sql": Outcome(0, json.dumps([[], schema]).encode(), "")}, "SELECT 1", fmt="json")
         self.assertEqual(json.loads(out), [])
         self.assertLessEqual(len(err.splitlines()[0].encode("utf-8")), 1024)
         self.assertIn("type notes shortened", err)
@@ -1544,7 +1540,7 @@ class TestExecute(SnowmanTestCase):
         for fmt in ("csv", "json"):
             with self.subTest(fmt=fmt):
                 _, out, err = self.run_execute(
-                    {"sql": Outcome(0, json.dumps([[], schema]), "")}, "SELECT 1", fmt=fmt,
+                    {"sql": Outcome(0, json.dumps([[], schema]).encode(), "")}, "SELECT 1", fmt=fmt,
                 )
                 self.assertEqual(out, "[]\n" if fmt == "json" else "")
                 self.assertLessEqual(len(err.splitlines()[0].encode()), 1024)
@@ -1561,13 +1557,13 @@ class TestExecute(SnowmanTestCase):
 
     def test_smallest_json_budget_keeps_valid_empty_array(self):
         self.enter(self.make_project())
-        _, out, err = self.run_execute({"sql": Outcome(0, '[{"N":1}]', "")}, "SELECT 1", fmt="json", max_output=3)
+        _, out, err = self.run_execute({"sql": Outcome(0, b'[{"N":1}]', "")}, "SELECT 1", fmt="json", max_output=3)
         self.assertEqual(out, "[]\n")
         self.assertIn("full result:", err)
 
     def test_malformed_success_output_is_refused_without_raw_stdout(self):
         self.enter(self.make_project())
-        for payload in ("not json" * 10000, '{"error":"bad"}', '[[1],[]]'):
+        for payload in (b"not json" * 10000, b'{"error":"bad"}', b'[[1],[]]'):
             with self.subTest(payload=payload[:20]):
                 with self.assertRaisesRegex(snowman.ResultProcessingError, "unexpected snow output"):
                     self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
@@ -1638,7 +1634,7 @@ class TestExecute(SnowmanTestCase):
 
     def test_failed_query_stdout_fragment_is_not_relayed(self):
         self.enter(self.make_project())
-        for fragment in ("[\n", "[]\n"):
+        for fragment in (b"[\n", b"[]\n"):
             code, out, err = self.run_execute(
                 {"sql": Outcome(5, fragment, PANEL_STDERR)}, "SELECT 1"
             )
@@ -1652,7 +1648,7 @@ class TestExecute(SnowmanTestCase):
             [{"A": 1, "B": "1.50"}],
             [{"name": "A", "type": "NUMBER(1,0)", "kind": "COLUMN"},
              {"name": "B", "type": "NUMBER(10,2)", "kind": "COLUMN"}],
-        ])
+        ]).encode()
         code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
         self.assertEqual(out, "A,B\n1,1.50\n")
@@ -1660,7 +1656,7 @@ class TestExecute(SnowmanTestCase):
 
     def test_two_statement_empty_result_reports_zero_rows(self):
         self.enter(self.make_project())
-        payload = json.dumps([[], [{"name": "A", "type": "DATE"}]])
+        payload = json.dumps([[], [{"name": "A", "type": "DATE"}]]).encode()
         _, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(out, "A\n")
         self.assertIn("# 0 rows\n", err)
@@ -1678,7 +1674,7 @@ class TestExecute(SnowmanTestCase):
         payload = json.dumps(
             [{"A": 1, "O": {"k": 1}, "N": None}, {"A": 2, "O": [1], "N": "x" * 300}],
             indent=4,
-        )
+        ).encode()
         code, out, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         self.assertEqual(code, 0)
         lines = out.splitlines()
@@ -1696,7 +1692,7 @@ class TestExecute(SnowmanTestCase):
     def test_row_cap_spills_full_result_with_recovery_on_stderr(self):
         root = self.enter(self.make_project())
         rows = [{"N": i} for i in range(1203)]
-        code, out, err = self.run_execute({"sql": Outcome(0, json.dumps(rows), "")}, "SELECT 1")
+        code, out, err = self.run_execute({"sql": Outcome(0, json.dumps(rows).encode(), "")}, "SELECT 1")
         self.assertEqual(code, 0)
         self.assertEqual(len(out.splitlines()), 51)
         self.assertIn("# showing 50 of 1203 rows", err)
@@ -1707,31 +1703,32 @@ class TestExecute(SnowmanTestCase):
     def test_one_row_preview_holds_no_copy_of_the_row_list(self):
         # A copy of the row list costs one 8-byte pointer per row. From the
         # moment the JSON is parsed, the run may not add half that.
+        if tracemalloc.is_tracing():
+            self.skipTest("reset_peak would discard the peak of a runner that already traces")
         self.enter(self.make_project())
         rows = 100_000
         payload = json.dumps([{"N": i} for i in range(rows)]).encode()
-        split_result, parsed = snowman.split_result, []
+        split_result, bytes_after_parse = snowman.split_result, []
 
         def split_and_mark(result):
-            parsed.append(tracemalloc.get_traced_memory()[0])
+            bytes_after_parse.append(tracemalloc.get_traced_memory()[0])
             tracemalloc.reset_peak()
             return split_result(result)
 
-        if not tracemalloc.is_tracing():  # A runner started with -X tracemalloc keeps its tracing.
-            tracemalloc.start()
-            self.addCleanup(tracemalloc.stop)
+        tracemalloc.start()
+        self.addCleanup(tracemalloc.stop)
         with mock.patch.object(snowman, "split_result", split_and_mark):
             code, _, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1", max_rows=1)
         after_parse_peak = tracemalloc.get_traced_memory()[1]
         self.assertEqual(code, 0)
-        self.assertLess(after_parse_peak - parsed[0], rows * 4)
+        self.assertLess(after_parse_peak - bytes_after_parse[0], rows * 4)
 
     def test_spill_path_is_relative_to_cwd(self):
         root = self.enter(self.make_project())
         sub = root / "analysis" / "q1"
         sub.mkdir(parents=True)
         self.enter(sub)
-        payload = json.dumps([{"N": i} for i in range(60)])
+        payload = json.dumps([{"N": i} for i in range(60)]).encode()
         _, _, err = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
         rel = err.split("full result: ")[1].splitlines()[0]
         self.assertTrue(rel.startswith("../../.snowman/results/"), rel)
@@ -1752,7 +1749,7 @@ class TestExecute(SnowmanTestCase):
         root = self.enter(self.make_bare_dir())
         rows = [{"N": i} for i in range(60)]
         _, out, err = self.run_execute(
-            {"sql": Outcome(0, json.dumps(rows), "")}, "SELECT 1", connection_override="c"
+            {"sql": Outcome(0, json.dumps(rows).encode(), "")}, "SELECT 1", connection_override="c"
         )
         self.assertIn("# showing 50 of 60 rows", err)
         path = Path(err.split("full result: ")[1].splitlines()[0])
@@ -1765,7 +1762,7 @@ class TestExecute(SnowmanTestCase):
 
     def test_max_rows_zero_and_json_flag(self):
         self.enter(self.make_project())
-        payload = json.dumps([{"N": i} for i in range(60)])
+        payload = json.dumps([{"N": i} for i in range(60)]).encode()
         _, out, _ = self.run_execute(
             {"sql": Outcome(0, payload, "")}, "SELECT 1", max_rows=0, fmt="json"
         )
@@ -1773,13 +1770,13 @@ class TestExecute(SnowmanTestCase):
 
     def test_empty_result_notes_zero_rows(self):
         self.enter(self.make_project())
-        _, out, _ = self.run_execute({"sql": Outcome(0, "[]\n", "")}, "SELECT 1")
+        _, out, _ = self.run_execute({"sql": Outcome(0, b"[]\n", "")}, "SELECT 1")
         self.assertEqual(out, "")
 
     def test_failed_query_raw_stdout_is_suppressed(self):
         self.enter(self.make_project())
         code, out, _ = self.run_execute(
-            {"sql": Outcome(3, "not json at all\n", "")}, "SELECT 1"
+            {"sql": Outcome(3, b"not json at all\n", "")}, "SELECT 1"
         )
         self.assertEqual(code, 3)
         self.assertEqual(out, "")
@@ -1787,7 +1784,7 @@ class TestExecute(SnowmanTestCase):
     def test_sql_error_panel_cleaned_and_exit_code_forwarded(self):
         self.enter(self.make_project())
         code, out, err = self.run_execute(
-            {"sql": Outcome(5, "", PANEL_STDERR)}, "SELECT 1"
+            {"sql": Outcome(5, b"", PANEL_STDERR)}, "SELECT 1"
         )
         self.assertEqual(code, 5)
         self.assertEqual(out, "")
@@ -1796,7 +1793,7 @@ class TestExecute(SnowmanTestCase):
     def test_forwards_snow_exit_code_and_stderr(self):
         self.enter(self.make_project())
         code, out, err = self.run_execute(
-            {"sql": Outcome(1, "", "some snow error\n")}, "SELECT 1"
+            {"sql": Outcome(1, b"", "some snow error\n")}, "SELECT 1"
         )
         self.assertEqual(code, 1)
         self.assertEqual(out, "")
@@ -1867,7 +1864,7 @@ class TestExecute(SnowmanTestCase):
             "╰──────────────────────────────────────────────────────────╯\n"
         )
         code, _, err = self.run_execute(
-            {"sql": Outcome(1, "", panel),
+            {"sql": Outcome(1, b"", panel),
              "connection": connection_listing("analytics", {"authenticator": "SNOWFLAKE_JWT"})},
             "SELECT 1",
         )
@@ -1882,7 +1879,7 @@ class TestExecute(SnowmanTestCase):
     def test_non_auth_failure_gets_no_hint(self):
         self.enter(self.make_project())
         code, _, err = self.run_execute(
-            {"sql": Outcome(1, "", "syntax error\n")}, "SELECT 1"
+            {"sql": Outcome(1, b"", "syntax error\n")}, "SELECT 1"
         )
         self.assertEqual(code, 1)
         self.assertNotIn("hint:", err)
@@ -1926,7 +1923,7 @@ class TestAuthHintFor(SnowmanTestCase):
 
     def test_bad_byte_in_another_field_still_classifies(self):
         listing = connection_listing("analytics", {"authenticator": "EXTERNALBROWSER", "user": "X"})
-        listing = listing._replace(stdout=listing.stdout.replace('"X"', '"\xff"').encode("latin-1"))
+        listing = listing._replace(stdout=listing.stdout.replace(b'"X"', b'"\xff"'))
         self.assertIn(b"\xff", listing.stdout)
         with mock.patch.object(snowman, "run_snow", fake_snow({"connection": listing})):
             params = snowman.connection_params("analytics", {})
@@ -1950,7 +1947,7 @@ class TestAuthHintFor(SnowmanTestCase):
             ("not listed", connection_listing("other", {"authenticator": "SNOWFLAKE_JWT"})),
             ("other authenticator", connection_listing("analytics", {"authenticator": "OAUTH_CLIENT_CREDENTIALS"})),
             ("empty parameters", connection_listing("analytics", {})),
-            ("garbage output", Outcome(0, "not json", "")),
+            ("garbage output", Outcome(0, b"not json", "")),
         ):
             with self.subTest(lookup=label):
                 hint = self.hint("JWT token is invalid", lookup)
@@ -1974,8 +1971,8 @@ class TestAuthHintFor(SnowmanTestCase):
 class TestMainCli(SnowmanTestCase):
     def test_result_shape_errors_report_query_already_ran_without_stdout(self):
         self.enter(self.make_project())
-        for payload in ("", " \n", "not json", '{"error":"bad"}', '[[1],[]]',
-                        '[{"A":1},{"B":2}]', '[[{"A":1},{"A":2,"B":3}],[]]'):
+        for payload in (b"", b" \n", b"not json", b'{"error":"bad"}', b'[[1],[]]',
+                        b'[{"A":1},{"B":2}]', b'[[{"A":1},{"A":2,"B":3}],[]]'):
             with self.subTest(payload=payload):
                 snow = fake_snow({"sql": Outcome(0, payload, "")})
                 stdout, stderr = io.StringIO(), io.StringIO()
@@ -1991,9 +1988,9 @@ class TestMainCli(SnowmanTestCase):
 
     def test_processing_failures_preserve_received_payload_privately(self):
         self.enter(self.make_project())
-        payloads = ["not json secret", '{"error":"secret"}', '[{"A":1},{"B":2}]',
-                    '[[1],[]]', '[[{"A":1}],[{"name":42,"type":"DATE"}]]',
-                    json.dumps([{"A": chr(0xD800)}])]
+        payloads = [b"not json secret", b'{"error":"secret"}', b'[{"A":1},{"B":2}]',
+                    b'[[1],[]]', b'[[{"A":1}],[{"name":42,"type":"DATE"}]]',
+                    json.dumps([{"A": chr(0xD800)}]).encode()]
         for payload in payloads:
             with self.subTest(payload=payload), tempfile.TemporaryDirectory() as recovery_root:
                 snow = fake_snow({"sql": Outcome(0, payload, "")})
@@ -2008,7 +2005,7 @@ class TestMainCli(SnowmanTestCase):
                 self.assertIn("query already ran", stderr.getvalue())
                 self.assertNotIn("secret", stderr.getvalue())
                 path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-                self.assertEqual(path.read_text(), payload)
+                self.assertEqual(path.read_bytes(), payload)
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
                 self.assertIn("Inspect this file locally", stderr.getvalue())
 
@@ -2044,7 +2041,7 @@ class TestMainCli(SnowmanTestCase):
 
     def test_empty_cli_output_reports_no_payload_to_recover(self):
         self.enter(self.make_project())
-        for payload in ("", " \n"):
+        for payload in (b"", b" \n"):
             with self.subTest(payload=payload):
                 snow = fake_snow({"sql": Outcome(0, payload, "")})
                 stderr = io.StringIO()
@@ -2056,7 +2053,7 @@ class TestMainCli(SnowmanTestCase):
 
     def test_recovery_storage_failure_reports_no_saved_copy(self):
         self.enter(self.make_project())
-        snow = fake_snow({"sql": Outcome(0, "invalid secret payload", "")})
+        snow = fake_snow({"sql": Outcome(0, b"invalid secret payload", "")})
         stderr = io.StringIO()
         with mock.patch.object(snowman, "run_snow", snow), \
                 mock.patch.object(tempfile, "mkstemp", side_effect=OSError("disk full")), \
@@ -2070,7 +2067,7 @@ class TestMainCli(SnowmanTestCase):
     def test_spill_error_reports_query_already_ran_without_stdout(self):
         root = self.enter(self.make_project())
         (root / ".snowman" / "results").write_text("not a directory")
-        snow = fake_snow({"sql": Outcome(0, json.dumps([{"DDL": "x" * 500}]), "")})
+        snow = fake_snow({"sql": Outcome(0, json.dumps([{"DDL": "x" * 500}]).encode(), "")})
         stdout, stderr = io.StringIO(), io.StringIO()
         with mock.patch.object(snowman, "run_snow", snow), \
                 contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):

@@ -99,7 +99,6 @@ environment the user named. If unresolved in a multi-account project, ask first.
    `SHOW GRANTS OF ROLE`) and cite the precedent in the script. Record any
    convention the user confirms in the context body.
 2. Stage the script with a purpose-specific `--name` and the required `--env`.
-3. Return the path and manual command, plus any destructive-keyword warning and, for a
-   one-row-per-key change, the source row count and staged key count.
+3. Return what [the staging policy](../SKILL.md#stage-requested-changes) says to relay.
 4. Once the user reports execution and requests verification, check the effect
    with counts, DESCRIBE, or samples. Leave script cleanup to the user.

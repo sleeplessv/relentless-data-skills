@@ -47,7 +47,7 @@ the CLI sends `&name` and `<% name %>` text, such as `'F&W'`, unchanged.
 ## Direct snow calls
 
 Agents never run `snow` or `snowsql` themselves. The only direct calls are
-`snow connection list`, `snow connection test`, `snow --version` and `snow --help`.
+`snow connection list`, `snow connection test`, `snow --version` and `snow --help` or `-h`.
 A staged script is run by the user, not the agent.
 
 A `PreToolUse` hook, [`hooks/snow_guard.py`](../hooks/snow_guard.py), refuses

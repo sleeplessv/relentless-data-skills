@@ -25,12 +25,11 @@ from __future__ import annotations
 import json
 import os
 import re
-import shlex
 import sys
 
 BLOCKED = {"snow", "snowsql", "snowflake-cli"}  # the last via pipx run or uvx
 SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
-SEPARATOR_CHARS = set(";&|()\n")
+SHELL_OPTIONS_WITH_VALUE = {"-o", "+o", "-O", "+O", "--rcfile", "--init-file"}
 RESERVED = {"!", "{", "}", "if", "then", "else", "elif", "fi", "do", "done",
             "while", "until", "for", "case", "esac", "time"}
 # Wrappers that run their arguments as a command. Values name the options that
@@ -45,8 +44,7 @@ WRAPPERS = {
     "timeout": {"-s", "--signal", "-k", "--kill-after"},
 }
 ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
-HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([A-Za-z_][A-Za-z0-9_]*)\1")
-SUBSTITUTION = re.compile(r"\$\(((?:[^()]|\([^()]*\))*)\)|`([^`]*)`")
+SUBSTITUTED = "\0"  # stands in for a $(...) or backtick result inside a word
 REASON = (
     "BLOCKED: direct `{cmd}` call. Every Snowflake call goes through the snowman "
     "wrapper (scripts/snowman.py). To run a staged script, give the user its "
@@ -55,49 +53,201 @@ REASON = (
 )
 
 
-def strip_heredocs(command: str) -> tuple[str, list[str]]:
-    """Drop heredoc bodies. Return the rest and the bodies the shell expands."""
-    lines = command.split("\n")
-    kept, expanded, pending = [], [], []
-    for line in lines:
-        if pending:
-            quoted, delimiter, body = pending[0]
-            if line.lstrip("\t") == delimiter:
-                if not quoted:
-                    expanded.append("\n".join(body))
-                pending.pop(0)
+class Parser:
+    """Split shell text into simple commands, following its quoting rules.
+
+    Each segment is (words, heredoc bodies fed to it). Commands inside $(...),
+    backticks and unquoted heredoc bodies become segments of their own, since
+    the shell runs them too. Raises ValueError on an unterminated quote or
+    substitution.
+    """
+
+    def __init__(self, text: str, start: int = 0, closing: bool = False):
+        self.s, self.i, self.closing = text, start, closing
+        self.segments: list[tuple[list[str], list[str]]] = []
+        self.words: list[str] = []
+        self.bodies: list[str] = []
+        self.chars: list[str] = []
+        self.in_word = self.quoted = False
+        self.target = None  # None, "redirect", or ("heredoc", strip_tabs)
+        self.pending: list[tuple[str, bool, bool, list[str]]] = []
+        self.parens = 0
+
+    def parse(self) -> Parser:
+        s = self.s
+        while self.i < len(s):
+            c, nxt = s[self.i], s[self.i + 1:self.i + 2]
+            if c == "\\":
+                self.i += 2
+                if nxt != "\n":  # backslash-newline joins the lines
+                    self.add(nxt, quoted=True)
+            elif c == "'":
+                end = s.find("'", self.i + 1)
+                if end < 0:
+                    raise ValueError("unterminated single quote")
+                self.add(s[self.i + 1:end], quoted=True)
+                self.i = end + 1
+            elif c == "$" and nxt == "'":
+                self.ansi_quote()
+            elif c == '"':
+                self.double_quote()
+            elif c == "$" and nxt == "(":
+                self.substitution()
+            elif c == "`":
+                self.backtick()
+            elif c == "#" and not self.in_word:
+                end = s.find("\n", self.i)
+                self.i = len(s) if end < 0 else end
+            elif c in " \t\r":
+                self.end_word()
+                self.i += 1
+            elif c == "\n":
+                self.end_segment()
+                self.i += 1
+                self.read_heredocs()
+            elif c in "<>" or (c == "&" and nxt == ">"):
+                self.redirect()
+            elif c in ";&|()":
+                if c == ")" and self.closing and self.parens == 0:
+                    self.end_segment()
+                    self.i += 1
+                    return self
+                self.parens += {"(": 1, ")": -1}.get(c, 0)
+                self.end_segment()
+                self.i += 1
             else:
-                body.append(line)
-            continue
-        kept.append(line)
-        for match in HEREDOC.finditer(line):
-            pending.append((bool(match.group(1)), match.group(2), []))
-    return "\n".join(kept), expanded
+                self.add(c)
+                self.i += 1
+        if self.closing:
+            raise ValueError("unterminated $(")
+        self.end_segment()
+        return self
 
+    def add(self, text: str, quoted: bool = False) -> None:
+        self.chars.append(text)
+        self.in_word = True
+        self.quoted = self.quoted or quoted
 
-def tokens(command: str) -> list[str]:
-    # Newlines separate commands, so they are punctuation, not whitespace.
-    # Comments stay words: a commented-out `snow` is never at command position
-    # unless it follows a separator, and a false refusal there is harmless.
-    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
-    lexer.whitespace = " \t\r"
-    lexer.whitespace_split = True
-    lexer.commenters = ""
-    return list(lexer)
+    def end_word(self) -> None:
+        if not self.in_word:
+            return
+        word, target = "".join(self.chars), self.target
+        if target is None:
+            self.words.append(word)
+        elif target != "redirect":
+            self.pending.append((word, self.quoted, target[1], self.bodies))
+        self.chars, self.in_word, self.quoted, self.target = [], False, False, None
 
+    def end_segment(self) -> None:
+        self.end_word()
+        self.target = None
+        if self.words or self.bodies:
+            self.segments.append((self.words, self.bodies))
+        self.words, self.bodies = [], []
 
-def segments(words: list[str]) -> list[list[str]]:
-    out, current = [], []
-    for word in words:
-        if word and set(word) <= SEPARATOR_CHARS:
-            if current:
-                out.append(current)
-            current = []
+    def redirect(self) -> None:
+        s = self.s
+        if self.in_word and not self.quoted and "".join(self.chars).isdigit():
+            self.chars, self.in_word = [], False  # a file descriptor, as in 2>
+        self.end_word()
+        if s.startswith("<<<", self.i):  # here-string: one word, no body
+            self.i += 3
+            self.target = "redirect"
+        elif s.startswith("<<", self.i):
+            strip = s.startswith("<<-", self.i)
+            self.i += 3 if strip else 2
+            self.target = ("heredoc", strip)
         else:
-            current.append(word)
-    if current:
-        out.append(current)
-    return out
+            self.i += 1
+            while self.i < len(s) and s[self.i] in "<>&|":
+                self.i += 1
+            self.target = "redirect"
+
+    def read_heredocs(self) -> None:
+        s = self.s
+        for delimiter, quoted, strip, bodies in self.pending:
+            lines = []
+            while self.i < len(s):
+                end = s.find("\n", self.i)
+                end = len(s) if end < 0 else end
+                line, self.i = s[self.i:end], end + 1
+                if (line.lstrip("\t") if strip else line) == delimiter:
+                    break
+                lines.append(line)
+            body = "\n".join(lines)
+            bodies.append(body)
+            if not quoted:  # the shell expands $(...) in an unquoted body
+                self.segments += Expansions(body).parse().segments
+        self.pending = []
+
+    def double_quote(self) -> None:
+        s = self.s
+        self.add("", quoted=True)
+        self.i += 1
+        while self.i < len(s):
+            c, nxt = s[self.i], s[self.i + 1:self.i + 2]
+            if c == '"':
+                self.i += 1
+                return
+            if c == "\\" and nxt in ("$", "`", '"', "\\", "\n"):
+                if nxt != "\n":
+                    self.chars.append(nxt)
+                self.i += 2
+            elif c == "$" and nxt == "(":
+                self.substitution()
+            elif c == "`":
+                self.backtick()
+            else:
+                self.chars.append(c)
+                self.i += 1
+        raise ValueError("unterminated double quote")
+
+    def ansi_quote(self) -> None:
+        s, j = self.s, self.i + 2
+        while j < len(s) and s[j] != "'":
+            j += 2 if s[j] == "\\" else 1
+        if j >= len(s):
+            raise ValueError("unterminated $' quote")
+        self.add(s[self.i + 2:j], quoted=True)
+        self.i = j + 1
+
+    def substitution(self) -> None:
+        inner = Parser(self.s, self.i + 2, closing=True).parse()
+        self.segments += inner.segments
+        self.i = inner.i
+        self.add(SUBSTITUTED)
+
+    def backtick(self) -> None:
+        s, j, inner = self.s, self.i + 1, []
+        while j < len(s) and s[j] != "`":
+            if s[j] == "\\" and s[j + 1:j + 2] in ("`", "\\", "$"):
+                j += 1
+            inner.append(s[j])
+            j += 1
+        if j >= len(s):
+            raise ValueError("unterminated backtick")
+        self.segments += Parser("".join(inner)).parse().segments
+        self.i = j + 1
+        self.add(SUBSTITUTED)
+
+
+class Expansions(Parser):
+    """Find the substitutions in text the shell expands but does not split,
+    such as an unquoted heredoc body."""
+
+    def parse(self) -> Expansions:
+        s = self.s
+        while self.i < len(s):
+            c, nxt = s[self.i], s[self.i + 1:self.i + 2]
+            if c == "\\":
+                self.i += 2
+            elif c == "$" and nxt == "(":
+                self.substitution()
+            elif c == "`":
+                self.backtick()
+            else:
+                self.i += 1
+        return self
 
 
 def skip_options(args: list[str], with_value: set[str]) -> list[str]:
@@ -115,6 +265,9 @@ def unwrap(words: list[str]) -> list[str]:
         head = os.path.basename(words[0])
         if words[0] in RESERVED or ASSIGNMENT.match(words[0]):
             words = words[1:]
+        elif head == "command" and any(
+                "v" in w or "V" in w for w in words[1:len(words) - len(skip_options(words[1:], set()))]):
+            return []  # `command -v snow` looks the program up; it runs nothing
         elif head == "uv" and words[1:2] == ["run"]:
             words = skip_options(words[2:], WRAPPERS["uvx"] | {"--project", "--directory"})
         elif head == "uv" and words[1:3] == ["tool", "run"]:
@@ -130,6 +283,24 @@ def unwrap(words: list[str]) -> list[str]:
     return words
 
 
+def shell_script(args: list[str]) -> str | None:
+    """The script a shell runs from `-c`, or None when it reads stdin or a file."""
+    has_c, i = False, 0
+    while i < len(args):
+        arg = args[i]
+        if arg == "--":
+            i += 1
+            break
+        if not arg.startswith(("-", "+")):
+            break
+        if arg in SHELL_OPTIONS_WITH_VALUE:
+            i += 1
+        elif not arg.startswith("--") and "c" in arg[1:]:
+            has_c = True
+        i += 1
+    return args[i] if has_c and i < len(args) else None
+
+
 def allowed(args: list[str]) -> bool:
     if args[:1] in (["--version"], ["--help"], ["-h"]):
         return True
@@ -140,34 +311,30 @@ def blocked_call(command: str, depth: int = 0) -> str | None:
     """Return the blocked program a shell command would run, or None."""
     if depth > 5:
         return None
-    command, expanded = strip_heredocs(command)
-    # Substitutions run even inside double quotes and unquoted heredocs.
-    for text in [command, *expanded]:
-        for paren, tick in SUBSTITUTION.findall(text):
-            found = blocked_call(paren or tick, depth + 1)
-            if found:
-                return found
     try:
-        words = tokens(command)
+        segments = Parser(command).parse().segments
     except ValueError:
+        # The shell runs the lines before a syntax error, so judge the raw text.
         match = re.search(r"(?:^|[\s;&|(`])(?:\S*/)?(snow(?:sql)?)(?=\s|$)", command)
         return match.group(1) if match else None
-    for segment in segments(words):
-        words = unwrap([w.lstrip("`$") for w in segment])
+    for words, bodies in segments:
+        words = unwrap(words)
         if not words:
             continue
         head = os.path.basename(words[0])
         if head in BLOCKED and not (head == "snow" and allowed(words[1:])):
             return head
-        if head in SHELLS and "-c" in words[1:]:
-            script = words[words.index("-c") + 1:words.index("-c") + 2]
-            found = blocked_call(script[0], depth + 1) if script else None
+        if head in SHELLS:
+            script = shell_script(words[1:])
+            scripts = [script] if script is not None else bodies
         elif head == "eval":
-            found = blocked_call(" ".join(words[1:]), depth + 1)
+            scripts = [" ".join(words[1:])]
         else:
-            found = None
-        if found:
-            return found
+            scripts = []
+        for script in scripts:
+            found = blocked_call(script, depth + 1)
+            if found:
+                return found
     return None
 
 

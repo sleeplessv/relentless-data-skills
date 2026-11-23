@@ -52,6 +52,15 @@ REFUSED = {
     "other subcommand": "snow stage copy a @s",
     "connection add": "snow connection add",
     "unbalanced quote": "snow sql -q 'select",
+    "after a quoted <<EOF pattern": "grep -n '<<EOF' notes.md\nsnow sql",
+    "after a here-string": "cat <<<EOF\nsnow sql",
+    "after a line continuation": "cd proj && \\\nsnow sql",
+    "bash -lc": "bash -lc 'snow sql'",
+    "bash -o value -c": "bash -o pipefail -c 'snow sql'",
+    "bash reading a heredoc": "bash <<'EOF'\nsnow sql\nEOF",
+    "after a redirect": ">out.txt snow sql",
+    "command with a later -v": "command snow sql -v",
+    "after a heredoc": "cat <<'EOF'\nhello\nEOF\nsnow sql",
 }
 
 ALLOWED = {
@@ -69,6 +78,13 @@ ALLOWED = {
     "snowman path": "cat .snowman/context.md",
     "commit message": "git commit -m 'refuse snow sql'",
     "pipx other": "pipx run snowman",
+    "literal backticks in single quotes": "rg -F '`snow sql`' docs",
+    "quoted pipe argument": "printf '%s\\n' '|' snow",
+    "backslash-newline inside single quotes": "printf 'x\\\nsnow sql'",
+    "command -v": "command -v snow",
+    "command -V": "command -V snow",
+    "comment": "ls # then snow sql",
+    "redirect into a file named snow": "echo hi > snow",
     "heredoc commit message": (
         "git commit -m \"$(cat <<'EOF'\nfix(snowman): refuse (direct) calls\n\n"
         "snow sql -f x.sql (was allowed)\nEOF\n)\""

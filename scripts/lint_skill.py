@@ -16,10 +16,9 @@ Lints every ``skills/*/SKILL.md`` for its own integrity:
   folder) contain a command that acts on shared state (``SIDE_EFFECT_COMMANDS``,
   e.g. ``gh pr merge``, ``git push``) must set ``disable-model-invocation: true``
   or be listed in ``SIDE_EFFECT_ALLOWLIST`` with a reason;
-- no argument placeholder (``$`` and a digit, or ``$ARGUMENTS``) in SKILL.md,
-  because Claude Code substitutes skill arguments there. A ``$`` with exactly
-  one backslash before it (``\\$1``) stays literal, so the lint accepts it.
-  Two or more backslashes (``\\\\$1``) do not escape it. Claude Code does not
+- no argument placeholder text (``$`` and a digit, or ``$ARGUMENTS``) in
+  SKILL.md, whatever precedes it, because Claude Code substitutes skill
+  arguments for placeholders in a SKILL.md body. Claude Code does not
   substitute files under ``references/``, and the lint does not check them.
 
 Standard library only.
@@ -93,7 +92,7 @@ SIDE_EFFECT_ALLOWLIST = {
 
 SKIP_DIRS = frozenset({"node_modules", "__pycache__", ".venv", "venv"})
 
-ARGUMENT_PLACEHOLDER_RE = re.compile(r"(?<!(?<!\\)\\)\$(?:[0-9]|ARGUMENTS)")
+ARGUMENT_PLACEHOLDER_RE = re.compile(r"\$(?:[0-9]|ARGUMENTS)")
 
 
 def parse_frontmatter(text: str, where: str) -> dict[str, str]:
@@ -169,9 +168,9 @@ def lint(skill_md: Path, skills_dir: Path = SKILLS_DIR) -> list[str]:
     for n, line in enumerate(text.splitlines(), 1):
         for m in ARGUMENT_PLACEHOLDER_RE.finditer(line):
             errors.append(
-                f"line {n}: {m.group()} is an argument placeholder. Claude Code substitutes "
-                "skill arguments for it when the skill runs with arguments. Escape it as "
-                f"\\{m.group()}, reword the line, or move the text to a file under references/"
+                f"line {n}: {m.group()} matches an argument placeholder, and Claude Code "
+                "substitutes skill arguments for placeholders in SKILL.md. Reword the line, "
+                "or move the text to a file under references/"
             )
 
     skill_name = skill_md.parent.name

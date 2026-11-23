@@ -106,19 +106,15 @@ class TestLintSkill(unittest.TestCase):
         self.assertIn("$ARGUMENTS", errors[0])
         self.assertEqual(self.lint_dir(), 1)
 
-    def test_escaped_placeholder_in_skill_md_passes(self) -> None:
-        skill_md = self.add_skill(
-            "escaper", f"description: {DESC}\n", body="# Skill\n\nIt costs \\$1.00 for \\$ARGUMENTS.\n"
-        )
-        self.assertEqual(self.lint(skill_md), [])
-
-    def test_placeholder_after_two_or_three_backslashes_fails(self) -> None:
-        for name, line in (("dbl", "\\\\$1"), ("triple", "\\\\\\$1")):
+    def test_placeholder_after_backslashes_fails(self) -> None:
+        cases = (("one", "\\$1.00", "$1"), ("args", "\\$ARGUMENTS", "$ARGUMENTS"),
+                 ("two", "\\\\$1", "$1"), ("three", "\\\\\\$1", "$1"))
+        for name, line, placeholder in cases:
             with self.subTest(line=line):
                 skill_md = self.add_skill(name, f"description: {DESC}\n", body=f"# Skill\n\n{line}\n")
                 errors = self.lint(skill_md)
                 self.assertEqual(len(errors), 1)
-                self.assertIn("line 8: $1", errors[0])
+                self.assertIn(f"line 8: {placeholder}", errors[0])
 
     def test_placeholder_in_reference_file_passes(self) -> None:
         skill_md = self.add_skill("projector", f"description: {DESC}\n")

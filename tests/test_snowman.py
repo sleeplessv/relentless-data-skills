@@ -1940,28 +1940,33 @@ class TestMainCli(SnowmanTestCase):
 
     def test_subprocess_recovery_preserves_invalid_utf8_bytes(self):
         root = self.enter(self.make_project())
-        payload = b"not json \xff\r\n"
-        calls = root / "calls.txt"
-        binary = root / "snow"
-        binary.write_text(
-            f"#!{sys.executable}\nimport sys\n"
-            f"with open({str(calls)!r}, 'a') as out: out.write('call\\n')\n"
-            f"sys.stdout.buffer.write({payload!r})\n"
-        )
-        binary.chmod(0o700)
-        stdout, stderr = io.StringIO(), io.StringIO()
-        with mock.patch.dict(os.environ, {"PATH": str(root)}), \
-                contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
-            code = snowman.main(["snowman.py", "SELECT 1"])
-        self.assertEqual(code, 1)
-        self.assertEqual(calls.read_text(), "call\n")
-        self.assertEqual(stdout.getvalue(), "")
-        self.assertNotIn("not json", stderr.getvalue())
-        self.assertNotIn("�", stderr.getvalue())
-        path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-        self.addCleanup(path.unlink)
-        self.assertEqual(path.read_bytes(), payload)
-        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        # Not JSON, then valid JSON whose string holds a bad byte or an encoded surrogate.
+        for payload in (b"not json \xff\r\n", b'[{"A":"secret \xe9"}]\n',
+                        b'[{"A":"secret \xed\xa0\x80"}]\n'):
+            with self.subTest(payload=payload):
+                calls = root / "calls.txt"
+                calls.unlink(missing_ok=True)
+                binary = root / "snow"
+                binary.write_text(
+                    f"#!{sys.executable}\nimport sys\n"
+                    f"with open({str(calls)!r}, 'a') as out: out.write('call\\n')\n"
+                    f"sys.stdout.buffer.write({payload!r})\n"
+                )
+                binary.chmod(0o700)
+                stdout, stderr = io.StringIO(), io.StringIO()
+                with mock.patch.dict(os.environ, {"PATH": str(root)}), \
+                        contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                    code = snowman.main(["snowman.py", "SELECT 1"])
+                self.assertEqual(code, 1)
+                self.assertEqual(calls.read_text(), "call\n")
+                self.assertEqual(stdout.getvalue(), "")
+                self.assertNotIn("not json", stderr.getvalue())
+                self.assertNotIn("secret", stderr.getvalue())
+                self.assertNotIn("�", stderr.getvalue())
+                path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
+                self.addCleanup(path.unlink)
+                self.assertEqual(path.read_bytes(), payload)
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_empty_cli_output_reports_no_payload_to_recover(self):
         self.enter(self.make_project())

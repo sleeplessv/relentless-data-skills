@@ -957,7 +957,7 @@ def execute(
 
     raw = result.stdout_bytes if result.stdout_bytes is not None else result.stdout
     try:
-        rows, types = split_result(json.loads(result.stdout))
+        rows, types = split_result(json.loads(raw.decode("utf-8") if isinstance(raw, bytes) else raw))
     except (ValueError, RecursionError):
         rows = types = None
     if not isinstance(rows, list):

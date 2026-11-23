@@ -162,7 +162,7 @@ Git does not read a `.gitignore` that is a symbolic link. A query blocks before
 it runs when `.snowman/results/.gitignore` is a link. Staging blocks before it
 writes when `.snowman/staged/.gitignore` is a link. Neither changes the link.
 Replace the link with a regular file that contains `*`.
-Git drops every rule in a `.gitignore` larger than 100 MiB, the appended `*`
+Git drops every rule in a `.gitignore` of 100 MiB or more, the appended `*`
 included. The wrapper does not check the size, so keep each `.gitignore` small.
 Each run sets the directory to `0700`. Every saved file, bootstrap results
 included, is created `0600`. A write that fails removes the file, so no partial

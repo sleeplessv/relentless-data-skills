@@ -752,19 +752,20 @@ def create_private_file(
     bump = 1
     fd = None  # set only once this call has created `path`
     try:
-        while True:
-            try:
-                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                break
-            except FileExistsError:
-                path = directory / f"{stem}-{bump}{suffix}"
-                bump += 1
-        # closefd=False: open() would close fd itself if building the stream failed.
         try:
+            while True:
+                try:
+                    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                    break
+                except FileExistsError:
+                    path = directory / f"{stem}-{bump}{suffix}"
+                    bump += 1
+            # closefd=False: open() would close fd itself if building the stream failed.
             with open(fd, "w", encoding="utf-8", closefd=False) as out:
                 yield path, out
         finally:
-            os.close(fd)
+            if fd is not None:
+                os.close(fd)
     except BaseException:
         if fd is not None:
             path.unlink(missing_ok=True)

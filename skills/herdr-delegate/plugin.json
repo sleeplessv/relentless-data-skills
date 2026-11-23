@@ -1,6 +1,6 @@
 {
   "name": "herdr-delegate",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Hand a task to Codex, Claude or another coding agent from inside Herdr, open it in the caller's own space, and collect its result.",
   "author": {
     "name": "sleeplessv"

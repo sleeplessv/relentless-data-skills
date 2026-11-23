@@ -44,6 +44,24 @@ and appends `DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. 
 statement provides schema metadata for the preview and saved result. With templating off,
 the CLI sends `&name` and `<% name %>` text, such as `'F&W'`, unchanged.
 
+## Direct snow calls
+
+Agents never run `snow` or `snowsql` themselves. The only direct calls are
+`snow connection list`, `snow connection test`, `snow --version` and `snow --help`.
+A staged script is run by the user, not the agent.
+
+On Claude Code, the snowman plugin's `PreToolUse` hook
+([`hooks/snow_guard.py`](../hooks/snow_guard.py)) refuses any other direct call,
+including after `&&`, `;` or a pipe, inside `$(...)`, `bash -c` or `eval`, and
+behind wrappers such as `env`, `uvx` or `xargs`. It ships only with the plugin
+install (`/plugin install snowman@relentless-data-skills`), not with
+`npx skills add`, and it fires inside helpers too. Cortex Code, Codex and Cursor
+rely on this rule alone for now.
+
+The hook catches a mistake, such as running the printed staged command. It does
+not stop a deliberate bypass, such as Python with the Snowflake connector. The
+connection's role is the real limit, so use a least-privilege role.
+
 ## Output
 
 Successful query stdout contains data only. All type, NULL, truncation, and

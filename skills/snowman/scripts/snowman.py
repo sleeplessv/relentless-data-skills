@@ -726,12 +726,14 @@ def gitignored_dir(path: Path) -> Path:
     path.mkdir(exist_ok=True)
     path.chmod(0o700)
     gitignore = path / ".gitignore"
-    text = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
-    rules = [line.strip() for line in text.splitlines()
-             if line.strip() and not line.startswith("#")]
-    if rules[-1:] != ["*"]:
-        separator = "\n" if text and not text.endswith("\n") else ""
-        gitignore.write_text(f"{text}{separator}*\n", encoding="utf-8")
+    # Bytes, so a .gitignore in any encoding is kept as it is. Git ignores
+    # trailing spaces but not leading ones.
+    data = gitignore.read_bytes() if gitignore.is_file() else b""
+    rules = [line.rstrip() for line in data.splitlines()
+             if line.strip() and not line.startswith(b"#")]
+    if rules[-1:] != [b"*"]:
+        separator = b"\n" if data and not data.endswith(b"\n") else b""
+        gitignore.write_bytes(data + separator + b"*\n")
     return path
 
 

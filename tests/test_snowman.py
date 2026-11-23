@@ -878,11 +878,11 @@ class TestStage(SnowmanTestCase):
         root = self.enter(self.make_project())
         gitignore = root / ".snowman" / "staged" / ".gitignore"
         gitignore.parent.mkdir()
-        gitignore.write_text("*.tmp", encoding="utf-8")
+        gitignore.write_bytes(b"# caf\xe9 notes\n*.tmp\n *")
         self.run_stage("SELECT 1", "noop", None)
         [staged] = self.staged_files(root)
         self.assert_git_ignores(root, staged)
-        self.assertEqual(gitignore.read_text(encoding="utf-8"), "*.tmp\n*\n")
+        self.assertEqual(gitignore.read_bytes(), b"# caf\xe9 notes\n*.tmp\n *\n*\n")
 
     def test_staged_file_and_directory_are_owner_only(self):
         self.umask_022()
@@ -1565,6 +1565,7 @@ class TestExecute(SnowmanTestCase):
         self.addCleanup(self._rmtree, path.parent)
         self.assertTrue(path.is_absolute())
         self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(path.read_text())["rows"], rows)
         self.assertFalse((root / ".snowman").exists())
 

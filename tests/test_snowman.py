@@ -10,7 +10,9 @@ executes by design.
 """
 from __future__ import annotations
 
+import codecs
 import contextlib
+import errno
 import io
 import json
 import os
@@ -150,7 +152,8 @@ class SnowmanTestCase(unittest.TestCase):
         self.assertEqual([p.name for p in directory.iterdir()], [".gitignore"])
 
     def assert_git_ignores(self, root: Path, path: Path) -> None:
-        """Assert `git check-ignore` in a repo at `root` reports `path` ignored."""
+        """Assert `path` is a file and `git check-ignore` in a repo at `root` reports it ignored."""
+        self.assertTrue(path.is_file(), f"{path} is not a file")  # git ignores an absent path too
         if shutil.which("git") is None:
             self.skipTest("git is not installed")
         subprocess.run(["git", "init", "-q", str(root)], check=True)
@@ -1252,6 +1255,39 @@ class TestCreatePrivateFile(SnowmanTestCase):
         with self.assertRaises(OSError):
             os.fstat(opened[0])  # the descriptor was closed
 
+    def test_interrupted_encoder_setup_closes_once_and_removes_the_file(self):
+        # open() closes a descriptor it owns when building the stream fails.
+        root = self.make_bare_dir()
+        closed = []
+
+        def recording_close(fd):
+            closed.append(fd)
+            real_close(fd)
+
+        real_close = os.close
+        with mock.patch.object(snowman.os, "close", recording_close), \
+                mock.patch.object(codecs.IncrementalEncoder, "__init__", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            with snowman.create_private_file(root, "noop", ".sql", datetime.now()):
+                pass
+        self.assertEqual(list(root.iterdir()), [])
+        self.assertEqual(len(closed), 1)
+        with self.assertRaises(OSError):
+            os.fstat(closed[0])  # the descriptor was closed
+
+    def test_close_that_raises_after_a_clean_block_removes_the_file(self):
+        root = self.make_bare_dir()
+
+        def failing_close(fd):
+            real_close(fd)
+            raise OSError(errno.EIO, "close failed")
+
+        real_close = os.close
+        with mock.patch.object(snowman.os, "close", failing_close), self.assertRaises(OSError):
+            with snowman.create_private_file(root, "noop", ".sql", datetime.now()) as (_, out):
+                out.write("SELECT 1")
+        self.assertEqual(list(root.iterdir()), [])
+
 
 class TestSpillFullResult(SnowmanTestCase):
     def test_writes_full_untruncated_json_and_gitignore(self):
@@ -1298,6 +1334,7 @@ class TestSpillFullResult(SnowmanTestCase):
         gitignore.write_bytes(b"*.tmp\n*")
         gitignore.chmod(0o400)
         path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["rows"], [{"N": 1}])
         self.assert_git_ignores(root, path)
         self.assertEqual(gitignore.read_bytes(), b"*.tmp\n*")
 

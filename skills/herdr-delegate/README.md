@@ -1,9 +1,9 @@
 # herdr-delegate
 
 Have an agent running in the Herdr desktop app hand a task to another agent,
-such as Codex reviewing Claude's change. The helper opens in the caller's own
-Herdr space, whatever space the person is looking at, and writes its result to a
-findings file that the caller collects.
+such as Codex, Claude, Cortex or Antigravity reviewing a change. The helper
+opens in the caller's own Herdr space, whatever space the person is looking at,
+and writes its result to a findings file that the caller collects.
 
 ## Use
 

@@ -513,6 +513,10 @@ class TestResolveTarget(SnowmanTestCase):
         root = self.make_project()
         self.assert_blocked(snowman.resolve_target, root, "", None, match="--connection")
 
+    def test_empty_connection_override_blocks_without_context(self):
+        root = self.make_bare_dir()
+        self.assert_blocked(snowman.resolve_target, root, "", None, match="empty name")
+
     def test_env_file_at_project_root(self):
         root = self.make_project()
         (root / ".env").write_text("X=1\n", encoding="utf-8")
@@ -1767,6 +1771,20 @@ class TestMainCli(SnowmanTestCase):
         self.assert_usage_error(
             ["--connection", "c", "--env", "dev", "SELECT 1"], "use one"
         )
+
+    def test_empty_connection_is_still_a_given_flag(self):
+        # A bare dir keeps a run that slips past the parser away from real files.
+        self.enter(self.make_bare_dir())
+        cases = {
+            "with --stage": (
+                ["--stage", "--name", "noop", "--connection", "", "SELECT 1"],
+                "--connection is not valid with --stage",
+            ),
+            "with --env": (["--connection", "", "--env", "dev", "SELECT 1"], "use one"),
+        }
+        for name, (argv, match) in cases.items():
+            with self.subTest(name):
+                self.assert_usage_error(argv, match)
 
     def test_json_invalid_with_stage(self):
         self.assert_usage_error(

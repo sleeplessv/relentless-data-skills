@@ -122,6 +122,36 @@ class SnowmanTestCase(unittest.TestCase):
         os.chdir(path)
         return path
 
+    def umask_022(self) -> None:
+        """Set umask 022, the common default, for the rest of the test."""
+        self.addCleanup(os.umask, os.umask(0o022))
+
+    def link_gitignore(self, directory: Path) -> Path:
+        """Make `directory/.gitignore` a symlink to a `*` file elsewhere; return the target."""
+        target = self.make_bare_dir() / "shared-ignore"
+        target.write_bytes(b"*\n")
+        directory.mkdir(parents=True)
+        (directory / ".gitignore").symlink_to(target)
+        return target
+
+    def assert_link_refused(self, reason: str, directory: Path, target: Path) -> None:
+        """Assert the refusal says what to do, and the link and its target are untouched."""
+        link = directory / ".gitignore"
+        self.assertIn(f"{link} is a symbolic link", reason)
+        self.assertIn("Replace the link with a regular file that contains the line *.", reason)
+        self.assertTrue(link.is_symlink())
+        self.assertEqual(Path(os.readlink(link)), target)
+        self.assertEqual(target.read_bytes(), b"*\n")
+        self.assertEqual([p.name for p in directory.iterdir()], [".gitignore"])
+
+    def assert_git_ignores(self, root: Path, path: Path) -> None:
+        """Assert `git check-ignore` in a repo at `root` reports `path` ignored."""
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        check = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", str(path)])
+        self.assertEqual(check.returncode, 0, f"{path} is not ignored")  # 0 = ignored
+
     @staticmethod
     def _rmtree(path: Path) -> None:
         import shutil
@@ -862,6 +892,47 @@ class TestStage(SnowmanTestCase):
         gitignore = root / ".snowman" / "staged" / ".gitignore"
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
 
+    def test_narrower_gitignore_gets_a_catch_all_rule(self):
+        root = self.enter(self.make_project())
+        gitignore = root / ".snowman" / "staged" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_bytes(b"# caf\xe9 notes\n*.tmp\n *")
+        self.run_stage("SELECT 1", "noop", None)
+        [staged] = self.staged_files(root)
+        self.assert_git_ignores(root, staged)
+        self.assertEqual(gitignore.read_bytes(), b"# caf\xe9 notes\n*.tmp\n *\n*\n")
+
+    def test_staged_file_and_directory_are_owner_only(self):
+        self.umask_022()
+        root = self.enter(self.make_project())
+        (root / ".snowman" / "staged").mkdir(mode=0o755)
+        self.run_stage("SELECT 1", "noop", None)
+        [staged] = self.staged_files(root)
+        self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(staged.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_failed_write_leaves_no_staged_file(self):
+        # A lone surrogate, as from a non-UTF-8 argv byte, fails UTF-8 encoding.
+        root = self.enter(self.make_project())
+        with self.assertRaises(UnicodeEncodeError):
+            snowman.stage("SELECT '\ud800'", "noop", None)
+        self.assertEqual(sorted(p.name for p in (root / ".snowman" / "staged").iterdir()),
+                         [".gitignore"])
+
+    def test_interrupt_before_the_first_write_leaves_no_staged_file(self):
+        root = self.enter(self.make_project())
+        with mock.patch.object(snowman.shlex, "join", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            snowman.stage("SELECT 1", "noop", None)
+        self.assertEqual(self.staged_files(root), [])
+
+    def test_linked_gitignore_blocks_staging_and_is_left_alone(self):
+        root = self.enter(self.make_project())
+        staged = root / ".snowman" / "staged"
+        target = self.link_gitignore(staged)
+        reason = self.assert_blocked(snowman.stage, "SELECT 1", "noop", None)
+        self.assert_link_refused(reason, staged, target)
+
     def test_empty_script_blocks(self):
         self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "   ", "noop", None, match="empty")
@@ -1132,10 +1203,11 @@ class TestCleanSnowStderr(SnowmanTestCase):
         self.assertEqual(snowman.clean_snow_stderr(""), "")
 
 
-class TestReservePath(SnowmanTestCase):
+class TestCreatePrivateFile(SnowmanTestCase):
     def test_timestamp_base_and_suffix(self):
         root = self.make_bare_dir()
-        path = snowman.reserve_path(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5))
+        with snowman.create_private_file(root, "noop", ".sql", datetime(2026, 1, 2, 3, 4, 5)) as (path, _):
+            pass
         self.assertEqual(path, root / "20260102-030405__noop.sql")
         self.assertEqual(path.read_text(encoding="utf-8"), "")
 
@@ -1144,9 +1216,36 @@ class TestReservePath(SnowmanTestCase):
         now = datetime(2026, 1, 2, 3, 4, 5)
         (root / "20260102-030405__noop.sql").touch()
         (root / "20260102-030405__noop-1.sql").touch()
-        path = snowman.reserve_path(root, "noop", ".sql", now)
+        with snowman.create_private_file(root, "noop", ".sql", now) as (path, _):
+            pass
         self.assertEqual(path.name, "20260102-030405__noop-2.sql")
         self.assertEqual(path.read_text(encoding="utf-8"), "")
+
+    def test_close_that_raises_removes_the_file(self):
+        root = self.make_bare_dir()
+        with self.assertRaises(OSError):
+            with snowman.create_private_file(root, "noop", ".sql", datetime.now()) as (path, out):
+                out.write("SELECT 1")
+                os.close(out.fileno())  # the buffered write then fails at close
+        self.assertEqual(list(root.iterdir()), [])
+
+    def test_interrupt_after_the_exclusive_open_closes_and_removes_the_file(self):
+        root = self.make_bare_dir()
+        opened = []
+
+        def recording_open(*args, **kwargs):
+            opened.append(real_open(*args, **kwargs))
+            return opened[-1]
+
+        real_open = os.open
+        with mock.patch.object(snowman.os, "open", recording_open), \
+                mock.patch("snowman.open", create=True, side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            with snowman.create_private_file(root, "noop", ".sql", datetime.now()):
+                pass
+        self.assertEqual(list(root.iterdir()), [])
+        with self.assertRaises(OSError):
+            os.fstat(opened[0])  # the descriptor was closed
 
 
 class TestSpillFullResult(SnowmanTestCase):
@@ -1164,6 +1263,91 @@ class TestSpillFullResult(SnowmanTestCase):
         self.assertNotIn("…", body)
         gitignore = root / ".snowman" / "results" / ".gitignore"
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
+
+    def test_gitignore_that_unignores_json_gets_a_catch_all_rule(self):
+        root = self.make_project()
+        gitignore = root / ".snowman" / "results" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_text("*\n!*.json\n", encoding="utf-8")
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assert_git_ignores(root, path)
+        self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n!*.json\n*\n")
+
+    def test_gitignore_whose_last_line_only_looks_like_a_catch_all_gets_one(self):
+        # Git keeps a trailing tab, and a bare CR does not end a line for it.
+        for data in (b"*.tmp\n*\t\n", b"*.tmp\r*\n"):
+            with self.subTest(data=data):
+                root = self.make_project()
+                gitignore = root / ".snowman" / "results" / ".gitignore"
+                gitignore.parent.mkdir()
+                gitignore.write_bytes(data)
+                path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+                self.assert_git_ignores(root, path)
+                self.assertEqual(gitignore.read_bytes(), data + b"*\n")
+
+    def test_unterminated_catch_all_is_left_as_is(self):
+        # Read-only, so an append would raise PermissionError.
+        root = self.make_project()
+        gitignore = root / ".snowman" / "results" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_bytes(b"*.tmp\n*")
+        gitignore.chmod(0o400)
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assert_git_ignores(root, path)
+        self.assertEqual(gitignore.read_bytes(), b"*.tmp\n*")
+
+    def test_crlf_catch_all_is_left_as_is(self):
+        root = self.make_project()
+        gitignore = root / ".snowman" / "results" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_bytes(b"*.tmp\r\n*\r\n")
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assert_git_ignores(root, path)
+        self.assertEqual(gitignore.read_bytes(), b"*.tmp\r\n*\r\n")
+
+    @unittest.skipIf(sys.platform == "win32", "needs RLIMIT_FSIZE and SIGXFSZ")
+    def test_failed_gitignore_append_keeps_the_existing_rules(self):
+        # A file-size limit of 0 makes any write fail with EFBIG, in a child process.
+        results = self.make_project() / ".snowman" / "results"
+        results.mkdir()
+        (results / ".gitignore").write_bytes(b"*.tmp\n")
+        child = subprocess.run([sys.executable, "-c", (
+            "import resource, signal, sys\n"
+            "from pathlib import Path\n"
+            f"sys.path.insert(0, {str(SKILL_DIR / 'scripts')!r})\n"
+            "import snowman\n"
+            "signal.signal(signal.SIGXFSZ, signal.SIG_IGN)\n"
+            "resource.setrlimit(resource.RLIMIT_FSIZE, (0, resource.getrlimit(resource.RLIMIT_FSIZE)[1]))\n"
+            "try:\n"
+            "    snowman.gitignored_dir(Path(sys.argv[1]))\n"
+            "except OSError as exc:\n"
+            "    print(type(exc).__name__)\n"
+        ), str(results)], capture_output=True, text=True)
+        self.assertEqual(child.stdout, "OSError\n", child.stderr)
+        self.assertEqual((results / ".gitignore").read_bytes(), b"*.tmp\n")
+
+    def test_interrupt_before_the_first_write_leaves_no_result_file(self):
+        root = self.make_project()
+        with mock.patch.object(snowman.json, "dump", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assertEqual(sorted(p.name for p in (root / ".snowman" / "results").iterdir()),
+                         [".gitignore"])
+
+    def test_result_file_and_directory_are_owner_only(self):
+        self.umask_022()
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", self.make_project() / ".snowman")
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_failed_write_leaves_no_result_file(self):
+        # The first rows encode and reach the file before the lone surrogate fails.
+        root = self.make_project()
+        rows = [{"S": "x" * 100_000}, {"S": "\ud800"}]
+        with self.assertRaises(UnicodeEncodeError):
+            snowman.spill_full_result(rows, "SELECT 1", root / ".snowman")
+        self.assertEqual(sorted(p.name for p in (root / ".snowman" / "results").iterdir()),
+                         [".gitignore"])
 
     def test_same_sql_in_the_same_second_keeps_both_results(self):
         snowman_dir = self.make_project() / ".snowman"
@@ -1491,6 +1675,16 @@ class TestExecute(SnowmanTestCase):
         self.assertEqual((Path.cwd() / rel).resolve(), root / ".snowman" / "results" / Path(rel).name)
         self.assertTrue((Path.cwd() / rel).is_file())
 
+    def test_linked_results_gitignore_blocks_before_querying(self):
+        root = self.enter(self.make_project())
+        results = root / ".snowman" / "results"
+        target = self.link_gitignore(results)
+        self.snow = fake_snow({})
+        with mock.patch.object(snowman, "run_snow", self.snow):
+            reason = self.assert_blocked(snowman.execute, "SELECT 1")
+        self.assertEqual(self.snow.calls, [])
+        self.assert_link_refused(reason, results, target)
+
     def test_bootstrap_truncation_saves_in_private_temporary_directory(self):
         root = self.enter(self.make_bare_dir())
         rows = [{"N": i} for i in range(60)]
@@ -1502,6 +1696,7 @@ class TestExecute(SnowmanTestCase):
         self.addCleanup(self._rmtree, path.parent)
         self.assertTrue(path.is_absolute())
         self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(json.loads(path.read_text())["rows"], rows)
         self.assertFalse((root / ".snowman").exists())
 

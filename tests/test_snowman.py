@@ -2271,6 +2271,19 @@ class TestDocumentedInvocation(unittest.TestCase):
         self.assertNotIn("LIKE 'F%W'", guardrails)
         self.assertNotIn("CHR(38)", guardrails)
 
+    def test_list_substitute_prefers_directory_table(self):
+        row = next(line for line in self.docs()["guardrails.md"].splitlines()
+                   if line.startswith("| `LIST @stage/path` |"))
+        substitute = row.split("|")[2]
+        queries = re.findall(r"`(SELECT [^`]+)`", substitute)
+        self.assertEqual(len(queries), 2, substitute)
+        self.assertIn("FROM DIRECTORY(@stage)", queries[0])
+        self.assertIn("METADATA$FILENAME", queries[1])
+        self.assertIn("empty files", substitute)
+        for sql in queries:
+            with self.subTest(sql=sql):
+                snowman.enforce_read_only(sql)
+
 
 if __name__ == "__main__":
     unittest.main()

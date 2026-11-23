@@ -24,7 +24,7 @@ keyword, while `update_date` does not. `SYSTEM$` reads are blocked as a group.
 
 | Blocked | Read-only substitute |
 | --- | --- |
-| `LIST @stage/path` | `SELECT METADATA$FILENAME, METADATA$FILE_LAST_MODIFIED, COUNT(*) FROM @stage/path (FILE_FORMAT => '<db>.<schema>.<format>') GROUP BY 1, 2`. `DIRECTORY(@stage)` works only where the stage has a directory table enabled. |
+| `LIST @stage/path` | `SELECT RELATIVE_PATH, SIZE, LAST_MODIFIED FROM DIRECTORY(@stage) WHERE RELATIVE_PATH LIKE 'path/%'` where the stage has a directory table enabled. It lists the files as of the table's last refresh. Without a directory table, `SELECT METADATA$FILENAME, METADATA$FILE_LAST_MODIFIED, COUNT(*) FROM @stage/path (FILE_FORMAT => '<db>.<schema>.<format>') GROUP BY 1, 2` scans the data and lists only files that yield rows, so it omits empty files. |
 | `SYSTEM$TYPEOF(col)` | `DESCRIBE TABLE` for a column's declared type; the stderr `# types:` note names a result's VARIANT, OBJECT and ARRAY columns. |
 | `SYSTEM$CLUSTERING_INFORMATION`, other `SYSTEM$` reads | `SHOW TABLES LIKE '<t>' IN SCHEMA <db>.<schema> ->> SELECT "cluster_by", "automatic_clustering" FROM $1` for clustering; otherwise stage the statement for the user. |
 | `USE WAREHOUSE`, `USE ROLE`, `USE DATABASE` | `--warehouse <name>` for one call; the role comes from the connection, so pick the `--env` whose connection holds the access, or stage the check for the user. Qualify object names fully instead of `USE DATABASE`. |

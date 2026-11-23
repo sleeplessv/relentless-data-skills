@@ -863,6 +863,14 @@ class TestStage(SnowmanTestCase):
         body = staged.read_text(encoding="utf-8")
         self.assertIn("-- target environment: prod (connection: acme_prod)", body)
 
+    def test_env_name_with_slash_is_slugged_only_in_the_filename(self):
+        root = self.enter(self.make_project(MULTI_ENV_FRONTMATTER.replace("  dev:", "  team/dev:")))
+        self.run_stage("SELECT 1", "noop", "team/dev", now=datetime(2026, 1, 2, 3, 4, 5))
+        [staged] = self.staged_files(root)
+        self.assertEqual(staged.name, "20260102-030405__team-dev__noop.sql")
+        body = staged.read_text(encoding="utf-8")
+        self.assertIn("-- target environment: team/dev (connection: acme_dev)", body)
+
     def test_filename_collision_bumps_suffix(self):
         root = self.enter(self.make_project())
         fixed = datetime(2026, 1, 2, 3, 4, 5)

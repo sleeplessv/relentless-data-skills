@@ -758,6 +758,11 @@ def spill_full_result(
     return path
 
 
+def slugify(text: str) -> str:
+    """Lowercase ``text`` and collapse each run of other characters to one hyphen."""
+    return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", text.lower())).strip("-")
+
+
 def stage(
     sql: str, name: str, env: str | None, *,
     warehouse: str | None = None, now: datetime | None = None,
@@ -766,7 +771,7 @@ def stage(
     if not sql.strip():
         raise Blocked("empty script. Nothing to stage.")
 
-    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")
+    slug = slugify(name)
     if not slug:
         raise Blocked(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
 
@@ -776,7 +781,8 @@ def stage(
     staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
     now = now or datetime.now()
-    env_part = f"{env_name}__" if env_name else ""
+    env_slug = slugify(env_name) if env_name else ""
+    env_part = f"{env_slug}__" if env_slug else ""
     path = reserve_path(staged_dir, f"{env_part}{slug}", ".sql", now)
 
     run_args = ["snow", "sql", "-f", str(path), "--connection", connection,

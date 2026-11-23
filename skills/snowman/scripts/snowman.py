@@ -334,7 +334,7 @@ def snow_env(env_file: Path | None) -> dict[str, str]:
 
 
 class SnowResult(NamedTuple):
-    """CLI result: stdout as received, for strict parsing and lossless recovery."""
+    """CLI result with stdout kept as received, for strict parsing and lossless recovery."""
 
     returncode: int
     stdout: bytes

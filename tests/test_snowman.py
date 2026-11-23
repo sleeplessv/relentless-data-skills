@@ -56,6 +56,14 @@ default_env: dev
 """
 
 
+EMPTY_CONNECTION = "--connection was given an empty name. Pass a connection name, or drop the flag."
+EMPTY_ENV = "--env was given an empty name. Pass an environment name, or drop the flag."
+
+
+def delimiter_refusal(context: Path, number: int, line: str) -> str:
+    return f"{context} line {number} is {line!r}. A frontmatter delimiter line must be exactly `---`."
+
+
 Outcome = snowman.SnowResult
 
 OK = Outcome(0, b"[]", "")
@@ -405,15 +413,21 @@ class TestParseFrontmatter(SnowmanTestCase):
         )
         self.assert_blocked(snowman.parse_frontmatter, context, match="no closing `---`")
 
-    def test_delimiters_must_equal_three_dashes(self):
+    def test_near_miss_delimiter_is_quoted(self):
         cases = {
-            "opening ---suffix": ("---suffix\nconnection: analytics\n---\n", "no YAML frontmatter"),
-            "closing with a trailing space": ("---\nconnection: analytics\n--- \n", "no closing `---`"),
+            "opening with a suffix": ("---x\nconnection: analytics\n---\n", 1, "---x"),
+            "opening with a trailing space": ("--- \nconnection: analytics\n---\n", 1, "--- "),
+            "opening with no closing line": ("--- \nconnection: analytics\n", 1, "--- "),
+            "closing with a trailing space": ("---\nconnection: analytics\n--- \n", 3, "--- "),
+            "closing with a suffix": ("---\nconnection: analytics\n---x\n# notes\n", 3, "---x"),
+            "closing before an exact rule in the notes": (
+                "---\nconnection: analytics\n--- \n# notes\n---\nconnection: other\n", 3, "--- "),
         }
-        for name, (text, match) in cases.items():
+        for name, (text, number, line) in cases.items():
             with self.subTest(name):
                 context = self.write_context(text)
-                self.assert_blocked(snowman.parse_frontmatter, context, match=match)
+                reason = self.assert_blocked(snowman.parse_frontmatter, context)
+                self.assertEqual(reason, delimiter_refusal(context, number, line))
 
     def test_crlf_line_endings_parse(self):
         context = self.write_context("---\r\nconnection: analytics\r\n---\r\n# notes\r\n")
@@ -448,6 +462,23 @@ class TestParseFrontmatter(SnowmanTestCase):
         _, environments = snowman.parse_frontmatter(context)
         self.assertEqual(environments["dev"], {"connection": "acme_dev"})
         self.assertEqual(environments["prod"], {"connection": "acme_prod"})
+
+    def test_shallower_field_after_a_deeper_first_line_blocks(self):
+        context = self.write_context(
+            "---\n"
+            "environments:\n"
+            "  dev:\n"
+            "      odd: x\n"
+            "    connection: acme_dev\n"
+            "default_env: dev\n"
+            "---\n"
+        )
+        reason = self.assert_blocked(snowman.parse_frontmatter, context)
+        self.assertEqual(
+            reason,
+            f"environment 'dev' in {context} has a line indented 4 spaces after a first "
+            "line indented 6. Indent every field under 'dev' by the same number of spaces.",
+        )
 
     def test_environment_name_with_a_value_blocks(self):
         context = self.write_context(
@@ -514,6 +545,36 @@ class TestResolveTarget(SnowmanTestCase):
         target = self.resolve(root)
         self.assertEqual((target.connection, target.environment), ("acme_dev", "dev"))
 
+    def test_four_space_environment_names_and_eight_space_fields(self):
+        root = self.make_project(
+            "---\n"
+            "environments:\n"
+            "    dev:\n"
+            "        connection: acme_dev\n"
+            "        default_warehouse: dev_wh\n"
+            "    prod:\n"
+            "        connection: acme_prod\n"
+            "default_env: dev\n"
+            "---\n"
+        )
+        for env, expected in {"dev": "acme_dev", "prod": "acme_prod", None: "acme_dev"}.items():
+            with self.subTest(env=env):
+                target = self.resolve(root, env)
+                self.assertEqual(target.connection, expected)
+        self.assertEqual(self.resolve(root, "dev").warehouse, "dev_wh")
+
+    def test_empty_env_blocks(self):
+        projects = {
+            "multi-environment": self.make_project(MULTI_ENV_FRONTMATTER),
+            "single connection": self.make_project(SINGLE_CONN_FRONTMATTER),
+        }
+        for label, root in projects.items():
+            for env in ("", " "):
+                for for_stage in (False, True):
+                    with self.subTest(label, env=env, for_stage=for_stage):
+                        reason = self.assert_blocked(self.resolve, root, env, for_stage=for_stage)
+                        self.assertEqual(reason, EMPTY_ENV)
+
     def test_multi_env_unknown_env_blocks(self):
         root = self.make_project(MULTI_ENV_FRONTMATTER)
         self.assert_blocked(self.resolve, root, "staging", match="unknown environment")
@@ -570,7 +631,24 @@ class TestResolveTarget(SnowmanTestCase):
 
     def test_empty_connection_override_blocks_without_context(self):
         root = self.make_bare_dir()
-        self.assert_blocked(snowman.resolve_target, root, "", None, match="empty name")
+        for connection in ("", " ", "\t"):
+            with self.subTest(connection=connection):
+                reason = self.assert_blocked(snowman.resolve_target, root, connection, None)
+                self.assertEqual(reason, EMPTY_CONNECTION)
+
+    def test_one_context_lookup_per_run(self):
+        root = self.make_project()
+        with mock.patch.object(snowman, "find_up", wraps=snowman.find_up) as find_up:
+            snowman.resolve_target(root, None, None)
+            self.assert_blocked(snowman.resolve_target, root, "other_conn", None)
+        context_lookups = [c for c in find_up.call_args_list if c.args[1] == snowman.CONTEXT_FILE]
+        self.assertEqual(len(context_lookups), 2)
+        self.assertFalse(hasattr(snowman, "find_context"))
+
+    def test_context_path_is_written_once(self):
+        source = (SKILL_DIR / "scripts" / "snowman.py").read_text(encoding="utf-8")
+        self.assertEqual(source.count(".snowman/context.md"), 1)
+        self.assertEqual(snowman.CONTEXT_FILE, ".snowman/context.md")
 
     def test_env_file_at_project_root(self):
         root = self.make_project()
@@ -2125,6 +2203,30 @@ class TestMainCli(SnowmanTestCase):
             ["--connection", "c", "--env", "dev", "SELECT 1"], "use one"
         )
 
+    def test_empty_env_is_still_a_given_flag(self):
+        for env in ("", " "):
+            with self.subTest(env=env):
+                self.assert_usage_error(["--connection", "c", "--env", env, "SELECT 1"], "use one")
+
+    def test_empty_env_blocks_queries_and_staging(self):
+        self.enter(self.make_project(
+            MULTI_ENV_FRONTMATTER.replace("default_env: dev", "default_env: prod")))
+        cases = {
+            "query": ["--env", "", "SELECT 1"],
+            "stage": ["--stage", "--name", "noop", "--env", "", "SELECT 1"],
+        }
+        for name, argv in cases.items():
+            with self.subTest(name):
+                snow = fake_snow({"sql": OK})
+                stderr = io.StringIO()
+                with mock.patch.object(snowman, "run_snow", snow), \
+                        contextlib.redirect_stderr(stderr):
+                    code = snowman.main(["snowman.py", *argv])
+                self.assertEqual(code, snowman.BLOCK)
+                self.assertEqual(stderr.getvalue(), f"BLOCKED: {EMPTY_ENV}\n")
+                self.assertEqual(snow.calls, [])
+                self.assertFalse((Path.cwd() / ".snowman" / "staged").exists())
+
     def test_empty_connection_is_still_a_given_flag(self):
         # A bare dir keeps a run that slips past the parser away from real files.
         self.enter(self.make_bare_dir())
@@ -2284,6 +2386,41 @@ class TestDocumentedInvocation(unittest.TestCase):
             with self.subTest(doc=name):
                 self.assertEqual(text.count("<skill-dir>/scripts/snowman.py"),
                                  text.count('"<skill-dir>/scripts/snowman.py"'))
+
+    def test_connection_rule_lives_in_guardrails(self):
+        rule = ("`--connection <name>` is for bootstrap only. It bypasses context and uses the "
+                "named connection's warehouse setting. It works only when executing a query "
+                "without `--env`, and it blocks when a `.snowman/context.md` exists at or above "
+                "the working directory.")
+        docs = {**self.docs(), "README.md": (SKILL_DIR / "README.md").read_text(encoding="utf-8")}
+        joined = {name: " ".join(text.split()) for name, text in docs.items()}
+        self.assertEqual(joined["guardrails.md"].count(rule), 1)
+        self.assertIn("\n### Connection resolution\n", docs["guardrails.md"])
+        for name, text in joined.items():
+            with self.subTest(doc=name):
+                self.assertNotIn("bootstrap only", text.replace(rule, ""))
+        self.assertIn(
+            "Queries require context. Before it exists, the bootstrap uses the "
+            "[`--connection` override](references/guardrails.md#connection-resolution).",
+            joined["SKILL.md"],
+        )
+        self.assertIn(
+            "[Connection resolution](guardrails.md#connection-resolution) says when "
+            "`--connection` applies and which warehouse it uses.",
+            joined["install.md"],
+        )
+
+    def test_connection_help_points_to_guardrails(self):
+        stdout = io.StringIO()
+        # Wide enough that argparse does not wrap the link at its hyphen.
+        with mock.patch.dict(os.environ, {"COLUMNS": "500"}), \
+                contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit):
+            snowman.main(["snowman.py", "--help"])
+        self.assertIn(
+            "connection to query during bootstrap, before a context file exists. See "
+            "references/guardrails.md#connection-resolution.",
+            " ".join(stdout.getvalue().split()),
+        )
 
     def test_ampersand_workaround_is_gone(self):
         guardrails = self.docs()["guardrails.md"]

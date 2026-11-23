@@ -29,15 +29,19 @@ keyword, while `update_date` does not. `SYSTEM$` reads are blocked as a group.
 | `SYSTEM$CLUSTERING_INFORMATION`, other `SYSTEM$` reads | `SHOW TABLES LIKE '<t>' IN SCHEMA <db>.<schema> ->> SELECT "cluster_by", "automatic_clustering" FROM $1` for clustering; otherwise stage the statement for the user. |
 | `USE WAREHOUSE`, `USE ROLE`, `USE DATABASE` | `--warehouse <name>` for one call; the role comes from the connection, so pick the `--env` whose connection holds the access, or stage the check for the user. Qualify object names fully instead of `USE DATABASE`. |
 
+### Connection resolution
+
 After validation, the wrapper resolves the connection and `default_warehouse`
 from project context. An explicit environment selects its own settings.
 Queries fall back to `default_env`. `prd` and `prod` are aliases: when the
 context defines only one, the other resolves to it and a `# environment:` note
 on stderr names both. Unknown environments, mixed context forms,
-and `--env` with a single-account context are rejected. `--connection` is for
-bootstrap only. It bypasses context and retains the named connection's warehouse
-setting, and it blocks when a `.snowman/context.md` exists at or above the
-working directory.
+and `--env` with a single-account context are rejected.
+
+`--connection <name>` is for bootstrap only. It bypasses context and uses the
+named connection's warehouse setting. It works only when executing a query
+without `--env`, and it blocks when a `.snowman/context.md` exists at or above
+the working directory.
 
 The CLI call uses `--format JSON_EXT --enhanced-exit-codes --enable-templating NONE`
 and appends `DESCRIBE RESULT LAST_QUERY_ID()` to the query in the same session. This second

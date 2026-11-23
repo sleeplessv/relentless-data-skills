@@ -26,9 +26,10 @@ heredoc and this wrapper line, in one shell call:
 uv run --python 3.13 --no-project "<skill-dir>/scripts/snowman.py" --connection <chosen> "$SQL"
 ```
 
-Stop passing `--connection` after writing context. The override uses the named
-connection's warehouse setting. Queries require network access. Follow the
-execution and failure guidance in [SKILL.md](../SKILL.md#handle-failures).
+[Connection resolution](guardrails.md#connection-resolution) says when
+`--connection` applies and which warehouse it uses. Queries require network
+access. Follow the execution and failure guidance in
+[SKILL.md](../SKILL.md#handle-failures).
 
 ## Discover and resolve preferences
 

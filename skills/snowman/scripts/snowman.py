@@ -47,6 +47,9 @@ DESTRUCTIVE_KEYWORDS = {
 
 BLOCK = 2  # exit code for a guardrail refusal
 
+# The project context file, found by walking up from the working directory.
+CONTEXT_FILE = ".snowman/context.md"
+
 # Projects name production either way. A requested name the context does not
 # define resolves to its counterpart here when the context defines that one.
 ENV_ALIASES = {"prd": "prod", "prod": "prd"}
@@ -95,17 +98,6 @@ def find_up(start: Path, relative: str) -> Path | None:
     return None
 
 
-def find_context(start: Path) -> Path:
-    """Walk up from `start` to find .snowman/context.md."""
-    context = find_up(start, ".snowman/context.md")
-    if context is not None:
-        return context
-    raise Blocked(
-        "no .snowman/context.md found in this project. Run the snowman "
-        "bootstrap first (see references/install.md)."
-    )
-
-
 def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
     """Parse the context file's YAML frontmatter (stdlib, schema-specific).
 
@@ -117,14 +109,22 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
     # Text mode already turns CRLF into LF. split("\n") keeps characters such
     # as U+2028 inside their line, where splitlines() would start a new one.
     lines = context.read_text(encoding="utf-8").split("\n")
-    if not lines or lines[0] != "---":
+    if not lines[0].startswith("---"):
         raise Blocked(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
-    if "---" not in lines[1:]:
+    # The closing line is the next one that starts with `---`, so a near miss is not skipped.
+    closing = next((n for n, line in enumerate(lines[1:], 1) if line.startswith("---")), None)
+    for n in (0, closing):
+        if n is not None and lines[n] != "---":
+            raise Blocked(
+                f"{context} line {n + 1} is {lines[n]!r}. "
+                "A frontmatter delimiter line must be exactly `---`."
+            )
+    if closing is None:
         raise Blocked(
             f"{context} frontmatter has no closing `---` line, so the wrapper "
             "cannot tell the settings from the notes. Add one after the last setting."
         )
-    front = lines[1:lines.index("---", 1)]
+    front = lines[1:closing]
 
     top: dict[str, str] = {}
     environments: dict[str, dict[str, str]] = {}
@@ -166,6 +166,12 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
                 # The first line under the environment sets its field indentation.
                 if field_indent is None:
                     field_indent = indent
+                elif indent < field_indent:
+                    raise Blocked(
+                        f"environment {current_env!r} in {context} has a line indented "
+                        f"{indent} spaces after a first line indented {field_indent}. "
+                        f"Indent every field under {current_env!r} by the same number of spaces."
+                    )
                 if value and indent == field_indent:
                     environments[current_env][key] = value
     return top, environments
@@ -261,16 +267,19 @@ def resolve_target(
 
     A ``connection`` override skips the context file (bootstrap mode), and
     blocks once a context file exists at or above ``start``.
-    Otherwise the nearest ``.snowman/context.md`` supplies the connection,
+    Otherwise the nearest ``CONTEXT_FILE`` supplies the connection,
     with ``env`` choosing among its environments. The ``.env`` is the nearest
     one at or above the project root, or above ``start`` in bootstrap mode.
-    Raises ``Blocked`` for a missing context file or a bad frontmatter.
+    Raises ``Blocked`` for an empty flag value, a missing context file or a
+    bad frontmatter.
     """
+    if env is not None and not env.strip():
+        raise Blocked("--env was given an empty name. Pass an environment name, or drop the flag.")
     warehouse = None
+    context = find_up(start, CONTEXT_FILE)
     if connection is not None:
-        if not connection:
+        if not connection.strip():
             raise Blocked("--connection was given an empty name. Pass a connection name, or drop the flag.")
-        context = find_up(start, ".snowman/context.md")
         if context is not None:
             raise Blocked(
                 f"--connection is for bootstrap only, but {context} exists. "
@@ -279,7 +288,11 @@ def resolve_target(
             )
         environment = project_root = snowman_dir = None
     else:
-        context = find_context(start)
+        if context is None:
+            raise Blocked(
+                f"no {CONTEXT_FILE} found in this project. Run the snowman "
+                "bootstrap first (see references/install.md)."
+            )
         connection, environment, settings = resolve_connection(
             context, env, for_stage=for_stage
         )
@@ -998,8 +1011,8 @@ def main(argv: list[str]) -> int:
     )
     parser.add_argument(
         "--connection", metavar="NAME",
-        help="connection name override for bootstrap, before "
-        ".snowman/context.md exists; blocks once it does (execute mode only)",
+        help="connection to query during bootstrap, before a context file "
+        "exists. See references/guardrails.md#connection-resolution.",
     )
     parser.add_argument(
         "--env", metavar="NAME",
@@ -1040,7 +1053,7 @@ def main(argv: list[str]) -> int:
             parser.error("--json is only valid when executing")
     elif args.name:
         parser.error("--name is only valid with --stage")
-    elif args.connection is not None and args.env:
+    elif args.connection is not None and args.env is not None:
         parser.error("--env resolves via the context file and --connection bypasses it, so use one or the other")
 
     try:

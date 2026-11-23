@@ -641,7 +641,8 @@ class TestEnvAlias(SnowmanTestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
                 self.assertEqual(snowman.stage("DROP TABLE t", "teardown", requested, now=fixed), 0)
             [path] = (root / ".snowman" / "staged").glob("*.sql")
-            staged[requested] = (path.name, path.read_text(encoding="utf-8"), stderr.getvalue())
+            body = path.read_text(encoding="utf-8").replace(str(root), "<root>")
+            staged[requested] = (path.name, body, stderr.getvalue())
         self.assertEqual(staged["prd"][:2], staged["prod"][:2])
         name, body, _ = staged["prd"]
         self.assertIn("prod__teardown", name)
@@ -794,6 +795,17 @@ class TestStage(SnowmanTestCase):
         run_args = shlex.split(run_line.removeprefix("run with: "))
         self.assertEqual(run_args[run_args.index("--enable-templating") + 1], "NONE")
         self.assertIn(f"-- run with: {shlex.join(run_args)}", body)
+
+    def test_printed_path_is_absolute_from_a_subdirectory(self):
+        root = self.make_project()
+        (root / "models").mkdir()
+        self.enter(root / "models")
+        output = self.run_stage("SELECT 1", "noop", None)
+        [staged] = self.staged_files(root)
+        self.assertIn(f"STAGED (not executed): {staged}\n", output)
+        run_line = next(line for line in output.splitlines() if line.startswith("run with: "))
+        run_args = shlex.split(run_line.removeprefix("run with: "))
+        self.assertEqual(run_args[run_args.index("-f") + 1], str(staged))
 
     def test_accepts_multi_statement_dml(self):
         root = self.enter(self.make_project())

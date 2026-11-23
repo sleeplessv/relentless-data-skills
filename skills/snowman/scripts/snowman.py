@@ -772,15 +772,14 @@ def stage(
 
     target = resolve_target(Path.cwd(), None, env, for_stage=True)
     connection, env_name = target.connection, target.environment
-    assert target.snowman_dir is not None and target.project_root is not None
+    assert target.snowman_dir is not None
     staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
     now = now or datetime.now()
     env_part = f"{env_name}__" if env_name else ""
     path = reserve_path(staged_dir, f"{env_part}{slug}", ".sql", now)
-    rel = path.relative_to(target.project_root)
 
-    run_args = ["snow", "sql", "-f", str(rel), "--connection", connection,
+    run_args = ["snow", "sql", "-f", str(path), "--connection", connection,
                 "--enable-templating", "NONE"]
     warehouse = warehouse or target.warehouse
     if warehouse:
@@ -803,7 +802,7 @@ def stage(
         )
     path.write_text("\n".join(header) + "\n\n" + sql.strip() + "\n", encoding="utf-8")
 
-    print(f"STAGED (not executed): {rel}")
+    print(f"STAGED (not executed): {path}")
     print(f"run with: {run_cmd}")
     return 0
 

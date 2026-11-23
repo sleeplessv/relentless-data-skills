@@ -69,11 +69,8 @@ Follow the `herdr-delegate` skill up to and including its wait for the
 report, with these inputs:
 
 - **Name**: `astra-review-$HC_TERMINAL_ID`, with your address expanded
-  (`astra-review-t10x`). Names are unique across every session on the
-  machine, so a bare `astra-review` is often held by another session's
-  review. When a live terminal holds the name, `hc run` exits 1 and prints
-  an error whose `kind` is `name_taken`; add `-2`, then `-3`, until one
-  starts.
+  (`astra-review-t10x`). A bare `astra-review` is often held by another
+  session's review. `herdr-delegate` says what to do on `name_taken`.
 - **Folder**: launch with `--cwd "$DIR"` in place of herdr-delegate's
   `--cwd "$PWD"`, so Astra starts in `DIR` whatever folder your shell is in.
 - **Program**: `codex --no-daemon -m "$MODEL" --approve-for-me -c model_reasoning_effort=high "$BRIEF"`.

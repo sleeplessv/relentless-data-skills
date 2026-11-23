@@ -75,6 +75,12 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Guard**: in generation two, a limit the environment applies to a command, whatever the agent's instructions say. The command is refused, or it waits for the owner's answer. _Avoid_: hook (one harness's mechanism), guardrail (the snowman wrapper's), permission rule.
 - **Reach command**: a command a repo names that proves an environment its runs depend on can be reached. _Avoid_: health check, connection test.
 - **Run grant**: in generation two, the writes other people can see that starting a run permits without asking. _Avoid_: permissions already granted (generation one's handoff phrase).
+- **Lesson**: something that went wrong in a run, recorded with its sightings before any change is made for it. _Avoid_: retro finding, learning.
+- **Sighting**: one run in which a lesson was seen. Its ticket is one of the lesson's cases, which a change made for the lesson is tested on. _Avoid_: occurrence, incident.
+- **Starting figure**: a number in generation two's design that was chosen, not measured. _Avoid_: default (the value a stack setting has when a repo sets none), threshold.
+- **Text rule**: an instruction added to text a generation-two run loads. A repo's own are run rules. _Avoid_: patch, rule alone.
+- **Repair**: a change that fixes wrong instructions or a stopped run and adds no behaviour. _Avoid_: fix (a fix answers a review finding), patch.
+- **Rule ledger**: the record of each text rule added after launch, with its lesson and its cases. _Avoid_: changelog, rule list.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner filter** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner filter applies. _Avoid_: owner (in generation two, the person who started a run).
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

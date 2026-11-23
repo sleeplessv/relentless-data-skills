@@ -125,7 +125,7 @@ source rows and, separately, the keys in the staged file. Relay the path and bot
 ## Explore efficiently
 
 - Start from the narrowest known scope. Take column and schema names from a
-  `DESCRIBE TABLE` projected to `"name","type"` with `->>`, `INFORMATION_SCHEMA.COLUMNS`,
+  `DESCRIBE TABLE` projected to `"name","type"` with [`->>`](references/workflows.md#explore-objects), `INFORMATION_SCHEMA.COLUMNS`,
   or the dbt model's SQL and `schema` config before the first SELECT on a table;
   a name inferred from the model's purpose fails with `invalid identifier` and
   costs a round trip. Discover databases or schemas only when their names are missing.

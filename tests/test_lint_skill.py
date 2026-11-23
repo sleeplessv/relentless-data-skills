@@ -112,6 +112,14 @@ class TestLintSkill(unittest.TestCase):
         )
         self.assertEqual(self.lint(skill_md), [])
 
+    def test_placeholder_after_two_or_three_backslashes_fails(self) -> None:
+        for name, line in (("dbl", "\\\\$1"), ("triple", "\\\\\\$1")):
+            with self.subTest(line=line):
+                skill_md = self.add_skill(name, f"description: {DESC}\n", body=f"# Skill\n\n{line}\n")
+                errors = self.lint(skill_md)
+                self.assertEqual(len(errors), 1)
+                self.assertIn("line 8: $1", errors[0])
+
     def test_placeholder_in_reference_file_passes(self) -> None:
         skill_md = self.add_skill("projector", f"description: {DESC}\n")
         refs = skill_md.parent / "references"

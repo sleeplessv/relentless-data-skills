@@ -47,8 +47,8 @@ ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
 SUBSTITUTED = "\0"  # stands in for a $(...) or backtick result inside a word
 REASON = (
     "BLOCKED: direct `{cmd}` call. Every Snowflake call goes through the snowman "
-    "wrapper (scripts/snowman.py). To run a staged script, give the user its "
-    "path and manual command; they run it. Allowed direct calls: `snow "
+    "wrapper (scripts/snowman.py). The user runs staged scripts. Follow "
+    "\"Stage requested changes\" in snowman's SKILL.md. Allowed direct calls: `snow "
     "connection list`, `snow connection test`, `snow --version`, `snow --help`."
 )
 

@@ -641,13 +641,14 @@ class TestEnvAlias(SnowmanTestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(stderr):
                 self.assertEqual(snowman.stage("DROP TABLE t", "teardown", requested, now=fixed), 0)
             [path] = (root / ".snowman" / "staged").glob("*.sql")
-            staged[requested] = (path.name, path.read_text(encoding="utf-8"), stderr.getvalue())
+            body = path.read_text(encoding="utf-8").replace(str(root), "<root>")
+            staged[requested] = (path.name, body, stderr.getvalue())
         self.assertEqual(staged["prd"][:2], staged["prod"][:2])
         name, body, _ = staged["prd"]
         self.assertIn("prod__teardown", name)
         self.assertIn("-- target environment: prod (connection: acme_prod)", body)
         self.assertIn("-- WARNING: contains DROP", body)
-        self.assertEqual(staged["prod"][2], "")
+        self.assertNotIn("alias", staged["prod"][2])
         self.assertIn("using its alias 'prod'", staged["prd"][2])
 
     def test_query_through_the_alias_keeps_the_read_only_guard(self):
@@ -764,13 +765,26 @@ class TestFindUp(SnowmanTestCase):
 
 class TestStage(SnowmanTestCase):
     def run_stage(self, *args, **kwargs) -> str:
-        stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout):
+        return self.run_stage_with_stderr(*args, **kwargs)[0]
+
+    def run_stage_with_stderr(self, *args, **kwargs) -> tuple[str, str]:
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             self.assertEqual(snowman.stage(*args, **kwargs), 0)
-        return stdout.getvalue()
+        return stdout.getvalue(), stderr.getvalue()
 
     def staged_files(self, root: Path) -> list:
         return sorted((root / ".snowman" / "staged").glob("*.sql"))
+
+    def make_named_project(self, name: str, frontmatter: str = SINGLE_CONN_FRONTMATTER) -> Path:
+        """Create a project in a directory called `name`; skip if the filesystem refuses it."""
+        root = self.make_bare_dir() / name
+        try:
+            (root / ".snowman").mkdir(parents=True)
+        except OSError as exc:
+            self.skipTest(f"filesystem refuses {name!r}: {exc}")
+        (root / ".snowman" / "context.md").write_text(frontmatter, encoding="utf-8")
+        return root
 
     def test_stages_file_without_executing(self):
         root = self.enter(self.make_project())
@@ -795,6 +809,33 @@ class TestStage(SnowmanTestCase):
         self.assertEqual(run_args[run_args.index("--enable-templating") + 1], "NONE")
         self.assertIn(f"-- run with: {shlex.join(run_args)}", body)
 
+    def test_printed_path_is_absolute_from_a_subdirectory(self):
+        # The space makes the run command's path need shell quoting.
+        root = self.make_named_project("my project")
+        (root / "models").mkdir()
+        self.enter(root / "models")
+        output = self.run_stage("SELECT 1", "noop", None)
+        [staged] = self.staged_files(root)
+        self.assertIn(f"STAGED (not executed): {staged}\n", output)
+        run_line = next(line for line in output.splitlines() if line.startswith("run with: "))
+        run_args = shlex.split(run_line.removeprefix("run with: "))
+        self.assertEqual(run_args[run_args.index("-f") + 1], str(staged))
+
+    def test_line_break_in_the_path_stays_inside_the_header_comment(self):
+        root = self.enter(self.make_named_project("Quarter\nOne"))
+        self.run_stage("SELECT 1", "noop", None)
+        header, sql = self.staged_files(root)[0].read_text(encoding="utf-8").split("\n\n", 1)
+        self.assertIn("Quarter", header)
+        self.assertTrue(all(line.startswith("-- ") for line in header.split("\n")), header)
+        self.assertEqual(sql, "SELECT 1\n")
+
+    def test_unicode_line_separator_in_env_name_stays_verbatim_in_header(self):
+        env = "QA\u2028Blue"
+        root = self.enter(self.make_project(MULTI_ENV_FRONTMATTER.replace("  dev:", f"  {env}:")))
+        self.run_stage("SELECT 1", "noop", env)
+        body = self.staged_files(root)[0].read_text(encoding="utf-8")
+        self.assertIn(f"-- target environment: {env} (connection: acme_dev)\n", body)
+
     def test_accepts_multi_statement_dml(self):
         root = self.enter(self.make_project())
         self.run_stage("INSERT INTO t VALUES (1); UPDATE t SET x = 2;", "backfill", None)
@@ -802,17 +843,18 @@ class TestStage(SnowmanTestCase):
 
     def test_destructive_keywords_warn_but_never_block(self):
         root = self.enter(self.make_project())
-        self.run_stage("DROP TABLE old; TRUNCATE TABLE older;", "teardown", None)
+        _, err = self.run_stage_with_stderr("DROP TABLE old; TRUNCATE TABLE older;", "teardown", None)
         body = self.staged_files(root)[0].read_text(encoding="utf-8")
-        self.assertIn("WARNING", body)
-        self.assertIn("DROP", body)
-        self.assertIn("TRUNCATE", body)
+        warning = "WARNING: contains DROP, TRUNCATE. Review carefully before running"
+        self.assertIn(f"-- {warning}", body)
+        self.assertEqual(err, f"{warning}\n")
 
     def test_non_destructive_script_has_no_warning(self):
         root = self.enter(self.make_project())
-        self.run_stage("INSERT INTO t VALUES (1)", "insert-row", None)
+        _, err = self.run_stage_with_stderr("INSERT INTO t VALUES (1)", "insert-row", None)
         body = self.staged_files(root)[0].read_text(encoding="utf-8")
         self.assertNotIn("WARNING", body)
+        self.assertEqual(err, "")
 
     def test_maintains_gitignore(self):
         root = self.enter(self.make_project())
@@ -846,6 +888,14 @@ class TestStage(SnowmanTestCase):
         self.assertIn("prod__noop", staged.name)
         body = staged.read_text(encoding="utf-8")
         self.assertIn("-- target environment: prod (connection: acme_prod)", body)
+
+    def test_env_name_with_slash_is_slugged_only_in_the_filename(self):
+        root = self.enter(self.make_project(MULTI_ENV_FRONTMATTER.replace("  dev:", "  team/dev:")))
+        self.run_stage("SELECT 1", "noop", "team/dev", now=datetime(2026, 1, 2, 3, 4, 5))
+        [staged] = self.staged_files(root)
+        self.assertEqual(staged.name, "20260102-030405__team-dev__noop.sql")
+        body = staged.read_text(encoding="utf-8")
+        self.assertIn("-- target environment: team/dev (connection: acme_dev)", body)
 
     def test_filename_collision_bumps_suffix(self):
         root = self.enter(self.make_project())

@@ -758,6 +758,11 @@ def spill_full_result(
     return path
 
 
+def slugify(text: str) -> str:
+    """Lowercase ``text`` and collapse each run of other characters to one hyphen."""
+    return re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", text.lower())).strip("-")
+
+
 def stage(
     sql: str, name: str, env: str | None, *,
     warehouse: str | None = None, now: datetime | None = None,
@@ -766,45 +771,52 @@ def stage(
     if not sql.strip():
         raise Blocked("empty script. Nothing to stage.")
 
-    slug = re.sub(r"-{2,}", "-", re.sub(r"[^a-z0-9-]+", "-", name.lower())).strip("-")
+    slug = slugify(name)
     if not slug:
         raise Blocked(f"--name {name!r} reduces to an empty slug. Use letters, digits, hyphens.")
 
     target = resolve_target(Path.cwd(), None, env, for_stage=True)
     connection, env_name = target.connection, target.environment
-    assert target.snowman_dir is not None and target.project_root is not None
+    assert target.snowman_dir is not None
     staged_dir = gitignored_dir(target.snowman_dir / "staged")
 
     now = now or datetime.now()
-    env_part = f"{env_name}__" if env_name else ""
+    env_slug = slugify(env_name) if env_name else ""
+    env_part = f"{env_slug}__" if env_slug else ""
     path = reserve_path(staged_dir, f"{env_part}{slug}", ".sql", now)
-    rel = path.relative_to(target.project_root)
 
-    run_args = ["snow", "sql", "-f", str(rel), "--connection", connection,
+    run_args = ["snow", "sql", "-f", str(path), "--connection", connection,
                 "--enable-templating", "NONE"]
     warehouse = warehouse or target.warehouse
     if warehouse:
         run_args += ["--warehouse", warehouse]
     run_cmd = shlex.join(run_args)
     destructive = sorted(keywords_in(strip_for_analysis(sql), DESTRUCTIVE_KEYWORDS))
+    warning = (f"WARNING: contains {', '.join(destructive)}. Review carefully before running"
+               if destructive else "")
     header = [
-        "-- staged by snowman, NOT executed",
-        f"-- purpose: {slug}",
+        "staged by snowman, NOT executed",
+        f"purpose: {slug}",
     ]
     if env_name:
-        header.append(f"-- target environment: {env_name} (connection: {connection})")
+        header.append(f"target environment: {env_name} (connection: {connection})")
     header += [
-        f"-- staged at: {now:%Y-%m-%d %H:%M:%S}",
-        f"-- run with: {run_cmd}",
+        f"staged at: {now:%Y-%m-%d %H:%M:%S}",
+        f"run with: {run_cmd}",
     ]
-    if destructive:
-        header.append(
-            f"-- WARNING: contains {', '.join(destructive)}. Review carefully before running"
-        )
-    path.write_text("\n".join(header) + "\n\n" + sql.strip() + "\n", encoding="utf-8")
+    if warning:
+        header.append(warning)
+    # A line break inside a value (a path, an env name) must not end the comment.
+    # Split only on the breaks that end a SQL comment; keep U+2028 and the like.
+    comment = "\n".join(
+        f"-- {line}" for entry in header for line in re.split(r"\r\n|\r|\n", entry)
+    )
+    path.write_text(comment + "\n\n" + sql.strip() + "\n", encoding="utf-8")
 
-    print(f"STAGED (not executed): {rel}")
+    print(f"STAGED (not executed): {path}")
     print(f"run with: {run_cmd}")
+    if warning:
+        print(warning, file=sys.stderr)
     return 0
 
 

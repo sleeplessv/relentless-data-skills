@@ -1,6 +1,6 @@
 ---
 name: herdr-delegate
-description: Hand a task to another coding agent (Codex, Claude) from inside the Herdr desktop app, open it in the caller's own Herdr space, and collect its result. Use when an agent running in Herdr is asked to have Codex, Claude or another agent review, check or do part of the work.
+description: Hand a task to another coding agent (Codex, Claude, Cortex, Antigravity) from inside the Herdr desktop app, open it in the caller's own Herdr space, and collect its result. Use when an agent running in Herdr is asked to have Codex, Claude, Cortex, Antigravity or another agent review, check or do part of the work.
 ---
 
 # Delegate to another agent in Herdr
@@ -74,24 +74,24 @@ targets `ID`, and only a report from `ID` ends this delegation.
 |---|---|
 | Claude as the helper | `claude "$BRIEF" --allowedTools "Bash(hc send $HC_TERMINAL_ID *)" "Edit(/$RESULT)"` in place of `codex --no-daemon "$BRIEF"` |
 | Cortex as the helper | `cortex --bypass -- "$BRIEF"` |
+| Antigravity as the helper | `agy --dangerously-skip-permissions --add-dir "$(dirname "$RESULT")" -i "$BRIEF"` |
 | A split in your own tab | add `--label herdr.tab="$TAB"` |
 | A hidden helper | drop both labels |
 | You are a subagent | add `--no-notify`, so hc types no notes about the helper into the main session; drop `Bash(hc send …)` from Claude's grant |
 | A template from `hc templates` | `<template> "$BRIEF"` in place of the program |
 
 - **Codex needs `--no-daemon`.** Without it, its commands run outside hc.
-- **A new tab** in the home space is what `herdr.space` alone gives. The
-  person's screen stays where it is.
+- **A new tab** in the home space is what `herdr.space` alone gives; the person's screen stays where it is.
 - **Pre-approve the helper's tools.** A helper that asks permission sits
   `blocked` until the person answers. Cortex asks before every write and
-  command unless started with `--bypass`. For a narrower Cortex grant, use
-  `--allowed-tools Read Write "Bash(git *)" "Bash(hc *)"`. Cortex then denies
-  any call no rule matches, and a rule matches the whole command line, so end
-  the brief with: "Run each shell command on its own: no cd, no && chains, no pipes."
-  Claude's grant covers only the last step: `hc send` to your terminal and
-  the write to `RESULT` (`/$RESULT` makes the `//` prefix Claude Code uses
-  for an absolute path). The brief goes before `--allowedTools`, which takes
-  every argument after it.
+  command unless started with `--bypass` (or `--allowed-tools Read Write
+  "Bash(git *)" "Bash(hc *)"`, ending the brief with "Run each shell command
+  on its own: no cd, no && chains, no pipes."). Antigravity needs `--add-dir`
+  for `RESULT`'s folder and `--dangerously-skip-permissions` to write there
+  and run `hc send`; it reports `idle` briefly before `-i` starts, so check
+  the screen before resending. Claude's grant covers only `hc send` and
+  writing `RESULT` (`/$RESULT` gives Claude Code's `//` absolute-path
+  prefix), with the brief before `--allowedTools`.
 
 Check the launch with `hc get "$ID" --json`; `jq '{labels, state, status,
 first_message}'` trims it, or read those fields from the raw JSON. Take the

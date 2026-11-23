@@ -113,7 +113,9 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
     snowman templates produce are understood. Anything nested deeper is
     ignored. An environment's settings are its direct fields only.
     """
-    lines = context.read_text(encoding="utf-8").splitlines()
+    # Text mode already turns CRLF into LF. split("\n") keeps characters such
+    # as U+2028 inside their line, where splitlines() would start a new one.
+    lines = context.read_text(encoding="utf-8").split("\n")
     if not lines or lines[0] != "---":
         raise Blocked(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
     if "---" not in lines[1:]:
@@ -148,7 +150,13 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
             if not in_environments and value:
                 top[key] = value
         elif in_environments:
-            if not value and (env_indent is None or indent <= env_indent):
+            if env_indent is None or indent <= env_indent:
+                if value:
+                    raise Blocked(
+                        f"environment {key!r} in {context} has a value on its name "
+                        f"line ({value!r}). Write it as `{key}:` followed by its "
+                        "indented fields."
+                    )
                 env_indent = indent
                 field_indent = None
                 current_env = key
@@ -258,7 +266,9 @@ def resolve_target(
     Raises ``Blocked`` for a missing context file or a bad frontmatter.
     """
     warehouse = None
-    if connection:
+    if connection is not None:
+        if not connection:
+            raise Blocked("--connection was given an empty name. Pass a connection name, or drop the flag.")
         context = find_up(start, ".snowman/context.md")
         if context is not None:
             raise Blocked(
@@ -287,7 +297,7 @@ def load_dotenv(path: Path) -> dict[str, str]:
     Malformed lines are skipped silently. This is a relay, not a linter.
     """
     out: dict[str, str] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_text(encoding="utf-8").split("\n"):
         line = line.strip()
         if not line or line.startswith("#"):
             continue
@@ -985,13 +995,13 @@ def main(argv: list[str]) -> int:
     if args.stage:
         if not args.name:
             parser.error("--stage requires --name <purpose-slug>")
-        if args.connection:
+        if args.connection is not None:
             parser.error("--connection is not valid with --stage")
         if args.json:
             parser.error("--json is only valid when executing")
     elif args.name:
         parser.error("--name is only valid with --stage")
-    elif args.connection and args.env:
+    elif args.connection is not None and args.env:
         parser.error("--env resolves via the context file and --connection bypasses it, so use one or the other")
 
     try:

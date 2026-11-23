@@ -97,8 +97,7 @@ class SnowmanTestCase(unittest.TestCase):
         self._original_cwd = os.getcwd()
         self.addCleanup(os.chdir, self._original_cwd)
         # Recovery copies go to tempfile's default dir; keep them in one this test removes.
-        self.temp_root = Path(tempfile.mkdtemp(prefix="snowman-tmp-")).resolve()
-        self.addCleanup(self._rmtree, self.temp_root)
+        self.temp_root = self.make_bare_dir()
         patcher = mock.patch.object(tempfile, "tempdir", str(self.temp_root))
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -1756,7 +1755,6 @@ class TestExecute(SnowmanTestCase):
         )
         self.assertIn("# showing 50 of 60 rows", err)
         path = Path(err.split("full result: ")[1].splitlines()[0])
-        self.addCleanup(self._rmtree, path.parent)
         self.assertTrue(path.is_absolute())
         self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
@@ -2044,6 +2042,8 @@ class TestMainCli(SnowmanTestCase):
         error = snowman.preserve_failed_result(b"payload", "reason.")
         path = Path(str(error).split("# raw CLI stdout: ")[1].splitlines()[0])
         self.assertEqual(path.parent, self.temp_root)
+        self.doCleanups()
+        self.assertFalse(path.exists())
 
     def test_empty_cli_output_reports_no_payload_to_recover(self):
         self.enter(self.make_project())
@@ -2084,7 +2084,6 @@ class TestMainCli(SnowmanTestCase):
         self.assertTrue(stderr.getvalue().startswith("ERROR: query already ran;"))
         self.assertIn("cannot save full result", stderr.getvalue())
         path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-        self.addCleanup(path.unlink)
         self.assertEqual(json.loads(path.read_text()), [{"DDL": "x" * 500}])
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertNotIn("BLOCKED:", stderr.getvalue())
@@ -2277,9 +2276,9 @@ class TestDocumentedInvocation(unittest.TestCase):
         substitute = row.split("|")[2]
         queries = re.findall(r"`(SELECT [^`]+)`", substitute)
         self.assertEqual(len(queries), 2, substitute)
-        self.assertIn("FROM DIRECTORY(@stage)", queries[0])
+        self.assertIn("FROM DIRECTORY(@stage) WHERE STARTSWITH(RELATIVE_PATH, 'path')", queries[0])
         self.assertIn("METADATA$FILENAME", queries[1])
-        self.assertIn("empty files", substitute)
+        self.assertIn("omits empty files", substitute.split(queries[1], 1)[1])
         for sql in queries:
             with self.subTest(sql=sql):
                 snowman.enforce_read_only(sql)

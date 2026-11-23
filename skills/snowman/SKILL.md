@@ -32,7 +32,7 @@ in the same shell call, so the shell keeps `"`, `$`, `'`, backticks, and backsla
 unset SQL && { IFS= read -r -d '' SQL || [ -n "$SQL" ]; } <<'SQL' &&
 <SQL>
 SQL
-uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py "$SQL"
+uv run --python 3.13 --no-project "<skill-dir>/scripts/snowman.py" "$SQL"
 ```
 
 `unset` fails on a read-only `SQL`, and `IFS=` keeps leading spaces. `read` exits 1 at the
@@ -44,7 +44,7 @@ It applies `default_warehouse` from the selected context. If absent, the named
 connection's warehouse setting applies. `--warehouse <name>` overrides both for
 one query or staged script. `USE WAREHOUSE` is blocked.
 
-To shorten repeated calls, set `S=<skill-dir>/scripts/snowman.py` and run
+To shorten repeated calls, set `S="<skill-dir>/scripts/snowman.py"` and run
 `uv run --python 3.13 --no-project "$S" ...`. Never put `uv`, `python3` or flags in any shell variable: zsh does
 not split `$S` or `$FLAGS`, so the call fails with exit 127 or an argparse usage
 error. Write shell blocks that also run under zsh, with no `declare -A` or other
@@ -108,7 +108,7 @@ Reuse an already stated target without another confirmation.
 When the user asks for DML or DDL, stage it with the [Run queries](#run-queries) heredoc and this wrapper line in one shell call:
 
 ```bash
-uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --stage "$SQL" --name <purpose-slug>
+uv run --python 3.13 --no-project "<skill-dir>/scripts/snowman.py" --stage "$SQL" --name <purpose-slug>
 ```
 
 Add the chosen `--env` for multi-environment projects. Staging requires context and accepts several statements.

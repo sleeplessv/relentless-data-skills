@@ -15,7 +15,7 @@ API is versioned with the app and changes between releases.
 | Command | Does |
 | ------- | ---- |
 | `uv run --python 3.13 --no-project $M bootstrap [--force]` | Write `.metabase/context.md`. Refuses to clobber a file with no generated marker; `--force` keeps a copy first |
-| `uv run --python 3.13 --no-project $M sql "<SQL>" --db <id> [--limit N]` | Run one **read-only** statement, rows as JSON (default 200-row print cap) |
+| `uv run --python 3.13 --no-project $M sql "$SQL" --db <id> [--limit N]` | Run one **read-only** statement, read into `SQL` by the [quoted heredoc](../SKILL.md#ad-hoc-sql-is-read-only), rows as JSON (default 200-row print cap) |
 | `uv run --python 3.13 --no-project $M card <id>` | Full card definition JSON |
 | `uv run --python 3.13 --no-project $M sql-of <id> [--compiled]` | Card's SQL, native verbatim, MBQL compiled. `--compiled` substitutes template tags so the output is runnable |
 | `uv run --python 3.13 --no-project $M run <id> [--count] [--limit N]` | Execute card. `--count` counts **server-side** where possible, falling back to client-side |

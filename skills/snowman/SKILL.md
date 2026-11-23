@@ -25,18 +25,18 @@ restriction. Query other databases when the user's question requires them.
 
 ## Run queries
 
-Every SQL query goes through the wrapper. Pass the SQL through a quoted heredoc,
-so the shell keeps `"`, `$`, `'`, backticks, and backslashes as written:
+Every SQL query goes through the wrapper. Pass the SQL through a quoted heredoc
+in the same shell call, so the shell keeps `"`, `$`, `'`, backticks, and backslashes:
 
 ```bash
-IFS= read -r -d '' SQL <<'SQL' || true
+unset SQL && { IFS= read -r -d '' SQL || [ -n "$SQL" ]; } <<'SQL' &&
 <SQL>
 SQL
 uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py "$SQL"
 ```
 
-`read` exits 1 at the end of input, and `|| true` keeps that from failing the call.
-The SQL must not contain a line that is exactly `SQL`.
+`unset` fails on a read-only `SQL`, and `IFS=` keeps leading spaces. `read` exits 1 at the
+end of input, so the wrapper runs only when `SQL` is set. No line may be exactly `SQL`.
 `<skill-dir>` is this skill's directory; without `uv`, plain `python3` 3.13+ works.
 Submit one statement per call.
 The wrapper appends `DESCRIBE RESULT` to obtain column types in the same session.
@@ -105,7 +105,7 @@ Reuse an already stated target without another confirmation.
 
 ## Stage requested changes
 
-When the user asks for DML or DDL, set `SQL` as in [Run queries](#run-queries) and stage it:
+When the user asks for DML or DDL, stage it with the [Run queries](#run-queries) heredoc and this wrapper line in one shell call:
 
 ```bash
 uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --stage "$SQL" --name <purpose-slug>

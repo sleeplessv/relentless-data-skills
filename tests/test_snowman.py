@@ -1769,18 +1769,19 @@ class TestMainCli(SnowmanTestCase):
 class TestDocumentedInvocation(unittest.TestCase):
     """The docs' query invocation hands SQL to the wrapper unchanged."""
 
-    # Double quotes, $1, an odd apostrophe, an ampersand, a backtick and a backslash.
-    SQL = """SHOW TABLES ->> SELECT "name" FROM $1 WHERE "name" <> 'F&W' -- it's `x` \\n"""
+    # Leading spaces, double quotes, $1, an odd apostrophe, an ampersand, a backtick and a backslash.
+    SQL = """  SHOW TABLES ->> SELECT "name" FROM $1 WHERE "name" <> 'F&W' -- it's `x` \\n"""
 
     def docs(self) -> dict[str, str]:
         paths = [SKILL_DIR / "SKILL.md", *sorted((SKILL_DIR / "references").glob("*.md"))]
         return {p.name: p.read_text(encoding="utf-8") for p in paths}
 
-    def test_run_queries_block_passes_sql_unchanged(self):
+    def run_block(self, prefix: str = "") -> dict:
+        """Run the Run queries block under bash and zsh with a fake `uv`; map shell to result."""
         run_queries = self.docs()["SKILL.md"].split("## Run queries", 1)[1]
         block = re.search(r"```bash\n(.*?)```", run_queries, re.S).group(1)
         self.assertIn("<SQL>", block)
-        script = block.replace("<SQL>", self.SQL).replace("<skill-dir>", "/skill")
+        script = prefix + block.replace("<SQL>", self.SQL).replace("<skill-dir>", "/skill")
         shells = [sh for sh in ("bash", "zsh") if shutil.which(sh)]
         if not shells:
             self.skipTest("neither bash nor zsh on PATH")
@@ -1792,24 +1793,40 @@ class TestDocumentedInvocation(unittest.TestCase):
             )
             uv.chmod(0o755)
             env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"}
-            for sh in shells:
-                with self.subTest(shell=sh):
-                    done = subprocess.run(
-                        [sh, "-c", script], env=env, capture_output=True, text=True, check=False,
-                    )
-                    self.assertEqual(done.returncode, 0, done.stderr)
-                    self.assertEqual(
-                        json.loads(done.stdout),
-                        ["run", "--python", "3.13", "--no-project",
-                         "/skill/scripts/snowman.py", self.SQL + "\n"],
-                    )
+            return {
+                sh: subprocess.run([sh, "-c", script], env=env, capture_output=True, text=True, check=False)
+                for sh in shells
+            }
+
+    def test_run_queries_block_passes_sql_unchanged(self):
+        for sh, done in self.run_block().items():
+            with self.subTest(shell=sh):
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual(
+                    json.loads(done.stdout),
+                    ["run", "--python", "3.13", "--no-project",
+                     "/skill/scripts/snowman.py", self.SQL + "\n"],
+                )
+
+    def test_failed_assignment_never_reaches_the_wrapper(self):
+        # A read-only SQL keeps its old value; the old query must not run.
+        for sh, done in self.run_block("readonly SQL='SELECT 17'\n").items():
+            with self.subTest(shell=sh):
+                self.assertNotEqual(done.returncode, 0)
+                self.assertEqual(done.stdout, "")
 
     def test_other_examples_point_to_run_queries(self):
-        docs = self.docs()
-        for name, text in docs.items():
+        for name, text in self.docs().items():
+            lines = text.splitlines()
             with self.subTest(doc=name):
                 self.assertNotIn('"<SQL>"', text)
-        self.assertIn("(../SKILL.md#run-queries)", docs["workflows.md"])
+            for i, line in enumerate(lines):
+                if '"$SQL"' not in line:
+                    continue
+                window = "\n".join(lines[max(0, i - 5):i + 2])
+                with self.subTest(doc=name, line=i + 1):
+                    self.assertTrue("#run-queries)" in window or "<<'SQL'" in window, line)
+        self.assertIn("(../SKILL.md#run-queries)", self.docs()["workflows.md"])
 
     def test_ampersand_workaround_is_gone(self):
         guardrails = self.docs()["guardrails.md"]

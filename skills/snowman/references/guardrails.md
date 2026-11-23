@@ -129,7 +129,8 @@ a hint matched to the connection's authenticator. See
 
 ## Staging
 
-`--stage "$SQL" --name <purpose-slug>` writes SQL for manual execution.
+`--stage "$SQL" --name <purpose-slug>` writes SQL for manual execution. Set `SQL`
+with the [Run queries](../SKILL.md#run-queries) heredoc in the same shell call.
 It requires context and, for multiple environments, an explicit `--env`.
 It accepts DML, DDL, and multiple statements. Empty scripts are rejected.
 

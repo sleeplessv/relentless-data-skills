@@ -734,7 +734,10 @@ def gitignored_dir(path: Path) -> Path:
     refuse_linked_gitignore(path)
     gitignore = path / ".gitignore"
     data = gitignore.read_bytes() if gitignore.exists() else b""
-    if data.split(b"\n")[-2:] not in ([b"*", b""], [b"*\r", b""]):
+    # Git drops one CR before a terminating LF, and reads an unterminated last line.
+    lines = data.split(b"\n")
+    last = lines[-2].removesuffix(b"\r") if len(lines) > 1 and not lines[-1] else lines[-1]
+    if last != b"*":
         with gitignore.open("ab") as out:
             out.write((b"\n" if data and not data.endswith(b"\n") else b"") + b"*\n")
     return path
@@ -753,18 +756,23 @@ def create_private_file(
     stem = f"{now:%Y%m%d-%H%M%S}__{base}"
     path = directory / f"{stem}{suffix}"
     bump = 1
-    while True:
-        try:
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            break
-        except FileExistsError:
-            path = directory / f"{stem}-{bump}{suffix}"
-            bump += 1
+    fd = out = None  # fd is set only once this call has created `path`
     try:
-        with open(fd, "w", encoding="utf-8") as out:
+        while True:
+            try:
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                break
+            except FileExistsError:
+                path = directory / f"{stem}-{bump}{suffix}"
+                bump += 1
+        out = open(fd, "w", encoding="utf-8")
+        with out:
             yield path, out
     except BaseException:
-        path.unlink(missing_ok=True)
+        if fd is not None:
+            if out is None:
+                os.close(fd)
+            path.unlink(missing_ok=True)
         raise
 
 

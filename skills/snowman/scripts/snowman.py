@@ -12,6 +12,7 @@ and references/guardrails.md for the usage and limits. Standard library only.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
@@ -23,7 +24,7 @@ import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import NamedTuple
+from typing import Iterator, NamedTuple, TextIO
 
 # Leading keyword must be one of these (read-only statements only).
 ALLOWED_LEADING = {"SELECT", "WITH", "SHOW", "DESCRIBE", "DESC", "EXPLAIN"}
@@ -753,6 +754,17 @@ def reserve_path(directory: Path, base: str, suffix: str, now: datetime) -> Path
             bump += 1
 
 
+@contextlib.contextmanager
+def filling(path: Path) -> Iterator[TextIO]:
+    """Open the file `reserve_path` created for writing. If writing fails, remove it."""
+    try:
+        with path.open("w", encoding="utf-8") as out:
+            yield out
+    except BaseException:
+        path.unlink(missing_ok=True)
+        raise
+
+
 def spill_full_result(
     rows: list[dict], sql: str, snowman_dir: Path | None, *,
     types: list[dict] | None = None, now: datetime | None = None,
@@ -762,7 +774,7 @@ def spill_full_result(
                    else Path(tempfile.mkdtemp(prefix="snowman-results-")))
     digest = hashlib.sha1(sql.encode("utf-8")).hexdigest()[:8]
     path = reserve_path(results_dir, digest, ".json", now or datetime.now())
-    with path.open("w", encoding="utf-8") as out:
+    with filling(path) as out:
         json.dump({"rows": rows, "types": types or []}, out, separators=(",", ":"), ensure_ascii=False)
         out.write("\n")
     return path
@@ -821,7 +833,8 @@ def stage(
     comment = "\n".join(
         f"-- {line}" for entry in header for line in re.split(r"\r\n|\r|\n", entry)
     )
-    path.write_text(comment + "\n\n" + sql.strip() + "\n", encoding="utf-8")
+    with filling(path) as out:
+        out.write(comment + "\n\n" + sql.strip() + "\n")
 
     print(f"STAGED (not executed): {path}")
     print(f"run with: {run_cmd}")

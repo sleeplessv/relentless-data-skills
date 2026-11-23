@@ -893,6 +893,14 @@ class TestStage(SnowmanTestCase):
         self.assertEqual(staged.stat().st_mode & 0o777, 0o600)
         self.assertEqual(staged.parent.stat().st_mode & 0o777, 0o700)
 
+    def test_failed_write_leaves_no_staged_file(self):
+        # A lone surrogate, as from a non-UTF-8 argv byte, fails UTF-8 encoding.
+        root = self.enter(self.make_project())
+        with self.assertRaises(UnicodeEncodeError):
+            snowman.stage("SELECT '\ud800'", "noop", None)
+        self.assertEqual(sorted(p.name for p in (root / ".snowman" / "staged").iterdir()),
+                         [".gitignore"])
+
     def test_empty_script_blocks(self):
         self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "   ", "noop", None, match="empty")
@@ -1210,6 +1218,15 @@ class TestSpillFullResult(SnowmanTestCase):
         path = snowman.spill_full_result([{"N": 1}], "SELECT 1", self.make_project() / ".snowman")
         self.assertEqual(path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+
+    def test_failed_write_leaves_no_result_file(self):
+        # The first rows encode and reach the file before the lone surrogate fails.
+        root = self.make_project()
+        rows = [{"S": "x" * 100_000}, {"S": "\ud800"}]
+        with self.assertRaises(UnicodeEncodeError):
+            snowman.spill_full_result(rows, "SELECT 1", root / ".snowman")
+        self.assertEqual(sorted(p.name for p in (root / ".snowman" / "results").iterdir()),
+                         [".gitignore"])
 
     def test_same_sql_in_the_same_second_keeps_both_results(self):
         snowman_dir = self.make_project() / ".snowman"

@@ -38,7 +38,7 @@ captures a restore point first.
   dead. `mb wiring <dashboard-id>` resolves every id in every mapping, flags any
   belonging to another database than its card, and exits 1 on a finding.
 - **Read-only ad-hoc SQL.** `mb sql "$SQL" --db <id>`, with `SQL` read from a
-  [quoted heredoc](SKILL.md#ad-hoc-sql-is-read-only), strips comments and
+  [quoted heredoc](references/api-reference.md#pass-sql-through-a-quoted-heredoc), strips comments and
   string literals (dollar-quoted and `E''` forms included), then rejects
   multi-statements, non-read-only leading keywords, write/DDL keywords anywhere,
   `SELECT … INTO`, and side-effecting functions. It is documented honestly as a

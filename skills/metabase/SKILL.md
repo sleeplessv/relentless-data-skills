@@ -120,23 +120,10 @@ Read it before any write.
 
 ## Ad-hoc SQL is read-only
 
-Pass the SQL through a quoted heredoc in the same shell call, so the shell keeps
-`"`, `$`, `'`, backticks, and backslashes:
-
-```bash
-unset SQL && { IFS= read -r -d '' SQL || [ -n "$SQL" ]; } <<'SQL' &&
-<SQL>
-SQL
-uv run --python 3.13 --no-project "<skill-dir>/scripts/mb.py" sql "$SQL" --db <id>
-```
-
-`read` exits 1 at the end of input, so the wrapper runs only when `SQL` is set.
-No line may be exactly `SQL`.
-
-`mb sql` runs one statement. The wrapper strips comments and
-string literals (including dollar-quoted and `E''` forms), then rejects
-multi-statements, non-read-only leading keywords, write/DDL keywords anywhere,
-`SELECT … INTO`, and functions with side effects.
+`mb sql "$SQL" --db <id>` runs one statement, with `SQL` read by the
+[quoted heredoc](references/api-reference.md#pass-sql-through-a-quoted-heredoc). The wrapper strips
+comments and string literals (including dollar-quoted and `E''` forms), then rejects multi-statements,
+non-read-only leading keywords, write/DDL keywords anywhere, `SELECT … INTO`, and functions with side effects.
 
 **This is a speed bump, not a sandbox.** A string-level check cannot cover every
 volatile function or user-defined write. The durable control is a **read-only

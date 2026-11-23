@@ -15,10 +15,14 @@ user chooses several accounts, also ask for their environment names.
 If no connection exists, ask the user to run `snow connection add` in their own
 terminal. The user owns credential setup. Snowman does not create connections.
 
-Before context exists, run discovery with:
+Snowman is tested with Snowflake CLI 3.29.0 (`snow --version`). If a query fails
+with `ERROR: No such option: --enable-templating`, ask the user to upgrade Snowflake CLI.
+
+Before context exists, run discovery with the [Run queries](../SKILL.md#run-queries)
+heredoc and this wrapper line, in one shell call:
 
 ```bash
-uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --connection <chosen> "<SQL>"
+uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py --connection <chosen> "$SQL"
 ```
 
 Stop passing `--connection` after writing context. The override uses the named

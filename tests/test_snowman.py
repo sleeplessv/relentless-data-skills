@@ -14,6 +14,10 @@ import contextlib
 import io
 import json
 import os
+import re
+import shlex
+import shutil
+import subprocess
 import sys
 import tempfile
 import types
@@ -23,7 +27,8 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(REPO_ROOT / "skills" / "snowman" / "scripts"))
+SKILL_DIR = REPO_ROOT / "skills" / "snowman"
+sys.path.insert(0, str(SKILL_DIR / "scripts"))
 
 import snowman  # noqa: E402
 
@@ -780,6 +785,16 @@ class TestStage(SnowmanTestCase):
         self.assertIn("--connection analytics", body)
         self.assertIn("CREATE TABLE t (id INT)", body)
 
+    def test_run_command_disables_templating_and_keeps_ampersand(self):
+        root = self.enter(self.make_project())
+        output = self.run_stage("UPDATE t SET brand = 'F&W'", "fix-brand", None)
+        body = self.staged_files(root)[0].read_text(encoding="utf-8")
+        self.assertIn("UPDATE t SET brand = 'F&W'", body)
+        run_line = next(line for line in output.splitlines() if line.startswith("run with: "))
+        run_args = shlex.split(run_line.removeprefix("run with: "))
+        self.assertEqual(run_args[run_args.index("--enable-templating") + 1], "NONE")
+        self.assertIn(f"-- run with: {shlex.join(run_args)}", body)
+
     def test_accepts_multi_statement_dml(self):
         root = self.enter(self.make_project())
         self.run_stage("INSERT INTO t VALUES (1); UPDATE t SET x = 2;", "backfill", None)
@@ -1282,15 +1297,16 @@ class TestExecute(SnowmanTestCase):
                 with self.assertRaisesRegex(snowman.ResultProcessingError, "unexpected snow output"):
                     self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1")
 
-    def test_runs_snow_with_resolved_connection(self):
+    def test_runs_snow_with_resolved_connection_and_no_templating(self):
+        # Without --enable-templating NONE, snow renders &W in 'F&W' and fails.
         self.enter(self.make_project())
-        code, _, _ = self.run_execute({"sql": OK}, "SELECT 1")
+        code, _, _ = self.run_execute({"sql": OK}, "SELECT 'F&W'")
         self.assertEqual(code, 0)
         self.assertEqual(
             self.sql_args(),
-            ["sql", "-q", "SELECT 1\n;DESCRIBE RESULT LAST_QUERY_ID()",
+            ["sql", "-q", "SELECT 'F&W'\n;DESCRIBE RESULT LAST_QUERY_ID()",
              "--connection", "analytics",
-             "--format", "JSON_EXT", "--enhanced-exit-codes"],
+             "--format", "JSON_EXT", "--enhanced-exit-codes", "--enable-templating", "NONE"],
         )
 
     def test_context_warehouse_is_applied_for_selected_environment(self):
@@ -1858,6 +1874,75 @@ class TestMainCli(SnowmanTestCase):
                 0,
             )
         self.assertTrue(list((root / ".snowman" / "staged").glob("*.sql")))
+
+
+
+class TestDocumentedInvocation(unittest.TestCase):
+    """The docs' query invocation hands SQL to the wrapper unchanged."""
+
+    # Leading spaces, double quotes, $1, an odd apostrophe, an ampersand, a backtick and a backslash.
+    SQL = """  SHOW TABLES ->> SELECT "name" FROM $1 WHERE "name" <> 'F&W' -- it's `x` \\n"""
+
+    def docs(self) -> dict[str, str]:
+        paths = [SKILL_DIR / "SKILL.md", *sorted((SKILL_DIR / "references").glob("*.md"))]
+        return {p.name: p.read_text(encoding="utf-8") for p in paths}
+
+    def run_block(self, prefix: str = "") -> dict:
+        """Run the Run queries block under bash and zsh with a fake `uv`; map shell to result."""
+        run_queries = self.docs()["SKILL.md"].split("## Run queries", 1)[1]
+        block = re.search(r"```bash\n(.*?)```", run_queries, re.S).group(1)
+        self.assertIn("<SQL>", block)
+        script = prefix + block.replace("<SQL>", self.SQL).replace("<skill-dir>", "/skill")
+        shells = [sh for sh in ("bash", "zsh") if shutil.which(sh)]
+        if not shells:
+            self.skipTest("neither bash nor zsh on PATH")
+        with tempfile.TemporaryDirectory() as tmp:
+            uv = Path(tmp) / "uv"
+            uv.write_text(
+                f"#!{sys.executable}\nimport json, sys\nprint(json.dumps(sys.argv[1:]))\n",
+                encoding="utf-8",
+            )
+            uv.chmod(0o755)
+            env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"}
+            return {
+                sh: subprocess.run([sh, "-c", script], env=env, capture_output=True, text=True, check=False)
+                for sh in shells
+            }
+
+    def test_run_queries_block_passes_sql_unchanged(self):
+        for sh, done in self.run_block().items():
+            with self.subTest(shell=sh):
+                self.assertEqual(done.returncode, 0, done.stderr)
+                self.assertEqual(
+                    json.loads(done.stdout),
+                    ["run", "--python", "3.13", "--no-project",
+                     "/skill/scripts/snowman.py", self.SQL + "\n"],
+                )
+
+    def test_failed_assignment_never_reaches_the_wrapper(self):
+        # A read-only SQL keeps its old value; the old query must not run.
+        for sh, done in self.run_block("readonly SQL='SELECT 17'\n").items():
+            with self.subTest(shell=sh):
+                self.assertNotEqual(done.returncode, 0)
+                self.assertEqual(done.stdout, "")
+
+    def test_other_examples_point_to_run_queries(self):
+        for name, text in self.docs().items():
+            lines = text.splitlines()
+            with self.subTest(doc=name):
+                self.assertNotIn('"<SQL>"', text)
+            for i, line in enumerate(lines):
+                if '"$SQL"' not in line:
+                    continue
+                window = "\n".join(lines[max(0, i - 5):i + 2])
+                with self.subTest(doc=name, line=i + 1):
+                    self.assertTrue("#run-queries)" in window or "<<'SQL'" in window, line)
+        self.assertIn("(../SKILL.md#run-queries)", self.docs()["workflows.md"])
+
+    def test_ampersand_workaround_is_gone(self):
+        guardrails = self.docs()["guardrails.md"]
+        self.assertNotIn("LIKE 'F%W'", guardrails)
+        self.assertNotIn("CHR(38)", guardrails)
 
 
 if __name__ == "__main__":

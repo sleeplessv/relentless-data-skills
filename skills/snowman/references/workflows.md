@@ -1,8 +1,9 @@
 # snowman workflows
 
-Use the playbook matching the request. Run SQL through
-`uv run --python 3.13 --no-project <skill-dir>/scripts/snowman.py "<SQL>"`. Start from the narrowest known
-scope and inspect saved result artifacts when a preview truncates.
+Use the playbook matching the request. Pass each query below to the wrapper
+through the heredoc in [Run queries](../SKILL.md#run-queries), which passes
+`"` and `$` to the wrapper unchanged. Start from the narrowest known scope and inspect saved
+result artifacts when a preview truncates.
 
 ## Explore objects
 

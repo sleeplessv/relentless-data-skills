@@ -29,9 +29,11 @@ hc get "$ID" --json | jq '1800 - (now - .created_ms / 1000 | floor)'
 
 A subagent shares the main session's terminal, so a message to the main
 session also ends its wait: `reason` `message` with a `from` other than
-`ID`. That message is not the subagent's to handle: run the wait again at
-once, with no `hc get`, and with `--timeout` set to what was left of the
-one it cut short, so the check-in stays due when it was.
+`ID`. That message is not the subagent's to handle. Before each wait,
+save when its check-in falls due, `date +%s` plus `<check>`. On such a
+message, print the seconds until then. Above 0: run the wait again at once
+with that `--timeout` and no `hc get`. At 0 or less: the check-in is due;
+take the rows below as for `reason` `timeout`.
 
 First handle anything else that woke you, such as another helper's report
 or a message to you. It does not move the limit. Then run

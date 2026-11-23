@@ -143,14 +143,19 @@ keys come from Codex's source, because its docs omit them.
   setting for a non-autonomous one.
 - **Limits.** Up to 50 background workers run at once, with no setting documented; a
   background worker cannot spawn background workers.
-- **Model.** The worker definition's `model` field, or `inherit`; the spawn call accepts
-  `model: "inherit"`, and no other spawn value is documented. A definition sets the class:
-  `auto-intelligent` for strong and `auto-efficient` for standard, which the account's
-  configuration maps to models. Without such a definition, or in a session that itself runs
-  on `auto-efficient`, leave the model unset.
-- **Worktrees.** A worker is isolated when the spawn prompt asks for a worktree, on branch
-  `agent/<agentId>`. `--worktree-base` sets its base (changelog 1.2.14); where the flag
-  goes and the default base are undocumented.
+- **Model.** The worker definition's `model` field and the `task` call's `model` both take
+  an exact id, and the call's wins (observed on 1.2.46); `inherit` is the session's model
+  (changelog 1.1.52). No alias exists: bare `opus`, `sonnet`, and `haiku` are ignored with a
+  warning and the worker inherits (binary only). Families rank as the Claude Code and Codex
+  subsections give them. Within the session model's vendor, strong class is the newest Opus
+  or Sol id and standard class the newest Sonnet or Terra id. The docs' automatic values
+  `auto`, `auto-intelligent`, and `auto-efficient` belong to no family.
+- **Worktrees.** A background `task` call with `worktree_isolation: true` isolates its
+  worker in `<session dir>/.claude/worktrees/coco-agent-<8 hex>` (seen in session logs).
+  The branch is `coco-agent-<8 hex>`, cut from current HEAD with no base option, and both
+  are force-deleted when the worker ends, so work it has not pushed is lost (binary only;
+  `--worktree-base` serves only the session's own `--worktree`). The extensibility page
+  still says to ask in the prompt, on branch `agent/<agentId>`.
 - **Completion and resume.** The spawner fetches a worker's output, or resumes a killed
   worker, by its ID.
 

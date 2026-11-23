@@ -29,6 +29,10 @@ SQL
 <runner> show --inline "$SQL" --limit <N>
 ```
 
+`unset` fails on a read-only `SQL`, and `IFS=` keeps leading spaces. `read` exits 1 at the
+end of input, so the runner runs only when `SQL` is set. No line may be exactly `SQL`. If one
+is, choose another delimiter and change both markers, keeping the opening one quoted.
+
 With no documented read path, or with credentials or network missing, the observation is a
 blocked check as step 7 defines it.
 

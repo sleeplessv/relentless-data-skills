@@ -2214,20 +2214,6 @@ class TestMainCli(SnowmanTestCase):
 
 
 
-class TestWriteFakeExecutable(unittest.TestCase):
-    def test_runs_when_the_python_path_has_spaces(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            python = Path(tmp) / "py dir" / "python3"
-            python.parent.mkdir()
-            python.symlink_to(sys.executable)
-            fake = Path(tmp) / "uv"
-            write_fake_executable(fake, "import json, sys\nprint(json.dumps(sys.argv[1:]))\n",
-                                  python=str(python))
-            done = subprocess.run([str(fake), "a b", "$1"], capture_output=True, text=True, check=False)
-        self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(json.loads(done.stdout), ["a b", "$1"])
-
-
 class TestDocumentedInvocation(unittest.TestCase):
     """The docs' query invocation hands SQL to the wrapper unchanged."""
 
@@ -2239,7 +2225,10 @@ class TestDocumentedInvocation(unittest.TestCase):
         return {p.name: p.read_text(encoding="utf-8") for p in paths}
 
     def run_block(self, prefix: str = "") -> dict:
-        """Run the Run queries block under bash and zsh with a fake `uv`; map shell to result."""
+        """Run the Run queries block under bash and zsh with a fake `uv`; map shell to result.
+
+        The fake `uv` runs through a Python path with a space, which a `#!` line cannot hold.
+        """
         run_queries = self.docs()["SKILL.md"].split("## Run queries", 1)[1]
         block = re.search(r"```bash\n(.*?)```", run_queries, re.S).group(1)
         self.assertIn("<SQL>", block)
@@ -2248,8 +2237,12 @@ class TestDocumentedInvocation(unittest.TestCase):
         if not shells:
             self.skipTest("neither bash nor zsh on PATH")
         with tempfile.TemporaryDirectory() as tmp:
+            python = Path(tmp) / "py dir" / "python3"
+            python.parent.mkdir()
+            python.symlink_to(sys.executable)
             uv = Path(tmp) / "uv"
-            write_fake_executable(uv, "import json, sys\nprint(json.dumps(sys.argv[1:]))\n")
+            write_fake_executable(uv, "import json, sys\nprint(json.dumps(sys.argv[1:]))\n",
+                                  python=str(python))
             env = {**os.environ, "PATH": f"{tmp}{os.pathsep}{os.environ['PATH']}"}
             return {
                 sh: subprocess.run([sh, "-c", script], env=env, capture_output=True, text=True, check=False)

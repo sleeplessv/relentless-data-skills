@@ -55,8 +55,8 @@ SQL
 uv run --python 3.13 --no-project "$M" sql "$SQL" --db <id>
 ```
 
-`read` exits 1 at the end of input, so the wrapper runs only when `SQL` is set.
-No line may be exactly `SQL`.
+`unset` fails on a read-only `SQL`, and `IFS=` keeps leading spaces. `read` exits 1 at the
+end of input, so the wrapper runs only when `SQL` is set. No line may be exactly `SQL`.
 
 ## Auth
 

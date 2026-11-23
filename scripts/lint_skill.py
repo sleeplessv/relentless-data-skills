@@ -16,10 +16,11 @@ Lints every ``skills/*/SKILL.md`` for its own integrity:
   folder) contain a command that acts on shared state (``SIDE_EFFECT_COMMANDS``,
   e.g. ``gh pr merge``, ``git push``) must set ``disable-model-invocation: true``
   or be listed in ``SIDE_EFFECT_ALLOWLIST`` with a reason;
-- no argument placeholder text (``$`` and a digit, or ``$ARGUMENTS``) in
-  SKILL.md, whatever precedes it, because Claude Code substitutes skill
-  arguments for placeholders in a SKILL.md body. Claude Code does not
-  substitute files under ``references/``, and the lint does not check them.
+- no ``$`` followed by a digit or ``ARGUMENTS`` in SKILL.md. Claude Code
+  substitutes skill arguments for an unescaped placeholder in a SKILL.md body,
+  but not in files under ``references/``, which the lint does not check. An
+  escaped ``\\$1`` renders literally, but issue #239 bans the text from
+  SKILL.md, so the lint flags it too.
 
 Standard library only.
 

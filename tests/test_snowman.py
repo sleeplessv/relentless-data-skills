@@ -96,6 +96,12 @@ class SnowmanTestCase(unittest.TestCase):
     def setUp(self) -> None:
         self._original_cwd = os.getcwd()
         self.addCleanup(os.chdir, self._original_cwd)
+        # Recovery copies go to tempfile's default dir; keep them in one this test removes.
+        self.temp_root = Path(tempfile.mkdtemp(prefix="snowman-tmp-")).resolve()
+        self.addCleanup(self._rmtree, self.temp_root)
+        patcher = mock.patch.object(tempfile, "tempdir", str(self.temp_root))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def assert_blocked(self, fn, *args, match: str = "", **kwargs) -> str:
         """Assert `fn(...)` raises Blocked; return the reason for further checks."""
@@ -1992,11 +1998,10 @@ class TestMainCli(SnowmanTestCase):
                     b'[[1],[]]', b'[[{"A":1}],[{"name":42,"type":"DATE"}]]',
                     json.dumps([{"A": chr(0xD800)}]).encode()]
         for payload in payloads:
-            with self.subTest(payload=payload), tempfile.TemporaryDirectory() as recovery_root:
+            with self.subTest(payload=payload):
                 snow = fake_snow({"sql": Outcome(0, payload, "")})
                 stdout, stderr = io.StringIO(), io.StringIO()
                 with mock.patch.object(snowman, "run_snow", snow), \
-                        mock.patch.object(tempfile, "tempdir", recovery_root), \
                         contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
                     code = snowman.main(["snowman.py", "SELECT 1"])
                 self.assertEqual(code, 1)
@@ -2035,9 +2040,13 @@ class TestMainCli(SnowmanTestCase):
                 self.assertNotIn("secret", stderr.getvalue())
                 self.assertNotIn("�", stderr.getvalue())
                 path = Path(stderr.getvalue().split("# raw CLI stdout: ")[1].splitlines()[0])
-                self.addCleanup(path.unlink)
                 self.assertEqual(path.read_bytes(), payload)
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_recovery_copy_lands_in_the_test_owned_temp_dir(self):
+        error = snowman.preserve_failed_result(b"payload", "reason.")
+        path = Path(str(error).split("# raw CLI stdout: ")[1].splitlines()[0])
+        self.assertEqual(path.parent, self.temp_root)
 
     def test_empty_cli_output_reports_no_payload_to_recover(self):
         self.enter(self.make_project())

@@ -122,6 +122,14 @@ class SnowmanTestCase(unittest.TestCase):
         os.chdir(path)
         return path
 
+    def assert_git_ignores(self, root: Path, path: Path) -> None:
+        """Assert `git check-ignore` in a repo at `root` reports `path` ignored."""
+        if shutil.which("git") is None:
+            self.skipTest("git is not installed")
+        subprocess.run(["git", "init", "-q", str(root)], check=True)
+        check = subprocess.run(["git", "-C", str(root), "check-ignore", "-q", str(path)])
+        self.assertEqual(check.returncode, 0, f"{path} is not ignored")  # 0 = ignored
+
     @staticmethod
     def _rmtree(path: Path) -> None:
         import shutil
@@ -862,6 +870,16 @@ class TestStage(SnowmanTestCase):
         gitignore = root / ".snowman" / "staged" / ".gitignore"
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
 
+    def test_narrower_gitignore_gets_a_catch_all_rule(self):
+        root = self.enter(self.make_project())
+        gitignore = root / ".snowman" / "staged" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_text("*.tmp", encoding="utf-8")
+        self.run_stage("SELECT 1", "noop", None)
+        [staged] = self.staged_files(root)
+        self.assert_git_ignores(root, staged)
+        self.assertEqual(gitignore.read_text(encoding="utf-8"), "*.tmp\n*\n")
+
     def test_empty_script_blocks(self):
         self.enter(self.make_project())
         self.assert_blocked(snowman.stage, "   ", "noop", None, match="empty")
@@ -1164,6 +1182,15 @@ class TestSpillFullResult(SnowmanTestCase):
         self.assertNotIn("…", body)
         gitignore = root / ".snowman" / "results" / ".gitignore"
         self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n")
+
+    def test_gitignore_that_unignores_json_gets_a_catch_all_rule(self):
+        root = self.make_project()
+        gitignore = root / ".snowman" / "results" / ".gitignore"
+        gitignore.parent.mkdir()
+        gitignore.write_text("*\n!*.json\n", encoding="utf-8")
+        path = snowman.spill_full_result([{"N": 1}], "SELECT 1", root / ".snowman")
+        self.assert_git_ignores(root, path)
+        self.assertEqual(gitignore.read_text(encoding="utf-8"), "*\n!*.json\n*\n")
 
     def test_same_sql_in_the_same_second_keeps_both_results(self):
         snowman_dir = self.make_project() / ".snowman"

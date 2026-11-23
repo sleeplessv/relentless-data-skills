@@ -716,11 +716,19 @@ def clean_snow_stderr(text: str) -> str:
 
 
 def gitignored_dir(path: Path) -> Path:
-    """Create `path` (if needed) with a `.gitignore` ignoring everything in it."""
+    """Create `path` (if needed) with a `.gitignore` ignoring everything in it.
+
+    An existing `.gitignore` keeps its rules. Unless its last rule is `*`,
+    a `*` line is appended: git applies the last matching rule.
+    """
     path.mkdir(exist_ok=True)
     gitignore = path / ".gitignore"
-    if not gitignore.is_file():
-        gitignore.write_text("*\n", encoding="utf-8")
+    text = gitignore.read_text(encoding="utf-8") if gitignore.is_file() else ""
+    rules = [line.strip() for line in text.splitlines()
+             if line.strip() and not line.startswith("#")]
+    if rules[-1:] != ["*"]:
+        separator = "\n" if text and not text.endswith("\n") else ""
+        gitignore.write_text(f"{text}{separator}*\n", encoding="utf-8")
     return path
 
 

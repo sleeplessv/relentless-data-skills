@@ -480,6 +480,11 @@ class TestParseFrontmatter(SnowmanTestCase):
             "line indented 6. Indent every field under 'dev' by the same number of spaces.",
         )
 
+    def test_field_that_starts_with_dashes_is_not_a_delimiter(self):
+        context = self.write_context("---\n---owner: analytics\nconnection: demo\n---\n")
+        top, _ = snowman.parse_frontmatter(context)
+        self.assertEqual(top, {"---owner": "analytics", "connection": "demo"})
+
     def test_environment_name_with_a_value_blocks(self):
         context = self.write_context(
             "---\n"
@@ -636,19 +641,28 @@ class TestResolveTarget(SnowmanTestCase):
                 reason = self.assert_blocked(snowman.resolve_target, root, connection, None)
                 self.assertEqual(reason, EMPTY_CONNECTION)
 
-    def test_one_context_lookup_per_run(self):
-        root = self.make_project()
-        with mock.patch.object(snowman, "find_up", wraps=snowman.find_up) as find_up:
-            snowman.resolve_target(root, None, None)
-            self.assert_blocked(snowman.resolve_target, root, "other_conn", None)
-        context_lookups = [c for c in find_up.call_args_list if c.args[1] == snowman.CONTEXT_FILE]
-        self.assertEqual(len(context_lookups), 2)
-        self.assertFalse(hasattr(snowman, "find_context"))
+    def test_blank_flag_values_block_before_any_lookup(self):
+        root = self.make_bare_dir()
+        cases = {
+            "connection": ({"connection": " ", "env": None}, EMPTY_CONNECTION),
+            "empty connection": ({"connection": "", "env": None}, EMPTY_CONNECTION),
+            "env": ({"connection": None, "env": " "}, EMPTY_ENV),
+        }
+        for name, (flags, refusal) in cases.items():
+            with self.subTest(name), mock.patch.object(
+                snowman, "find_up", side_effect=PermissionError("unreadable .snowman")
+            ) as find_up:
+                reason = self.assert_blocked(snowman.resolve_target, root, **flags)
+                self.assertEqual(reason, refusal)
+                find_up.assert_not_called()
 
-    def test_context_path_is_written_once(self):
+    def test_context_file_has_one_lookup_site(self):
         source = (SKILL_DIR / "scripts" / "snowman.py").read_text(encoding="utf-8")
         self.assertEqual(source.count(".snowman/context.md"), 1)
-        self.assertEqual(snowman.CONTEXT_FILE, ".snowman/context.md")
+        literal = re.search(r'^(\w+) = "\.snowman/context\.md"$', source, re.M)
+        self.assertIsNotNone(literal, "the path is not held in a module constant")
+        lookups = re.findall(rf"find_up\([^)]*\b{literal.group(1)}\)", source)
+        self.assertEqual(len(lookups), 1, lookups)
 
     def test_env_file_at_project_root(self):
         root = self.make_project()
@@ -2388,36 +2402,46 @@ class TestDocumentedInvocation(unittest.TestCase):
                                  text.count('"<skill-dir>/scripts/snowman.py"'))
 
     def test_connection_rule_lives_in_guardrails(self):
-        rule = ("`--connection <name>` is for bootstrap only. It bypasses context and uses the "
-                "named connection's warehouse setting. It works only when executing a query "
-                "without `--env`, and it blocks when a `.snowman/context.md` exists at or above "
-                "the working directory.")
         docs = {**self.docs(), "README.md": (SKILL_DIR / "README.md").read_text(encoding="utf-8")}
+        section = docs["guardrails.md"].split("\n### Connection resolution\n", 1)[1].split("\n#", 1)[0]
+        paragraphs = [" ".join(p.split()) for p in section.split("\n\n")]
+        rule = next(p for p in paragraphs if "is for bootstrap only." in p)
         joined = {name: " ".join(text.split()) for name, text in docs.items()}
         self.assertEqual(joined["guardrails.md"].count(rule), 1)
-        self.assertIn("\n### Connection resolution\n", docs["guardrails.md"])
+        self.assertEqual(joined["guardrails.md"].count("bootstrap only"), 1)
+        sentences = re.split(r"(?<=\.) ", rule)
         for name, text in joined.items():
+            if name == "guardrails.md":
+                continue
             with self.subTest(doc=name):
-                self.assertNotIn("bootstrap only", text.replace(rule, ""))
-        self.assertIn(
-            "Queries require context. Before it exists, the bootstrap uses the "
-            "[`--connection` override](references/guardrails.md#connection-resolution).",
-            joined["SKILL.md"],
-        )
-        self.assertIn(
-            "[Connection resolution](guardrails.md#connection-resolution) says when "
-            "`--connection` applies and which warehouse it uses.",
-            joined["install.md"],
-        )
+                self.assertNotIn("bootstrap only", text)
+                for sentence in sentences:
+                    self.assertNotIn(sentence, text)
+
+    def test_connection_links_reach_the_rule(self):
+        guardrails = SKILL_DIR / "references" / "guardrails.md"
+        headings = re.findall(r"^#+ (.+)$", guardrails.read_text(encoding="utf-8"), re.M)
+        anchors = {re.sub(r"[^a-z0-9 -]", "", h.lower()).replace(" ", "-") for h in headings}
+        for doc in (SKILL_DIR / "SKILL.md", SKILL_DIR / "references" / "install.md"):
+            with self.subTest(doc=doc.name):
+                links = re.findall(r"\]\(([^)#]*guardrails\.md)#([^)]+)\)", doc.read_text(encoding="utf-8"))
+                self.assertIn("connection-resolution", [anchor for _, anchor in links])
+                for path, anchor in links:
+                    if anchor == "connection-resolution":
+                        self.assertEqual((doc.parent / path).resolve(), guardrails.resolve())
+                self.assertIn("connection-resolution", anchors)
 
     def test_connection_help_points_to_guardrails(self):
         stdout = io.StringIO()
-        with contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit):
+        # A fixed width keeps argparse's line wrapping out of the assertion.
+        with mock.patch.dict(os.environ, {"COLUMNS": "200"}), \
+                contextlib.redirect_stdout(stdout), self.assertRaises(SystemExit):
             snowman.main(["snowman.py", "--help"])
-        self.assertIn(
+        line = next(l for l in stdout.getvalue().splitlines() if l.lstrip().startswith("--connection NAME"))
+        self.assertEqual(
+            line.split("--connection NAME", 1)[1].strip(),
             "connection to query during bootstrap, before a context file exists. See "
             "Connection resolution in references/guardrails.md.",
-            " ".join(stdout.getvalue().split()),
         )
 
     def test_ampersand_workaround_is_gone(self):

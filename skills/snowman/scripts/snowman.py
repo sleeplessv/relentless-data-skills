@@ -956,7 +956,7 @@ def execute(
         rows = types = None
     if not isinstance(rows, list):
         raise preserve_failed_result(raw, "unexpected snow output; expected JSON row arrays.")
-    if rows and any(row.keys() != rows[0].keys() for row in rows[1:]):
+    if rows and any(row.keys() != rows[0].keys() for row in rows):
         raise preserve_failed_result(raw, "inconsistent result columns; cannot safely render these rows.")
     if types is not None and any(
         not isinstance(row.get("name"), str) or not isinstance(row.get("type"), str)

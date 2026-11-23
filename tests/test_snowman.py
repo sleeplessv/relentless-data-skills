@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tracemalloc
 import types
 import unittest
 from datetime import datetime
@@ -1665,6 +1666,27 @@ class TestExecute(SnowmanTestCase):
         rel = err.split("full result: ")[1].splitlines()[0]
         self.assertRegex(rel, r"^\.snowman/results/\d{8}-\d{6}__[0-9a-f]{8}\.json$")
         self.assertEqual(json.loads((root / rel).read_text())["rows"], rows)
+
+    def test_one_row_preview_holds_no_copy_of_the_row_list(self):
+        # A copy of the row list costs one 8-byte pointer per row. From the
+        # moment the JSON is parsed, the run may not add half that.
+        self.enter(self.make_project())
+        rows = 100_000
+        payload = json.dumps([{"N": i} for i in range(rows)]).encode()
+        split_result, parsed = snowman.split_result, []
+
+        def split_and_mark(result):
+            parsed.append(tracemalloc.get_traced_memory()[0])
+            tracemalloc.reset_peak()
+            return split_result(result)
+
+        self.addCleanup(tracemalloc.stop)
+        tracemalloc.start()
+        with mock.patch.object(snowman, "split_result", split_and_mark):
+            code, _, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1", max_rows=1)
+        after_parse_peak = tracemalloc.get_traced_memory()[1]
+        self.assertEqual(code, 0)
+        self.assertLess(after_parse_peak - parsed[0], rows * 4)
 
     def test_spill_path_is_relative_to_cwd(self):
         root = self.enter(self.make_project())

@@ -120,7 +120,7 @@ the script. Snowman does neither.
 
 Compose staged SQL only from complete values: a full `--json` result file or the
 saved `# full result:` artifact, never a preview. Before relaying the path, run
-`grep -c '…(+' <path>`: `0` (exit 1) passes; any other count is a truncated value and the script is not ready.
+`grep -c '…(+' "<path>"`, quoting the printed path as one argument: `0` (exit 1) passes; any other count is a truncated value and the script is not ready.
 
 ## Explore efficiently
 

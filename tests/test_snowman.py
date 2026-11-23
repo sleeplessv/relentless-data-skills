@@ -829,6 +829,13 @@ class TestStage(SnowmanTestCase):
         self.assertTrue(all(line.startswith("-- ") for line in header.split("\n")), header)
         self.assertEqual(sql, "SELECT 1\n")
 
+    def test_unicode_line_separator_in_env_name_stays_verbatim_in_header(self):
+        env = "QA\u2028Blue"
+        root = self.enter(self.make_project(MULTI_ENV_FRONTMATTER.replace("  dev:", f"  {env}:")))
+        self.run_stage("SELECT 1", "noop", env)
+        body = self.staged_files(root)[0].read_text(encoding="utf-8")
+        self.assertIn(f"-- target environment: {env} (connection: acme_dev)\n", body)
+
     def test_accepts_multi_statement_dml(self):
         root = self.enter(self.make_project())
         self.run_stage("INSERT INTO t VALUES (1); UPDATE t SET x = 2;", "backfill", None)

@@ -807,7 +807,10 @@ def stage(
     if warning:
         header.append(warning)
     # A line break inside a value (a path, an env name) must not end the comment.
-    comment = "\n".join(f"-- {line}" for entry in header for line in entry.splitlines())
+    # Split only on the breaks that end a SQL comment; keep U+2028 and the like.
+    comment = "\n".join(
+        f"-- {line}" for entry in header for line in re.split(r"\r\n|\r|\n", entry)
+    )
     path.write_text(comment + "\n\n" + sql.strip() + "\n", encoding="utf-8")
 
     print(f"STAGED (not executed): {path}")

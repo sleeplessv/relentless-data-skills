@@ -27,6 +27,11 @@ hc get "$ID" --json | jq '1800 - (now - .created_ms / 1000 | floor)'
 
 ## When a wait returns without a report
 
+A subagent shares the main session's terminal, so a message to the main
+session also ends its wait: `reason` `message` with a `from` other than
+`ID`. That message is not the subagent's to handle: run the same wait
+again at once, with no `hc get`.
+
 First handle anything else that woke you, such as another helper's report
 or a message to you. It does not move the limit. Then run
 `hc get "$ID" --json` and take the first row that fits:

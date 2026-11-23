@@ -59,8 +59,8 @@ Done when the brief carries all four.
 
 ## 3. Launch the helper
 
-Pick a short unique `NAME` (`codex-review`). Put the brief in the launch: a
-message sent to an agent that is still starting can be lost.
+Pick a `NAME` ending in your address (`codex-review-t4z`): names are unique
+machine-wide. Put the brief in the launch: a message sent to a starting agent can be lost.
 
 ```sh
 hc run --bg --json --name "$NAME" --cwd "$PWD" --label herdr.space="$SPACE" \

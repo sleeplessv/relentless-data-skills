@@ -1891,6 +1891,9 @@ class TestAuthHintFor(SnowmanTestCase):
         listing = connection_listing("analytics", {"authenticator": "EXTERNALBROWSER", "user": "X"})
         listing = listing._replace(stdout=listing.stdout.replace('"X"', '"\xff"').encode("latin-1"))
         self.assertIn(b"\xff", listing.stdout)
+        with mock.patch.object(snowman, "run_snow", fake_snow({"connection": listing})):
+            params = snowman.connection_params("analytics", {})
+        self.assertEqual(params, {"authenticator": "EXTERNALBROWSER", "user": "�"})
         hint = self.hint("OAuth access token expired", listing)
         self.assertIn("authenticates in a browser", hint)
         self.assertNotIn("PRIVATE_KEY_PASSPHRASE", hint)

@@ -10,6 +10,7 @@ executes by design.
 """
 from __future__ import annotations
 
+import ast
 import codecs
 import contextlib
 import errno
@@ -58,6 +59,29 @@ default_env: dev
 
 EMPTY_CONNECTION = "--connection was given an empty name. Pass a connection name, or drop the flag."
 EMPTY_ENV = "--env was given an empty name. Pass an environment name, or drop the flag."
+
+
+def context_lookup_sites(source: str) -> int:
+    """Count the ``find_up`` calls in ``source`` whose path is the context path literal or a name bound to it."""
+    tree = ast.parse(source)
+    literal = ".snowman/context.md"
+    names = {
+        target.id
+        for node in ast.walk(tree) if isinstance(node, ast.Assign)
+        and isinstance(node.value, ast.Constant) and node.value.value == literal
+        for target in node.targets if isinstance(target, ast.Name)
+    }
+
+    def is_context_path(arg: ast.expr) -> bool:
+        return (isinstance(arg, ast.Constant) and arg.value == literal) or (
+            isinstance(arg, ast.Name) and arg.id in names)
+
+    return sum(
+        1 for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and getattr(node.func, "id", getattr(node.func, "attr", None)) == "find_up"
+        and any(is_context_path(arg) for arg in [*node.args, *(k.value for k in node.keywords)])
+    )
 
 
 def delimiter_refusal(context: Path, number: int, line: str) -> str:
@@ -480,10 +504,26 @@ class TestParseFrontmatter(SnowmanTestCase):
             "line indented 6. Indent every field under 'dev' by the same number of spaces.",
         )
 
-    def test_field_that_starts_with_dashes_is_not_a_delimiter(self):
-        context = self.write_context("---\n---owner: analytics\nconnection: demo\n---\n")
-        top, _ = snowman.parse_frontmatter(context)
-        self.assertEqual(top, {"---owner": "analytics", "connection": "demo"})
+    def test_interior_field_that_starts_with_dashes_is_a_field(self):
+        for key in ("---owner", "---owner ", "---project owner", "---owner#id"):
+            with self.subTest(key=key):
+                context = self.write_context(f"---\n{key}: analytics\nconnection: demo\n---\n")
+                top, _ = snowman.parse_frontmatter(context)
+                self.assertEqual(top, {key.strip(): "analytics", "connection": "demo"})
+
+    def test_first_line_that_starts_with_dashes_is_a_near_miss(self):
+        for line in ("---owner: analytics", "---owner : analytics", "--- # note"):
+            with self.subTest(line=line):
+                context = self.write_context(f"{line}\nconnection: demo\n---\n")
+                reason = self.assert_blocked(snowman.parse_frontmatter, context)
+                self.assertEqual(reason, delimiter_refusal(context, 1, line))
+
+    def test_interior_near_miss_without_a_colon_is_a_delimiter(self):
+        for line in ("--- ", "---x", "--- # note", "----"):
+            with self.subTest(line=line):
+                context = self.write_context(f"---\nconnection: demo\n{line}\n# notes\n")
+                reason = self.assert_blocked(snowman.parse_frontmatter, context)
+                self.assertEqual(reason, delimiter_refusal(context, 3, line))
 
     def test_environment_name_with_a_value_blocks(self):
         context = self.write_context(
@@ -659,10 +699,26 @@ class TestResolveTarget(SnowmanTestCase):
     def test_context_file_has_one_lookup_site(self):
         source = (SKILL_DIR / "scripts" / "snowman.py").read_text(encoding="utf-8")
         self.assertEqual(source.count(".snowman/context.md"), 1)
-        literal = re.search(r'^(\w+) = "\.snowman/context\.md"$', source, re.M)
-        self.assertIsNotNone(literal, "the path is not held in a module constant")
-        lookups = re.findall(rf"find_up\([^)]*\b{literal.group(1)}\)", source)
-        self.assertEqual(len(lookups), 1, lookups)
+        self.assertEqual(context_lookup_sites(source), 1)
+
+    def test_lookup_site_count_reads_calls_not_spelling(self):
+        constant = 'CONTEXT_FILE = ".snowman/context.md"\n'
+        cases = {
+            "one call": (constant + "def r(s):\n    return find_up(s, CONTEXT_FILE)\n", 1),
+            "single-quoted constant": (
+                "CONTEXT_FILE = '.snowman/context.md'\ndef r(s):\n    return find_up(s, CONTEXT_FILE)\n", 1),
+            "one call per branch, trailing comma": (
+                constant + "def r(s, c):\n    if c:\n        a = find_up(s, CONTEXT_FILE)\n"
+                "    else:\n        a = find_up(\n            s, CONTEXT_FILE,\n        )\n", 2),
+            "literal in the call": ("def r(s):\n    return snowman.find_up(s, relative='.snowman/context.md')\n", 1),
+            "shared helper": (
+                constant + "def h(s):\n    return find_up(s, CONTEXT_FILE)\n"
+                "def r(s):\n    return h(s)\ndef q(s):\n    return h(s)\n", 1),
+            "other path": (constant + "def r(s):\n    return find_up(s, '.env')\n", 0),
+        }
+        for name, (code, expected) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(context_lookup_sites(code), expected)
 
     def test_env_file_at_project_root(self):
         root = self.make_project()
@@ -2406,6 +2462,8 @@ class TestDocumentedInvocation(unittest.TestCase):
         section = docs["guardrails.md"].split("\n### Connection resolution\n", 1)[1].split("\n#", 1)[0]
         paragraphs = [" ".join(p.split()) for p in section.split("\n\n")]
         rule = next(p for p in paragraphs if "is for bootstrap only." in p)
+        # The flag and its restriction are fixed here, not read from the doc.
+        self.assertTrue(rule.startswith("`--connection <name>` is for bootstrap only. "), rule)
         joined = {name: " ".join(text.split()) for name, text in docs.items()}
         self.assertEqual(joined["guardrails.md"].count(rule), 1)
         self.assertEqual(joined["guardrails.md"].count("bootstrap only"), 1)

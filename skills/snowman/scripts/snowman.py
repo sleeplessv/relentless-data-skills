@@ -98,9 +98,10 @@ def find_up(start: Path, relative: str) -> Path | None:
     return None
 
 
-def is_delimiter_like(line: str) -> bool:
-    """True for ``---`` and near misses such as ``--- `` or ``---x``; false for a field like ``---owner: x``."""
-    return line.startswith("---") and not re.match(r"---[^\s#:]*:", line)
+def split_field(line: str) -> tuple[str, str] | None:
+    """Split a frontmatter line into its raw ``(key, value)``, or ``None`` when it is not a field."""
+    key, sep, value = line.strip().partition(":")
+    return (key, value) if sep else None
 
 
 def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
@@ -114,10 +115,14 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
     # Text mode already turns CRLF into LF. split("\n") keeps characters such
     # as U+2028 inside their line, where splitlines() would start a new one.
     lines = context.read_text(encoding="utf-8").split("\n")
-    if not is_delimiter_like(lines[0]):
+    if not lines[0].startswith("---"):
         raise Blocked(f"{context} has no YAML frontmatter, so the wrapper cannot find the connection.")
-    # The closing line is the next delimiter-like one, so a near miss is not skipped.
-    closing = next((n for n, line in enumerate(lines[1:], 1) if is_delimiter_like(line)), None)
+    # The closing line is the next `---` line that is not a field, so a near miss is not skipped.
+    closing = next(
+        (n for n, line in enumerate(lines[1:], 1)
+         if line.startswith("---") and split_field(line) is None),
+        None,
+    )
     for n in (0, closing):
         if n is not None and lines[n] != "---":
             raise Blocked(
@@ -142,10 +147,10 @@ def parse_frontmatter(context: Path) -> tuple[dict[str, str], dict[str, dict[str
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         indent = len(raw) - len(raw.lstrip(" "))
-        key, sep, value = raw.strip().partition(":")
-        if not sep:
+        field = split_field(raw)
+        if field is None:
             continue
-        key = key.strip()
+        key, value = field[0].strip(), field[1]
         # YAML inline comments: `#` at the start of the value or after
         # whitespace ends it. Values here are bare names, never contain `#`.
         value = re.sub(r"(?:^|\s)#.*$", "", value.strip()).strip().strip("'\"")

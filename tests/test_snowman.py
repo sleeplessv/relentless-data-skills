@@ -1127,15 +1127,11 @@ class TestRenderRows(SnowmanTestCase):
 
     def test_row_cap_footer(self):
         rows = [{"N": i} for i in range(1203)]
-        text, footers, _ = snowman.render_rows(
-            rows, fmt="csv", max_rows=50, max_cell=200,
-            full_note="full result: .snowman/results/20260903-181200__ab12cd34.csv",
-        )
+        text, footers, _ = snowman.render_rows(rows, fmt="csv", max_rows=50, max_cell=200)
         self.assertEqual(text.count("\n"), 51)  # header + 50 rows
         self.assertEqual(
             footers,
-            ["# showing 50 of 1203 rows; full result: "
-             ".snowman/results/20260903-181200__ab12cd34.csv; narrow the query or raise --max-rows/--max-output"],
+            ["# showing 50 of 1203 rows; narrow the query or raise --max-rows/--max-output"],
         )
 
     def test_max_rows_zero_is_unlimited(self):
@@ -1147,7 +1143,7 @@ class TestRenderRows(SnowmanTestCase):
     def test_footer_order_types_null_truncation_cap(self):
         rows = [{"S": "abcdefghij", "N": None}] * 3
         _, footers, _ = snowman.render_rows(
-            rows, fmt="csv", max_rows=2, max_cell=4, full_note="full result: x.csv",
+            rows, fmt="csv", max_rows=2, max_cell=4,
             types=[{"name": "N", "type": "DATE"}],
         )
         self.assertEqual(
@@ -1157,6 +1153,7 @@ class TestRenderRows(SnowmanTestCase):
              "# some cells truncated to 4 chars",
              "# showing 2 of 3 rows"],
         )
+        self.assertEqual(footers[-1], "# showing 2 of 3 rows; narrow the query or raise --max-rows/--max-output")
 
     def test_json_output_is_compact_and_parseable(self):
         rows = [{"O": {"k": 1}, "S": "abcdefghij", "N": None}]

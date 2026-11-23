@@ -582,7 +582,6 @@ def render_rows(
     max_rows: int = DEFAULT_MAX_ROWS,
     max_cell: int = DEFAULT_MAX_CELL,
     max_output: int = DEFAULT_MAX_OUTPUT,
-    full_note: str | None = None,
     types: list[dict] | None = None,
 ) -> tuple[str, list[str], bool]:
     """Return data text, stderr notes, and whether any result detail was cut.
@@ -666,10 +665,7 @@ def render_rows(
     if nested_cut:
         notes.append("# truncated nested JSON cells are shown as JSON text strings")
     if len(pieces) < total:
-        note = f"# showing {len(pieces)} of {total} rows"
-        if full_note:
-            note += f"; {full_note}"
-        notes.append(note + "; narrow the query or raise --max-rows/--max-output")
+        notes.append(f"# showing {len(pieces)} of {total} rows; narrow the query or raise --max-rows/--max-output")
     if budget_cut:
         notes.append(f"# data preview limited to {max_output} UTF-8 bytes; pass --max-output 0 for unlimited")
     truncated = cell_cut or type_cut or budget_cut or len(pieces) < total

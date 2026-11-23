@@ -369,7 +369,7 @@ def connection_params(connection: str, env: dict[str, str]) -> dict | None:
     """
     try:
         result = run_snow(["connection", "list", "--format", "JSON"], env, timeout=30)
-        for item in json.loads(result.stdout):
+        for item in json.loads(result.stdout.decode(errors="replace")):
             if item.get("connection_name") == connection:
                 params = item.get("parameters")
                 return params if isinstance(params, dict) else {}

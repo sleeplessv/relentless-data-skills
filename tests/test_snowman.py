@@ -1680,8 +1680,9 @@ class TestExecute(SnowmanTestCase):
             tracemalloc.reset_peak()
             return split_result(result)
 
-        self.addCleanup(tracemalloc.stop)
-        tracemalloc.start()
+        if not tracemalloc.is_tracing():  # A runner started with -X tracemalloc keeps its tracing.
+            tracemalloc.start()
+            self.addCleanup(tracemalloc.stop)
         with mock.patch.object(snowman, "split_result", split_and_mark):
             code, _, _ = self.run_execute({"sql": Outcome(0, payload, "")}, "SELECT 1", max_rows=1)
         after_parse_peak = tracemalloc.get_traced_memory()[1]
@@ -1885,6 +1886,14 @@ class TestAuthHintFor(SnowmanTestCase):
                 self.assertIn("authenticates in a browser", hint)
                 self.assertIn("snow connection test -c analytics", hint)
                 self.assertNotIn("PRIVATE_KEY_PASSPHRASE", hint)
+
+    def test_bad_byte_in_another_field_still_classifies(self):
+        listing = connection_listing("analytics", {"authenticator": "EXTERNALBROWSER", "user": "X"})
+        listing = listing._replace(stdout=listing.stdout.replace('"X"', '"\xff"').encode("latin-1"))
+        self.assertIn(b"\xff", listing.stdout)
+        hint = self.hint("OAuth access token expired", listing)
+        self.assertIn("authenticates in a browser", hint)
+        self.assertNotIn("PRIVATE_KEY_PASSPHRASE", hint)
 
     def test_keypair_connection(self):
         for params in ({"authenticator": "SNOWFLAKE_JWT"}, {"private_key_file": "/k.pem"}):

@@ -420,7 +420,7 @@
       "name": "snowman",
       "source": "./skills/snowman",
       "description": "Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution.",
-      "version": "0.1.15",
+      "version": "0.1.16",
       "author": {
         "name": "sleeplessv"
       },

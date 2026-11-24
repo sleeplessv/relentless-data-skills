@@ -38,7 +38,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Baseline**: in generation one, the original base commit and its recorded check results. Later dispatch commits and integration failures remain distinct from this original evidence. _Avoid_: baseline for a comparison group (that is the single-agent baseline).
 - **Handoff files**: durable shared artifacts containing scope, ticket snapshots, exploration notes, commands, and decisions. Workers exchange their paths and update the run record as work completes and integrates.
 - **Generation one**: the implementation and orchestration skills in use before the redesign: orchestrator-mode, implement-ticket, implement-feature and implement-backlog. _Avoid_: v1, the old stack.
-- **Generation two**: the skill built beside generation one to replace it: deliver. _Avoid_: v2, the new stack.
+- **Generation two**: the skills built beside generation one to replace it: deliver for ticket work and fan-out for non-ticket work. _Avoid_: v2, the new stack.
 - **Harness**: the agent program a session runs in, such as Claude Code, Cortex Code, Codex, Cursor or Antigravity. A harness is distinct from the model it runs. _Avoid_: tool, agent, IDE.
 - **Supported harness**: a harness on which every generation-two skill must reach the same result and pass the same checks as on any other supported harness.
 - **Adapter**: the text a session on one supported harness reads for the steps that harness does differently from the harness a skill is written for. That harness itself has none. _Avoid_: harness notes.
@@ -72,6 +72,9 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Ticket PR**: in generation two, the pull request one author opens for one ticket. In a feature run it targets the integration branch; in a backlog run, the default branch.
 - **Run record**: the durable record of one multi-ticket run: its work-set, the state of each ticket, and the decisions that cross tickets, each with its reason and who made it. _Avoid_: decision list (generation one's record, which holds decisions only), handoff file.
 - **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
+- **Helper**: an agent a session starts to do some of its work and report back.
+- **Fan-out**: handing the independent parts of one non-ticket task to helpers, one part each. The session that fans out has no role name. _Avoid_: orchestrator mode, coordinator (the session that runs a multi-ticket run), delegation (handing work to a person or to another harness's agent).
+- **Part**: one piece of a fan-out, which depends on no other piece.
 - **Brief**: in generation two, the text a helper is given when it starts. A script writes it in a fixed form, and no agent adds to it. _Avoid_: handoff, prompt; local brief (a repo's own rules are run rules).
 - **Author's report**: the fixed final message of an author a coordinator started: its PR, its final commit, its state, and each decision that affects another ticket. _Avoid_: handoff, summary.
 - **Upstream dependency**: a skill this repo does not own or version that a generation-two path reads during a run, or whose output it works from. _Avoid_: fixed neighbour, companion skill.

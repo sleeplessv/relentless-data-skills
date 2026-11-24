@@ -166,7 +166,7 @@
       "name": "herdr-delegate",
       "source": "./skills/herdr-delegate",
       "description": "Hand a task to Codex, Claude or another coding agent from inside Herdr, open it in the caller's own space, and collect its result.",
-      "version": "0.1.6",
+      "version": "0.1.7",
       "author": {
         "name": "sleeplessv"
       },

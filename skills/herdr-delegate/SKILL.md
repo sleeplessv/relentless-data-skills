@@ -16,6 +16,8 @@ with an explicit `herdr.space` label.
 
 ## 1. Find your home space
 
+If you are Codex, first follow [references/codex-caller.md](references/codex-caller.md):
+a Codex TUI can run your commands under another terminal's `HC_TERMINAL_ID`.
 If `HC_TERMINAL_ID`, your terminal's address (`t4z`), is unset or empty, you are
 outside herdr-core: tell the user, use your harness's own subagents, and stop.
 
@@ -25,14 +27,12 @@ SPACE=$(printf '%s' "$ME" | jq -r '.labels["herdr.space"] // empty')
 TAB=$(printf '%s' "$ME" | jq -r '.labels["herdr.tab"] // empty')
 ```
 
-Read the labels only if the block printed no `hc get failed:` line. If it did,
-a sandbox may have blocked `hc get`: follow
-[references/lookup-failure.md](references/lookup-failure.md) before any launch.
+Read the labels only if the block printed no `hc get failed:` line. If it did, a
+sandbox may have blocked `hc get`: follow [references/lookup-failure.md](references/lookup-failure.md).
 Without `jq`, read `labels."herdr.space"` and `labels."herdr.tab"` from `$ME`.
 
-Done when the block printed no `hc get failed:` line and `SPACE` holds an ID
-starting `sp`. An empty `SPACE` with no such line means your terminal is a
-hidden worker: launch the helper without labels, so it stays hidden too.
+Done when the block printed no `hc get failed:` line and `SPACE` holds an ID starting `sp`. An empty
+`SPACE` with no such line means your terminal is a hidden worker: launch the helper without labels.
 
 ## 2. Write the brief
 
@@ -80,7 +80,7 @@ targets `ID`, and only a report from `ID` ends this delegation.
 | You are a subagent | add `--no-notify`, so hc types no notes about the helper into the main session; drop `Bash(hc send …)` from Claude's grant |
 | A template from `hc templates` | `<template> "$BRIEF"` in place of the program |
 
-- **Codex needs `--no-daemon`.** Without it, its commands run outside hc.
+- **A Codex helper needs `--no-daemon`.** Without it, its commands run outside hc, under another terminal's ID.
 - **A new tab** in the home space is what `herdr.space` alone gives; the person's screen stays where it is.
 - **Pre-approve the helper's tools.** A helper that asks permission sits
   `blocked` until the person answers. Cortex asks before every write and

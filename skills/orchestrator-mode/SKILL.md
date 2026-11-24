@@ -25,7 +25,7 @@ starts the mode is too small to repay that, say so and offer to answer directly.
 
 In standing mode, and for the named tasks in scoped mode, the coordinator calls only:
 
-- spawn, message, resume, wait, and stop tools for workers;
+- spawn, wait, and stop tools for workers;
 - the plan or todo tool;
 - reads of and appends to the [decision list](references/reference.md#decision-list);
 - skill loading, including a file read of a skill's SKILL.md or a reference it points to;
@@ -79,12 +79,10 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    and a done-when, and the run directory is named.
 2. **Dispatch.** Launch independent dispatches together in one message, each with a full
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
-3. **Collect.** Wait through completion notifications or the wait tool. A follow-up on
-   the task a worker just did (a gap in its report, an answer to its question, a fix to
-   its own change) resumes that worker, once: it holds the reasons for its work, but the
-   coordinator cannot see how full its context is. A verification, a new phase
-   (integration, the PR, the next wave), a second follow-up, or a worker the harness
-   cannot resume gets a fresh worker briefed by artifact path. When a retry fails the
+3. **Collect.** Wait through completion notifications or the wait tool. Never resume or
+   message a finished worker: every follow-up (a gap in its report, an answer to its
+   question, a fix to its own change), verification, or new phase gets a fresh worker
+   briefed by artifact path and the earlier worker's `decisions_made`. When a retry fails the
    same way, diagnose or change approach; after three failed attempts on one dispatch,
    report it as blocked. Keep independent work moving while a dependency waits on the
    user. Done when every worker in the wave has returned or is reported blocked.
@@ -97,7 +95,7 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
 5. **Verify.** Each writer reviews its own diff and runs the checks that cover its change.
    Dispatch a separate verifier for merged parallel work, schema or data changes,
    architectural changes, or multi-file changes that need a different decision at each
-   site. The verifier reports problems, the writer fixes them as a follow-up under Collect,
+   site. The verifier reports problems, a fresh writer fixes them as a follow-up under Collect,
    and a fresh verifier checks again. Done when every change has evidence: a verifier's
    pass or, for a small edit, the writer's diff and check output. A promotion also passes
    its checks: read [Promotion checks](references/reference.md#promotion-checks) first.

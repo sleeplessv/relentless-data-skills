@@ -33,7 +33,7 @@ whose class is the session's, or would be above it, gets no model, and so does a
 worker with no model runs on its spawner's, unless a worker definition or a harness default
 sets another. Where that subsection ranks model families and the session's model is in none
 of them, or an exact id is needed and the harness has shown no model list to take it from,
-no worker gets a model. A resumed worker keeps the model it started on.
+no worker gets a model.
 
 **Class escalation.** A task fails its check when a verifier, a re-check, or a rerun of its
 checks reports its done-when unmet; the worker that reports the failure has not failed. After
@@ -42,7 +42,7 @@ a second failure on the strong class, it goes to a fresh worker on the session c
 that is higher. Every attempt counts toward Collect's three, which still ends the dispatch,
 and the decision list records each move with the failed check. A worker that is stuck
 returns the obstacle and what it tried in `open_questions`; the coordinator answers from
-what it holds and resumes it.
+what it holds and passes the answer to a fresh worker.
 
 ## Harness notes
 
@@ -59,9 +59,8 @@ general notes, then the subsection for the harness this session runs in.
 ### Claude Code
 
 - **Questions.** Only a fork can ask; other workers lose `AskUserQuestion`.
-- **Limits.** Up to 20 workers run at once (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`);
-  resuming a finished worker takes a slot without checking the limit, so resumes can push
-  the count past it. Workers nest 3 layers below the main thread
+- **Limits.** Up to 20 workers run at once (`CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS`).
+  Workers nest 3 layers below the main thread
   (`CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH`), and a fork cannot start another fork.
 - **Model and effort.** The per-call `model` takes an alias: `fable`, `opus`, `sonnet`,
   `haiku`, highest first. Strong class is `opus` and
@@ -77,10 +76,9 @@ general notes, then the subsection for the harness this session runs in.
   completion notifications. By default a worker gets its own workers' results before it
   finishes; with fork mode off (`CLAUDE_CODE_FORK_SUBAGENT=0`) in `claude -p` or the Agent
   SDK, they run in the background and report to the main thread if they outlast it.
-- **Resume, instructions and skills.** Built-in Explore and Plan workers cannot be resumed.
-  They skip CLAUDE.md and AGENTS.md, and so does a worker whose definition sets
-  `omitClaudeMd: true`; other workers load them. A worker the user stopped refuses
-  messages, and background workers keep the `Skill` tool.
+- **Instructions and skills.** Built-in Explore and Plan workers skip CLAUDE.md and
+  AGENTS.md, and so does a worker whose definition sets `omitClaudeMd: true`; other
+  workers load them. Background workers keep the `Skill` tool.
 - **Scripted fan-out.** Workers other than forks never get the `Workflow` tool. A workflow
   runs up to 16 agents at once by default, fewer on machines with fewer CPUs
   (`CLAUDE_CODE_WORKFLOW_MAX_CONCURRENT_AGENTS`, 1 to 256), apart from the 20-worker cap.
@@ -116,9 +114,8 @@ keys come from Codex's source, because its docs omit them.
   fails with a list of the available ones. The families are Astra, Sol, Terra, and Luna,
   highest first. Strong class is the newest Sol id and standard class the newest Terra id.
 - **Worktrees.** No native isolation: all workers share one working directory.
-- **Completion and resume.** V2 delivers a worker's final answer to its spawner
-  automatically; `wait_agent` reports only which workers have updates. `followup_task`
-  starts a new turn on an idle worker; `send_message` delivers without starting one.
+- **Completion.** V2 delivers a worker's final answer to its spawner
+  automatically; `wait_agent` reports only which workers have updates.
 - **Project instructions and skills.** Workers inherit their spawner's AGENTS.md and skills.
 
 ### Cursor
@@ -133,8 +130,8 @@ keys come from Codex's source, because its docs omit them.
   setting make Cursor fall back to another model without an error.
 - **Worktrees.** Isolation is opt-in, as a local worktree or a cloud VM, from an
   undocumented base.
-- **Completion and resume.** A background worker writes its output to files under
-  `~/.cursor/subagents/`, which its spawner reads. A finished worker resumes by its ID.
+- **Completion.** A background worker writes its output to files under
+  `~/.cursor/subagents/`, which its spawner reads.
 
 ### Cortex Code
 
@@ -156,8 +153,7 @@ keys come from Codex's source, because its docs omit them.
   are force-deleted when the worker ends, so work it has not pushed is lost (binary only;
   `--worktree-base` serves only the session's own `--worktree`). The extensibility page
   still says to ask in the prompt, on branch `agent/<agentId>`.
-- **Completion and resume.** The spawner fetches a worker's output, or resumes a killed
-  worker, by its ID.
+- **Completion.** The spawner fetches a worker's output by its ID.
 
 ## Decision list
 
@@ -245,8 +241,8 @@ database, a workspace, a CI runner, or a live deployment.
    version it ran on (a commit SHA or version id), the command, and its exit code or output.
 4. **Gate.** Promote once every listed check has a passing result from its place for the
    version being promoted. A failing, pending, or missing result holds the promotion, and so
-   does a result from another place or for another version. A failure goes back to the
-   writer as Verify describes, and the fixed version runs every promotion check again.
+   does a result from another place or for another version. A failure follows Verify,
+   and the fixed version runs every promotion check again.
 
 ## Worked example
 
@@ -255,7 +251,6 @@ read-only search workers in one message. One lists callers of `foo()` as `file:l
 other lists configuration that sets the related timeouts. Each writes its findings to the
 run directory and returns a short index. Send one writer the quoted index entries, the
 agreed scope, and the decisions so far. A separate verifier runs the affected tests and
-reviews the diff. A failing check goes back to the writer, resumed once with the
-verifier's report, then to a fresh verifier. If that fix fails too, a fresh writer gets
-the report, the diff, and the first writer's `decisions_made`. A single-file change keeps
+reviews the diff. A failing check goes to a fresh writer with the verifier's report, the
+diff, and the first writer's `decisions_made`, then to a fresh verifier. A single-file change keeps
 the same evidence, but its writer's diff and test output can stand as the verification.

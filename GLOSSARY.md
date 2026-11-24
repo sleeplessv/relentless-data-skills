@@ -65,6 +65,10 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Measurement record**: what is recorded about one finished unit of work: the facts its run knows and the cost and outcome found afterwards. _Avoid_: run record (the record of a multi-ticket run), metrics, telemetry.
 - **Replay set**: the fixed set of finished tickets that every comparison between ways of working reruns. _Avoid_: benchmark, eval set.
 - **Replay**: one run of a replay-set ticket from the commit before its merged PR. Its result is judged and never merged. _Avoid_: rerun, shadow run.
+- **Cross-harness test**: the test that runs every generation-two path on every supported harness, started from one session. _Avoid_: compatibility test, harness matrix.
+- **Proof run**: one run of one path on one supported harness in the cross-harness test. It is judged from the records it leaves, never from the harness's reply. _Avoid_: smoke test, trial run.
+- **Guard probe**: the cross-harness test's run that tries each guarded command with a stand-in, to show it refused or held. _Avoid_: guard test, hook test.
+- **Fixture repo**: the repo the cross-harness test's runs work on, returned to the same commit before each run. _Avoid_: test repo, sandbox repo.
 - **Multi-ticket run**: in generation two, one run that takes two or more tickets from request to their PRs under a coordinator. _Avoid_: orchestrated run.
 - **Feature run**: a multi-ticket run whose work-set comes from one spec. Its ticket PRs land on an integration branch, and it ends in a feature PR.
 - **Backlog run**: a multi-ticket run over tickets that share no spec. Each ticket PR targets the default branch, and no feature PR follows.

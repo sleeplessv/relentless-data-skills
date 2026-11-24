@@ -79,13 +79,14 @@ coordinator, read [Nesting](references/reference.md#nesting-sub-orchestrators).
    and a done-when, and the run directory is named.
 2. **Dispatch.** Launch independent dispatches together in one message, each with a full
    [handoff](#handoffs). Done when every dispatch in the current wave is running.
-3. **Collect.** Wait through completion notifications or the wait tool. Never resume or
-   message a finished worker: every follow-up (a gap in its report, an answer to its
-   question, a fix to its own change), verification, or new phase gets a fresh worker
-   briefed by artifact path and the earlier worker's `decisions_made`. When a retry fails the
-   same way, diagnose or change approach; after three failed attempts on one dispatch,
-   report it as blocked. Keep independent work moving while a dependency waits on the
-   user. Done when every worker in the wave has returned or is reported blocked.
+3. **Collect.** Wait through completion notifications or the wait tool, with any timeout
+   [Harness notes](references/reference.md#harness-notes) gives. Never resume or message a
+   finished worker: every follow-up (a gap in its report, an answer to its question, a fix to
+   its own change), verification, or new phase gets a fresh worker briefed by artifact path and
+   the earlier worker's `decisions_made`. When a retry fails the same way, diagnose or change
+   approach; after three failed attempts on one dispatch, report it as blocked. Keep
+   independent work moving while a dependency waits on the user. Done when every worker in the
+   wave has returned or is reported blocked.
 4. **Integrate.** One writer handles small edits. Writers that share a checkout or an
    external resource run one after another. Parallel code writers each get a worktree and
    branch from a pinned base SHA, and one integration worker merges them; read

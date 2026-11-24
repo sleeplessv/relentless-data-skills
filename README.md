@@ -21,13 +21,13 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`implement-backlog`](skills/implement-backlog/) | Work a ticket backlog as chief of staff, with one subagent owning each ticket from claim to merged pull request. |
 | [`implement-feature`](skills/implement-feature/) | Implement a feature specification or selected tickets as one verified pull request. |
 | [`implement-ticket`](skills/implement-ticket/) | Implement a GitHub ticket, verify the result, and prepare a pull request for review. |
+| [`land`](skills/land/) | Commit, publish, and merge working-tree changes through a pull request. |
 | [`metabase`](skills/metabase/) | Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration. |
 | [`orchestrator-mode`](skills/orchestrator-mode/) | Coordinate work through subagents with scoped delegation, shared evidence, and verification. |
 | [`pbi-desktop-bridge`](skills/pbi-desktop-bridge/) | Reload Power BI Desktop in a Parallels Windows VM from a Mac and screenshot report pages, so an agent sees its PBIP edits rendered. |
 | [`prefect`](skills/prefect/) | Build, review, and debug Prefect 3 projects using documentation and live instance evidence. |
 | [`qualify-delegation`](skills/qualify-delegation/) | Qualify assignments for human colleagues or contractors and produce clear handoffs with explicit outcomes, authority, and constraints. |
 | [`review-pbi-diff`](skills/review-pbi-diff/) | Review Power BI PBIP changes with page layouts, DAX checks, and ranked findings. |
-| [`ship`](skills/ship/) | Commit, publish, and merge working-tree changes through a pull request. |
 | [`smart-git-commit`](skills/smart-git-commit/) | Group working-tree changes into conventional commits and push them to the remote when asked. |
 | [`snowman`](skills/snowman/) | Explore Snowflake data, investigate data quality, and prepare SQL changes for manual execution. |
 | [`statusline`](skills/statusline/) | Show the current model, reasoning effort, context window usage, directory, git branch and its diff, and open pull requests in the Claude Code status line. |

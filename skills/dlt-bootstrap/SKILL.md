@@ -113,7 +113,7 @@ matching the interview answer:
 - Get each toolkit's entry skill from installed metadata or current upstream docs.
   Hand off through that entrypoint, DuckDB validation, production hardening,
   Prefect orchestration, shipping, and inspection of the selected destination.
-- Check whether `prefect`, `ship`, and destination-specific companions are available.
+- Check whether `prefect`, `land`, and destination-specific companions are available.
   Name missing companions and give an available docs or CLI fallback.
   Do not promise unavailable slash commands or install companions without a request.
 

@@ -30,7 +30,7 @@ from typing import Dict, List, Optional, Set
 REPO_ROOT = Path(__file__).resolve().parent.parent
 IMPLEMENT_FEATURE_REF = REPO_ROOT / "skills" / "implement-feature" / "references" / "reference.md"
 REVIEW_AND_PR = REPO_ROOT / "skills" / "implement-ticket" / "references" / "review-and-pr.md"
-SHIP_SKILL = REPO_ROOT / "skills" / "ship" / "SKILL.md"
+LAND_SKILL = REPO_ROOT / "skills" / "land" / "SKILL.md"
 SMART_COMMIT_SKILL = REPO_ROOT / "skills" / "smart-git-commit" / "SKILL.md"
 
 GIT = shutil.which("git")
@@ -567,16 +567,16 @@ class ImplementFeatureIntegrationTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------------
-# ship
+# land
 # --------------------------------------------------------------------------
 
-def ship_block(heading: str, marker: str, values: Optional[Dict[str, str]] = None) -> List[str]:
-    """A ship block with `gh` lines dropped and `<placeholder>`s filled in.
+def land_block(heading: str, marker: str, values: Optional[Dict[str, str]] = None) -> List[str]:
+    """A land block with `gh` lines dropped and `<placeholder>`s filled in.
 
     `gh` lines go first, line by line: their `<number>` placeholders are not
     valid shell, so they cannot reach the parser.
     """
-    block = doc_block(SHIP_SKILL, heading, marker)
+    block = doc_block(LAND_SKILL, heading, marker)
     offline = "\n".join(drop_gh(block.splitlines()))
     return split_commands(substitute(offline, values or {}))
 
@@ -590,13 +590,13 @@ class ShipTests(unittest.TestCase):
         self.work = self.sb.clone(self.origin, "work")
 
     def inline_fresh_branch(self) -> str:
-        text = section(SHIP_SKILL.read_text(encoding="utf-8"), "Step 2: Pick the branch")
+        text = section(LAND_SKILL.read_text(encoding="utf-8"), "Step 2: Pick the branch")
         m = re.search(r"Fresh-branch mechanics: `([^`]+)`", text)
         self.assertIsNotNone(m, "Fresh-branch mechanics inline command not found")
         return m.group(1)
 
     def test_merged_detection(self):
-        cmds = ship_block("Step 2: Pick the branch", "ancestor-merged")
+        cmds = land_block("Step 2: Pick the branch", "ancestor-merged")
         self.assertEqual(cmds, ["git fetch origin main",
                                 "git merge-base --is-ancestor HEAD origin/main && echo ancestor-merged"])
         self.sb.git(self.work, "checkout", "-q", "-b", "feat/old")
@@ -622,7 +622,7 @@ class ShipTests(unittest.TestCase):
         self.assertIn("README.md", self.sb.git(self.work, "status", "--porcelain"))
 
     def test_push_sets_upstream(self):
-        cmds = split_commands(doc_block(SHIP_SKILL, "Step 3: Commit", "git push"))
+        cmds = split_commands(doc_block(LAND_SKILL, "Step 3: Commit", "git push"))
         self.assertEqual(cmds, ["git push -u origin HEAD"])
         self.sb.git(self.work, "checkout", "-q", "-b", "feat/x")
         sha = self.sb.commit_file(self.work, "x.txt", "x\n", "feat: x")
@@ -632,7 +632,7 @@ class ShipTests(unittest.TestCase):
         self.assertEqual(self.sb.git(self.work, "rev-parse", "--abbrev-ref", "@{u}"), "origin/feat/x")
 
     def ci_detect(self, sha: str) -> Run:
-        cmds = ship_block("Step 5: Merge and clean up", "git grep -lwE")
+        cmds = land_block("Step 5: Merge and clean up", "git grep -lwE")
         self.assertEqual(len(cmds), 1, cmds)
         self.assertIn("\"$sha\" -- .github/workflows", cmds[0])
         return self.sb.run(self.work, cmds, {"sha": sha}, allow={"git grep": {0, 1}})
@@ -675,7 +675,7 @@ class ShipTests(unittest.TestCase):
         merge_oid = self.sb.git(server, "rev-parse", "HEAD")
         self.sb.git(server, "push", "-q", "origin", "HEAD:main")
 
-        cmds = ship_block("Step 5: Merge and clean up", "git checkout main && git pull",
+        cmds = land_block("Step 5: Merge and clean up", "git checkout main && git pull",
                           {"<mergeCommit.oid>": merge_oid, "<branch>": branch})
         self.assertEqual(len(cmds), 4, cmds)
         allow = {"ls-remote": {0, 2}, "rev-parse --verify": {0, 1}}

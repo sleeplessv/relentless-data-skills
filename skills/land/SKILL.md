@@ -1,6 +1,6 @@
 ---
 name: land
-description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. Waits for CI and never merges a PR with a failing check. The clean argument skips only that merge confirmation, never the CI gate or the unrelated-changes prompt.
+description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch without asking. Waits for CI and never merges a PR with a failing check.
 disable-model-invocation: true
 ---
 
@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Take the current working-tree changes from branch to merged PR in one pass: branch off `main`, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
 
-**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/land clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
+**Argument:** land merges and cleans up by default once the Step 5 CI gate is green; `clean` is accepted and changes nothing. "Don't merge" or "ask first" stops at Step 5 with the PR open, or asks there. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
 
 **Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit. The PR's checks are the test gate: the flow runs git and gh commands plus what the `smart-git-commit` and `pr` skills read, and nothing that executes the code.
 
@@ -25,9 +25,9 @@ Run in parallel:
 
 Form the commit groups **before** any branching (the `smart-git-commit` grouping pass: inspect `git status`/`git diff`, group by affected area); branch decisions depend on them.
 
-**Unrelated-work detection:** if the groups would not sit honestly under a single PR title, because they are disjoint subsystems with different intents (e.g. a `feat` in `api/` plus an unrelated `fix` in `.github/workflows/`), ask: "These look like unrelated changes: <one line per group>. Ship as separate branches/PRs, or together?" A feature plus its own tests/docs is NOT a split; when in doubt, default to one branch. This prompt fires even under `clean`; silently bundling unrelated work is exactly what `clean` must not do.
+**Unrelated-work detection:** if the groups would not sit honestly under a single PR title, because they are disjoint subsystems with different intents (e.g. a `feat` in `api/` plus an unrelated `fix` in `.github/workflows/`), ask: "These look like unrelated changes: <one line per group>. Ship as separate branches/PRs, or together?" A feature plus its own tests/docs is NOT a split; when in doubt, default to one branch. This prompt always fires; silently bundling unrelated work into a merge nobody confirms is what it prevents.
 
-**If splitting:** run Steps 2–5 once per group, each on its own branch off updated main (`git checkout main && git pull && git checkout -b …` between groups carries the remaining uncommitted changes along). Disjoint files mean later PRs merge cleanly after earlier ones. Ask the Step 5 merge question once, listing all PRs.
+**If splitting:** run Steps 2–5 once per group, each on its own branch off updated main (`git checkout main && git pull && git checkout -b …` between groups carries the remaining uncommitted changes along). Disjoint files mean later PRs merge cleanly after earlier ones.
 
 ## Step 2: Pick the branch
 
@@ -79,7 +79,7 @@ EOF
 
 `<number>` is the PR number from Step 4, or the open PR Step 0 found. Name it in every `gh pr` command, because the current branch may not be the PR's.
 
-**CI gate, under `clean` too.** Before any merge question, wait for each PR's checks to settle, then read them:
+**CI gate.** Before any merge, wait for each PR's checks to settle, then read them:
 
 ```bash
 gh pr checks <number> --watch --fail-fast >/dev/null 2>&1   # blocks until every check finishes or one fails; the JSON below is the read
@@ -102,15 +102,14 @@ Route by the JSON (or the "no checks reported" message), never by either command
   ```
 
   - No `git grep` hit **and** an empty `gh run list` → the repo has no PR CI. Continue with the checks line "checks: none reported", which the close-out carries so the user knows nothing gated the merge.
-  - A hit, or any run listed (push-triggered CI also checks the PR head) → re-read `gh pr checks <number> --json name,bucket` and `gh run list` up to 5 times; as soon as a check appears, rerun the watch and route again. Still no check after 5 reads → stop and ask the user whether to merge without CI, even under `clean`.
+  - A hit, or any run listed (push-triggered CI also checks the PR head) → re-read `gh pr checks <number> --json name,bucket` and `gh run list` up to 5 times; as soon as a check appears, rerun the watch and route again. Still no check after 5 reads → stop and ask the user whether to merge without CI.
 
 Then, with the gate green:
 
-- Invoked with `clean` → proceed without asking; the checks line goes in the close-out.
-- Otherwise ask: "Merge and clean up (squash-merge the PR, delete the local and remote branch)?", followed by the checks line.
-  - **No** → leave the PR open, print its URL, and stop. Delete nothing.
+- Merge without asking; the checks line goes in the close-out.
+- Only when the user said "don't merge" or "ask first": stop, or ask "Merge and clean up (squash-merge the PR, delete the local and remote branch)?" with the checks line. On no, leave the PR open, print its URL, and stop. Delete nothing.
 
-On yes (or `clean`), merge, then, once the merge has returned, read the PR's end state whatever the merge's exit code. The state routes this step: a merge that landed exits 1 when local branch deletion fails, and a merge-queue enqueue exits 0 with the PR still open.
+Merge, then, once the merge has returned, read the PR's end state whatever the merge's exit code. The state routes this step: a merge that landed exits 1 when local branch deletion fails, and a merge-queue enqueue exits 0 with the PR still open.
 
 ```bash
 gh pr merge <number> --squash --delete-branch
@@ -144,5 +143,5 @@ All three confirm → **merged**. Any miss → **merged, but cleanup incomplete*
 
 - The smart-git-commit rules apply: no force-push, no skipped hooks (`--no-verify`), no likely secrets (`.env`, credentials, tokens) in a commit.
 - Delete branches only through `--delete-branch` in the Step 5 merge, which acts only once the PR has merged; an unmerged branch may hold the only copy of the work.
-- Merge only once the Step 5 CI gate is green, and only with the `clean` argument or an explicit yes; the squash-merge is the one irreversible step and the user owns it.
+- Merge only once the Step 5 CI gate is green; running land is the user's go-ahead for the squash-merge, the one irreversible step, unless they said "don't merge" or "ask first".
 - If a step fails mid-flow (rejected push, conflict on `git checkout` or `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one. A non-zero exit from `gh pr checks` or `gh pr merge` is not such a failure: Step 5 routes by the state it reads, and a failing check stops the flow through the CI gate.

@@ -46,6 +46,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Check**: in generation two, a command run against a change that ends in pass or fail, such as a test, a build, or a run of the changed thing. _Avoid_: verification, verifier; check for a reading of a change (generation one's check wave is made of reviews).
 - **Review**: in generation two, a reading of a change against stated criteria by an agent that wrote none of it. _Avoid_: verifier, verification, check.
 - **Check plan**: the list written before a change is made that pairs each of its requirements with the check or review that will prove it. _Avoid_: test plan.
+- **Entry check**: in generation two, the check that a ticket holds what a run needs before an author starts on it: what to build, and at least one requirement that can be proven. _Avoid_: triage (deciding whether a ticket should be worked at all), readiness check.
 - **Small edit**: in generation two, a two-way door change that stays within the line limit and has a low blast radius. It is the size of change that needs no review. _Avoid_: trivial change, quick fix.
 - **Blast radius**: everything else that can break or give wrong results if a change is wrong. It is high when the change touches a critical path, or when more depends on what it changes than the limit allows. _Avoid_: impact, risk level.
 - **Critical path**: a part of a repo where every change gets a review, whatever its size. _Avoid_: protected path, sensitive file.
@@ -70,6 +71,8 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Ticket PR**: in generation two, the pull request one author opens for one ticket. In a feature run it targets the integration branch; in a backlog run, the default branch.
 - **Run record**: the durable record of one multi-ticket run: its work-set, the state of each ticket, and the decisions that cross tickets, each with its reason and who made it. _Avoid_: decision list (generation one's record, which holds decisions only), handoff file.
 - **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
+- **Brief**: in generation two, the text a helper is given when it starts. A script writes it in a fixed form, and no agent adds to it. _Avoid_: handoff, prompt; local brief (a repo's own rules are run rules).
+- **Author's report**: the fixed final message of an author a coordinator started: its PR, its final commit, its state, and each decision that affects another ticket. _Avoid_: handoff, summary.
 - **Upstream dependency**: a skill this repo does not own or version that a generation-two path reads during a run, or whose output it works from. _Avoid_: fixed neighbour, companion skill.
 - **Upstream contract**: the record of what generation two takes from each upstream dependency, and of what it supplies where that skill expects a person to answer. _Avoid_: pin, lock file.
 - **Stack settings**: the one file in a repo, controlled by its owner, that sets how generation two behaves there. A repo without it gets every default. _Avoid_: config, local brief, the file the owner controls.
@@ -81,6 +84,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Run grant**: in generation two, the writes other people can see that starting a run permits without asking. _Avoid_: permissions already granted (generation one's handoff phrase).
 - **Lesson**: something that went wrong in a run, recorded with its sightings before any change is made for it. _Avoid_: retro finding, learning.
 - **Sighting**: one run in which a lesson was seen. Its ticket is one of the lesson's cases, which a change made for the lesson is tested on. _Avoid_: occurrence, incident.
+- **Lesson line**: the line in a run's final report that names a lesson, saying what went wrong and where it was seen. The owner turns it into a run rule, files it as a lesson, or drops it. _Avoid_: proposed rule, retro note.
 - **Starting figure**: a number in generation two's design that was chosen, not measured. _Avoid_: default (the value a stack setting has when a repo sets none), threshold.
 - **Text rule**: an instruction added to text a generation-two run loads. A repo's own are run rules. _Avoid_: patch, rule alone.
 - **Repair**: a change that fixes wrong instructions or a stopped run and adds no behaviour. _Avoid_: fix (a fix answers a review finding), patch.

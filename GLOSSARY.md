@@ -46,6 +46,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Check**: in generation two, a command run against a change that ends in pass or fail, such as a test, a build, or a run of the changed thing. _Avoid_: verification, verifier; check for a reading of a change (generation one's check wave is made of reviews).
 - **Review**: in generation two, a reading of a change against stated criteria by an agent that wrote none of it. _Avoid_: verifier, verification, check.
 - **Check plan**: the list written before a change is made that pairs each of its requirements with the check or review that will prove it. _Avoid_: test plan.
+- **Counted pass**: a saved check that counts as evidence for a change: it passed, it selected something, and it ran on the final commit with no uncommitted change. _Avoid_: green run, passing check (a check can pass and not count).
 - **Entry check**: in generation two, the check that a ticket holds what a run needs before an author starts on it: what to build, and at least one requirement that can be proven. _Avoid_: triage (deciding whether a ticket should be worked at all), readiness check.
 - **Small edit**: in generation two, a two-way door change that stays within the line limit and has a low blast radius. It is the size of change that needs no review. _Avoid_: trivial change, quick fix.
 - **Blast radius**: everything else that can break or give wrong results if a change is wrong. It is high when the change touches a critical path, or when more depends on what it changes than the limit allows. _Avoid_: impact, risk level.
@@ -80,6 +81,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Extension point**: the stack settings and the run rules together, the only place a repo changes generation two. _Avoid_: override, brief.
 - **Preflight**: in generation two, the checks a run makes on its environment before the edit. Each ends in a stop or a warning. _Avoid_: setup check, environment check; check alone (a check is run against a change).
 - **Guard**: a limit the environment applies to a command inside a generation-two run, whatever the agent's instructions say. The command is refused, or it waits for the owner's answer. Outside a run no command is refused. _Avoid_: hook (one harness's mechanism), guardrail (the snowman wrapper's), permission rule.
+- **Run mark**: in generation two, the record that a run is in progress in one checkout or worktree. A guard applies only where one is present. _Avoid_: lock, session file.
 - **Reach command**: a command a repo names that proves an environment its runs depend on can be reached. _Avoid_: health check, connection test.
 - **Run grant**: in generation two, the writes other people can see that starting a run permits without asking. _Avoid_: permissions already granted (generation one's handoff phrase).
 - **Lesson**: something that went wrong in a run, recorded with its sightings before any change is made for it. _Avoid_: retro finding, learning.

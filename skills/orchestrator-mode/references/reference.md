@@ -115,7 +115,10 @@ keys come from Codex's source, because its docs omit them.
   highest first. Strong class is the newest Sol id and standard class the newest Terra id.
 - **Worktrees.** No native isolation: all workers share one working directory.
 - **Completion.** V2 delivers a worker's final answer to its spawner
-  automatically; `wait_agent` reports only which workers have updates.
+  automatically; `wait_agent` reports only which workers have updates. It returns as soon
+  as any worker sends an update or the user types, so a long `timeout_ms` never delays a
+  result: pass one that covers the wave, such as `1800000` (the cap is `3600000`), not the
+  30 s default or a 60 s loop, which wakes the coordinator for a model turn each time.
 - **Project instructions and skills.** Workers inherit their spawner's AGENTS.md and skills.
 
 ### Cursor

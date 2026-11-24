@@ -74,7 +74,7 @@
       "name": "dlt-bootstrap",
       "source": "./skills/dlt-bootstrap",
       "description": "Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },
@@ -247,6 +247,27 @@
       ]
     },
     {
+      "name": "land",
+      "source": "./skills/land",
+      "description": "Commit, publish, and merge working-tree changes through a pull request.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/land",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "git",
+        "github",
+        "pull-requests",
+        "branching",
+        "workflow",
+        "automation",
+        "gh-cli"
+      ]
+    },
+    {
       "name": "metabase",
       "source": "./skills/metabase",
       "description": "Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration.",
@@ -375,27 +396,6 @@
         "wireframes",
         "semantic-model",
         "business-intelligence"
-      ]
-    },
-    {
-      "name": "ship",
-      "source": "./skills/ship",
-      "description": "Commit, publish, and merge working-tree changes through a pull request.",
-      "version": "0.1.7",
-      "author": {
-        "name": "sleeplessv"
-      },
-      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/ship",
-      "repository": "https://github.com/sleeplessv/relentless-data-skills",
-      "license": "Apache-2.0",
-      "keywords": [
-        "git",
-        "github",
-        "pull-requests",
-        "branching",
-        "workflow",
-        "automation",
-        "gh-cli"
       ]
     },
     {

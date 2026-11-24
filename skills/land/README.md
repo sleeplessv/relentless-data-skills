@@ -1,12 +1,12 @@
-# ship
+# land
 
-The `ship` agent skill takes the changes in your working tree to a merged pull
+The `land` agent skill takes the changes in your working tree to a merged pull
 request in one run. It creates a branch off `main`, commits the changes in the
 `smart-git-commit` style, and opens a PR. It then squash-merges the PR and
 deletes the local and remote branches.
 
 The skill sets `disable-model-invocation: true`, so it never starts from
-conversation. Run it as `/ship`, or as `/ship clean` to skip the merge
+conversation. Run it as `/land`, or as `/land clean` to skip the merge
 confirmation. On a clean tree it resumes from where the branch stands: an open
 PR goes to the CI wait and merge, commits that are not pushed yet go to the push
 and PR. On `main` with unpushed commits it stops and names them.
@@ -30,7 +30,7 @@ The skill runs these steps in order:
    - On a merged branch with new local commits, it asks which branch to use.
 
    New branch names use the format `<type>/<short-slug>`, for example
-   `feat/ship-skill`.
+   `feat/land-skill`.
 3. **Commits and pushes.** It commits through the
    [`smart-git-commit`](../smart-git-commit) skill, one conventional commit per
    group. Then it pushes the branch itself.
@@ -63,12 +63,12 @@ See the [repo root README](../../README.md) for the general install patterns
 (`npx skills`, Claude Code plugin, manual clone). For this skill specifically:
 
 ```bash
-npx skills add sleeplessv/relentless-data-skills/skills/ship
+npx skills add sleeplessv/relentless-data-skills/skills/land
 ```
 
 ```text
 /plugin marketplace add sleeplessv/relentless-data-skills
-/plugin install ship@relentless-data-skills
+/plugin install land@relentless-data-skills
 ```
 
 ## Files
@@ -83,10 +83,10 @@ npx skills add sleeplessv/relentless-data-skills/skills/ship
 - Network access to GitHub. Run `gh`, `git fetch`, `git pull`, and `git push`
   outside any sandbox. Inside one, they fail with misleading DNS and connection
   errors.
-- The `smart-git-commit` skill. Without it, ship uses a shorter built-in
+- The `smart-git-commit` skill. Without it, land uses a shorter built-in
   commit workflow.
-- The `pr` skill, loaded with the Skill tool during Step 4. Without it, ship
+- The `pr` skill, loaded with the Skill tool during Step 4. Without it, land
   writes a plain Summary body.
-- A permission rule that allows `gh pr merge`, for unattended `/ship clean`
+- A permission rule that allows `gh pr merge`, for unattended `/land clean`
   runs in background or auto mode. Without the rule, the merge stops at a
   permission prompt.

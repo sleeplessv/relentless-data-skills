@@ -45,7 +45,7 @@ toolkits or source types change; do not delete it.
 - Before promotion, set `dev_mode=False`, remove resource limits, and select
   the production destination. Verify repeated runs keep a stable dataset and
   handle new rows, updates, and deletions as the chosen strategy requires.
-- Use `/ship` when available. Otherwise follow the project's commit and PR
+- Use `/land` when available. Otherwise follow the project's commit and PR
   workflow within the user's requested scope.
 
 ## Warehouse inspection

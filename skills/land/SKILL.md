@@ -1,14 +1,14 @@
 ---
-name: ship
+name: land
 description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch after confirmation. Waits for CI and never merges a PR with a failing check. The clean argument skips only that merge confirmation, never the CI gate or the unrelated-changes prompt.
 disable-model-invocation: true
 ---
 
-# Ship
+# Land
 
 Take the current working-tree changes from branch to merged PR in one pass: branch off `main`, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
 
-**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/ship clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
+**Argument:** `clean` skips the Step 5 merge confirmation and goes straight through (`/land clean`). Only that: the Step 1 unrelated-work prompt and the Step 5 CI gate still apply. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
 
 **Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit. The PR's checks are the test gate: the flow runs git and gh commands plus what the `smart-git-commit` and `pr` skills read, and nothing that executes the code.
 
@@ -16,7 +16,7 @@ Take the current working-tree changes from branch to merged PR in one pass: bran
 
 Run in parallel:
 
-- `git status` and `git log --oneline origin/main..HEAD`. A clean tree on a feature branch still ships when the branch holds work: with an open PR on the current branch (the Step 2 `gh pr list --state open` check) resume at Step 5; with commits ahead of `origin/main` and no PR, resume at the Step 3 push. A clean tree on `main` with commits ahead of `origin/main` is not ship's to push: name those commits and stop. A branch with neither is nothing to ship: say so and stop.
+- `git status` and `git log --oneline origin/main..HEAD`. A clean tree on a feature branch still ships when the branch holds work: with an open PR on the current branch (the Step 2 `gh pr list --state open` check) resume at Step 5; with commits ahead of `origin/main` and no PR, resume at the Step 3 push. A clean tree on `main` with commits ahead of `origin/main` is not land's to push: name those commits and stop. A branch with neither is nothing to ship: say so and stop.
 - `gh auth status` and `git remote get-url origin`. If `gh` is missing or unauthenticated, or there is no `origin` remote, stop with a clear message before touching anything.
 
 **Run all `gh` and `git fetch`/`pull`/`push`/`ls-remote` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
@@ -49,11 +49,11 @@ gh pr list --head "$(git branch --show-current)" --state open --json number
 
 Fresh-branch mechanics: `git checkout main && git pull && git checkout -b <branch>`.
 
-**Branch name (fixed format):** `<type>/<short-slug>`. `type` is the conventional-commit type of the dominant change group, slug is 2-4 kebab-case words. Examples: `feat/ship-skill`, `fix/null-order-totals`.
+**Branch name (fixed format):** `<type>/<short-slug>`. `type` is the conventional-commit type of the dominant change group, slug is 2-4 kebab-case words. Examples: `feat/land-skill`, `fix/null-order-totals`.
 
 ## Step 3: Commit
 
-Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group. Either way, ship pushes the branch itself, whether or not smart-git-commit pushed:
+Commit using the **`smart-git-commit`** skill workflow, reusing the groups from Step 1: one conventional commit per group. If that skill is unavailable, fall back to one conventional commit (lowercase type, imperative subject) per group. Either way, land pushes the branch itself, whether or not smart-git-commit pushed:
 
 ```bash
 git push -u origin HEAD
@@ -70,7 +70,7 @@ EOF
 )"
 ```
 
-- The title is the conventional-commit subject of the dominant change (e.g. `feat: add ship skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
+- The title is the conventional-commit subject of the dominant change (e.g. `feat: add land skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
 - Load the **`pr`** skill with the Skill tool (`Skill: pr`) and write the body to its template: Summary, Evidence, Merge Danger. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.
 - On a live branch, when the PR includes commits that predate this run, the title and body describe the whole PR (everything the squash lands on `main`), not just this session's groups.
 - Do not use em dashes in the title or body. Use a comma, colon, or parentheses, or rewrite the sentence. Same rule as the commit messages.

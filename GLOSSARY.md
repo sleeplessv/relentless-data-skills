@@ -92,6 +92,8 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Repair**: a change that fixes wrong instructions or a stopped run and adds no behaviour. _Avoid_: fix (a fix answers a review finding), patch.
 - **Rule ledger**: the record of each text rule added after launch, with its lesson and its cases. _Avoid_: changelog, rule list.
 - **Path map**: the record of which text each generation-two path loads, and that path's word limit. _Avoid_: manifest.
+- **Retirement**: the one change that removes generation one's four skills and land from this repo. _Avoid_: deprecation, sunset, cutover.
+- **Retirement gate**: the conditions that must all hold before retirement. _Avoid_: exit criteria, go-live check.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.
 - **Owner filter** — an optional per-invocation filter narrowing a report to one GitHub account's repos. When absent (the default), the report is actor-bounded and no owner filter applies. _Avoid_: owner (in generation two, the person who started a run).
 - **Refusal**: the snowman wrapper's `Blocked` exception, raised by the guardrail or by target resolution and rendered once in `main` as `BLOCKED: <reason>` with exit code 2.

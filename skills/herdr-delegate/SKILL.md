@@ -148,3 +148,8 @@ hc kill "$ID"; hc rm "$ID"
 
 Remove only helpers you started. Keep the helper alive instead when the user
 wants to follow up with it: `hc send "$ID" "..."` reaches it later.
+
+Clean up on every exit, not only the good one: when you stop on an error, a
+blocker or a timeout, and when a caller keeps the helper open for a follow-up,
+close it as soon as that follow-up is answered or dropped. Never end a session
+with a helper you started still running, and tell the user if you must.

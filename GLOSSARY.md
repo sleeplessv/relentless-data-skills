@@ -99,8 +99,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Repair**: a change that fixes wrong instructions or a stopped run and adds no behaviour. _Avoid_: fix (a fix answers a review finding), patch.
 - **Rule ledger**: the record of each text rule added after launch, with its lesson and its cases. _Avoid_: changelog, rule list.
 - **Path map**: the record of which text each generation-two path loads, and that path's word limit. _Avoid_: manifest.
-- **Generation-two design**: the files in this repo that state generation two's rules, written from the decisions on its map. Generation two is built from them. _Avoid_: spec (a spec is an issue), design doc.
-- **Build stage**: one step in building generation two from its design. Its tickets are cut from one spec, and only once the stage before it has ended. _Avoid_: phase, milestone; stage alone (a promotion's).
+- **Build stage**: one step in building generation two. Its tickets are cut from one spec, and only once the stage before it has ended. _Avoid_: phase, milestone; stage alone (a promotion's).
 - **Retirement**: the one change that removes generation one's four skills and land from this repo. _Avoid_: deprecation, sunset, cutover.
 - **Retirement gate**: the conditions that must all hold before retirement. _Avoid_: exit criteria, go-live check.
 - **Actor** — the GitHub user whose activity a report describes; discovered at invocation time (the authenticated `gh` user), never committed to a repo, overridable per invocation. The actor bounds a report's scope: the report covers the actor's activity wherever it happened, across every account and repo.

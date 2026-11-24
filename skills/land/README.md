@@ -6,8 +6,9 @@ request in one run. It creates a branch off `main`, commits the changes in the
 deletes the local and remote branches.
 
 The skill sets `disable-model-invocation: true`, so it never starts from
-conversation. Run it as `/land`, or as `/land clean` to skip the merge
-confirmation. On a clean tree it resumes from where the branch stands: an open
+conversation. Run it as `/land`: it merges and cleans up without asking
+once CI is green. Add "don't merge" or "ask first" to stop or ask before the
+merge. On a clean tree it resumes from where the branch stands: an open
 PR goes to the CI wait and merge, commits that are not pushed yet go to the push
 and PR. On `main` with unpushed commits it stops and names them.
 
@@ -17,9 +18,8 @@ The skill runs these steps in order:
 
 1. **Groups the changes.** It groups the changes by the area they affect before
    it creates any branch. If the groups have different intents and don't fit
-   under one PR title, it asks whether to ship them as separate PRs. It asks
-   even under `clean`, because `clean` must never bundle unrelated work into
-   one PR.
+   under one PR title, it asks whether to ship them as separate PRs. It always
+   asks, because a merge nobody confirms must never bundle unrelated work.
 2. **Picks the branch.** It reads the git and `gh` state and asks only in the
    one ambiguous case:
    - On `main`, it creates a branch off the updated `main`.
@@ -39,14 +39,14 @@ The skill runs these steps in order:
    body. If `pr` isn't installed, the body is a short Summary with one bullet
    per commit group.
 5. **Waits for CI.** It runs `gh pr checks --watch --fail-fast` before it
-   merges, even under `clean`. A failing or cancelled check stops the run and
+   merges. A failing or cancelled check stops the run and
    leaves the PR open. If no checks appear but the repo has PR-triggered
    workflows, it reads the checks up to five more times, then asks you before
    it merges. It merges without checks only when the repo has no PR CI, and the
    final report says so.
-6. **Merges.** It runs `gh pr merge <number> --squash --delete-branch`. Without
-   `clean`, it asks first and shows the check results with the question. If you
-   decline, it leaves the PR open and deletes nothing.
+6. **Merges.** It runs `gh pr merge <number> --squash --delete-branch`. It does not
+   ask first unless you said "don't merge" or "ask first". If you decline, it
+   leaves the PR open and deletes nothing.
 7. **Confirms the outcome.** It reads the PR state from GitHub and ignores the
    exit code of `gh`. For a merged PR, it checks out and pulls `main`, then
    confirms that the squash commit is on local `main` and that both branches
@@ -87,6 +87,6 @@ npx skills add sleeplessv/relentless-data-skills/skills/land
   commit workflow.
 - The `pr` skill, loaded with the Skill tool during Step 4. Without it, land
   writes a plain Summary body.
-- A permission rule that allows `gh pr merge`, for unattended `/land clean`
+- A permission rule that allows `gh pr merge`, for unattended `/land`
   runs in background or auto mode. Without the rule, the merge stops at a
   permission prompt.

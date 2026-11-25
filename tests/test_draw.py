@@ -169,6 +169,30 @@ FORMS: dict[str, dict[str, str]] = {
         "gh pr view --json url --jq .url", "gh 'pr create'", "gh pr create-preview"], "")}
 # A command another program runs is not counted, by the owner's choice, though the shell would start it.
 WRAPPED = ["bash -c 'gh pr create'", "eval gh pr create", "sh ./open-pr.sh"]
+# Forms whose reading is asserted but which no test hands to a shell: each can find a program past the
+# stand-ins, so it could start the real gh.
+PAST_THE_STAND_IN = {"command -p gh pr create": "command -p searches the system's default path, not PATH"}
+
+
+def shell_forms() -> list[tuple[str, str, str]]:
+    """Each form the shell test hands to bash: (what the reader should say, the form, the reason)."""
+    return [(does, command, reason) for does, commands in FORMS.items() for command, reason in commands.items()
+            if command not in PAST_THE_STAND_IN]
+
+
+def shell_path(root: Path, stand_ins: set[str]) -> str:
+    """The PATH a form runs with: the stand-ins' folder, then a folder that links each program in /usr/bin and
+    /bin but those the stand-ins replace, so a form that misses a stand-in finds no real one behind it."""
+    system = root / "system"
+    if not system.exists():
+        system.mkdir()
+        for folder in ("/usr/bin", "/bin"):
+            for program in sorted(Path(folder).iterdir()):
+                if program.name not in stand_ins | {"gh"} and not (system / program.name).exists():
+                    (system / program.name).symlink_to(program)
+    return f"{root / 'bin'}:{system}"
+
+
 # A stand-in gh that records each call and prints the PR's URL for `pr create`; its exits are set per run.
 STAND_IN = f"""#!/bin/sh
 printf '%s\\n' "$*" >> "$CALLS"
@@ -586,29 +610,55 @@ class TestDraw(unittest.TestCase):
                         for git in "01" for create in "01" for view in "01" for gh in ("gh", "true")]
         for command in WRAPPED:
             self.assertIsNone(draw.runs_gh_pr_create(command))
-        for does, commands in FORMS.items():
-            for command, reason in commands.items():
-                with self.subTest(command=command):
-                    self.assertEqual(draw.runs_gh_pr_create(command), {"opens": "opens", "may": "maybe"}.get(does))
-                    runs = []  # (the shell's exit, whether gh was asked to create a PR) per arrangement
-                    for arrangement in arrangements:
-                        calls.write_text("")
-                        creates.write_text("")
-                        env = {"PATH": f"{root / 'bin'}:/usr/bin:/bin", "HOME": str(root), "CALLS": str(calls),
-                               "CREATES": str(creates), **arrangement}
-                        code = subprocess.run(["bash", "-c", command], cwd=root, env=env, capture_output=True).returncode
-                        for _ in range(20):  # a call in the background may come a moment after the shell ends
-                            if creates.read_text() or "&" not in command:
-                                break
-                            subprocess.run(["sleep", "0.05"])
-                        runs.append((code, creates.read_text() != ""))
-                    passed = [called for code, called in runs if code == 0]
-                    if does == "opens":
-                        self.assertTrue(passed and all(passed), runs)
-                    elif does == "may" and not reason:
-                        self.assertIn(False, passed, runs)
-                    elif does == "neither":
-                        self.assertFalse(any(called for _, called in runs), runs)
+        for command in PAST_THE_STAND_IN:
+            self.assertEqual(draw.runs_gh_pr_create(command), "maybe")
+        for does, command, reason in shell_forms():
+            with self.subTest(command=command):
+                self.assertEqual(draw.runs_gh_pr_create(command), {"opens": "opens", "may": "maybe"}.get(does))
+                runs = []  # (the shell's exit, whether gh was asked to create a PR) per arrangement
+                for arrangement in arrangements:
+                    calls.write_text("")
+                    creates.write_text("")
+                    env = {"PATH": shell_path(root, {"gh"}), "HOME": str(root), "CALLS": str(calls),
+                           "CREATES": str(creates), **arrangement}
+                    code = subprocess.run(["bash", "-c", command], cwd=root, env=env, capture_output=True).returncode
+                    for _ in range(20):  # a call in the background may come a moment after the shell ends
+                        if creates.read_text() or "&" not in command:
+                            break
+                        subprocess.run(["sleep", "0.05"])
+                    runs.append((code, creates.read_text() != ""))
+                passed = [called for code, called in runs if code == 0]
+                if does == "opens":
+                    self.assertTrue(passed and all(passed), runs)
+                elif does == "may" and not reason:
+                    self.assertIn(False, passed, runs)
+                elif does == "neither":
+                    self.assertFalse(any(called for _, called in runs), runs)
+
+    def test_no_form_the_shell_test_runs_can_reach_a_program_outside_its_stand_ins(self) -> None:
+        # Each form runs with `sh` in the place of gh, and a stand-in sh first on PATH that only records. A
+        # script named `pr` marks the run when any other sh reads it, as a gh found past the stand-in would.
+        root = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, root)
+        for folder in ("bin", "tools", "x"):
+            (root / folder).mkdir()
+        for name, text in (("sh", '#!/bin/bash\nprintf "%s\\n" "$*" >> "$CALLS"\n'),
+                           ("git", '#!/bin/bash\nexit "$GIT_EXIT"\n')):
+            (root / "bin" / name).write_text(text)
+            (root / "bin" / name).chmod(0o755)
+        (root / "tools" / "sh").symlink_to(root / "bin" / "sh")
+        mark = root / "escaped"
+        (root / "pr").write_text(f": > {mark}\n")
+        for does, command, reason in shell_forms():
+            with self.subTest(command=command):
+                mark.unlink(missing_ok=True)
+                probe = re.sub(r"\bgh\b", "sh", command)
+                for git in "01":
+                    env = {"PATH": shell_path(root, {"sh"}), "HOME": str(root), "CALLS": str(root / "calls"),
+                           "GIT_EXIT": git, "GH": "sh"}
+                    subprocess.run(["bash", "-c", probe], cwd=root, env=env, capture_output=True)
+                subprocess.run(["sleep", "0.05"] if "&" in command else ["true"])
+                self.assertFalse(mark.exists(), "a program outside the stand-ins ran")
 
     def test_a_list_counts_only_in_a_criteria_section_read_as_markdown(self) -> None:
         bodies = {

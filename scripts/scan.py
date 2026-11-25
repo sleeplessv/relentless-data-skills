@@ -5,8 +5,9 @@ Usage: python3 scripts/scan.py SESSION
 
 SESSION is a session id or the path of its .jsonl log. An id is looked up as
 $CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl (default ~/.claude). Helpers' logs
-are read from <log without .jsonl>/subagents/ and its subfolders. The row is
-keyed by the session id inside the log, else by the file's name.
+are read from <log without .jsonl>/subagents/ and every folder below it. The
+row is keyed by the file's name when the log's lines carry it, else by the
+first session id inside the log.
 
 The row replaces any earlier row for the same session in scan-rows.jsonl in the
 machine directory: $DELIVER_STATE_DIR, default ~/.local/state/deliver. A
@@ -61,18 +62,22 @@ def texts(line: dict) -> list[str]:
 
 
 def usages(lines: list[dict]) -> dict[str, dict]:
-    """Each response's usage by API message id, from lines that hold a token count.
+    """Each response's final usage by API message id, from lines that hold a token count.
 
     Claude Code writes a response's usage on each of its content blocks' lines, and a later line can
-    hold a larger, final count, so the last line wins.
+    hold a larger, final count. A forked helper's log can hold an early copy. So each field keeps its
+    largest value, whatever the order of the lines and files.
     """
-    found = {}
+    found: dict[str, dict] = {}
     for line in lines:
         message = line.get("message") or {}
         usage = message.get("usage")
         if (line.get("type") == "assistant" and isinstance(usage, dict) and message.get("model") != "<synthetic>"
                 and any(isinstance(usage.get(field), (int, float)) for field in KINDS.values())):
-            found[message.get("id") or line.get("uuid")] = usage
+            counts = found.setdefault(message.get("id") or line.get("uuid"), {})
+            for field in KINDS.values():
+                if isinstance(usage.get(field), (int, float)):
+                    counts[field] = max(counts.get(field, 0), usage[field])
     return found
 
 
@@ -113,9 +118,11 @@ def scan(session: str, log: Path) -> dict:
     if not log.is_file():
         return {**row, **blank}
     main = read_lines(log)
-    # A copy of a log keeps its session's id inside, whatever the file is called.
-    row["session"] = next((line["sessionId"] for line in main if isinstance(line.get("sessionId"), str)), session)
-    # A workflow's helpers sit one folder deeper, under subagents/workflows/<run>/.
+    # A copy of a log keeps its session's id inside, whatever the file is called. A log can also start
+    # with lines that carry another session's id, so the file's name wins when its lines carry it.
+    ids = [line["sessionId"] for line in main if isinstance(line.get("sessionId"), str)]
+    row["session"] = session if session in ids or not ids else ids[0]
+    # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
     helper_logs = sorted((log.parent / log.stem / "subagents").rglob("agent-*.jsonl"))
     helpers = [(path, read_lines(path)) for path in helper_logs]
     every = main + [line for _, lines in helpers for line in lines]

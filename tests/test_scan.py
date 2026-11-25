@@ -417,7 +417,7 @@ class TestScan(unittest.TestCase):
         self.assertEqual((row["total_tokens"], row["active_minutes"]), (30, 11.0))
         self.assertEqual([(helper["id"], helper["total_tokens"]) for helper in row["helpers"]], [("aworker", 20)])
 
-    def test_a_response_counts_at_its_last_and_final_usage(self) -> None:
+    def test_a_response_counts_at_its_final_usage(self) -> None:
         main = Log(self.session).user(0, "Go.")
         main.agent_call(1, (1, 1, 1, 1), "toolu_one", "Write it.")
         main.write(self.log_path())
@@ -430,6 +430,21 @@ class TestScan(unittest.TestCase):
 
         row = self.only_row()
         self.assertEqual((row["total_tokens"], row["helpers"][0]["total_tokens"]), (104, 100))
+
+    def test_a_forks_early_copy_of_a_response_does_not_replace_its_final_count(self) -> None:
+        main = Log(self.session).user(0, "Go.")
+        response = main.assistant(1, (5, 1, 0, 0))
+        main.assistant(1.5, (5, 50, 0, 0), message_id=response)
+        main.write(self.log_path())
+        fork = Log(self.session, "afork").raw({"type": "fork-context-ref", "agentId": "afork"})
+        fork.assistant(1, (5, 1, 0, 0), message_id=response)
+        fork.assistant(3, (2, 3, 0, 0))
+        self.helper("afork", "Fork", fork, "toolu_fork", agentType="fork", spawnDepth=1)
+
+        self.scan(str(self.log_path()))
+
+        row = self.only_row()
+        self.assertEqual((row["total_tokens"], row["output_tokens"], row["helpers"][0]["total_tokens"]), (60, 53, 5))
 
     def test_usage_with_no_token_counts_gives_a_row_of_blanks(self) -> None:
         log = Log(self.session).user(0, "Go.")
@@ -464,6 +479,21 @@ class TestScan(unittest.TestCase):
             self.scan(str(self.root / f"saved-{number}" / "saved.jsonl"))
 
         self.assertEqual(sorted(row["session"] for row in self.rows()), sorted(sessions))
+
+    def test_a_log_that_starts_with_another_sessions_lines_is_keyed_by_its_own_name(self) -> None:
+        other = str(uuid.uuid4())
+        source = Log(other).user(0, "Go.")
+        source.assistant(1, (1, 1, 1, 1))
+        source.write(self.log_path(other))
+        log = Log(self.session).user(2, "Go on.")
+        log.assistant(3, (2, 2, 2, 2))
+        log.lines[:0] = source.lines
+        log.write(self.log_path())
+
+        for path in (self.log_path(other), self.log_path()):
+            self.scan(str(path))
+
+        self.assertEqual(sorted(row["session"] for row in self.rows()), sorted([other, self.session]))
 
     def test_the_rows_file_and_a_new_machine_directory_are_owner_only(self) -> None:
         log = Log(self.session).user(0, "Go.")

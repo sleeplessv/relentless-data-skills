@@ -8,14 +8,17 @@ the network, the real machine directory or a real session.
 """
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 REPO = "example-org/alpha"
@@ -51,16 +54,16 @@ printf '%s\n' "$*" >> "$GH_LOG"
 [ "$1 $2" = "repo clone" ] || { echo "stand-in gh: no answer for $*" >&2; exit 1; }
 exec git clone -q "$GH_REMOTES/$3.git" "$4"
 """
-# Records each argument on a line of its own, the prompt it reads, its working folder and what that folder
-# holds and what its stamp.txt says; tries to change the folder, and removes $CLAUDE_BREAK when it is set; then
-# prints the saved answer as Claude Code's JSON result.
+# Records each argument on a line of its own, the prompt it reads, its working folder, what that folder holds
+# and a copy of it, links and modes kept; tries to change the folder, and removes $CLAUDE_BREAK when it is set;
+# then prints the saved answer as Claude Code's JSON result.
 CLAUDE = r"""#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDE_ARGS"
 cat > "$CLAUDE_PROMPT"
 pwd > "$CLAUDE_CWD"
 if git rev-parse --git-dir > /dev/null 2>&1; then echo inside > "$CLAUDE_GIT"; else echo outside > "$CLAUDE_GIT"; fi
 ls -A > "$CLAUDE_FILES"
-cat stamp.txt > "$CLAUDE_STAMP"
+rm -rf "$CLAUDE_COPY" && cp -pRP . "$CLAUDE_COPY"
 if [ -n "$CLAUDE_BREAK" ]; then rm -rf "$CLAUDE_BREAK"; fi
 echo "the reviewer wrote this" > app.txt
 rm -f counter
@@ -109,10 +112,12 @@ class World:
         owner = ("Main Author", "main@example.com")
         gen_one = ("Gen One Author", "gen-one@example.com")
         # Attributes that git archive would act on: a $Format$ stamp it would fill in and a file it would leave out.
-        # A link inside the folder is kept; one that leads out of it is not.
+        # A link inside the folder is kept; one that leads out of it is not. run.sh is executable.
         (work / "inside-link").symlink_to("report.txt")
         (work / "outside-link").symlink_to("../../outside")
-        self.start = commit(work, "Start", owner, {
+        (work / "run.sh").write_text("#!/bin/sh\necho run\n")
+        (work / "run.sh").chmod(0o755)
+        commit(work, "Start", owner, {
             "counter": "1\n", "report.txt": "rows\n", "stamp.txt": "$Format:%an %s$\n", "hidden.txt": "kept\n",
             ".gitattributes": "stamp.txt export-subst\nhidden.txt export-ignore\n"})
         git(work, "checkout", "-q", "-b", "ticket-7-the-branch")
@@ -158,7 +163,7 @@ class World:
                     "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
                     "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,
                     **{f"CLAUDE_{name.upper()}": str(self.records / name)
-                       for name in ("args", "prompt", "cwd", "git", "files", "stamp")}})
+                       for name in ("args", "prompt", "cwd", "git", "files", "copy")}})
         return subprocess.run([sys.executable, str(SCRIPTS / "judge.py"), *args], cwd=self.root / "cwd", env=env,
                               text=True, capture_output=True)
 
@@ -244,7 +249,8 @@ class TestJudge(unittest.TestCase):
                 self.assertIn(f" rows\n{added}", prompt)
                 [verdict] = [verdict for verdict in self.world.verdicts() if verdict["version"] == version]
                 self.assertEqual(prompt, self.world.saved(verdict["review"]["prompt"]))
-                seen = prompt + "".join(self.world.record(name) for name in ("args", "cwd", "files", "stamp"))
+                seen = prompt + "".join(self.world.record(name) for name in ("args", "cwd", "files"))
+                seen += (self.world.records / "copy" / "stamp.txt").read_text()
                 for secret in (*SECRETS, version, self.world.ready, self.world.replay, "A-7"):
                     self.assertNotIn(secret, seen)
                 self.assertEqual(self.world.record("git"), "outside\n")
@@ -252,9 +258,27 @@ class TestJudge(unittest.TestCase):
 
     def test_the_reviewer_reads_every_committed_file_as_committed(self) -> None:
         self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
-        self.assertEqual(self.world.record("files").split(), [
-            ".gitattributes", "counter", "hidden.txt", "inside-link", "notes.txt", "report.txt", "stamp.txt"])
-        self.assertEqual(self.world.record("stamp"), "$Format:%an %s$\n")
+        copy, clone = self.world.records / "copy", self.world.replay_clone
+        tree = {}  # path: (mode, the blob's bytes) for each file of the version's commit
+        for record in git(clone, "ls-tree", "-r", self.world.replay).splitlines():
+            info, path = record.split("\t")
+            mode, _, blob = info.split()
+            tree[path] = (mode, subprocess.run(["git", "-C", str(clone), "cat-file", "blob", blob], check=True,
+                                               capture_output=True).stdout)
+        # Every file but the link that leads out of the folder, and nothing else.
+        self.assertEqual(sorted(path.name for path in copy.iterdir()), sorted(set(tree) - {"outside-link"}))
+        for path, (mode, data) in tree.items():
+            if path == "outside-link":
+                continue
+            with self.subTest(path=path):
+                if mode == "120000":
+                    self.assertEqual(os.readlink(copy / path), data.decode())
+                else:
+                    self.assertFalse((copy / path).is_symlink())
+                    self.assertEqual((copy / path).read_bytes(), data)
+                    self.assertEqual(os.access(copy / path, os.X_OK), mode == "100755")
+        self.assertEqual(tree["stamp.txt"][1], b"$Format:%an %s$\n")
+        self.assertEqual(tree["run.sh"][0], "100755")
 
     def test_each_listed_requirement_is_one_r_line_however_its_text_wraps(self) -> None:
         path = self.world.state / "replay-set-1.json"
@@ -279,6 +303,55 @@ class TestJudge(unittest.TestCase):
             "R1: The report prints the total.", "R2: The total counts every row. Blank rows count too.",
             "R3: The help names the total.", "R4: A list of its own:", "R5: its item is one too."])
 
+    def test_each_item_is_one_requirement_and_what_sits_inside_an_item_is_not_its_text(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        with mock.patch.object(sys, "dont_write_bytecode", True):  # no scripts/__pycache__ in the checkout
+            draw = importlib.import_module("draw")
+        cases = {  # the list under the heading: its requirements
+            "- The default retry count follows\n  the configuration, currently\n  3. A successful request resets it.\n":
+                ["The default retry count follows the configuration, currently 3. A successful request resets it."],
+            "1. Count rows.\n   > Includes the header.\n2. Save the count.\n": ["Count rows.", "Save the count."],
+            "- Check the totals.\n    - Count blank rows.\n": ["Check the totals.", "Count blank rows."],
+            "10. Report the total.\n    > Not a requirement.\n11. Print it.\n": ["Report the total.", "Print it."],
+            "- Run it:\n\n  ```\n  make\n  ```\n\n  Then read the log.\n- Next.\n": ["Run it: Then read the log.",
+                                                                                    "Next."],
+            "- One.\n\n    ```\n    x\n    ```\n\n- Two.\n": ["One.", "Two."],
+            "- One.\n\n      code\n\n- Two.\n": ["One.", "Two."],
+            "- Parent\n  - child\n\n  Parent again.\n- Sibling\n": ["Parent Parent again.", "child", "Sibling"],
+            "- Count every\nrow.\n- Show the total.\n": ["Count every row.", "Show the total."],
+        }
+        for listed, expected in cases.items():
+            with self.subTest(listed=listed):
+                self.assertEqual(draw.requirements(f"## Acceptance\n\n{listed}"), expected)
+
+    def test_an_interrupt_after_the_line_is_written_keeps_the_files_it_names(self) -> None:
+        version = ("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
+        self.world.judge(*version)
+        [earlier] = self.world.verdicts()
+        earlier_folder = (self.world.state / earlier["check"]["output"]).parent
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        with mock.patch.object(sys, "dont_write_bytecode", True):  # no scripts/__pycache__ in the checkout
+            judge = importlib.import_module("judge")
+        removing = shutil.rmtree
+
+        def interrupted(path, *args, **kwargs):
+            if Path(path) == earlier_folder:
+                raise KeyboardInterrupt
+            return removing(path, *args, **kwargs)
+        env = {"DELIVER_STATE_DIR": str(self.world.state), "PATH": f"{self.world.bin}{os.pathsep}{os.environ['PATH']}",
+               "CLAUDE_ANSWER": str(self.world.root / "answer"), "CLAUDE_EXIT": "0", "CLAUDE_BREAK": "",
+               **{f"CLAUDE_{name.upper()}": str(self.world.records / name)
+                  for name in ("args", "prompt", "cwd", "git", "files", "copy")}}
+        with mock.patch.dict(os.environ, env), mock.patch.object(judge.shutil, "rmtree", interrupted):
+            with self.assertRaises(KeyboardInterrupt):
+                judge.main(list(version))
+        [line] = self.world.verdicts()
+        self.assertNotEqual(line["judged_at"] + line["check"]["output"], earlier["judged_at"] + earlier["check"]["output"])
+        for path in (line["check"]["output"], line["review"]["lines"], line["review"]["prompt"]):
+            self.assertTrue((self.world.state / path).is_file(), path)
+
     def test_the_diff_for_generation_one_runs_from_where_its_branch_started(self) -> None:
         self.world.judge("A-7", "generation-one")
         diff = self.world.record("prompt").split("<diff>\n", 1)[1].split("</diff>", 1)[0]
@@ -290,7 +363,8 @@ class TestJudge(unittest.TestCase):
         cases = {  # answer: (test 2 passed, proven findings, right first time)
             "R1: met\nR2: met\nR3: met": (True, 0, True),
             "R1: met\n\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none": (True, 0, True),
-            "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none.": (True, 0, True),
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: R2 skips blank rows. Evidence: fails: a file with "
+            "one blank row -> the total is one short.": (False, 1, False),
             "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No blank rows. Evidence: breaks R2: it counts "
             "rows with text only.": (False, 1, False),
             "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: Blank rows. Evidence: fails R2: a file with one "
@@ -317,9 +391,25 @@ class TestJudge(unittest.TestCase):
         self.world.judge("A-7", "generation-one")
         self.assertEqual(self.world.verdicts()[0]["review"]["findings"], [
             {"finding": "F1", "file": "docs/a b.md", "line": 12, "what": "Says 3.",
-             "evidence": "breaks R1: it prints no total.", "requirement": "R1", "proven": True},
+             "evidence": "breaks R1: it prints no total.", "requirements": ["R1"], "proven": True},
             {"finding": "F2", "file": "report.txt", "line": 1, "what": "Terse.", "evidence": "none",
-             "requirement": None, "proven": False}])
+             "requirements": [], "proven": False}])
+
+    def test_a_finding_names_each_requirement_its_line_holds(self) -> None:
+        self.world.answer("R1: not met\nR2: met\nR3: not met\nF1: report.txt:1: R1 and R3 lack the total; R2D2 is "
+                          "no word. Evidence: fails: a two-row file -> printed no total.")
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        [finding] = self.world.verdicts()[0]["review"]["findings"]
+        self.assertEqual((finding["requirements"], finding["proven"]), (["R1", "R3"], True))
+
+    def test_the_help_and_the_prompt_state_the_same_rules(self) -> None:
+        self.world.judge("A-7", "generation-one")
+        help_text = subprocess.run([sys.executable, str(SCRIPTS / "judge.py"), "--help"], check=True, text=True,
+                                   capture_output=True).stdout
+        rules = help_text.split("\n  none\n\n", 1)[1].split("\n\n", 1)[0]
+        self.assertIn("cannot tell", " ".join(rules.split()))
+        self.assertIn("F1, F2", rules)
+        self.assertIn(" ".join(rules.split()), " ".join(self.world.record("prompt").split()))
 
     def test_an_answer_outside_the_fixed_lines_gives_no_verdict(self) -> None:
         cases = {
@@ -344,7 +434,11 @@ class TestJudge(unittest.TestCase):
             "the fixed lines",
             "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No total. Evidence: breaks R1: no total.": "the answer is "
             "not in the fixed lines",
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none.": "the answer is not in the "
+            "fixed lines",
             # A finding that names a requirement the ticket does not have.
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:2: R4 is short. Evidence: fails: one row -> no total.": "the "
+            "answer is not in the fixed lines",
             "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Extra. Evidence: breaks R4: no such.": "the answer is not in "
             "the fixed lines",
         }

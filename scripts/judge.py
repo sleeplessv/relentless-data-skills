@@ -35,19 +35,27 @@ ANSWERS = ("met", "not met", "cannot tell")
 LINES = f"""\
 R<n>: {' | '.join(ANSWERS)}
 F<n>: <file>:<line>: <what is wrong> Evidence: <evidence>"""
-EVIDENCE = """\
-breaks R<n>: <how the line breaks requirement n>
-fails: <what to give or do> -> <what goes wrong then>
-fails R<n>: <what to give or do> -> <what goes wrong then>
-none"""
+# Each form the evidence may take, as shown and as read; every form but "none" proves its finding.
+FORMS = (("breaks R<n>: <how the line breaks requirement n>", r"breaks R[1-9]\d*: \S.*"),
+         ("fails: <what to give or do> -> <what goes wrong then>", r"fails: \S.*? -> \S.*"),
+         ("fails R<n>: <what to give or do> -> <what goes wrong then>", r"fails R[1-9]\d*: \S.*? -> \S.*"),
+         ("none", "none"))
+EVIDENCE = "\n".join(shown for shown, _ in FORMS)
+PROOF = re.compile("|".join(read for shown, read in FORMS if shown != "none"))
 RULES = """\
-A finding is proven when its evidence shows it failing ("fails") or names the
-requirement its line breaks ("breaks"); "none" proves nothing. Each "cannot
-tell" counts as a proven finding. A requirement that is not met needs a proven
-finding that names it. Test 2 passes when no finding is proven."""
+Give one R line for each requirement, in order, and one F line for each
+finding, numbered F1, F2 and on. "breaks" names the requirement that the line
+at <file>:<line> breaks. "fails" shows the finding failing: what to give the
+change or do with it, and what goes wrong then. Write "none" when you can show
+neither. A finding names each requirement, R<n>, that its line holds after
+<file>:<line>, and names no other. A finding is proven when its evidence is
+"breaks" or "fails", and each "cannot tell" counts as a proven finding. A
+requirement that is not met needs a proven finding that names it. The review
+passes when no finding is proven, so with every requirement met and nothing
+wrong the answer is the R lines alone."""
 REQUIREMENT_LINE = re.compile(rf"R([1-9]\d*): ({'|'.join(ANSWERS)})")
 FINDING_LINE = re.compile(r"F([1-9]\d*): ([^\s:][^:]*):([1-9]\d*): (\S.*?) Evidence: (.+)")
-PROOF = re.compile(r"breaks R(?P<breaks>[1-9]\d*): \S.*|fails(?: R(?P<fails>[1-9]\d*))?: \S.*? -> \S.*")
+NAMED = re.compile(r"\bR([1-9]\d*)\b")
 VERSION_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
 
@@ -78,8 +86,8 @@ and the diff from the version's starting commit: from the merge base of the
 commit before the merged PR and the version's commit. It starts in a folder
 outside any git repo that holds the version's files as committed and no git
 history, so it sees no branch name, commit message or author, and it can read
-those files but change nothing. The requirements are the items under "##
-Acceptance criteria", "## Acceptance" or "## Done when", numbered R1, R2 and
+those files but change nothing. The requirements are the items under
+{draw.one_of([f'"## {heading}"' for heading in draw.CRITERIA_HEADINGS])}, numbered R1, R2 and
 on in the order written. The reviewer answers in fixed lines only:
 
 {indented(LINES)}
@@ -90,9 +98,9 @@ where the evidence is one of:
 
 {RULES}
 
-An answer with any other line, without one line for each requirement, or with
-a requirement not met and no proven finding against it gives no verdict, as
-does a review that fails or runs for more than {REVIEW_TIMEOUT // 60} minutes.
+Test 2 passes when the review passes. An answer with any other line, or that
+breaks these rules, gives no verdict, as does a review that fails or runs for
+more than {REVIEW_TIMEOUT // 60} minutes.
 
 The version is right first time when both tests pass. The judge checks that
 the version's commit and its tree are the same after the review as before it.
@@ -111,8 +119,9 @@ holds the ticket, project-labels.json and repos.json, and writes:
   judged/<label>-<ticket>-<version>/<attempt>/
                         check.txt, the output of setup and check; prompt.txt,
                         what the reviewer was given; review.txt, the
-                        review's answer as it came. Only the attempt the line
-                        names is kept.
+                        review's answer as it came. The folder of the
+                        attempt a line replaces is removed once the
+                        new line is written.
   judge-work/           Clones and checkouts, removed when the judge ends.
 
 Exit 0: a verdict was recorded. Exit 1: an error; nothing was recorded, and
@@ -144,16 +153,11 @@ Answer with these lines and nothing else: no heading, no code fence, no other te
 
 {LINES}
 
-- One R line for each requirement, in order.
-- One F line for each finding, numbered F1, F2 and on, with the evidence in one of these forms:
+where the evidence is one of:
 
 {EVIDENCE}
 
-  `breaks` names the requirement that the line at <file>:<line> breaks. `fails` shows the finding failing: what to \
-give the change or do with it, and what goes wrong then; name a requirement when the failure breaks one. Write \
-`none` when you can show neither.
-- A requirement that is not met needs a finding whose evidence names it.
-- With every requirement met and nothing wrong, the answer is the R lines alone.
+{RULES}
 """
 
 
@@ -188,7 +192,8 @@ def find_ticket(state: Path, label: str, number: int) -> dict:
 
 
 def repo_entry(state: Path, label: str) -> dict:
-    """The label's repo in repos.json, read by the draw's own reader so the check is the one that drew the ticket."""
+    """The label's repo in repos.json as it is now, read by the draw's own reader, which keeps the last of two entries
+    for one repo and refuses a list it cannot use."""
     repo = read_json(state / "project-labels.json").get(label)
     try:
         entry = Checkout(state, state).repos().get(str(repo).lower())
@@ -264,18 +269,18 @@ def read_answer(text: str, count: int) -> dict | None:
             answers[f"R{found.group(1)}"] = found.group(2)
         elif found := FINDING_LINE.fullmatch(line):
             evidence = found.group(5).strip()
-            proof = PROOF.fullmatch(evidence)
-            if int(found.group(1)) != len(findings) + 1 or not (proof or evidence in ("none", "none.")):
+            if int(found.group(1)) != len(findings) + 1 or not (evidence == "none" or PROOF.fullmatch(evidence)):
                 return None
-            named = proof and (proof.group("breaks") or proof.group("fails"))
+            named = sorted({int(number) for number in NAMED.findall(f"{found.group(4)} {evidence}")})
             findings.append({"finding": f"F{found.group(1)}", "file": found.group(2), "line": int(found.group(3)),
                              "what": found.group(4).strip(), "evidence": evidence,
-                             "requirement": f"R{named}" if named else None, "proven": bool(proof)})
+                             "requirements": [f"R{number}" for number in named], "proven": evidence != "none"})
         else:
             return None
-    named = {finding["requirement"] for finding in findings if finding["proven"]}
-    if len(answers) != count or not named <= set(answers) | {None} or any(
-            answer == "not met" and requirement not in named for requirement, answer in answers.items()):
+    named = {requirement for finding in findings for requirement in finding["requirements"]}
+    shown = {requirement for finding in findings if finding["proven"] for requirement in finding["requirements"]}
+    if len(answers) != count or not named <= set(answers) or any(
+            answer == "not met" and requirement not in shown for requirement, answer in answers.items()):
         return None
     proven = sum(finding["proven"] for finding in findings) + sum(answer == "cannot tell" for answer in answers.values())
     return {"requirements": answers, "findings": findings, "proven": proven, "passed": proven == 0}
@@ -361,20 +366,27 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
             "right_first_time": None if reading is None else failed is None and reading["passed"]}
 
 
-def publish(state: Path, record: dict, saved: Path) -> None:
-    """Put the verdict's line in verdicts.jsonl in place of the version's earlier one, whose attempt folder goes."""
+def ledger(state: Path) -> list[dict]:
+    path = state / "verdicts.jsonl"
+    return [json.loads(text) for text in (path.read_text().splitlines() if path.is_file() else []) if text.strip()]
+
+
+def folder_of(state: Path, line: dict) -> Path:
+    return (state / str(line.get("check", {}).get("output", ""))).parent
+
+
+def publish(state: Path, record: dict, saved: Path) -> list[Path]:
+    """Put the verdict's line in verdicts.jsonl in place of the version's earlier one, and give the attempt
+    folders that line named, for the caller to remove."""
     key = (record["label"], record["ticket"], record["version"])
     with open(state / "verdicts.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        path = state / "verdicts.jsonl"
-        lines = [json.loads(text) for text in (path.read_text().splitlines() if path.is_file() else []) if text.strip()]
+        lines = ledger(state)
         earlier = [line for line in lines if (line.get("label"), line.get("ticket"), line.get("version")) == key]
-        scan.write_private(path, "".join(json.dumps(line) + "\n" for line in [*(
+        scan.write_private(state / "verdicts.jsonl", "".join(json.dumps(line) + "\n" for line in [*(
             line for line in lines if line not in earlier), record]))
-    for line in earlier:
-        folder = (state / str(line.get("check", {}).get("output", ""))).parent
-        if folder.parent == saved.parent and folder != saved:
-            shutil.rmtree(folder, ignore_errors=True)
+    folders = [folder_of(state, line) for line in earlier]
+    return [folder for folder in folders if folder.parent == saved.parent and folder != saved]
 
 
 def judge(label: str, number: int, version: str, commit: str | None, source: Path | None) -> int:
@@ -390,10 +402,14 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
     saved = Path(tempfile.mkdtemp(dir=versions, prefix=datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ-")))
     try:
         record = attempt(state, label, number, version, commit, source, entry, repo, required, saved)
-        publish(state, record, saved)
+        replaced = publish(state, record, saved)
     except BaseException:
-        shutil.rmtree(saved, ignore_errors=True)
+        # Only an attempt that no line names is taken back: an interrupt can land after the line is written.
+        if all(folder_of(state, line) != saved for line in ledger(state)):
+            shutil.rmtree(saved, ignore_errors=True)
         raise
+    for folder in replaced:  # once the new line is written; an interrupt here leaves only an unnamed folder
+        shutil.rmtree(folder, ignore_errors=True)
 
     check, lines = state / record["check"]["output"], state / record["review"]["lines"]
     failed = record["check"]["reason"]

@@ -871,8 +871,8 @@ def requirements(body: str | None) -> list[str]:
 
     The body is read as CommonMark's blocks: code, fenced or indented, and HTML blocks hide what they
     hold; one of those ATX headings opens the section, and any ATX heading of level one or two ends it.
-    In the section the reader reads lists of - * + 1. and 1) items, each with its text on its marker
-    line. An item's text can wrap onto the lines after it, however they are indented, until a blank
+    In the section the reader reads lists of items marked - * + or a number and . or ), each with its
+    text on its marker line. An item's text can wrap onto the lines after it, however they are indented, until a blank
     line or the next item; it is read without its marker or a task box. A list nested in an item, its
     markers at most 3 columns past the item's text, gives items of its own after their parent. Between
     lists stand paragraphs, headings of level three and deeper, breaks, and code and HTML blocks, which

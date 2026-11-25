@@ -90,12 +90,13 @@ history, so it sees no branch name, commit message or author, and it can read
 those files but change nothing. The requirements are the items under
 {draw.one_of([f'"## {heading}"' for heading in draw.CRITERIA_HEADINGS])}, numbered R1, R2 and
 on in the order written. The judge reads only a list it can read with
-certainty: items of - * + 1. or 1), each with its text on its marker line,
-that text wrapped onto the lines below it, and lists nested in items. Inside
-an item any other block, such as a quote, code, HTML or a second paragraph,
-an item with no text, a quote or an underline anywhere in the section, or a
-marker numbered other than 1 right after a line of text stops the judge with
-an error that names the line. The reviewer answers in fixed lines only:
+certainty: items marked - * + or a number and . or ), each with its text on
+its marker line, that text wrapped onto the lines below it, and lists nested
+in items. Inside an item any other block, such as a quote, code, HTML or a
+second paragraph, an item with no text, a quote or an underline anywhere in
+the section, or a marker numbered other than 1 right after a line of text
+stops the judge with an error that names the line. The reviewer answers in
+fixed lines only:
 
 {indented(LINES)}
 

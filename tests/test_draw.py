@@ -61,6 +61,9 @@ class Ticket:
     state: str = "MERGED"
     draft: bool = False  # opened as a draft and marked ready later
     by_helper: bool = False  # a helper of the session opened the PR
+    twin: bool = False  # a second session also opened the PR
+    copied: bool = False  # a resumed session's log starts with copies of this session's lines
+    issue: int = 0  # the issue the PR closes, when not `number`
     merge: str = ""  # the merge commit's SHA, set when the world builds its repo
 
     @property
@@ -169,9 +172,9 @@ class World:
             "state": ticket.state, "additions": ticket.size - ticket.size // 4, "deletions": ticket.size // 4,
             "createdAt": "2026-01-01T12:00:00Z", "mergeCommit": {"oid": ticket.merge} if ticket.state == "MERGED" else None,
             "commits": commits,
-            "closingIssuesReferences": [{"number": ticket.number + extra, "repository": {
+            "closingIssuesReferences": [{"number": (ticket.issue or ticket.number) + extra, "repository": {
                 "name": repo.split("/")[1], "owner": {"login": repo.split("/")[0]}}} for extra in range(ticket.closes)]})
-        self.answers[f"issue {repo} {ticket.number}"] = json.dumps({
+        self.answers[f"issue {repo} {ticket.issue or ticket.number}"] = json.dumps({
             "title": f"Ticket {ticket.number}", "body": f"## What to build\n\nThing {ticket.number}.\n\n{ticket.criteria}\n"})
         events = [{"event": "committed", "sha": commit["oid"]} for commit in commits]
         if ticket.draft:  # two pages, as `gh api --paginate` prints them; ready at 10:30, draft again, ready at 12:30
@@ -182,14 +185,20 @@ class World:
             pages = [events]
         self.answers[f"api repos/{repo}/issues/{pr}/timeline"] = "\n".join(json.dumps(page) for page in pages)
 
-    def log_path(self, ticket: Ticket) -> Path:
-        return self.config / "projects" / "-work-example" / f"{ticket.session}.jsonl"
+    def log_path(self, ticket: Ticket, session: str | None = None) -> Path:
+        return self.config / "projects" / "-work-example" / f"{session or ticket.session}.jsonl"
 
     def write_log(self, ticket: Ticket) -> None:
         session = ticket.session
-        lines = [line(session, "user", 0, message={"role": "user", "content": "Implement the ticket."}),
-                 line(session, "user", 1, isMeta=True, message={"role": "user", "content": [
-                     {"type": "text", "text": f"Base directory for this skill: /home/someone/.claude/skills/{ticket.skill}\n\n# Body"}]})]
+        lines = [line(session, "user", 0, message={"role": "user", "content": "Implement the ticket."})]
+        if ":" in ticket.skill:  # a plugin's skill, loaded by a Skill call
+            lines += [assistant(session, 1, [{"type": "tool_use", "id": f"toolu_skill_{session}", "name": "Skill",
+                                              "input": {"skill": ticket.skill}}]),
+                      line(session, "user", 1, message={"role": "user", "content": [
+                          {"type": "tool_result", "tool_use_id": f"toolu_skill_{session}", "content": "Launching skill"}]})]
+        else:
+            lines.append(line(session, "user", 1, isMeta=True, message={"role": "user", "content": [
+                {"type": "text", "text": f"Base directory for this skill: /home/someone/.claude/skills/{ticket.skill}\n\n# Body"}]}))
         urls = [f"https://github.com/{ticket.repo}/pull/{ticket.pr + 1000 * extra}" for extra in range(ticket.prs)]
         opened = [entry for minute, url in enumerate(urls, 2) for entry in opening(session, minute * 2, url)]
         if ticket.by_helper:
@@ -197,6 +206,13 @@ class World:
             write_lines(helper, [{**entry, "agentId": "a1", "isSidechain": True} for entry in opened])
             opened = [assistant(session, 30, [{"type": "text", "text": "The helper opened the PR."}])]
         write_lines(self.log_path(ticket), lines + opened)
+        if ticket.twin:
+            other = f"00000000-0000-4000-9000-{ticket.number:012d}"
+            write_lines(self.log_path(ticket, other), opening(other, 2, f"https://github.com/{ticket.repo}/pull/{ticket.pr}"))
+        if ticket.copied:
+            other = f"00000000-0000-4000-a000-{ticket.number:012d}"
+            own = line(other, "user", 40, message={"role": "user", "content": "Carry on."})
+            write_lines(self.log_path(ticket, other), lines + opened + [own])
 
     def write_repos(self, repos: list[dict]) -> None:
         self.state.mkdir(parents=True, exist_ok=True)
@@ -219,23 +235,26 @@ class World:
         return json.loads(((state or self.state) / f"replay-set-{number}.json").read_text())
 
 
-class TestDraw(unittest.TestCase):
-    def world(self, tickets: list[Ticket], repos: list[dict] | None = None) -> World:
+class TestOneDraw(unittest.TestCase):
+    """One draw of a pool of 36 tickets, all passing, each opened by a helper; the tests read what it left."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
         temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        return World(Path(temporary.name), tickets, repos)
+        cls.addClassCleanup(temporary.cleanup)
+        cls.world = World(Path(temporary.name), full_pool(by_helper=True))
+        cls.outside = [cls.world.root / name for name in ("claude", "remotes", "home", "cwd", "bin")]
+        cls.before = cls.files()
+        cls.result = cls.world.draw("--seed", "7")
 
-    def test_help_prints_the_usage_and_formats(self) -> None:
-        result = self.world([]).draw("--help")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[:3], [
-            "Draw the replay set: 30 tickets generation one finished, 10 per size bucket.", "",
-            "Usage: python3 scripts/draw.py [--seed N]"])
+    @classmethod
+    def files(cls) -> dict[str, bytes]:
+        return {str(path): path.read_bytes() for folder in cls.outside if folder.exists()
+                for path in sorted(folder.rglob("*")) if path.is_file()}
 
-    def test_draw_writes_ten_tickets_per_bucket_with_each_entrys_fields(self) -> None:
-        world = self.world(full_pool())
-        result = world.draw("--seed", "7")
-        self.assertEqual(result.returncode, 0, result.stderr)
+    def test_the_draw_writes_ten_tickets_per_bucket_with_each_entrys_fields(self) -> None:
+        world = self.world
+        self.assertEqual(self.result.returncode, 0, self.result.stderr)
         drawn = world.set_file()
         self.assertEqual(drawn["seed"], 7)
         buckets = [entry["bucket"] for entry in drawn["tickets"]]
@@ -250,6 +269,160 @@ class TestDraw(unittest.TestCase):
                 "pr": ticket.pr, "session": ticket.session, "log": f"logs/{ticket.session}.jsonl",
                 "check_output": f"checks/A-{ticket.number}.txt"})
         self.assertEqual(json.loads((world.state / "project-labels.json").read_text()), {"A": ALPHA})
+
+    def test_the_draw_copies_and_scans_each_kept_session_log_with_its_helpers(self) -> None:
+        world = self.world
+        entries = world.set_file()["tickets"]
+        for entry in entries:
+            source = world.log_path(world.tickets[entry["ticket"]])
+            copy = world.state / entry["log"]
+            self.assertEqual(copy.read_text(), source.read_text())
+            helper = Path("subagents") / "agent-a1.jsonl"
+            self.assertEqual((copy.with_suffix("") / helper).read_text(),
+                             (source.with_suffix("") / helper).read_text())
+        rows = [json.loads(text) for text in (world.state / "scan-rows.jsonl").read_text().splitlines()]
+        self.assertEqual(sorted(row["session"] for row in rows), sorted(entry["session"] for entry in entries))
+        self.assertEqual({(row["model"], row["skills"] == ["implement-ticket"], len(row["helpers"])) for row in rows},
+                         {(MODEL, True, 1)})
+
+    def test_the_draw_writes_only_in_the_machine_directory_and_prints_labels_not_repos(self) -> None:
+        state = self.world.state
+        self.assertEqual(self.files(), self.before)
+        self.assertEqual(sorted(path.name for path in state.iterdir()), [
+            "checks", "draw.lock", "logs", "project-labels.json", "replay-set-1.json", "repos.json",
+            "scan-rows.jsonl", "scan-rows.lock"])
+        self.assertEqual(self.result.stdout.splitlines(), [
+            "Seed 7.", "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
+            "301-1500: pool 12, set aside 0, kept 10.", f"Wrote {state / 'replay-set-1.json'}."])
+        self.assertNotIn("example-org", self.result.stdout + self.result.stderr)
+
+
+class TestDraw(unittest.TestCase):
+    def world(self, tickets: list[Ticket], repos: list[dict] | None = None) -> World:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        return World(Path(temporary.name), tickets, repos)
+
+    def test_help_prints_the_usage_and_formats(self) -> None:
+        result = self.world([]).draw("--help")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[:3], [
+            "Draw the replay set: 30 tickets generation one finished, 10 per size bucket.", "",
+            "Usage: python3 scripts/draw.py [--seed N]"])
+
+    def test_pool_holds_only_tickets_that_meet_readings_2_and_3_in_listed_repos(self) -> None:
+        kept = [
+            *sized(1, 6, 20), Ticket(7, 20, by_helper=True), Ticket(8, 20, copied=True),
+            Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total."),
+            Ticket(10, 20, criteria="## Done when\n\n* The report prints the total."),
+            *sized(101, 9, 100), Ticket(110, 100, skill="some-plugin:implement-backlog"),
+            *sized(201, 9, 800, draft=True), Ticket(210, 1500)]
+        left_out = [
+            Ticket(11, 20, skill="tdd"), Ticket(12, 20, prs=2), Ticket(13, 20, closes=2), Ticket(14, 1501),
+            Ticket(15, 20, criteria="## Acceptance criteria\n\nThe report prints the total."),
+            Ticket(16, 20, criteria="## Notes\n\n- The report prints the total."),
+            Ticket(17, 20, criteria="## Acceptance criteria\n\n```\n- not a list item\n```"),
+            Ticket(18, 20, state="OPEN"), Ticket(19, 20, twin=True), Ticket(20, 20, repo=BETA),
+            Ticket(21, 20, issue=300), Ticket(22, 100, issue=300)]
+        world = self.world(kept + left_out)
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(entry["ticket"] for entry in world.set_file()["tickets"]),
+                         [ticket.number for ticket in kept])
+        self.assertEqual(world.set_file()["set_aside"], [])
+        for entry in world.set_file()["tickets"]:  # committed at 10:00, 11:00 and 13:00; created at 12:00
+            ticket = world.tickets[entry["ticket"]]
+            self.assertEqual(entry["ready_commit"], ticket.commit("a" if ticket.draft else "b"), ticket.number)
+
+    def test_a_ticket_whose_check_fails_before_the_change_is_replaced_by_the_next_in_seed_order(self) -> None:
+        passing = self.world(full_pool())
+        self.assertEqual(passing.draw("--seed", "5").returncode, 0)
+        first = [entry["ticket"] for entry in passing.set_file()["tickets"] if entry["bucket"] == "0-50"]
+        failed = first[3]
+        world = self.world([Ticket(ticket.number, ticket.size, passes=ticket.number != failed)
+                            for ticket in full_pool()])
+        result = world.draw("--seed", "5")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        drawn = [entry["ticket"] for entry in world.set_file()["tickets"] if entry["bucket"] == "0-50"]
+        self.assertEqual(drawn[:9], [number for number in first if number != failed])
+        self.assertNotIn(drawn[9], first)
+        self.assertEqual(world.set_file()["set_aside"], [{"label": "A", "ticket": failed, "bucket": "0-50",
+                                                           "reason": "check exited 1",
+                                                           "check_output": f"checks/A-{failed}.txt"}])
+        self.assertEqual(result.stdout.splitlines()[1:4], ["0-50: pool 12, set aside 1, kept 10.",
+                                                            "51-300: pool 12, set aside 0, kept 10.",
+                                                            "301-1500: pool 12, set aside 0, kept 10."])
+        self.assertEqual((world.state / f"checks/A-{failed}.txt").read_text(),
+                         f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 1\n")
+        self.assertEqual((world.state / f"checks/A-{drawn[0]}.txt").read_text(),
+                         f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 0\n")
+
+    def test_a_bucket_whose_pool_holds_fewer_than_ten_writes_no_set_and_runs_no_check(self) -> None:
+        world = self.world(sized(1, 12, 20) + sized(101, 9, 100) + sized(201, 12, 800))
+        result = world.draw("--seed", "2")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "Seed 2.", "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 9, set aside 0, kept 0.",
+            "301-1500: pool 12, set aside 0, kept 0.", "No set written: a bucket cannot reach 10 tickets."])
+        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
+                         ["draw.lock", "project-labels.json", "repos.json"])
+        self.assertNotIn("repo clone", world.gh_log.read_text())
+
+    def test_a_bucket_that_cannot_reach_ten_once_tickets_are_set_aside_writes_no_set(self) -> None:
+        world = self.world(sized(1, 12, 20) + sized(101, 12, 100)
+                           + sized(201, 9, 800) + sized(210, 2, 800, passes=False))
+        result = world.draw("--seed", "2")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [
+            "Seed 2.", "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
+            "301-1500: pool 11, set aside 2, kept 9.", "No set written: a bucket cannot reach 10 tickets."])
+        self.assertEqual(list(world.state.glob("replay-set-*")), [])
+        self.assertFalse((world.state / "logs").exists())
+        self.assertFalse((world.state / "draw-work").exists())
+
+    def test_the_same_seed_on_the_same_pool_and_check_results_gives_the_same_set(self) -> None:
+        world = self.world(full_pool(13) + [Ticket(14, 20, passes=False), Ticket(114, 100, passes=False)])
+        other = world.root / "other-state"
+        world.write_repos([{"repo": ALPHA, "check": CHECK, "setup": SETUP}])
+        shutil.copytree(world.state, other)
+        for state in (world.state, other):
+            self.assertEqual(world.draw("--seed", "11", state=state).returncode, 0)
+        first, again = world.set_file(state=world.state), world.set_file(state=other)
+        self.assertNotEqual(first["set_aside"], [])
+        self.assertEqual((first["tickets"], first["set_aside"]), (again["tickets"], again["set_aside"]))
+
+    def test_a_second_call_draws_thirty_more_with_no_ticket_kept_or_set_aside_before(self) -> None:
+        world = self.world([Ticket(ticket.number, ticket.size, passes=ticket.number % 100 > 3)
+                            for ticket in full_pool(26)])
+        self.assertEqual(world.draw("--seed", "1").returncode, 0)
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        first, second = world.set_file(1), world.set_file(2)
+        self.assertNotEqual(first["set_aside"], [])
+        self.assertEqual((second["set"], len(second["tickets"])), (2, 30))
+        earlier = {entry["ticket"] for entry in first["tickets"] + first["set_aside"]}
+        self.assertEqual(earlier & {entry["ticket"] for entry in second["tickets"] + second["set_aside"]}, set())
+
+    def test_a_failed_gh_call_names_the_label_keeps_gh_s_message_in_a_file_and_writes_no_set(self) -> None:
+        world = self.world(full_pool(10))
+        del world.answers[f"issue {ALPHA} 5"]
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr.splitlines(), [
+            f"draw: `gh issue view` failed for project A with exit 1. Its message is in {world.state / 'draw-error.txt'}."])
+        self.assertEqual((world.state / "draw-error.txt").read_text(),
+                         f"stand-in gh: no saved answer for issue {ALPHA} 5\n")
+        self.assertEqual(list(world.state.glob("replay-set-*")), [])
+
+    def test_a_missing_repo_list_or_a_bad_argument_writes_no_set(self) -> None:
+        world = self.world(full_pool(10))
+        (world.state / "repos.json").unlink()
+        result = world.draw()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr.splitlines(), [
+            f"draw: {world.state / 'repos.json'} does not exist. Write the repo list there first; --help gives its format."])
+        self.assertEqual(world.draw("--seed", "x").returncode, 2)
+        self.assertEqual(list(world.state.glob("replay-set-*")), [])
 
 
 if __name__ == "__main__":

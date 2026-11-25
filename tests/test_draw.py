@@ -126,7 +126,8 @@ FORMS: dict[str, dict[str, str]] = {
         "if true; then :; fi; gh pr create", "f() { echo hi; }; f; gh pr create",
         # The shape of the call that opened this repo's own PR for #281.
         "cat > body.md <<'EOF'\nBody text.\nEOF\ncd x && git push -q -u origin HEAD 2>&1 | tail -2; "
-        "cd .. && gh pr create --draft --base main --head ticket-1 --title \"Ticket 1\" --body-file body.md"], ""),
+        "cd .. && gh pr create --draft --base main --head ticket-1 --title \"Ticket 1\" --body-file body.md",
+        "git push &&\ngh pr create", "gh pr create --fill |\n  tail -3"], ""),
     "may": {
         f"if false; then gh pr create; fi; printf '%s\\n' {URL}": "",
         "git push && gh pr create --fill; echo done": "",
@@ -138,6 +139,23 @@ FORMS: dict[str, dict[str, str]] = {
         "f() { exit 0; }; f; gh pr create": "",
         "trap 'exit 0' ERR; git push; gh pr create": "",
         "set -e; trap 'exit 0' EXIT; git push; gh pr create": "",
+        f"false &&\ncommand -- gh pr create; printf '%s\\n' {URL}": "",
+        f"if false; then time {{ :; }}; command -- gh pr create; fi; printf '%s\\n' {URL}": "",
+        f"env -? gh pr create 2>/dev/null; printf '%s\\n' {URL}": "",
+        f"gh pr $'creat\\e'; printf '%s\\n' {URL}": "",
+        "git push ||\ngh pr create": "",
+        "gh() { :; }; gh pr create": "",
+        f"gh pr create < missing-file; printf '%s\\n' {URL}": "",
+        f"echo ${{x!}}; gh pr create\nprintf '%s\\n' {URL}": "",
+        f"echo $((1/0)); gh pr create\nprintf '%s\\n' {URL}": "",
+        f"gh pr create > missing-folder/out; printf '%s\\n' {URL}": "",
+        "case x in x) gh pr create;; esac": "the reader does not model case",
+        "function f { :; }; gh pr create": "the reader does not model the function keyword",
+        "command -p gh pr create": "the reader does not model command -p, whose own search path need not find gh",
+        "[[ -n x ]] && gh pr create": "the reader does not model [[ ]]",
+        "flags='pr create'; gh $flags": "the reader does not follow a variable's value",
+        "gh pr $'cre\\x61te'": "the reader does not decode ANSI-C escapes",
+        "printf '%s\\n' '<<\"EOF\"'\ngh pr create": "the reader does not tell a quoted << from a here-document's",
         "if true; then gh pr create --fill; fi": "the reader does not evaluate a condition",
         "false || gh pr create": "the reader does not evaluate a command before ||",
         "{ gh pr create; }": "the reader does not read inside a group",
@@ -148,16 +166,14 @@ FORMS: dict[str, dict[str, str]] = {
     "neither": dict.fromkeys([
         f"printf '%s\\n' 'ok' ';' gh pr create {URL}", "echo 'gh pr create'", "echo gh pr create",
         "command -v gh pr create", "cat <<'EOF'\n$(gh pr create)\nEOF", "# gh pr create",
-        "gh pr view --json url --jq .url"], "")}
+        "gh pr view --json url --jq .url", "gh 'pr create'", "gh pr create-preview"], "")}
 # A command another program runs is not counted, by the owner's choice, though the shell would start it.
 WRAPPED = ["bash -c 'gh pr create'", "eval gh pr create", "sh ./open-pr.sh"]
 # A stand-in gh that records each call and prints the PR's URL for `pr create`; its exits are set per run.
 STAND_IN = f"""#!/bin/sh
 printf '%s\\n' "$*" >> "$CALLS"
-case "$1 $2" in
-  "pr create") echo {URL}; exit "$CREATE_EXIT" ;;
-  "pr view") exit "$VIEW_EXIT" ;;
-esac
+if [ "$1" = pr ] && [ "$2" = create ]; then echo created >> "$CREATES"; echo {URL}; exit "$CREATE_EXIT"; fi
+if [ "$1" = pr ] && [ "$2" = view ]; then exit "$VIEW_EXIT"; fi
 """
 
 
@@ -565,7 +581,7 @@ class TestDraw(unittest.TestCase):
             (root / "bin" / name).write_text(text)
             (root / "bin" / name).chmod(0o755)
         (root / "tools" / "gh").symlink_to(root / "bin" / "gh")
-        calls = root / "calls"
+        calls, creates = root / "calls", root / "creates"
         arrangements = [{"GIT_EXIT": git, "CREATE_EXIT": create, "VIEW_EXIT": view, "GH": gh}
                         for git in "01" for create in "01" for view in "01" for gh in ("gh", "true")]
         for command in WRAPPED:
@@ -577,14 +593,15 @@ class TestDraw(unittest.TestCase):
                     runs = []  # (the shell's exit, whether gh was asked to create a PR) per arrangement
                     for arrangement in arrangements:
                         calls.write_text("")
+                        creates.write_text("")
                         env = {"PATH": f"{root / 'bin'}:/usr/bin:/bin", "HOME": str(root), "CALLS": str(calls),
-                               **arrangement}
+                               "CREATES": str(creates), **arrangement}
                         code = subprocess.run(["bash", "-c", command], cwd=root, env=env, capture_output=True).returncode
                         for _ in range(20):  # a call in the background may come a moment after the shell ends
-                            if "pr create" in calls.read_text() or "&" not in command:
+                            if creates.read_text() or "&" not in command:
                                 break
                             subprocess.run(["sleep", "0.05"])
-                        runs.append((code, any(text.startswith("pr create") for text in calls.read_text().splitlines())))
+                        runs.append((code, creates.read_text() != ""))
                     passed = [called for code, called in runs if code == 0]
                     if does == "opens":
                         self.assertTrue(passed and all(passed), runs)
@@ -884,6 +901,18 @@ class TestDraw(unittest.TestCase):
                                         r"\(OSError\)\.\n\Z")
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
 
+    def test_a_log_replaced_by_one_of_its_length_after_its_session_qualified_ends_the_draw_before_a_set(self) -> None:
+        world = self.world(full_pool(10))
+        projects = world.config / "projects" / "-work-example"
+        setup = (f'{SETUP} && for log in {projects}/*.jsonl; do tr a b < "$log" > "$log.new" && '
+                 'mv "$log.new" "$log"; done')
+        world.write_repos([{"repo": ALPHA, "check": CHECK, "setup": setup}])
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(result.stderr, r"\Adraw: could not save the session log of project A ticket \d+ "
+                                        r"\(OSError\)\.\n\Z")
+        self.assertEqual(list(world.state.glob("replay-set-*")), [])
+
     def test_a_retry_keeps_nothing_from_the_archive_of_an_earlier_draw(self) -> None:
         world = self.world(full_pool(10, by_helper=True))
         for ticket in world.tickets.values():
@@ -899,6 +928,126 @@ class TestDraw(unittest.TestCase):
         rows = [json.loads(text) for text in (world.state / "scan-rows.jsonl").read_text().splitlines()]
         self.assertEqual({tuple(helper["id"] for helper in row["helpers"]) for row in rows}, {("a1",)})
         self.assertEqual(list((world.state / "logs").rglob("agent-a2*")), [])
+
+    def test_an_unreadable_helper_folder_leaves_the_session_s_readable_opening_counting_against_others(self) -> None:
+        ticket = Ticket(1, 20)
+        world = self.world([ticket])
+        rival = world.log_path(ticket, ticket.rival_session)
+        rival.write_text(world.log_path(ticket).read_text().replace(ticket.session, ticket.rival_session))
+        hidden = rival.with_suffix("") / "subagents" / "workflows" / "run-1"
+        hidden.mkdir(parents=True)
+        hidden.chmod(0)
+        self.addCleanup(hidden.chmod, 0o755)
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(counts(result), (0, 0, 1))
+
+    def test_a_session_folder_that_cannot_be_searched_skips_its_session(self) -> None:
+        ticket = Ticket(1, 20)
+        world = self.world([ticket])
+        folder = world.log_path(ticket).with_suffix("")
+        write_lines(folder / "subagents" / "agent-a1.jsonl",
+                    opening(ticket.session, 20, "https://github.com/example-org/gamma/pull/9"))
+        folder.chmod(0)
+        self.addCleanup(folder.chmod, 0o755)
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(counts(result), (0, 0, 1))
+
+    def test_lines_a_session_writes_while_the_draw_reads_its_log_are_in_the_archive(self) -> None:
+        world = self.world(full_pool(10))
+        pending = {}  # each log's opening call and result, written as the draw first opens the log
+        for ticket in world.tickets.values():
+            path = world.log_path(ticket)
+            text = path.read_text().splitlines(keepends=True)
+            path.write_text("".join(text[:-2]))
+            pending[str(path)] = "".join(text[-2:])
+        (world.root / "pending.json").write_text(json.dumps(pending))
+        result = world.draw("--seed", "1", prelude="import json, pathlib\n"
+                            f"pending = json.loads(pathlib.Path({str(world.root / 'pending.json')!r}).read_text())\n"
+                            "real_open = pathlib.Path.open\n"
+                            "def open_(self, mode='r', *args, **options):\n"
+                            "    if 'r' in mode and str(self) in pending:\n"
+                            "        with real_open(self, 'a') as log:\n"
+                            "            log.write(pending.pop(str(self)))\n"
+                            "    return real_open(self, mode, *args, **options)\n"
+                            "pathlib.Path.open = open_")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        for entry in world.set_file()["tickets"]:
+            self.assertEqual((world.state / entry["log"]).read_text(),
+                             world.log_path(world.tickets[entry["ticket"]]).read_text())
+
+    def test_a_retry_that_cannot_copy_a_log_leaves_the_earlier_archive_as_it_was(self) -> None:
+        world = self.world(full_pool(10, by_helper=True))
+        (world.state / "scan-rows.lock").mkdir()  # the first draw saves a log and then cannot write its row
+        self.assertEqual(world.draw("--seed", "1").returncode, 1)
+        (world.state / "scan-rows.lock").rmdir()
+        logs = world.state / "logs"
+        saved = {path: path.read_bytes() for path in logs.rglob("*") if path.is_file()}
+        self.assertNotEqual(saved, {})
+        projects = world.config / "projects" / "-work-example"
+        setup = f'{SETUP} && for log in {projects}/*.jsonl; do [ ! -e "$log" ] || mv "$log" "$log.gone"; done'  # they expire
+        world.write_repos([{"repo": ALPHA, "check": CHECK, "setup": setup}])
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(result.stderr, r"\Adraw: could not save the session log of project A ticket \d+ "
+                                        r"\(FileNotFoundError\)\.\n\Z")
+        self.assertEqual({path: path.read_bytes() for path in logs.rglob("*") if path.is_file()}, saved)
+        self.assertEqual(sorted(path.name for path in logs.iterdir()), sorted({
+            path.relative_to(logs).parts[0] for path in saved}))
+
+    def test_an_interrupt_while_a_timed_out_check_is_stopped_signals_its_group_once(self) -> None:
+        world = self.world(full_pool(10))
+        record = world.root / "killpg.txt"
+        result = world.draw("--seed", "1", prelude="import os, subprocess\n"
+                            "real_wait = subprocess.Popen.wait\n"
+                            "def wait(self, timeout=None):\n"
+                            "    if timeout == 3600:  # every step times out at once\n"
+                            "        raise subprocess.TimeoutExpired(self.args, timeout)\n"
+                            "    return real_wait(self, timeout)\n"
+                            "subprocess.Popen.wait = wait\n"
+                            "real_killpg = os.killpg\n"
+                            "def killpg(group, number):\n"
+                            f"    with open({str(record)!r}, 'a') as out:\n"
+                            "        out.write(f'{number}\\n')\n"
+                            "    real_killpg(group, number)\n"
+                            "    raise KeyboardInterrupt  # as if Ctrl-C came right after the signal\n"
+                            "os.killpg = killpg")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(record.read_text(), f"{int(signal.SIGKILL)}\n")
+        self.assertNotIn("PermissionError", result.stderr)
+        self.assertEqual(result.stderr.splitlines()[-1], "KeyboardInterrupt")
+
+    def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
+        marks = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, marks)
+        check = f"{CHECK} && touch {marks}/started && sleep 1 && touch {marks}/late"
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
+        draw = world.start("--seed", "1")
+        self.addCleanup(draw.kill)
+        for _ in range(600):
+            if (marks / "started").exists() or draw.poll() is not None:
+                break
+            subprocess.run(["sleep", "0.05"])
+        draw.send_signal(signal.SIGTERM)
+        draw.communicate(timeout=60)
+        subprocess.run(["sleep", "1.5"])
+        self.assertEqual(sorted(path.name for path in marks.iterdir()), ["started"])
+        self.assertFalse((world.state / "draw-work").exists())
+
+    def test_the_model_takes_one_vote_per_parent_response_however_many_helpers_copy_it(self) -> None:
+        world = self.world(full_pool(10))
+        other = "claude-test-model-2"
+        for ticket in world.tickets.values():
+            log = world.log_path(ticket)
+            copied = assistant(ticket.session, 50, [{"type": "text", "text": "Noted."}], other)
+            write_lines(log, read_lines(log) + [assistant(ticket.session, minute, [{"type": "text", "text": "Working."}])
+                                                for minute in (46, 48)] + [copied])
+            for number in range(1, 5):
+                write_lines(log.with_suffix("") / "subagents" / f"agent-b{number}.jsonl", [copied])
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual({entry["model"] for entry in world.set_file()["tickets"]}, {MODEL})
 
     def test_a_scan_row_file_that_cannot_be_read_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))

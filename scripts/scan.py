@@ -23,6 +23,7 @@ import fnmatch
 import glob
 import json
 import os
+import stat
 import sys
 from collections.abc import Iterable
 from datetime import datetime
@@ -40,8 +41,13 @@ SKILL_LINE = "Base directory for this skill: "
 
 
 def read_lines(path: Path) -> list[dict]:
+    return parse_lines(path.read_text(errors="replace"), path)
+
+
+def parse_lines(text: str, path: Path) -> list[dict]:
+    """A log's lines, from its text as read from `path`."""
     lines = []
-    raw = path.read_text(errors="replace").split("\n")  # splitlines() would also split on U+2028
+    raw = text.split("\n")  # splitlines() would also split on U+2028
     for number, text in enumerate(raw, 1):
         if not text.strip():
             continue
@@ -140,10 +146,14 @@ def skills(lines: list[dict]) -> list[str]:
 
 
 def helper_logs(log: Path) -> list[Path]:
-    """The helpers' logs; a folder below subagents/ that cannot be listed raises OSError, not leaves one out."""
+    """The helpers' logs. A session without a subagents/ folder has none; a folder on the way to one, or
+    below it, that cannot be searched or listed raises OSError, not leaves one out."""
     # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
     folder = log.parent / log.stem / "subagents"
-    if not folder.is_dir():
+    try:
+        if not stat.S_ISDIR(folder.stat().st_mode):
+            return []
+    except (FileNotFoundError, NotADirectoryError):
         return []
 
     def fail(error: OSError) -> None:

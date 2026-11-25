@@ -2,7 +2,7 @@
 
 Each log is written in the shape of a Claude Code session log: one JSON object per
 line, helpers' transcripts under <session>/subagents/. No line comes from a real
-session, and every run points the machine directory and the Claude config
+session. Every run points HOME, the machine directory and the Claude config
 directory at temporary folders.
 """
 from __future__ import annotations
@@ -116,10 +116,12 @@ class TestScan(unittest.TestCase):
         (folder / f"agent-{agent}.meta.json").write_text(json.dumps(
             {"agentType": "general-purpose", "description": description, "toolUseId": tool_use_id, **meta}))
 
-    def scan(self, target: str, *, env: dict | None = None) -> subprocess.CompletedProcess[str]:
-        environment = {**os.environ, "DELIVER_STATE_DIR": str(self.state), "CLAUDE_CONFIG_DIR": str(self.config)}
-        environment.update(env or {})
-        return subprocess.run([sys.executable, str(SCAN), target], cwd=self.root, env=environment,
+    def environment(self) -> dict[str, str]:
+        return {**os.environ, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
+                "CLAUDE_CONFIG_DIR": str(self.config)}
+
+    def scan(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([sys.executable, str(SCAN), *args], cwd=self.root, env=self.environment(),
                               text=True, capture_output=True)
 
     def rows(self, state: Path | None = None) -> list[dict]:
@@ -333,22 +335,46 @@ class TestScan(unittest.TestCase):
         log = Log(self.session).user(0, "Go.")
         log.assistant(1, (1, 1, 1, 1))
         log.write(self.log_path())
-        home = self.root / "home"
-        environment = {key: value for key, value in os.environ.items() if key != "DELIVER_STATE_DIR"}
+        environment = self.environment()
+        del environment["DELIVER_STATE_DIR"]
 
         result = subprocess.run([sys.executable, str(SCAN), str(self.log_path())], cwd=self.root,
-                                env={**environment, "HOME": str(home)}, text=True, capture_output=True)
+                                env=environment, text=True, capture_output=True)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(len(self.rows(home / ".local" / "state" / "deliver")), 1)
+        self.assertEqual(len(self.rows(self.root / "home" / ".local" / "state" / "deliver")), 1)
 
     def test_without_one_session_named_it_prints_usage_and_exits_2(self) -> None:
-        result = subprocess.run([sys.executable, str(SCAN)], text=True, capture_output=True,
-                                env={**os.environ, "DELIVER_STATE_DIR": str(self.state)})
+        result = self.scan()
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("Usage:", result.stderr)
         self.assertFalse(self.state.exists())
+
+    def test_a_relative_log_path_may_start_with_a_dash(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 2, 3, 4))
+        log.write(self.root / "-work-example" / f"{self.session}.jsonl")
+
+        result = self.scan(f"-work-example/{self.session}.jsonl")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.only_row()["total_tokens"], 10)
+
+    def test_an_unknown_option_prints_usage_and_exits_2(self) -> None:
+        result = self.scan("--verbose")
+
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(self.state.exists())
+
+    def test_scans_run_at_once_keep_every_row(self) -> None:
+        scans = [subprocess.Popen([sys.executable, str(SCAN), str(self.log_path(f"gone-{number}"))],
+                                  cwd=self.root, env=self.environment(),
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                 for number in range(40)]
+        self.assertEqual([process.wait() for process in scans], [0] * 40)
+
+        self.assertEqual(len(self.rows()), 40)
 
     def test_help_prints_usage_and_writes_no_row(self) -> None:
         result = self.scan("--help")

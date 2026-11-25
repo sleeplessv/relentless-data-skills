@@ -141,8 +141,12 @@ def scan(session: str, log: Path) -> dict:
             "model": model(main), "skills": skills, "helpers": listed}
 
 
+def is_path(target: str) -> bool:
+    return target.endswith(".jsonl") or os.sep in target
+
+
 def resolve(target: str) -> tuple[str, Path]:
-    if target.endswith(".jsonl") or os.sep in target:
+    if is_path(target):
         path = Path(target).expanduser()
         return path.stem, path
     config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
@@ -168,7 +172,8 @@ def main(argv: list[str]) -> int:
     if argv in (["-h"], ["--help"]):
         print(__doc__.strip())
         return 0
-    if len(argv) != 1 or argv[0].startswith("-"):
+    # A path may start with "-": Claude Code names each project folder "-<path>".
+    if len(argv) != 1 or (argv[0].startswith("-") and not is_path(argv[0])):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     session, log = resolve(argv[0])

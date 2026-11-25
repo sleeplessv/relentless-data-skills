@@ -848,10 +848,13 @@ def requirements(body: str | None) -> list[str]:
     The body is read as CommonMark's blocks: code, fenced or indented, and HTML blocks hide what they
     hold; one of those ATX headings opens the section, and any heading of level one or two, ATX or
     setext, ends it. A list inside a blockquote is not read. An item's text is its first line and the
-    lines that continue it, joined by spaces, without the item's marker or a task box."""
+    lines that continue it, joined by spaces, without the item's marker or a task box: a line that follows
+    without a blank line, and after a blank line one indented to the item's text. A new marker starts a new
+    item, and a blockquote ends the item."""
     headings = {heading.lower() for heading in CRITERIA_HEADINGS}
     found: list[str] = []
-    under = paragraph = item = False  # paragraph: the line before continues a paragraph; item: it is found[-1]'s
+    under = paragraph = gap = False  # paragraph: the line before continues a paragraph; gap: a blank line since
+    item = None  # the column of the open item's text, when the lines that follow can be found[-1]'s
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
     for text in (body or "").expandtabs(4).splitlines():
         if fence:  # a fence ends at a line of at least as many of its own character
@@ -863,18 +866,22 @@ def requirements(body: str | None) -> list[str]:
                 html = None
             continue
         line = text.lstrip(" ")
+        indent = len(text) - len(line)
         if not line:
-            paragraph = item = False
+            paragraph, gap = False, item is not None
             continue
-        if len(text) - len(line) >= 4:  # indented code, or a line that continues a paragraph
-            if item:
+        if item is not None and gap and indent < item:  # after a blank line, a line the item's text is not over
+            item = None
+        if indent >= 4:  # indented code, or a line that continues a paragraph or an item
+            if item is not None and not (gap and indent >= item + 4):  # code inside an item is not its text
                 found[-1] += " " + line.strip()
+                gap = False
             continue
         if opening := re.match(r"`{3,}(?!.*`)|~{3,}", line):
-            fence, paragraph, item = opening.group(), False, False
+            fence, paragraph, item = opening.group(), False, None
             continue
         if paragraph and re.fullmatch(r"(?:=+|-+)[ \t]*", line):  # the paragraph above is a setext heading
-            under = paragraph = item = False
+            under, paragraph, item = False, False, None
             continue
         start = next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
         if start is None and not paragraph and TAG_LINE.fullmatch(line):
@@ -882,24 +889,28 @@ def requirements(body: str | None) -> list[str]:
         if start:
             begin, end = start
             html = None if begin and end is not BLANK and end.search(line, begin.match(line).end()) else end
-            paragraph = item = False
+            paragraph, item = False, None
             continue
         if heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line):
             if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
                 under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
-            paragraph = item = False
+            paragraph, item = False, None
             continue
         if re.fullmatch(r"([-*_])(?:[ \t]*\1){2,}[ \t]*", line):  # - - - is a break, not an item
-            paragraph = item = False
+            paragraph, item = False, None
             continue
         if (marker := re.match(r"(?:[-*+]|(\d{1,9})[.)])[ \t]+(?=\S)", line)) and (
-                not paragraph or marker.group(1) in (None, "1")):  # only 1. starts a list inside a paragraph
+                not paragraph or item is not None or marker.group(1) in (None, "1")):
+            # inside a list any marker starts an item; inside a paragraph only - * + and 1. start a list
             if under:
                 found.append(re.sub(r"\A\[[ xX]\][ \t]+", "", line[marker.end():]).strip())
-            paragraph, item = False, under
+            paragraph, gap, item = False, False, indent + marker.end() if under else None
             continue
-        if item:
+        if item is not None and line.startswith(">"):  # a blockquote ends the item
+            item = None
+        if item is not None:
             found[-1] += " " + line.strip()
+            gap = False
         paragraph = True
     return found
 

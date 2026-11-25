@@ -28,10 +28,12 @@ CHECK_TIMEOUT = 3600  # seconds, for each of setup and check
 CLOCK_SLACK = timedelta(minutes=1)  # between the machine's clock in the log and GitHub's
 EXIT_SHORT = 3
 NO_PUSH = "GitHub records no push to the PR's branch by the time it was first ready for review"
+UNREAD = "GitHub's record of the PR's history or of the pushes to its branch could not be read"
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
-MAY_OPEN = re.compile(r"\bgh\s+pr\s+create\b")
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)([\w.-]+)\1")
 COMMAND_END = set(";&|()\n")
+# Words before a command that leave it the command run: shell keywords and the `command` builtin.
+LEADING = {"if", "then", "else", "elif", "while", "until", "do", "!", "{", "time", "command"}
 
 
 def one_of(items: list[str]) -> str:
@@ -46,9 +48,12 @@ Usage: python3 scripts/draw.py [--seed N]
 The pool is every ticket that meets all of these:
 - One session under $CLAUDE_CONFIG_DIR/projects (default ~/.claude) ran
   `gh pr create`, itself or through a helper, and the run's result holds the
-  ticket's PR's URL. GitHub says the PR was opened while the command ran. No
-  other such run in the session prints another PR's URL. Lines a resumed
-  session's log copied from an earlier session count as the earlier session's.
+  ticket's PR's URL, and the time GitHub gives for the PR's opening falls
+  between the run's call and its result, give or take {CLOCK_SLACK.seconds // 60} minute. The session
+  opened no other PR: a URL from such a run in a repo outside repos.json counts
+  as opened. Lines copied from an earlier session, into the session's log or a
+  helper's, count as the earlier session's.
+- The session's own responses name the model it ran on.
 - That session loaded a generation-one skill:
   {one_of(list(GENERATION_ONE))}.
 - The PR is merged and closes one issue, the ticket, in the PR's own repo. No
@@ -65,11 +70,12 @@ random.Random seeded with "<seed>:<bucket>". The draw tries the tickets in that
 order until {PER_BUCKET} pass. A try runs the repo's setup command, where it has one,
 and then its check command, each with sh, in a clean checkout of the commit
 before the merged PR: the first parent of the PR's merge commit. A step that
-runs for more than {CHECK_TIMEOUT // 60} minutes is stopped. When the try ends, every process
-its steps started is stopped. A ticket is set aside when its repo cannot be
-cloned, when that commit is missing or cannot be checked out, when the PR came
-from a fork, when GitHub records no push to the PR's branch by the time it was
-first ready, or when its setup or check exits non-zero or is stopped.
+runs for more than {CHECK_TIMEOUT // 60} minutes is stopped. When a step ends, the processes
+still in its process group are stopped. A ticket is set aside when its repo
+cannot be cloned, when that commit is missing or cannot be checked out, when the
+PR came from a fork, when GitHub's record of the PR's history or of its
+branch's pushes cannot be read, when that record holds no push by the time the
+PR was first ready, or when its setup or check exits non-zero or is stopped.
 
 The commit first marked ready is the head of the PR's branch at the PR's first
 ready_for_review event, or at its creation when it has none: the newest push
@@ -94,15 +100,17 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
                         directory.
   checks/<label>-<ticket>.txt
                         The output of each try: its setup and check, or the
-                        clone or checkout that failed, or why it was not run.
+                        clone, checkout or gh call that failed, or why it was
+                        not run.
   logs/<session>.jsonl and logs/<session>/
                         A copy of each kept ticket's session log and the
                         session's folder, helpers' transcripts included,
                         scanned into scan-rows.jsonl.
   draw-work/            Clones and checkouts, removed when the draw ends.
 
-Output names projects by label only. A session log that cannot be read is
-skipped and counted.
+Output names projects by label only. A session log is read only when its text
+holds the words gh and create; one of those that cannot be read as a session
+is skipped and counted.
 
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
@@ -111,6 +119,14 @@ tickets are set aside; no set was written, and the count per bucket is printed."
 
 class DrawError(Exception):
     """Ends the draw with exit 1 and no set written."""
+
+
+class GhFailed(DrawError):
+    """A gh call that failed; `output` holds the command, gh's message and its exit."""
+
+    def __init__(self, message: str, output: str) -> None:
+        super().__init__(message)
+        self.output = output
 
 
 def label_name(number: int) -> str:
@@ -128,7 +144,11 @@ def generation_one(skills: list[str]) -> bool:
 
 
 def moment(text: str) -> datetime:
-    return datetime.fromisoformat(text)
+    """A time with its zone; a log's time without one cannot be set beside GitHub's."""
+    found = datetime.fromisoformat(text)
+    if found.tzinfo is None:
+        raise ValueError(f"{text} has no time zone")
+    return found
 
 
 def parts(line: dict) -> list[dict]:
@@ -166,20 +186,23 @@ def runs_gh_pr_create(command: str) -> bool:
             if words[:3] == ["gh", "pr", "create"]:
                 return True
             words = []
-        elif words or not re.fullmatch(r"\w+=\S*", token):  # a leading NAME=value sets the command's environment
+        elif words or not (re.fullmatch(r"\w+=\S*", token) or token in LEADING):  # NAME=value sets its environment
             words.append(token)
     return False
 
 
 def own_lines(log: Path) -> tuple[list[dict], list[dict]]:
-    """The session's own lines: its log's, less those copied from an earlier session, then its helpers'."""
-    main = [line for line in scan.read_lines(log) if line.get("sessionId") in (None, log.stem)]
-    return main, [line for path in scan.helper_logs(log) for line in scan.read_lines(path)]
+    """The session's own lines, its log's and then its helpers', less those copied from an earlier session.
+
+    A helper's lines carry its session's id, so one rule holds for both."""
+    def own(path: Path) -> list[dict]:
+        return [line for line in scan.read_lines(path) if line.get("sessionId") in (None, log.stem)]
+    return own(log), [line for path in scan.helper_logs(log) for line in own(path)]
 
 
-def opened_prs(lines: list[dict]) -> dict[tuple[str, int], tuple[datetime, datetime]]:
+def opened_prs(lines: list[dict]) -> dict[tuple[str, int], list[tuple[datetime, datetime]]]:
     """Each PR whose URL a successful `gh pr create` run prints, as (owner/name in lower case, number),
-    with the times of the run's call and of its result."""
+    with the times of each such run's call and of its result."""
     calls = {part.get("id"): line.get("timestamp") for line in lines if line.get("type") == "assistant"
              for part in parts(line) if part.get("type") == "tool_use" and part.get("name") == "Bash"
              and runs_gh_pr_create(str((part.get("input") or {}).get("command")))}
@@ -190,39 +213,35 @@ def opened_prs(lines: list[dict]) -> dict[tuple[str, int], tuple[datetime, datet
             if part.get("type") == "tool_result" and not part.get("is_error") and isinstance(start, str) \
                     and isinstance(end, str):
                 for repo, number in PR_URL.findall(result_text(part)):
-                    found[(repo.lower(), int(number))] = (moment(start), moment(end))
+                    found.setdefault((repo.lower(), int(number)), []).append((moment(start), moment(end)))
     return found
 
 
 def has_criteria(body: str | None) -> bool:
-    """True when the body holds an item of a list under one of the CRITERIA_HEADINGS, read as Markdown."""
+    """True when the body holds an item of a list under a "## " heading among the CRITERIA_HEADINGS, read as Markdown."""
     headings = {heading.lower() for heading in CRITERIA_HEADINGS}
-    under, fence, paragraph = False, "", ""
-    for text in re.sub(r"<!--.*?(?:-->|\Z)", "", body or "", flags=re.DOTALL).splitlines():
-        if fence:
+    under, fence, comment = False, "", False
+    for text in (body or "").splitlines():
+        if comment:  # an HTML comment ends at its -->
+            if "-->" not in text:
+                continue
+            text, comment = text.split("-->", 1)[1], False
+        if fence:  # a fence ends at a line of at least as many of its own character
             if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
                 fence = ""
             continue
         if opening := re.match(r" {0,3}(`{3,}(?!.*`)|~{3,})", text):
-            fence, paragraph = opening.group(1), ""
+            fence = opening.group(1)
             continue
+        text = re.sub(r"<!--.*?-->", "", text)
+        if "<!--" in text:
+            text, comment = text.split("<!--", 1)[0], True
         if heading := re.fullmatch(r" {0,3}(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", text):
-            level, title = len(heading.group(1)), heading.group(2) or ""
-        elif paragraph and (underline := re.fullmatch(r" {0,3}(=+|-+)[ \t]*", text)):
-            level, title = (1 if underline.group(1)[0] == "=" else 2), paragraph
-        else:
-            if re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", text) or not text.strip():
-                paragraph = ""  # a thematic break or a blank line
-            elif re.match(r" {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S", text):  # deeper is an indented code line
-                if under:
-                    return True
-                paragraph = ""
-            else:
-                paragraph = text.strip()
-            continue
-        paragraph = ""
-        if level <= 2:
-            under = level == 2 and title.strip().lower() in headings
+            if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
+                under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
+        elif under and re.match(r" {0,3}(?:[-*+]|\d{1,9}[.)])[ \t]+\S", text) \
+                and not re.fullmatch(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", text):  # deeper is code; - - - is a break
+            return True
     return False
 
 
@@ -256,15 +275,16 @@ class Draw:
         self.seed = seed
         self.state = scan.state_dir()
         self.work = self.state / "draw-work"
-        self.clones: dict[str, tuple[Path, str]] = {}  # label: (clone, its failure's output or "")
+        self.clones: dict[str, Path] = {}  # label: the repo's clone, once one has worked
 
     def gh(self, label: str, *args: str) -> str:
         result = subprocess.run(["gh", *args], text=True, capture_output=True)
         if result.returncode:
             # gh's own message can name the repo, so it goes to a file, not to the output.
             scan.write_private(self.state / "draw-error.txt", result.stderr)
-            raise DrawError(f"`gh {args[0]} {args[1]}` failed for project {label} with exit {result.returncode}. "
-                            f"Its message is in {self.state / 'draw-error.txt'}.")
+            raise GhFailed(f"`gh {args[0]} {args[1]}` failed for project {label} with exit {result.returncode}. "
+                           f"Its message is in {self.state / 'draw-error.txt'}.",
+                           f"$ gh {shlex.join(args)}\n{result.stderr}".rstrip("\n") + f"\ngh exit {result.returncode}\n")
         return result.stdout
 
     def repos(self) -> dict[str, dict]:
@@ -307,18 +327,18 @@ class Draw:
             used |= {(entry["label"], entry["ticket"]) for entry in earlier["tickets"] + earlier["set_aside"]}
         return used
 
-    def candidate(self, repo: dict, label: str, pr: int, opener: dict) -> dict | None:
-        view = json.loads(self.gh(label, "pr", "view", str(pr), "--repo", repo["repo"], "--json",
+    def view(self, repo: dict, label: str, pr: int) -> dict:
+        return json.loads(self.gh(label, "pr", "view", str(pr), "--repo", repo["repo"], "--json",
                                   "state,additions,deletions,createdAt,mergeCommit,closingIssuesReferences,"
                                   "headRefName,isCrossRepository"))
-        start, end = opener["while"]
+
+    def candidate(self, repo: dict, label: str, pr: int, view: dict, opener: dict) -> dict | None:
         size = view["additions"] + view["deletions"]
         bucket = next((name for name, sizes in BUCKETS.items() if size in sizes), None)
         closes = view.get("closingIssuesReferences") or []
         if (view.get("state") != "MERGED" or bucket is None or len(closes) != 1
                 or "/".join((closes[0]["repository"]["owner"]["login"], closes[0]["repository"]["name"])).lower()
-                != repo["repo"].lower()
-                or not start - CLOCK_SLACK <= moment(view["createdAt"]) <= end + CLOCK_SLACK):
+                != repo["repo"].lower()):
             return None
         number = closes[0]["number"]
         issue = json.loads(self.gh(label, "issue", "view", str(number), "--repo", repo["repo"], "--json", "title,body"))
@@ -329,37 +349,52 @@ class Draw:
                 "repo": repo, "merge": view["mergeCommit"]["oid"], "created": view["createdAt"],
                 "branch": view["headRefName"], "fork": view["isCrossRepository"], "source": opener["log"]}
 
-    def pool(self, repos: dict[str, dict], labels: dict[str, str]) -> dict[str, list[dict]]:
-        openers: dict[tuple[str, int], list[dict]] = {}
-        unreadable = 0
+    def sessions(self) -> tuple[list[dict], int]:
+        """Each session that ran `gh pr create` and printed a PR's URL, and how many logs could not be read."""
+        sessions, unreadable = [], 0
         for log in sorted((scan.config_dir() / "projects").glob("*/*.jsonl")):
             try:
-                if not any(MAY_OPEN.search(path.read_text(errors="replace")) for path in [log, *scan.helper_logs(log)]):
+                # Each command runs_gh_pr_create accepts holds these words just as the log's JSON text does.
+                if not any("gh" in text and "create" in text
+                           for text in (path.read_text(errors="replace") for path in [log, *scan.helper_logs(log)])):
                     continue
                 main, helpers = own_lines(log)
                 prs = opened_prs(main + helpers)
-                opener = {"log": log, "prs": len(prs), "skills": scan.skills(main + helpers), "model": scan.model(main)}
-            except (OSError, SystemExit, ValueError):  # a dangling link, a line that is not JSON, a bad timestamp
+                if not prs:
+                    continue
+                session = {"log": log, "prs": prs, "model": scan.model(main)}
+                session["eligible"] = bool(session["model"]) and generation_one(scan.skills(main + helpers))
+                if session["eligible"]:
+                    scan.scan(log.stem, log)  # the draw saves the scan's row for a kept ticket
+            except (Exception, SystemExit):  # whatever the cause, it is not a session the draw can read
                 unreadable += 1
                 continue
-            for pr, run in prs.items():
-                openers.setdefault(pr, []).append({**opener, "while": run})
-        tickets: dict[tuple[str, int], dict | None] = {}
-        for (repo, pr), sessions in sorted(openers.items()):
-            if repo not in repos or len(sessions) != 1 or sessions[0]["prs"] != 1 \
-                    or not generation_one(sessions[0]["skills"]):
-                continue
-            try:
-                scan.scan(sessions[0]["log"].stem, sessions[0]["log"])  # the draw saves the scan's row for a kept ticket
-            except (OSError, SystemExit, ValueError):  # a truncated meta.json or a malformed timestamp
-                unreadable += 1
-                continue
-            found = self.candidate(repos[repo], labels[repo], pr, sessions[0])
-            if found:
-                key = (repo, found["ticket"])
-                tickets[key] = None if key in tickets else found  # a ticket with two PRs has no PR of its own
+            sessions.append(session)
+        return sessions, unreadable
+
+    def pool(self, repos: dict[str, dict], labels: dict[str, str]) -> dict[str, list[dict]]:
+        sessions, unreadable = self.sessions()
         if unreadable:
             print(f"Skipped {unreadable} session logs that could not be read.")
+        views = {key: self.view(repos[key[0]], labels[key[0]], key[1])
+                 for key in sorted({key for session in sessions if session["eligible"] for key in session["prs"]})
+                 if key[0] in repos}
+        openers: dict[tuple[str, int], list[dict]] = {}
+        for session in sessions:
+            # GitHub's time for the PR decides which runs opened it. A PR outside the list, which
+            # the draw does not ask GitHub about, counts as opened on the command alone.
+            session["opened"] = [key for key, runs in session["prs"].items() if key not in views or any(
+                start - CLOCK_SLACK <= moment(views[key]["createdAt"]) <= end + CLOCK_SLACK for start, end in runs)]
+            for key in session["opened"]:
+                openers.setdefault(key, []).append(session)
+        tickets: dict[tuple[str, int], dict | None] = {}
+        for (repo, pr), found in sorted(openers.items()):
+            if repo not in repos or len(found) != 1 or not found[0]["eligible"] or len(found[0]["opened"]) != 1:
+                continue
+            candidate = self.candidate(repos[repo], labels[repo], pr, views[(repo, pr)], found[0])
+            if candidate:
+                key = (repo, candidate["ticket"])
+                tickets[key] = None if key in tickets else candidate  # a ticket with two PRs has no PR of its own
         used = self.used()
         buckets: dict[str, list[dict]] = {name: [] for name in BUCKETS}
         for _, found in sorted(tickets.items()):  # by repo and ticket, so the repo list's order changes nothing
@@ -376,10 +411,11 @@ class Draw:
         if label not in self.clones:
             target = self.work / label
             result = subprocess.run(["gh", "repo", "clone", repo, str(target)], text=True, capture_output=True)
-            failure = (f"$ gh repo clone {repo} {target}\n{result.stdout}{result.stderr}".rstrip("\n")
-                       + f"\nclone exit {result.returncode}\n") if result.returncode else ""
-            self.clones[label] = (target, failure)
-        return self.clones[label]
+            if result.returncode:  # the repo's next ticket tries again
+                return target, (f"$ gh repo clone {repo} {target}\n{result.stdout}{result.stderr}".rstrip("\n")
+                                + f"\nclone exit {result.returncode}\n")
+            self.clones[label] = target
+        return self.clones[label], ""
 
     def ready_commit(self, candidate: dict) -> str | None:
         repo, label = candidate["repo"]["repo"], candidate["label"]
@@ -396,7 +432,6 @@ class Draw:
     def run_check(self, candidate: dict, clone: Path, base: str, output: Path) -> str | None:
         """Run setup and check in a clean checkout of `base`; None when both pass, else the reason."""
         tree = self.work / f"{candidate['label']}-{candidate['ticket']}"
-        groups: list[int] = []
         try:
             added = self.git("-C", str(clone), "worktree", "add", "--detach", "--quiet", str(tree), base)
             if added.returncode:
@@ -413,11 +448,12 @@ class Draw:
                     # Its own process group, so the processes it starts can be stopped with it.
                     process = subprocess.Popen(command, shell=True, cwd=tree, stdin=subprocess.DEVNULL, stdout=out,
                                                stderr=subprocess.STDOUT, start_new_session=True)
-                    groups.append(process.pid)
                     try:
                         code = process.wait(timeout=CHECK_TIMEOUT)
                     except subprocess.TimeoutExpired:
-                        stop(process.pid)
+                        code = None
+                    stop(process.pid)  # what the step left running in its group ends with it
+                    if code is None:
                         process.wait()
                         out.write(f"\n{step} ran for more than {CHECK_TIMEOUT} seconds\n")
                         return f"{step} ran for more than {CHECK_TIMEOUT} seconds"
@@ -425,8 +461,6 @@ class Draw:
                     if code:
                         return f"{step} exited {code}"
         finally:
-            for group in groups:
-                stop(group)
             self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
             self.git("-C", str(clone), "worktree", "prune")
         return None
@@ -446,31 +480,42 @@ class Draw:
             reason = "the commit before the merged PR is missing"
         elif candidate["fork"]:
             reason = "the PR came from a fork, whose pushes GitHub records in the fork"
-        elif not (ready := self.ready_commit(candidate)):
-            reason = NO_PUSH
         else:
-            candidate["ready_commit"] = ready
-            return self.run_check(candidate, clone, candidate["base_commit"], output)
+            try:
+                ready = self.ready_commit(candidate)
+            except GhFailed as error:
+                output.write_text(error.output)
+                return UNREAD
+            if not ready:
+                reason = NO_PUSH
+            else:
+                candidate["ready_commit"] = ready
+                return self.run_check(candidate, clone, candidate["base_commit"], output)
         output.write_text(reason + "\n")
         return reason
 
     def save_log(self, candidate: dict) -> str:
-        """Copy the session's log and its folder; check its transcripts arrived and scan the copy."""
+        """Copy the session's log and its folder, the transcripts whole, and scan the copy."""
         source = candidate["source"]
         copy = self.state / "logs" / source.name
-        copy.parent.mkdir(exist_ok=True)
+        transcripts = [source, *scan.helper_logs(source)]  # listed from the original, before anything is copied
         try:
-            shutil.copyfile(source, copy)
+            copy.parent.mkdir(exist_ok=True)
             if source.with_suffix("").is_dir():
-                shutil.copytree(source.with_suffix(""), copy.with_suffix(""), dirs_exist_ok=True)
-        except OSError:  # shutil.Error too: whatever it could not read, the check below covers what is needed
-            pass
-        transcripts = [source, *scan.helper_logs(source)]
-        missing = sum(not (copy.parent / path.relative_to(source.parent)).is_file() for path in transcripts)
-        if missing:
+                try:
+                    shutil.copytree(source.with_suffix(""), copy.with_suffix(""), dirs_exist_ok=True)
+                except OSError:  # shutil.Error too: a file it cannot read stays behind; the transcripts follow
+                    pass
+            for path in transcripts:
+                target = copy.parent / path.relative_to(source.parent)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, target)
+                if target.stat().st_size != path.stat().st_size:
+                    raise OSError(f"{target.name} did not copy whole")
+            scan.write_row(scan.scan(source.stem, copy))
+        except (OSError, SystemExit, ValueError) as error:  # its message can name the project's folder
             raise DrawError(f"could not save the session log of project {candidate['label']} ticket "
-                            f"{candidate['ticket']}: {missing} of its {len(transcripts)} transcripts did not copy.")
-        scan.write_row(scan.scan(source.stem, copy))
+                            f"{candidate['ticket']} ({type(error).__name__}).")
         return str(copy.relative_to(self.state))
 
     def run(self) -> int:

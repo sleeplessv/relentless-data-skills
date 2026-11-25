@@ -200,7 +200,7 @@ def config_dir() -> Path:
 
 def state_dir() -> Path:
     """The machine directory, made private on first use: rows hold the head of each helper's brief."""
-    # Absolute, so a relative setting means the same folder to every command run from another one.
+    # Absolute, so the paths the draw builds from it hold in the commands it runs from other folders.
     state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver").absolute()
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     return state

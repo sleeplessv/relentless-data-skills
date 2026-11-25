@@ -232,12 +232,17 @@ def review(prompt: str, folder: Path) -> tuple[str, str | None]:
         return "", f"the review ran for more than {REVIEW_TIMEOUT} seconds"
     try:
         result = json.loads(done.stdout)
-        text = result["result"] if isinstance(result, dict) and isinstance(result.get("result"), str) else None
     except ValueError:
-        text = None
-    if done.returncode or text is None or result.get("is_error"):
-        return (f"{done.stdout}{done.stderr}".rstrip("\n") + f"\nclaude exit {done.returncode}\n",
-                f"the review session failed with exit {done.returncode}")
+        result = None
+    if isinstance(result, list):  # with "verbose" on in the user's settings the JSON is every message, the result last
+        result = next((message for message in reversed(result)
+                       if isinstance(message, dict) and message.get("type") == "result"), None)
+    text = result.get("result") if isinstance(result, dict) else None
+    reason = (f"the review session failed with exit {done.returncode}" if done.returncode
+              else "the review session gave no result" if not isinstance(text, str)
+              else "the review session ended in an error" if result.get("is_error") else None)
+    if reason:
+        return f"{done.stdout}{done.stderr}".rstrip("\n") + f"\nclaude exit {done.returncode}\n", reason
     return text, None
 
 

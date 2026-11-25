@@ -273,17 +273,31 @@ class TestJudge(unittest.TestCase):
                 self.assertEqual((self.world.state / "judged/A-7-generation-one/review.txt").read_text(), answer)
 
     def test_a_review_session_that_fails_gives_no_verdict(self) -> None:
-        cases = [("R1: met\nR2: met\nR3: met", 1, None),
-                 (None, 0, json.dumps({"type": "result", "is_error": True, "result": "R1: met\nR2: met\nR3: met"})),
-                 (None, 0, "not JSON")]
-        for text, exit, raw in cases:
+        cases = [("R1: met\nR2: met\nR3: met", 1, None, "the review session failed with exit 1"),
+                 (None, 0, json.dumps({"type": "result", "is_error": True, "result": "R1: met\nR2: met\nR3: met"}),
+                  "the review session ended in an error"),
+                 (None, 0, "not JSON", "the review session gave no result"),
+                 (None, 0, json.dumps([{"type": "system", "subtype": "init"}]), "the review session gave no result")]
+        for text, exit, raw, reason in cases:
             with self.subTest(exit=exit, raw=raw):
                 self.world.answer(text or "", exit, raw)
                 result = self.world.judge("A-7", "generation-one")
                 self.assertEqual(result.returncode, 3, result.stderr)
                 [verdict] = self.world.verdicts()
                 self.assertIsNone(verdict["right_first_time"])
-                self.assertEqual(verdict["review"]["reason"], f"the review session failed with exit {exit}")
+                self.assertEqual(verdict["review"]["reason"], reason)
+
+    def test_the_result_is_read_from_every_message_when_settings_make_the_output_verbose(self) -> None:
+        # With "verbose" on in the user's settings, --output-format json prints the list of messages, the result last.
+        self.world.answer("", 0, json.dumps([
+            {"type": "system", "subtype": "init"},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "R1: not met"}]}},
+            {"type": "result", "subtype": "success", "is_error": False, "result": "R1: met\nR2: met\nR3: met"}]))
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.world.verdicts()[0]["review"]["requirements"], {"R1": "met", "R2": "met", "R3": "met"})
+        self.assertEqual((self.world.state / "judged/A-7-generation-one/review.txt").read_text(),
+                         "R1: met\nR2: met\nR3: met")
 
     def test_the_review_changes_neither_the_version_nor_its_repo(self) -> None:
         clone = self.world.replay_clone

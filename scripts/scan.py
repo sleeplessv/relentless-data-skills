@@ -111,6 +111,11 @@ def model(lines: list[dict]) -> str | None:
     return max(counts, key=counts.get) if counts else None
 
 
+def helper_logs(log: Path) -> list[Path]:
+    # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
+    return sorted((log.parent / log.stem / "subagents").rglob("agent-*.jsonl"))
+
+
 def scan(session: str, log: Path) -> dict:
     row: dict = {"session": session}
     blank = {**blank_tokens(), "active_minutes": None, "auto_compactions": None,
@@ -122,9 +127,7 @@ def scan(session: str, log: Path) -> dict:
     # with lines that carry another session's id, so the file's name wins when its lines carry it.
     ids = [line["sessionId"] for line in main if isinstance(line.get("sessionId"), str)]
     row["session"] = session if session in ids or not ids else ids[0]
-    # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
-    helper_logs = sorted((log.parent / log.stem / "subagents").rglob("agent-*.jsonl"))
-    helpers = [(path, read_lines(path)) for path in helper_logs]
+    helpers = [(path, read_lines(path)) for path in helper_logs(log)]
     every = main + [line for _, lines in helpers for line in lines]
     final = usages(every)
     total = tokens(final, final)
@@ -180,18 +183,28 @@ def is_path(target: str) -> bool:
     return target.endswith(".jsonl") or os.sep in target
 
 
+def config_dir() -> Path:
+    return Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+
+
+def state_dir() -> Path:
+    """The machine directory, made private on first use: rows hold the head of each helper's brief."""
+    state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)
+    return state
+
+
 def resolve(target: str) -> tuple[str, Path]:
     if is_path(target):
         path = Path(target).expanduser()
         return path.stem, path
-    config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    config = config_dir()
     found = sorted((config / "projects").glob(f"*/{glob.escape(target)}.jsonl"))
     return target, found[0] if found else config / "projects" / f"{target}.jsonl"
 
 
 def write_row(row: dict) -> Path:
-    state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
-    state.mkdir(mode=0o700, parents=True, exist_ok=True)  # rows hold the head of each helper's brief
+    state = state_dir()
     rows = state / "scan-rows.jsonl"
     with open(state / "scan-rows.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)

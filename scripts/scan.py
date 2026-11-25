@@ -103,18 +103,19 @@ def scan(session: str, log: Path) -> dict:
     helper_logs = sorted((log.parent / log.stem / "subagents").glob("*.jsonl"))
     helpers = [(path, read_lines(path)) for path in helper_logs]
     every = main + [line for _, lines in helpers for line in lines]
+    total = tokens(every, set())
+    if total is None:
+        return {**row, **blank}
 
     seen: set[str] = set()
-    total = tokens(main, seen)
-    listed = []
+    tokens(main, seen)  # a forked helper's log repeats its parent's responses; those are the parent's spend
     briefs = {part.get("id"): (part.get("input") or {}).get("prompt")
               for line in every if line.get("type") == "assistant"
               for part in (line.get("message") or {}).get("content") or []
               if isinstance(part, dict) and part.get("type") == "tool_use"}
-    for path, lines in sorted(helpers, key=lambda item: min((l.get("timestamp", "") for l in item[1]), default="")):
+    listed = []
+    for path, lines in helpers:
         own = tokens(lines, seen)
-        if own:
-            total = {k: (total or dict.fromkeys(own, 0))[k] + own[k] for k in own}
         meta_path = path.with_name(path.stem + ".meta.json")
         meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
         brief = briefs.get(meta.get("toolUseId")) or next(
@@ -122,8 +123,6 @@ def scan(session: str, log: Path) -> dict:
              if line.get("type") == "user" and isinstance((line.get("message") or {}).get("content"), str)), None)
         listed.append({"id": path.stem.removeprefix("agent-"), "description": meta.get("description"),
                        "brief_head": brief[:BRIEF_HEAD] if brief else None, **(own or blank_tokens())})
-    if total is None:
-        return {**row, **blank}
 
     compactions = {line.get("uuid"): (line.get("compactMetadata") or {}).get("trigger")
                    for line in every if line.get("subtype") == "compact_boundary"}
@@ -165,9 +164,12 @@ def write_row(row: dict) -> Path:
 
 
 def main(argv: list[str]) -> int:
-    if len(argv) != 1 or argv[0] in ("-h", "--help"):
-        print(__doc__.strip(), file=sys.stderr if len(argv) != 1 else sys.stdout)
-        return 0 if argv in (["-h"], ["--help"]) else 2
+    if argv in (["-h"], ["--help"]):
+        print(__doc__.strip())
+        return 0
+    if len(argv) != 1 or argv[0].startswith("-"):
+        print(__doc__.strip(), file=sys.stderr)
+        return 2
     session, log = resolve(argv[0])
     print(write_row(scan(session, log)))
     return 0

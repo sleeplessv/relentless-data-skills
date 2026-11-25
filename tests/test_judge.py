@@ -287,11 +287,10 @@ class TestJudge(unittest.TestCase):
 
 1. The report prints
    the total.
-2. The total counts every row.
+2. The total counts every row,
+blank rows too.
 
-   Blank rows count too.
 - [ ] The help names the total.
-> A quote, not a requirement.
 - A list of its own:
   - its item is one too.
 """
@@ -300,30 +299,76 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
         requirements = self.world.record("prompt").split("the ticket gives them:\n\n", 1)[1].split("\n\n", 1)[0]
         self.assertEqual(requirements.splitlines(), [
-            "R1: The report prints the total.", "R2: The total counts every row. Blank rows count too.",
+            "R1: The report prints the total.", "R2: The total counts every row, blank rows too.",
             "R3: The help names the total.", "R4: A list of its own:", "R5: its item is one too."])
 
-    def test_each_item_is_one_requirement_whose_text_is_its_paragraphs_without_quotes_or_code(self) -> None:
+    def test_a_list_the_judge_cannot_read_with_certainty_is_an_error(self) -> None:
+        path = self.world.state / "replay-set-1.json"
+        listed = json.loads(path.read_text())
+        listed["tickets"][0]["body"] = ("## Acceptance\n\n- Print the total.\n"
+                                        "    <details><summary>Example</summary></details>\n- Count blank rows.\n")
+        path.write_text(json.dumps(listed))
+        self.world.answer("R1: met")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, "judge: the list under the criteria heading of ticket A-7 cannot be read "
+                                        "with certainty at line 4 of its body, '    <details><summary>Example"
+                                        "</summary></details>'. --help says which lists the judge reads.\n")
+        self.assertFalse((self.world.state / "verdicts.jsonl").exists())
+        self.assertFalse((self.world.state / "judged").exists())
+
+    def test_a_list_is_read_item_by_item_or_refused_at_the_first_line_it_cannot_be_sure_of(self) -> None:
         sys.path.insert(0, str(SCRIPTS))
         self.addCleanup(sys.path.remove, str(SCRIPTS))
         with mock.patch.object(sys, "dont_write_bytecode", True):  # no scripts/__pycache__ in the checkout
             draw = importlib.import_module("draw")
-        cases = {  # the list under the heading: its requirements
-            "- The default retry count follows\n  the configuration, currently\n  3. A successful request resets it.\n":
-                ["The default retry count follows the configuration, currently 3. A successful request resets it."],
-            "1. Count rows.\n   > Includes the header.\n2. Save the count.\n": ["Count rows.", "Save the count."],
-            "- Check the totals.\n    - Count blank rows.\n": ["Check the totals.", "Count blank rows."],
-            "10. Report the total.\n    > Not a requirement.\n11. Print it.\n": ["Report the total.", "Print it."],
-            "- Run it:\n\n  ```\n  make\n  ```\n\n  Then read the log.\n- Next.\n": ["Run it: Then read the log.",
-                                                                                    "Next."],
-            "- One.\n\n    ```\n    x\n    ```\n\n- Two.\n": ["One.", "Two."],
-            "- One.\n\n      code\n\n- Two.\n": ["One.", "Two."],
-            "- Parent\n  - child\n\n  Parent again.\n- Sibling\n": ["Parent Parent again.", "child", "Sibling"],
+        read = {  # the section under the heading: its requirements
+            "- [ ] One.\n- [x] Two.\n": ["One.", "Two."],
+            "1. The report prints\n   the total.\n2) Count.\n": ["The report prints the total.", "Count."],
             "- Count every\nrow.\n- Show the total.\n": ["Count every row.", "Show the total."],
+            "- One.\n\n- Two.\n": ["One.", "Two."],
+            "- Check the totals.\n    - Count blank rows.\n": ["Check the totals.", "Count blank rows."],
+            "- Parent\n  - child\n\n  - child again\n- Sibling\n": ["Parent", "child", "child again", "Sibling"],
+            "- Implement the validator.\n  01. Reject nulls.\n  02. Report duplicates.\n": [
+                "Implement the validator.", "Reject nulls.", "Report duplicates."],
+            "Done means:\n\n### Must\n\n- One.\n\n### Should\n\n1. Two.\n": ["One.", "Two."],
+            "<!-- one per line -->\n- One.\n\n```\n- an example\n```\n\n- Two.\n": ["One.", "Two."],
+            "- One.\n\n## Notes\n\n- not a requirement\n": ["One."],
         }
-        for listed, expected in cases.items():
+        refused = {  # the section under the heading: the line the reader is not sure of
+            "- Print the total.\n    <details><summary>Example</summary></details>\n- Count blank rows.\n":
+                "    <details><summary>Example</summary></details>",
+            "- Export.\n    > Example\n  3. Reject nulls.\n": "    > Example",
+            "- Export.\n    > # Example\n  Keep the order.\n- Count.\n": "    > # Example",
+            "- Print a total.\n- ```text\n  - Example switch\n  ```\n": "- ```text",
+            "- Check input.\n-\n  Save the total.\n": "-",
+            "- The default retry count follows\n  the configuration, currently\n  3. A successful request resets it.\n":
+                "  3. A successful request resets it.",
+            "1. Count rows.\n   > Includes the header.\n2. Save the count.\n": "   > Includes the header.",
+            "- One.\n\n    ```\n    x\n    ```\n\n- Two.\n": "    ```",
+            "10. Report the total.\n    > Not a requirement.\n11. Print it.\n": "    > Not a requirement.",
+            "- Run it:\n\n  ```\n  make\n  ```\n\n  Then read the log.\n- Next.\n": "  ```",
+            "- One.\n\n      code\n\n- Two.\n": "      code",
+            "- Parent\n  - child\n\n  Parent again.\n- Sibling\n": "  Parent again.",
+            "- One.\n\n  More about one.\n": "  More about one.",
+            "- One.\n> A quote.\n- Two.\n": "> A quote.",
+            "Intro.\n---\n\n- One.\n": "---",
+            "- One.\n        - Too deep to be sure.\n": "        - Too deep to be sure.",
+            "- -  Two markers.\n": "- -  Two markers.",
+            "-      code after the marker\n": "-      code after the marker",
+            "Done means:\n2. Not a list in CommonMark.\n": "2. Not a list in CommonMark.",
+        }
+        for listed, expected in read.items():
             with self.subTest(listed=listed):
                 self.assertEqual(draw.requirements(f"## Acceptance\n\n{listed}"), expected)
+        for listed, line in refused.items():
+            with self.subTest(listed=listed):
+                with self.assertRaises(draw.Unreadable) as refusal:
+                    draw.requirements(f"## Acceptance\n\n{listed}")
+                self.assertEqual((refusal.exception.number, refusal.exception.line),
+                                 (3 + listed.splitlines().index(line), line))
+        self.assertEqual(draw.requirements("## Acceptance\n\nNone yet.\n"), [])  # empty, which is not refused
+        self.assertFalse(draw.has_criteria("## Acceptance\n\n- One.\n> A quote.\n"))
 
     def test_an_interrupt_after_the_line_is_written_keeps_the_files_it_names(self) -> None:
         version = ("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
@@ -436,6 +481,11 @@ class TestJudge(unittest.TestCase):
             "not in the fixed lines",
             "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none.": "the answer is not in the "
             "fixed lines",
+            # A finding that names a requirement and proves nothing: neither a breach nor a passing remark.
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: This line violates R1 by printing just the rows and "
+            "omitting the total. Evidence: none": "the answer is not in the fixed lines",
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: R2 skips blank rows. Evidence: none": "the answer is "
+            "not in the fixed lines",
             # A finding that names a requirement the ticket does not have.
             "R1: met\nR2: met\nR3: met\nF1: report.txt:2: R4 is short. Evidence: fails: one row -> no total.": "the "
             "answer is not in the fixed lines",

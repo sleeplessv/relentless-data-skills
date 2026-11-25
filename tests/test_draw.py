@@ -683,6 +683,18 @@ class TestDraw(unittest.TestCase):
                 self.assertEqual(result.returncode, 3, result.stderr)
                 self.assertEqual(counts(result), (pool, 0, 0))
 
+    def test_a_ticket_whose_list_cannot_be_read_with_certainty_is_left_out_as_one_with_no_list(self) -> None:
+        bodies = {
+            "## Acceptance\n\n- Print the total.\n    <details><summary>Example</summary></details>\n- Count rows.": 0,
+            "## Acceptance\n\n- Print a total.\n- ```text\n  - Example switch\n  ```": 0,
+            "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows.": 0,
+            "## Acceptance\n\n- Print the total.\n  - Count rows.": 1}
+        for body, pool in bodies.items():
+            with self.subTest(body=body):
+                result = self.world([Ticket(1, 20, criteria=body)]).draw()
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertEqual(counts(result), (pool, 0, 0))
+
     def test_the_model_is_a_name_from_the_session_s_own_responses_or_a_helper_s_copy_of_one(self) -> None:
         for case, pool in (("a helper's copy", 1), ("a helper's own", 0), (17, 0), (" ", 0)):
             with self.subTest(case=case):

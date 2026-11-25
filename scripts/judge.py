@@ -47,12 +47,13 @@ Give one R line for each requirement, in order, and one F line for each
 finding, numbered F1, F2 and on. "breaks" names the requirement that the line
 at <file>:<line> breaks. "fails" shows the finding failing: what to give the
 change or do with it, and what goes wrong then. Write "none" when you can show
-neither. A finding names each requirement, R<n>, that its line holds after
-<file>:<line>, and names no other. A finding is proven when its evidence is
-"breaks" or "fails", and each "cannot tell" counts as a proven finding. A
-requirement that is not met needs a proven finding that names it. The review
-passes when no finding is proven, so with every requirement met and nothing
-wrong the answer is the R lines alone."""
+neither. A finding with "breaks" or "fails" names each requirement, R<n>, that
+its line holds after <file>:<line>, and names no other; a finding with "none"
+names no requirement. A finding is proven when its evidence is "breaks" or
+"fails", and each "cannot tell" counts as a proven finding. A requirement that
+is not met needs a proven finding that names it. The review passes when no
+finding is proven, so with every requirement met and nothing wrong the answer
+is the R lines alone."""
 REQUIREMENT_LINE = re.compile(rf"R([1-9]\d*): ({'|'.join(ANSWERS)})")
 FINDING_LINE = re.compile(r"F([1-9]\d*): ([^\s:][^:]*):([1-9]\d*): (\S.*?) Evidence: (.+)")
 NAMED = re.compile(r"\bR([1-9]\d*)\b")
@@ -88,7 +89,13 @@ outside any git repo that holds the version's files as committed and no git
 history, so it sees no branch name, commit message or author, and it can read
 those files but change nothing. The requirements are the items under
 {draw.one_of([f'"## {heading}"' for heading in draw.CRITERIA_HEADINGS])}, numbered R1, R2 and
-on in the order written. The reviewer answers in fixed lines only:
+on in the order written. The judge reads only a list it can read with
+certainty: items of - * + 1. or 1), each with its text on its marker line,
+that text wrapped onto the lines below it, and lists nested in items. Inside
+an item any other block, such as a quote, code, HTML or a second paragraph,
+an item with no text, a quote or an underline anywhere in the section, or a
+marker numbered other than 1 right after a line of text stops the judge with
+an error that names the line. The reviewer answers in fixed lines only:
 
 {indented(LINES)}
 
@@ -272,9 +279,10 @@ def read_answer(text: str, count: int) -> dict | None:
             answers[f"R{found.group(1)}"] = found.group(2)
         elif found := FINDING_LINE.fullmatch(line):
             evidence = found.group(5).strip()
-            if int(found.group(1)) != len(findings) + 1 or not (evidence == "none" or PROOF.fullmatch(evidence)):
-                return None
             named = sorted({int(number) for number in NAMED.findall(f"{found.group(4)} {evidence}")})
+            if int(found.group(1)) != len(findings) + 1 or not (
+                    evidence == "none" and not named or PROOF.fullmatch(evidence)):
+                return None
             findings.append({"finding": f"F{found.group(1)}", "file": found.group(2), "line": int(found.group(3)),
                              "what": found.group(4).strip(), "evidence": evidence,
                              "requirements": [f"R{number}" for number in named], "proven": evidence != "none"})
@@ -396,7 +404,12 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
     state = scan.state_dir()
     entry = find_ticket(state, label, number)
     repo = repo_entry(state, label)
-    required = draw.requirements(entry.get("body"))
+    try:
+        required = draw.requirements(entry.get("body"))
+    except draw.Unreadable as refusal:
+        raise JudgeError(f"the list under the criteria heading of ticket {label}-{number} cannot be read with "
+                         f"certainty at line {refusal.number} of its body, {refusal.line!r}. --help says which "
+                         "lists the judge reads.")
     if not required:
         raise JudgeError(f"ticket {label}-{number} has no requirements under the headings of --help.")
     # Each attempt keeps its files apart, so one that fails leaves the files of the line on record as they were.

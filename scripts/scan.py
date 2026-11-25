@@ -111,6 +111,32 @@ def model(lines: list[dict]) -> str | None:
     return max(counts, key=counts.get) if counts else None
 
 
+def tool_calls(lines: list[dict]) -> dict[str, dict]:
+    """Each tool call in the lines, by its id."""
+    return {part.get("id"): part for line in lines if line.get("type") == "assistant"
+            for part in (line.get("message") or {}).get("content") or []
+            if isinstance(part, dict) and part.get("type") == "tool_use"}
+
+
+def skills(lines: list[dict]) -> list[str]:
+    """The skills the lines show loaded, in the order they were first loaded."""
+    calls = tool_calls(lines)
+    found: list[str] = []
+    for line in lines:
+        if line.get("type") != "user":
+            continue
+        names = [Path(text[len(SKILL_LINE):].splitlines()[0].strip()).name
+                 for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
+        # A bundled skill has no folder, so no such line: its successful Skill call names it.
+        content = (line.get("message") or {}).get("content")
+        for part in content if isinstance(content, list) else []:
+            call = calls.get(part.get("tool_use_id")) if isinstance(part, dict) else None
+            if call and call.get("name") == "Skill" and part.get("type") == "tool_result" and not part.get("is_error"):
+                names.append(str((call.get("input") or {}).get("skill", "")).split(":")[-1])
+        found.extend(name for name in dict.fromkeys(names) if name and name not in found)
+    return found
+
+
 def helper_logs(log: Path) -> list[Path]:
     # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
     return sorted((log.parent / log.stem / "subagents").rglob("agent-*.jsonl"))
@@ -135,9 +161,7 @@ def scan(session: str, log: Path) -> dict:
         return {**row, **blank}
 
     seen = set(usages(main))  # a forked helper's log repeats its parent's responses; those are the parent's spend
-    calls = {part.get("id"): part for line in every if line.get("type") == "assistant"
-             for part in (line.get("message") or {}).get("content") or []
-             if isinstance(part, dict) and part.get("type") == "tool_use"}
+    calls = tool_calls(every)
     metas = {}
     for path, _ in helpers:
         meta_path = path.with_name(path.stem + ".meta.json")
@@ -160,23 +184,10 @@ def scan(session: str, log: Path) -> dict:
 
     compactions = {line.get("uuid"): (line.get("compactMetadata") or {}).get("trigger")
                    for line in every if line.get("subtype") == "compact_boundary"}
-    skills: list[str] = []
-    for line in every:
-        if line.get("type") != "user":
-            continue
-        names = [Path(text[len(SKILL_LINE):].splitlines()[0].strip()).name
-                 for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
-        # A bundled skill has no folder, so no such line: its successful Skill call names it.
-        content = (line.get("message") or {}).get("content")
-        for part in content if isinstance(content, list) else []:
-            call = calls.get(part.get("tool_use_id")) if isinstance(part, dict) else None
-            if call and call.get("name") == "Skill" and part.get("type") == "tool_result" and not part.get("is_error"):
-                names.append(str((call.get("input") or {}).get("skill", "")).split(":")[-1])
-        skills.extend(name for name in dict.fromkeys(names) if name and name not in skills)
     return {**row, **total, "active_minutes": active_minutes(every),
             "auto_compactions": sum(t == "auto" for t in compactions.values()),
             "typed_compactions": sum(t == "manual" for t in compactions.values()),
-            "model": model(main), "skills": skills, "helpers": listed}
+            "model": model(main), "skills": skills(every), "helpers": listed}
 
 
 def is_path(target: str) -> bool:
@@ -189,7 +200,8 @@ def config_dir() -> Path:
 
 def state_dir() -> Path:
     """The machine directory, made private on first use: rows hold the head of each helper's brief."""
-    state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
+    # Absolute, so a relative setting means the same folder to every command run from another one.
+    state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver").absolute()
     state.mkdir(mode=0o700, parents=True, exist_ok=True)
     return state
 
@@ -210,12 +222,17 @@ def write_row(row: dict) -> Path:
         fcntl.flock(lock, fcntl.LOCK_EX)
         kept = [text for text in (rows.read_text().splitlines() if rows.is_file() else [])
                 if text.strip() and json.loads(text).get("session") != row["session"]]
-        partial = rows.with_name(rows.name + ".partial")
-        with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as file:
-            os.fchmod(file.fileno(), 0o600)
-            file.write("".join(text + "\n" for text in [*kept, json.dumps(row)]))
-        partial.replace(rows)
+        write_private(rows, "".join(text + "\n" for text in [*kept, json.dumps(row)]))
     return rows
+
+
+def write_private(path: Path, text: str) -> None:
+    """Write a file only its owner can read, whole or not at all."""
+    partial = path.with_name(path.name + ".partial")
+    with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as file:
+        os.fchmod(file.fileno(), 0o600)  # a partial file left by an earlier run keeps its own mode
+        file.write(text)
+    partial.replace(path)
 
 
 def main(argv: list[str]) -> int:

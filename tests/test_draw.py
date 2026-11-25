@@ -21,10 +21,13 @@ import unittest
 from dataclasses import dataclass
 from pathlib import Path
 
-DRAW = Path(__file__).resolve().parent.parent / "scripts" / "draw.py"
+SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 ALPHA = "example-org/alpha"
 BETA = "example-org/beta"
 MODEL = "claude-test-model-1"
+EARLIER_MODEL = "claude-test-model-0"
+OPENS = "gh pr create --draft --body-file body.md"
+CREATED = "2026-01-05T10:04:30Z"  # between the opening call's line, at 10:04, and its result's, at 10:05
 SETUP = "touch .setup-done"
 CHECK = "test -e .setup-done && test ! -e broken"
 
@@ -64,6 +67,13 @@ class Ticket:
     twin: bool = False  # a second session also opened the PR
     copied: bool = False  # a resumed session's log starts with copies of this session's lines
     issue: int = 0  # the issue the PR closes, when not `number`
+    command: str = OPENS  # the Bash command whose result prints the PR's URL
+    created: str = CREATED  # when GitHub says the PR was opened
+    inherited: str = ""  # a skill loaded in lines this session's log copied from an earlier session
+    pushed: bool = True  # GitHub records the pushes to the PR's branch
+    lost: bool = False  # the merge commit GitHub names is not in the repo
+    fork: bool = False  # the PR came from a fork
+    refuses_checkout: bool = False  # a hook makes checking out the commit before the merged PR fail
     merge: str = ""  # the merge commit's SHA, set when the world builds its repo
 
     @property
@@ -92,17 +102,17 @@ def line(session: str, kind: str, minute: int, **fields: object) -> dict:
             "timestamp": f"2026-01-05T10:{minute:02d}:00.000Z", "cwd": "/work/example", **fields}
 
 
-def assistant(session: str, minute: int, content: list) -> dict:
+def assistant(session: str, minute: int, content: list, model: str = MODEL) -> dict:
     usage = {"input_tokens": 10, "output_tokens": 20, "cache_creation_input_tokens": 30, "cache_read_input_tokens": 40}
     return line(session, "assistant", minute, message={
-        "id": f"msg_{session}_{minute}", "role": "assistant", "model": MODEL, "content": content, "usage": usage})
+        "id": f"msg_{session}_{minute}", "role": "assistant", "model": model, "content": content, "usage": usage})
 
 
-def opening(session: str, minute: int, url: str) -> list[dict]:
-    """A Bash call that runs `gh pr create` and the result that prints the new PR's URL."""
+def opening(session: str, minute: int, url: str, command: str = OPENS) -> list[dict]:
+    """A Bash call, by default one that runs `gh pr create`, and the result that prints a PR's URL."""
     call = f"toolu_{session}_{minute}"
     return [assistant(session, minute, [{"type": "tool_use", "id": call, "name": "Bash",
-                                         "input": {"command": "gh pr create --draft --body-file body.md"}}]),
+                                         "input": {"command": command}}]),
             line(session, "user", minute + 1, message={"role": "user", "content": [
                 {"type": "tool_result", "tool_use_id": call, "content": url + "\n", "is_error": False}]})]
 
@@ -121,13 +131,26 @@ class World:
         self.config = root / "claude"
         self.remotes = root / "remotes"
         self.bin = root / "bin"
-        self.gh_log = root / "gh-calls.jsonl"
+        self.gh_log = root / "gh-calls.log"
         self.tickets = {ticket.number: ticket for ticket in tickets}
         self.answers: dict[str, str] = {}
         self.bases: dict[int, str] = {}
         self.bin.mkdir(parents=True)
         (self.bin / "gh").write_text(GH)
         (self.bin / "gh").chmod(0o755)
+        # The scripts run from a copy, so a test sees anything a run writes beside them.
+        self.source = root / "source"
+        shutil.copytree(SCRIPTS, self.source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        refused = [ticket.number for ticket in tickets if ticket.refuses_checkout]
+        if refused:  # git reads the hook folder from $HOME/.gitconfig
+            hooks = root / "hooks"
+            hooks.mkdir()
+            (hooks / "post-checkout").write_text("#!/bin/sh\ncase \"$(git rev-parse --git-dir)\" in\n" + "".join(
+                f"  */worktrees/A-{number}) echo 'the hook refused the checkout' >&2; exit 1 ;;\n" for number in refused)
+                + "esac\n")
+            (hooks / "post-checkout").chmod(0o755)
+            (root / "home").mkdir()
+            (root / "home" / ".gitconfig").write_text(f"[core]\n\thooksPath = {hooks}\n")
         for repo in dict.fromkeys(ticket.repo for ticket in tickets):
             self.build_repo(repo, [ticket for ticket in tickets if ticket.repo == repo])
         for ticket in tickets:
@@ -165,25 +188,40 @@ class World:
             ticket.merge = shas[f":{marks[ticket.number] + 1}"]
 
     def save_answers(self, ticket: Ticket) -> None:
+        """The PR, its issue, its timeline and its branch's pushes, as `gh` gives them.
+
+        Commit a is on the branch when the PR opens at 10:04:30. Commit b, made at 10:10, is pushed at
+        10:20. Commit c, made at 10:25, is pushed at 11:00. A draft is ready at 10:30, so its head then
+        is b, though c was made before then.
+        """
         repo, pr = ticket.repo, ticket.pr
-        commits = [{"oid": ticket.commit(letter), "committedDate": f"2026-01-01T{hour}:00:00Z"}
-                   for letter, hour in (("a", 10), ("b", 11), ("c", 13))]
+        merge = "f" * 40 if ticket.lost else ticket.merge
+        commits = [{"oid": ticket.commit(letter), "committedDate": f"2026-01-05T10:{minute}:00Z"}
+                   for letter, minute in (("a", "00"), ("b", "10"), ("c", "25"))]
         self.answers[f"pr {repo} {pr}"] = json.dumps({
             "state": ticket.state, "additions": ticket.size - ticket.size // 4, "deletions": ticket.size // 4,
-            "createdAt": "2026-01-01T12:00:00Z", "mergeCommit": {"oid": ticket.merge} if ticket.state == "MERGED" else None,
-            "commits": commits,
+            "createdAt": ticket.created, "mergeCommit": {"oid": merge} if ticket.state == "MERGED" else None,
+            "headRefName": f"ticket-{ticket.number}", "isCrossRepository": ticket.fork, "commits": commits,
             "closingIssuesReferences": [{"number": (ticket.issue or ticket.number) + extra, "repository": {
                 "name": repo.split("/")[1], "owner": {"login": repo.split("/")[0]}}} for extra in range(ticket.closes)]})
         self.answers[f"issue {repo} {ticket.issue or ticket.number}"] = json.dumps({
             "title": f"Ticket {ticket.number}", "body": f"## What to build\n\nThing {ticket.number}.\n\n{ticket.criteria}\n"})
         events = [{"event": "committed", "sha": commit["oid"]} for commit in commits]
-        if ticket.draft:  # two pages, as `gh api --paginate` prints them; ready at 10:30, draft again, ready at 12:30
-            events = [*events, {"event": "ready_for_review", "created_at": "2026-01-01T10:30:00Z"},
-                      {"event": "convert_to_draft", "created_at": "2026-01-01T12:10:00Z"}]
-            pages = [events[:2], [*events[2:], {"event": "ready_for_review", "created_at": "2026-01-01T12:30:00Z"}]]
+        if ticket.draft:  # two pages, as `gh api --paginate` prints them; ready at 10:30, draft again, ready at 11:30
+            events = [*events, {"event": "ready_for_review", "created_at": "2026-01-05T10:30:00Z"},
+                      {"event": "convert_to_draft", "created_at": "2026-01-05T11:10:00Z"}]
+            pages = [events[:2], [*events[2:], {"event": "ready_for_review", "created_at": "2026-01-05T11:30:00Z"}]]
         else:
             pages = [events]
         self.answers[f"api repos/{repo}/issues/{pr}/timeline"] = "\n".join(json.dumps(page) for page in pages)
+        pushes = [("branch_creation", "10:04:20", "0" * 40, "a"), ("push", "10:20:00", "a", "b"),
+                  ("push", "11:00:00", "b", "c"), ("branch_deletion", "12:00:00", "c", "0" * 40)]
+        activity = [{"activity_type": kind, "timestamp": f"2026-01-05T{moment}Z", "ref": f"refs/heads/ticket-{ticket.number}",
+                     "before": before if len(before) == 40 else ticket.commit(before),
+                     "after": after if len(after) == 40 else ticket.commit(after)}
+                    for kind, moment, before, after in reversed(pushes)] if ticket.pushed else []  # newest first
+        self.answers[f"api repos/{repo}/activity?ref=refs/heads/ticket-{ticket.number}&per_page=100"] = "\n".join(
+            json.dumps(page) for page in (activity[:2], activity[2:]))
 
     def log_path(self, ticket: Ticket, session: str | None = None) -> Path:
         return self.config / "projects" / "-work-example" / f"{session or ticket.session}.jsonl"
@@ -191,6 +229,13 @@ class World:
     def write_log(self, ticket: Ticket) -> None:
         session = ticket.session
         lines = [line(session, "user", 0, message={"role": "user", "content": "Implement the ticket."})]
+        if ticket.inherited:  # copied from an earlier session: its skill load and two of its responses
+            earlier = f"00000000-0000-4000-b000-{ticket.number:012d}"
+            lines = [line(earlier, "user", 0, isMeta=True, message={"role": "user", "content": [{"type": "text", "text":
+                         f"Base directory for this skill: /home/someone/.claude/skills/{ticket.inherited}\n\n# Body"}]}),
+                     *[assistant(earlier, minute, [{"type": "text", "text": "Earlier work."}], EARLIER_MODEL)
+                       for minute in (1, 2)],
+                     *lines]
         if ":" in ticket.skill:  # a plugin's skill, loaded by a Skill call
             lines += [assistant(session, 1, [{"type": "tool_use", "id": f"toolu_skill_{session}", "name": "Skill",
                                               "input": {"skill": ticket.skill}}]),
@@ -200,7 +245,7 @@ class World:
             lines.append(line(session, "user", 1, isMeta=True, message={"role": "user", "content": [
                 {"type": "text", "text": f"Base directory for this skill: /home/someone/.claude/skills/{ticket.skill}\n\n# Body"}]}))
         urls = [f"https://github.com/{ticket.repo}/pull/{ticket.pr + 1000 * extra}" for extra in range(ticket.prs)]
-        opened = [entry for minute, url in enumerate(urls, 2) for entry in opening(session, minute * 2, url)]
+        opened = [entry for minute, url in enumerate(urls, 2) for entry in opening(session, minute * 2, url, ticket.command)]
         if ticket.by_helper:
             helper = self.log_path(ticket).with_suffix("") / "subagents" / "agent-a1.jsonl"
             write_lines(helper, [{**entry, "agentId": "a1", "isSidechain": True} for entry in opened])
@@ -224,28 +269,41 @@ class World:
         answers.mkdir()
         for key, answer in self.answers.items():
             (answers / re.sub(r"[ /]", "_", key)).write_text(answer + "\n")
-        env = {**os.environ, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(state or self.state),
+        env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
+        env = {**env, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(state or self.state),
                "CLAUDE_CONFIG_DIR": str(self.config), "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
                "GH_LOG": str(self.gh_log), "GH_ANSWERS": str(answers), "GH_REMOTES": str(self.remotes)}
         work = self.root / "cwd"
         work.mkdir(exist_ok=True)
-        return subprocess.run([sys.executable, str(DRAW), *args], cwd=work, env=env, text=True, capture_output=True)
+        return subprocess.run([sys.executable, str(self.source / "draw.py"), *args], cwd=work, env=env, text=True,
+                              capture_output=True)
 
     def set_file(self, number: int = 1, state: Path | None = None) -> dict:
         return json.loads(((state or self.state) / f"replay-set-{number}.json").read_text())
 
 
 class TestOneDraw(unittest.TestCase):
-    """One draw of a pool of 36 tickets, all passing, each opened by a helper; the tests read what it left."""
+    """One draw of a pool of 36 tickets, all passing, each opened by a helper; the tests read what it left.
+
+    Beside the logs lie a dangling link where a log would be and, in each session's folder, a dangling
+    link next to the helper's transcript. A partial set file from an earlier run is left readable by all.
+    """
 
     @classmethod
     def setUpClass(cls) -> None:
         temporary = tempfile.TemporaryDirectory()
         cls.addClassCleanup(temporary.cleanup)
-        cls.world = World(Path(temporary.name), full_pool(by_helper=True))
-        cls.outside = [cls.world.root / name for name in ("claude", "remotes", "home", "cwd", "bin")]
+        world = cls.world = World(Path(temporary.name), full_pool(by_helper=True))
+        projects = world.config / "projects" / "-work-example"
+        (projects / "00000000-0000-4000-c000-000000000000.jsonl").symlink_to(world.root / "expired.jsonl")
+        for ticket in world.tickets.values():
+            (world.log_path(ticket).with_suffix("") / "expired.txt").symlink_to(world.root / "expired.txt")
+        partial = world.state / "replay-set-1.json.partial"
+        partial.write_text("left by a run that stopped\n")
+        partial.chmod(0o644)
+        cls.outside = [world.root / name for name in ("claude", "remotes", "home", "cwd", "bin", "source")]
         cls.before = cls.files()
-        cls.result = cls.world.draw("--seed", "7")
+        cls.result = world.draw("--seed", "7")
 
     @classmethod
     def files(cls) -> dict[str, bytes]:
@@ -265,7 +323,7 @@ class TestOneDraw(unittest.TestCase):
                 "label": "A", "ticket": ticket.number, "bucket": entry["bucket"], "size": ticket.size,
                 "title": f"Ticket {ticket.number}",
                 "body": f"## What to build\n\nThing {ticket.number}.\n\n{ticket.criteria}\n",
-                "base_commit": world.bases[ticket.number], "ready_commit": ticket.commit("b"), "model": MODEL,
+                "base_commit": world.bases[ticket.number], "ready_commit": ticket.commit("a"), "model": MODEL,
                 "pr": ticket.pr, "session": ticket.session, "log": f"logs/{ticket.session}.jsonl",
                 "check_output": f"checks/A-{ticket.number}.txt"})
         self.assertEqual(json.loads((world.state / "project-labels.json").read_text()), {"A": ALPHA})
@@ -292,9 +350,11 @@ class TestOneDraw(unittest.TestCase):
             "checks", "draw.lock", "logs", "project-labels.json", "replay-set-1.json", "repos.json",
             "scan-rows.jsonl", "scan-rows.lock"])
         self.assertEqual(self.result.stdout.splitlines(), [
-            "Seed 7.", "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
-            "301-1500: pool 12, set aside 0, kept 10.", f"Wrote {state / 'replay-set-1.json'}."])
-        self.assertNotIn("example-org", self.result.stdout + self.result.stderr)
+            "Seed 7.", "Skipped 1 session logs that could not be read.", "0-50: pool 12, set aside 0, kept 10.",
+            "51-300: pool 12, set aside 0, kept 10.", "301-1500: pool 12, set aside 0, kept 10.",
+            f"Wrote {state / 'replay-set-1.json'}."])
+        self.assertEqual(self.result.stderr, "")
+        self.assertEqual(oct((state / "replay-set-1.json").stat().st_mode & 0o777), oct(0o600))
 
 
 class TestDraw(unittest.TestCase):
@@ -312,7 +372,10 @@ class TestDraw(unittest.TestCase):
 
     def test_pool_holds_only_tickets_that_meet_readings_2_and_3_in_listed_repos(self) -> None:
         kept = [
-            *sized(1, 6, 20), Ticket(7, 20, by_helper=True), Ticket(8, 20, copied=True),
+            *sized(1, 2, 20), Ticket(3, 20, criteria="Acceptance criteria\n---\n\n- The report prints the total."),
+            Ticket(4, 20, criteria="  ## Acceptance\n\n- The report prints the total."),
+            Ticket(5, 20, command="cd ../alpha && GH_PROMPT_DISABLED=1 gh  pr create --fill"),
+            Ticket(6, 20, inherited="tdd"), Ticket(7, 20, by_helper=True), Ticket(8, 20, copied=True),
             Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total."),
             Ticket(10, 50, criteria="## Done when\n\n* The report prints the total."),
             *sized(101, 8, 100), Ticket(109, 51), Ticket(110, 300, skill="some-plugin:implement-backlog"),
@@ -323,16 +386,23 @@ class TestDraw(unittest.TestCase):
             Ticket(16, 20, criteria="## Notes\n\n- The report prints the total."),
             Ticket(17, 20, criteria="## Acceptance criteria\n\n```\n- not a list item\n```"),
             Ticket(18, 20, state="OPEN"), Ticket(19, 20, twin=True), Ticket(20, 20, repo=BETA),
-            Ticket(21, 20, issue=300), Ticket(22, 100, issue=300)]
+            Ticket(21, 20, issue=300), Ticket(22, 100, issue=300),
+            Ticket(23, 20, command="echo 'gh pr create'; gh pr view --json url --jq .url"),
+            Ticket(24, 20, command="gh pr create --fill || gh pr view --json url --jq .url", created="2026-01-04T09:00:00Z"),
+            Ticket(25, 20, skill="tdd", inherited="implement-ticket"),
+            Ticket(26, 20, criteria="## Acceptance criteria\n\n    - an indented code line"),
+            Ticket(27, 20, criteria="## Acceptance criteria\n\n<!--\n- a commented-out item\n-->"),
+            Ticket(28, 20, criteria="## Acceptance criteria\n\n````\n```\n- inside a longer fence\n````")]
         world = self.world(kept + left_out)
         result = world.draw("--seed", "1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(sorted(entry["ticket"] for entry in world.set_file()["tickets"]),
                          [ticket.number for ticket in kept])
         self.assertEqual(world.set_file()["set_aside"], [])
-        for entry in world.set_file()["tickets"]:  # committed at 10:00, 11:00 and 13:00; created at 12:00
+        for entry in world.set_file()["tickets"]:
             ticket = world.tickets[entry["ticket"]]
-            self.assertEqual(entry["ready_commit"], ticket.commit("a" if ticket.draft else "b"), ticket.number)
+            self.assertEqual((entry["ready_commit"], entry["model"]), (ticket.commit("b" if ticket.draft else "a"), MODEL),
+                             ticket.number)
 
     def test_a_ticket_whose_check_fails_before_the_change_is_replaced_by_the_next_in_seed_order(self) -> None:
         passing = self.world(full_pool())
@@ -402,6 +472,61 @@ class TestDraw(unittest.TestCase):
         self.assertEqual((second["set"], len(second["tickets"])), (2, 30))
         earlier = {entry["ticket"] for entry in first["tickets"] + first["set_aside"]}
         self.assertEqual(earlier & {entry["ticket"] for entry in second["tickets"] + second["set_aside"]}, set())
+
+    def test_a_ticket_that_cannot_be_tried_is_set_aside_with_its_output_and_replaced(self) -> None:
+        cannot = [Ticket(11, 20, lost=True), Ticket(12, 20, pushed=False), Ticket(13, 20, refuses_checkout=True),
+                  Ticket(14, 20, repo=BETA), Ticket(15, 20, fork=True)]
+        world = self.world(full_pool(10) + cannot, repos=[{"repo": ALPHA, "check": CHECK, "setup": SETUP},
+                                                          {"repo": BETA, "check": CHECK}])
+        shutil.rmtree(world.remotes / f"{BETA}.git")  # its clone fails
+        result = world.draw("--seed", "2")  # its order tries all five before the tenth that passes
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(sorted(entry["ticket"] for entry in world.set_file()["tickets"] if entry["bucket"] == "0-50"),
+                         list(range(1, 11)))
+        aside = {entry["ticket"]: entry for entry in world.set_file()["set_aside"]}
+        self.assertEqual({number: (entry["label"], entry["reason"]) for number, entry in aside.items()}, {
+            11: ("A", "the commit before the merged PR is missing"),
+            12: ("A", "GitHub records no push to the PR's branch by the time it was first ready for review"),
+            13: ("A", "the commit before the merged PR cannot be checked out"),
+            14: ("B", "the repo cannot be cloned"),
+            15: ("A", "the PR came from a fork, whose pushes GitHub records in the fork")})
+        outputs = {number: (world.state / entry["check_output"]).read_text().splitlines()
+                   for number, entry in aside.items()}
+        self.assertEqual(outputs[11], ["the commit before the merged PR is missing"])
+        self.assertEqual(outputs[12], ["GitHub records no push to the PR's branch by the time it was first ready for review"])
+        self.assertEqual(outputs[13][-2:], ["the hook refused the checkout", "checkout exit 1"])
+        self.assertEqual((outputs[14][0], outputs[14][-1]),
+                         (f"$ gh repo clone {BETA} {world.state / 'draw-work' / 'B'}", "clone exit 128"))
+        self.assertEqual(result.stdout.splitlines()[1], "0-50: pool 15, set aside 5, kept 10.")
+
+    def test_the_seed_gives_the_same_tickets_whatever_the_order_of_the_repo_list(self) -> None:
+        alpha = full_pool(6)
+        beta = [Ticket(ticket.number + 1000, ticket.size, repo=BETA) for ticket in alpha]
+        world = self.world(alpha + beta)
+        listed = [{"repo": ALPHA, "check": CHECK, "setup": SETUP}, {"repo": BETA, "check": CHECK, "setup": SETUP}]
+        world.write_repos(listed)
+        reversed_state = world.root / "reversed"
+        reversed_state.mkdir()
+        (reversed_state / "repos.json").write_text(json.dumps(listed[::-1]))
+        drawn = []
+        for state in (world.state, reversed_state):
+            # The second draw names its machine directory relative to the folder it runs in.
+            result = world.draw("--seed", "7", state=Path("..") / state.name if state == reversed_state else state)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            key = json.loads((state / "project-labels.json").read_text())
+            drawn.append(sorted((key[entry["label"]], entry["ticket"]) for entry in world.set_file(state=state)["tickets"]))
+        self.assertEqual(json.loads((reversed_state / "project-labels.json").read_text()), {"A": BETA, "B": ALPHA})
+        self.assertEqual(drawn[0], drawn[1])
+
+    def test_a_check_s_background_processes_end_with_its_try(self) -> None:
+        late = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, late)
+        check = f"{CHECK} && {{ (sleep 1; touch {late}/$$) & }}"  # leaves a process that writes after the check
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        subprocess.run(["sleep", "1.5"])
+        self.assertEqual(list(late.iterdir()), [])
 
     def test_a_failed_gh_call_names_the_label_keeps_gh_s_message_in_a_file_and_writes_no_set(self) -> None:
         world = self.world(full_pool(10))

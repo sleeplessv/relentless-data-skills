@@ -838,13 +838,20 @@ def parent_model(main: list[dict], helpers: list[dict]) -> str | None:
 
 
 def has_criteria(body: str | None) -> bool:
-    """True when the body holds an item of a list under a "## " heading among the CRITERIA_HEADINGS.
+    """True when the body holds an item of a list under a "## " heading among the CRITERIA_HEADINGS."""
+    return bool(requirements(body))
+
+
+def requirements(body: str | None) -> list[str]:
+    """The text of each item of a list under a "## " heading among the CRITERIA_HEADINGS, in the order written.
 
     The body is read as CommonMark's blocks: code, fenced or indented, and HTML blocks hide what they
     hold; one of those ATX headings opens the section, and any heading of level one or two, ATX or
-    setext, ends it. A list inside a blockquote is not read."""
+    setext, ends it. A list inside a blockquote is not read. An item's text is its first line and the
+    lines that continue it, joined by spaces, without the item's marker or a task box."""
     headings = {heading.lower() for heading in CRITERIA_HEADINGS}
-    under = paragraph = False  # paragraph: the line before continues a paragraph
+    found: list[str] = []
+    under = paragraph = item = False  # paragraph: the line before continues a paragraph; item: it is found[-1]'s
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
     for text in (body or "").expandtabs(4).splitlines():
         if fence:  # a fence ends at a line of at least as many of its own character
@@ -857,15 +864,17 @@ def has_criteria(body: str | None) -> bool:
             continue
         line = text.lstrip(" ")
         if not line:
-            paragraph = False
+            paragraph = item = False
             continue
         if len(text) - len(line) >= 4:  # indented code, or a line that continues a paragraph
+            if item:
+                found[-1] += " " + line.strip()
             continue
         if opening := re.match(r"`{3,}(?!.*`)|~{3,}", line):
-            fence, paragraph = opening.group(), False
+            fence, paragraph, item = opening.group(), False, False
             continue
         if paragraph and re.fullmatch(r"(?:=+|-+)[ \t]*", line):  # the paragraph above is a setext heading
-            under = paragraph = False
+            under = paragraph = item = False
             continue
         start = next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
         if start is None and not paragraph and TAG_LINE.fullmatch(line):
@@ -873,24 +882,26 @@ def has_criteria(body: str | None) -> bool:
         if start:
             begin, end = start
             html = None if begin and end is not BLANK and end.search(line, begin.match(line).end()) else end
-            paragraph = False
+            paragraph = item = False
             continue
         if heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line):
             if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
                 under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
-            paragraph = False
+            paragraph = item = False
             continue
         if re.fullmatch(r"([-*_])(?:[ \t]*\1){2,}[ \t]*", line):  # - - - is a break, not an item
-            paragraph = False
+            paragraph = item = False
             continue
-        if (item := re.match(r"(?:[-*+]|(\d{1,9})[.)])[ \t]+\S", line)) and (
-                not paragraph or item.group(1) in (None, "1")):  # only 1. starts a list inside a paragraph
+        if (marker := re.match(r"(?:[-*+]|(\d{1,9})[.)])[ \t]+(?=\S)", line)) and (
+                not paragraph or marker.group(1) in (None, "1")):  # only 1. starts a list inside a paragraph
             if under:
-                return True
-            paragraph = False
+                found.append(re.sub(r"\A\[[ xX]\][ \t]+", "", line[marker.end():]).strip())
+            paragraph, item = False, under
             continue
+        if item:
+            found[-1] += " " + line.strip()
         paragraph = True
-    return False
+    return found
 
 
 def pages(text: str) -> list:

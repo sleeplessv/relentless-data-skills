@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -51,13 +52,16 @@ printf '%s\n' "$*" >> "$GH_LOG"
 exec git clone -q "$GH_REMOTES/$3.git" "$4"
 """
 # Records each argument on a line of its own, the prompt it reads, its working folder and what that folder
-# holds; tries to change the folder; then prints the saved answer as Claude Code's JSON result.
+# holds and what its stamp.txt says; tries to change the folder, and removes $CLAUDE_BREAK when it is set; then
+# prints the saved answer as Claude Code's JSON result.
 CLAUDE = r"""#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDE_ARGS"
 cat > "$CLAUDE_PROMPT"
 pwd > "$CLAUDE_CWD"
 if git rev-parse --git-dir > /dev/null 2>&1; then echo inside > "$CLAUDE_GIT"; else echo outside > "$CLAUDE_GIT"; fi
 ls -A > "$CLAUDE_FILES"
+cat stamp.txt > "$CLAUDE_STAMP"
+if [ -n "$CLAUDE_BREAK" ]; then rm -rf "$CLAUDE_BREAK"; fi
 echo "the reviewer wrote this" > app.txt
 rm -f counter
 if [ -n "$CLAUDE_STDERR" ]; then echo "$CLAUDE_STDERR" >&2; fi
@@ -104,12 +108,20 @@ class World:
         git(work, "init", "-q", "-b", "main")
         owner = ("Main Author", "main@example.com")
         gen_one = ("Gen One Author", "gen-one@example.com")
-        self.base = commit(work, "Start", owner, {"counter": "1\n", "report.txt": "rows\n"})
+        # Attributes that git archive would act on: a $Format$ stamp it would fill in and a file it would leave out.
+        # A link inside the folder is kept; one that leads out of it is not.
+        (work / "inside-link").symlink_to("report.txt")
+        (work / "outside-link").symlink_to("../../outside")
+        self.start = commit(work, "Start", owner, {
+            "counter": "1\n", "report.txt": "rows\n", "stamp.txt": "$Format:%an %s$\n", "hidden.txt": "kept\n",
+            ".gitattributes": "stamp.txt export-subst\nhidden.txt export-ignore\n"})
         git(work, "checkout", "-q", "-b", "ticket-7-the-branch")
         # Generation one's commit first marked ready still holds `broken`; the fix after ready removes it.
         self.ready = commit(work, "Branch work for ticket 7", gen_one, {"report.txt": "rows\ntotal\n", "broken": "x\n"})
         self.fixed = commit(work, "Fix after ready", gen_one, {"broken": None})
         git(work, "checkout", "-q", "main")
+        # main moved on after the branch started: the commit before the merged PR is not where the branch began.
+        self.base = commit(work, "Main-only change", owner, {"notes.txt": "main only\n"})
         self.merged = commit(work, "Squash of ticket 7", owner, {"report.txt": "rows\ntotal\n"})
         bare = self.remotes / f"{REPO}.git"
         bare.parent.mkdir(parents=True)
@@ -131,6 +143,7 @@ class World:
                          "body": BODY, "base_commit": self.base, "ready_commit": self.ready, "model": "test-model",
                          "pr": 8, "session": "s-1", "log": "logs/s-1.jsonl", "check_output": "checks/A-7.txt"}]}))
         self.answer("R1: met\nR2: met\nR3: met\n")
+        self.breaking = ""
 
     def answer(self, text: str, exit: int = 0, raw: str | None = None) -> None:
         """The stand-in's next answer: `text` as the result of Claude Code's JSON, or `raw` printed as it is."""
@@ -143,8 +156,9 @@ class World:
         env.update({"HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
                     "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GH_LOG": str(self.records / "gh"),
                     "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
-                    "CLAUDE_EXIT": str(self.exit), **{f"CLAUDE_{name.upper()}": str(self.records / name)
-                                                      for name in ("args", "prompt", "cwd", "git", "files")}})
+                    "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,
+                    **{f"CLAUDE_{name.upper()}": str(self.records / name)
+                       for name in ("args", "prompt", "cwd", "git", "files", "stamp")}})
         return subprocess.run([sys.executable, str(SCRIPTS / "judge.py"), *args], cwd=self.root / "cwd", env=env,
                               text=True, capture_output=True)
 
@@ -153,6 +167,24 @@ class World:
 
     def verdicts(self) -> list[dict]:
         return [json.loads(line) for line in (self.state / "verdicts.jsonl").read_text().splitlines()]
+
+    def saved(self, path: str) -> str:
+        """A file a verdict names, by its path relative to the machine directory."""
+        return (self.state / path).read_text()
+
+    def files(self) -> dict[str, str]:
+        """Every file the judge saved for its verdicts, by path."""
+        return {str(path.relative_to(self.state)): path.read_text()
+                for path in sorted((self.state / "judged").rglob("*")) if path.is_file()}
+
+    def version(self, message: str, files: dict[str, bytes]) -> tuple[Path, str]:
+        """A clone of the replay's clone with one more commit on the replay: its folder and the commit."""
+        clone = self.root / f"version-{len(list(self.root.glob('version-*')))}"
+        git(self.root, "clone", "-q", str(self.replay_clone), str(clone))
+        git(clone, "checkout", "-q", "--detach", self.replay)
+        for name, data in files.items():
+            (clone / name).write_bytes(data)
+        return clone, commit(clone, message, ("Replay Author", "replay@example.com"), {})
 
 
 class TestJudge(unittest.TestCase):
@@ -178,15 +210,18 @@ class TestJudge(unittest.TestCase):
         [verdict] = self.world.verdicts()
         self.assertEqual((verdict["label"], verdict["ticket"], verdict["version"], verdict["commit"]),
                          ("A", 7, "zeta", self.world.replay))
-        self.assertEqual(verdict["check"], {"passed": True, "reason": None, "output": "judged/A-7-zeta/check.txt"})
+        folder = verdict["check"]["output"].removesuffix("/check.txt")
+        self.assertRegex(folder, r"\Ajudged/A-7-zeta/\d{8}T\d{6}Z-[^/]+\Z")
+        self.assertEqual(verdict["check"], {"passed": True, "reason": None, "output": f"{folder}/check.txt"})
         self.assertEqual(verdict["review"], {
             "passed": True, "reason": None, "requirements": {"R1": "met", "R2": "met", "R3": "met"}, "findings": [],
-            "proven": 0, "lines": "judged/A-7-zeta/review.txt"})
+            "proven": 0, "lines": f"{folder}/review.txt", "prompt": f"{folder}/prompt.txt"})
         self.assertIs(verdict["right_first_time"], True)
-        self.assertEqual(result.stdout.splitlines()[1:], [
-            f"Test 2, the review: passed. Answer in {self.world.state / 'judged/A-7-zeta/review.txt'}.",
+        self.assertEqual(result.stdout.splitlines(), [
+            f"Test 1, the check: passed. Output in {self.world.state / folder / 'check.txt'}.",
+            f"Test 2, the review: passed. Answer in {self.world.state / folder / 'review.txt'}.",
             "A-7 zeta is right first time."])
-        self.assertEqual((self.world.state / "judged/A-7-zeta/review.txt").read_text(), "R1: met\nR2: met\nR3: met\n")
+        self.assertEqual(self.world.saved(f"{folder}/review.txt"), "R1: met\nR2: met\nR3: met\n")
         self.assertFalse((self.world.records / "gh").exists())  # its repo is on this machine; GitHub is not asked
         self.assertEqual(list((self.world.state / "judge-work").iterdir()), [])
 
@@ -207,28 +242,62 @@ class TestJudge(unittest.TestCase):
                 self.assertIn("".join(f"R{at}: {text}\n" for at, text in enumerate(REQUIREMENTS, 1)), prompt)
                 added = "+total\n" if version == "generation-one" else "+total from replay\n"
                 self.assertIn(f" rows\n{added}", prompt)
-                self.assertEqual(prompt, (self.world.state / f"judged/A-7-{version}/prompt.txt").read_text())
-                seen = prompt + self.world.record("args") + self.world.record("cwd") + self.world.record("files")
+                [verdict] = [verdict for verdict in self.world.verdicts() if verdict["version"] == version]
+                self.assertEqual(prompt, self.world.saved(verdict["review"]["prompt"]))
+                seen = prompt + "".join(self.world.record(name) for name in ("args", "cwd", "files", "stamp"))
                 for secret in (*SECRETS, version, self.world.ready, self.world.replay, "A-7"):
                     self.assertNotIn(secret, seen)
                 self.assertEqual(self.world.record("git"), "outside\n")
                 self.assertNotIn(".git", self.world.record("files").split())
 
+    def test_the_reviewer_reads_every_committed_file_as_committed(self) -> None:
+        self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
+        self.assertEqual(self.world.record("files").split(), [
+            ".gitattributes", "counter", "hidden.txt", "inside-link", "notes.txt", "report.txt", "stamp.txt"])
+        self.assertEqual(self.world.record("stamp"), "$Format:%an %s$\n")
+
+    def test_each_listed_requirement_is_one_r_line_however_its_text_wraps(self) -> None:
+        path = self.world.state / "replay-set-1.json"
+        listed = json.loads(path.read_text())
+        listed["tickets"][0]["body"] = """## Acceptance criteria
+
+1. The report prints
+   the total.
+2. The total counts every row.
+
+   Blank rows count too.
+- [ ] The help names the total.
+> A quote, not a requirement.
+- A list of its own:
+  - its item is one too.
+"""
+        path.write_text(json.dumps(listed))
+        self.world.answer("R1: met\nR2: met\nR3: met\nR4: met\nR5: met")
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        requirements = self.world.record("prompt").split("the ticket gives them:\n\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(requirements.splitlines(), [
+            "R1: The report prints the total.", "R2: The total counts every row. Blank rows count too.",
+            "R3: The help names the total.", "R4: A list of its own:", "R5: its item is one too."])
+
     def test_the_diff_for_generation_one_runs_from_where_its_branch_started(self) -> None:
         self.world.judge("A-7", "generation-one")
-        prompt = self.world.record("prompt")
-        self.assertIn("+++ b/broken\n", prompt)
-        self.assertNotIn("Squash", prompt)
+        diff = self.world.record("prompt").split("<diff>\n", 1)[1].split("</diff>", 1)[0]
+        # From the commit before the merged PR, the diff would also take back main's later notes.txt.
+        self.assertEqual(re.findall(r"^diff --git a/(\S+)", diff, re.M), ["broken", "report.txt"])
+        self.assertNotIn("main only", diff)
 
     def test_the_review_lines_decide_test_two(self) -> None:
         cases = {  # answer: (test 2 passed, proven findings, right first time)
             "R1: met\nR2: met\nR3: met": (True, 0, True),
             "R1: met\n\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none": (True, 0, True),
-            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No blank rows. Evidence: R2 needs blank rows; "
-            "report.txt:2 counts none.": (False, 1, False),
-            "R1: met\nR2: not met\nR3: met": (False, 0, False),
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none.": (True, 0, True),
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No blank rows. Evidence: breaks R2: it counts "
+            "rows with text only.": (False, 1, False),
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: Blank rows. Evidence: fails R2: a file with one "
+            "blank row -> the total is one short.": (False, 1, False),
             "R1: met\nR2: cannot tell\nR3: met": (False, 1, False),
-            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: Breaks the count. Evidence: wc -l prints 3.": (False, 1, False),
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: Counts the header. Evidence: fails: a file of two rows "
+            "-> the total is 3.": (False, 1, False),
         }
         for answer, (passed, proven, right) in cases.items():
             with self.subTest(answer=answer):
@@ -243,11 +312,14 @@ class TestJudge(unittest.TestCase):
                                  f"A-7 direct is {'right' if right else 'not right'} first time.")
 
     def test_a_finding_line_is_read_into_its_parts(self) -> None:
-        self.world.answer("R1: met\nR2: met\nR3: met\nF1: docs/a b.md:12: Says 3. Evidence: R1 needs the total.")
+        self.world.answer("R1: not met\nR2: met\nR3: met\nF1: docs/a b.md:12: Says 3. Evidence: breaks R1: it prints "
+                          "no total.\nF2: report.txt:1: Terse. Evidence: none")
         self.world.judge("A-7", "generation-one")
         self.assertEqual(self.world.verdicts()[0]["review"]["findings"], [
-            {"finding": "F1", "file": "docs/a b.md", "line": 12, "what": "Says 3.", "evidence": "R1 needs the total.",
-             "proven": True}])
+            {"finding": "F1", "file": "docs/a b.md", "line": 12, "what": "Says 3.",
+             "evidence": "breaks R1: it prints no total.", "requirement": "R1", "proven": True},
+            {"finding": "F2", "file": "report.txt", "line": 1, "what": "Terse.", "evidence": "none",
+             "requirement": None, "proven": False}])
 
     def test_an_answer_outside_the_fixed_lines_gives_no_verdict(self) -> None:
         cases = {
@@ -260,6 +332,21 @@ class TestJudge(unittest.TestCase):
             "R1: met\nR2: met\nR3: met\nF1: report.txt: no line. Evidence: x": "the answer is not in the fixed lines",
             "R1: met\nR2: met\nR3: met\nF2: report.txt:1: Skips F1. Evidence: none": "the answer is not in the fixed lines",
             "": "the answer is not in the fixed lines",
+            # A finding with no text saying what is wrong.
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: Evidence: none": "the answer is not in the fixed lines",
+            # Evidence in none of the forms.
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: Odd. Evidence: Maybe.": "the answer is not in the fixed lines",
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: Odd. Evidence: fails: a blank row": "the answer is not in "
+            "the fixed lines",
+            # A requirement not met with no proven finding that names it.
+            "R1: met\nR2: not met\nR3: met": "the answer is not in the fixed lines",
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No blank rows. Evidence: none": "the answer is not in "
+            "the fixed lines",
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No total. Evidence: breaks R1: no total.": "the answer is "
+            "not in the fixed lines",
+            # A finding that names a requirement the ticket does not have.
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Extra. Evidence: breaks R4: no such.": "the answer is not in "
+            "the fixed lines",
         }
         for answer, reason in cases.items():
             with self.subTest(answer=answer):
@@ -270,14 +357,16 @@ class TestJudge(unittest.TestCase):
                 self.assertEqual((verdict["right_first_time"], verdict["review"]["passed"], verdict["review"]["reason"]),
                                  (None, None, reason))
                 self.assertEqual(result.stdout.splitlines()[-1], "No verdict for A-7 generation-one.")
-                self.assertEqual((self.world.state / "judged/A-7-generation-one/review.txt").read_text(), answer)
+                self.assertEqual(self.world.saved(verdict["review"]["lines"]), answer)
 
     def test_a_review_session_that_fails_gives_no_verdict(self) -> None:
         cases = [("R1: met\nR2: met\nR3: met", 1, None, "the review session failed with exit 1"),
                  (None, 0, json.dumps({"type": "result", "is_error": True, "result": "R1: met\nR2: met\nR3: met"}),
                   "the review session ended in an error"),
                  (None, 0, "not JSON", "the review session gave no result"),
-                 (None, 0, json.dumps([{"type": "system", "subtype": "init"}]), "the review session gave no result")]
+                 (None, 0, json.dumps([{"type": "system", "subtype": "init"}]), "the review session gave no result"),
+                 (None, 0, json.dumps({"type": "assistant", "result": "R1: met\nR2: met\nR3: met"}),
+                  "the review session gave no result")]
         for text, exit, raw, reason in cases:
             with self.subTest(exit=exit, raw=raw):
                 self.world.answer(text or "", exit, raw)
@@ -296,8 +385,7 @@ class TestJudge(unittest.TestCase):
         result = self.world.judge("A-7", "generation-one")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.world.verdicts()[0]["review"]["requirements"], {"R1": "met", "R2": "met", "R3": "met"})
-        self.assertEqual((self.world.state / "judged/A-7-generation-one/review.txt").read_text(),
-                         "R1: met\nR2: met\nR3: met")
+        self.assertEqual(self.world.saved(self.world.verdicts()[0]["review"]["lines"]), "R1: met\nR2: met\nR3: met")
 
     def test_the_review_changes_neither_the_version_nor_its_repo(self) -> None:
         clone = self.world.replay_clone
@@ -305,7 +393,7 @@ class TestJudge(unittest.TestCase):
                   git(clone, "status", "--porcelain"), (clone / "counter").read_text())
         self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from", str(clone))
         # The stand-in wrote app.txt and removed counter in its working folder, which is a copy.
-        self.assertEqual(self.world.record("files").split(), ["counter", "report.txt"])
+        self.assertIn("counter", self.world.record("files").split())
         after = (git(clone, "rev-parse", "HEAD"), git(clone, "rev-parse", f"{self.world.replay}^{{tree}}"),
                  git(clone, "status", "--porcelain"), (clone / "counter").read_text())
         self.assertEqual(after, before)
@@ -318,6 +406,47 @@ class TestJudge(unittest.TestCase):
         verdicts = self.world.verdicts()
         self.assertEqual([(verdict["version"], verdict["review"]["passed"]) for verdict in verdicts],
                          [("direct", True), ("generation-one", False)])
+        # Only the files the two lines name are kept.
+        self.assertEqual(list(self.world.files()), sorted(
+            path for verdict in verdicts
+            for path in (verdict["check"]["output"], verdict["review"]["lines"], verdict["review"]["prompt"])))
+
+    def test_a_failed_attempt_leaves_the_earlier_verdict_and_its_files_as_they_were(self) -> None:
+        self.assertEqual(self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from",
+                                          str(self.world.replay_clone)).returncode, 0)
+        verdicts, files = self.world.verdicts(), self.world.files()
+        # A second attempt whose check fails, and whose repo is taken away during its review.
+        clone, broken = self.world.version("Break it", {"broken": b"x\n"})
+        self.world.breaking = str(clone / ".git")
+        result = self.world.judge("A-7", "direct", "--commit", broken, "--from", str(clone))
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, "judge: the version's commit or its tree changed during the review.\n")
+        self.assertEqual(self.world.verdicts(), verdicts)
+        self.assertEqual(self.world.files(), files)
+
+    def test_a_text_file_that_is_not_utf8_reaches_the_reviewer(self) -> None:
+        clone, legacy = self.world.version("Latin-1 notes", {"legacy.txt": b"caf\xe9\n"})
+        result = self.world.judge("A-7", "direct", "--commit", legacy, "--from", str(clone))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("+++ b/legacy.txt\n@@ -0,0 +1 @@\n+caf\\xe9\n", self.world.record("prompt"))
+
+    def test_the_check_is_the_one_the_draw_reads_from_the_repo_list(self) -> None:
+        # Two entries for one repo: the draw keeps the last, so the judge runs the last one's check too.
+        (self.world.state / "repos.json").write_text(json.dumps([
+            {"repo": REPO, "check": "false"}, {"repo": REPO.upper(), "check": CHECK, "setup": SETUP}]))
+        self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
+        [verdict] = self.world.verdicts()
+        self.assertEqual(self.world.saved(verdict["check"]["output"]),
+                         f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 0\n")
+
+    def test_a_repo_list_the_draw_refuses_is_an_error(self) -> None:
+        path = self.world.state / "repos.json"
+        path.write_text(json.dumps([{"repo": REPO, "check": "   "}]))
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f'judge: {path} must be a list of {{"repo": "owner/name", "check": "...", '
+                                        '"setup": "..."} objects, with setup optional.\n')
+        self.assertFalse((self.world.state / "verdicts.jsonl").exists())
 
     def test_bad_usage_exits_2_with_the_help(self) -> None:
         for args in ([], ["A-7"], ["a-7", "generation-one"], ["A-07", "generation-one"], ["A-7", "Direct"],

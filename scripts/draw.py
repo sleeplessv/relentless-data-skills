@@ -39,6 +39,11 @@ OPERATORS = sorted([";;&", ";;", ";&", "&&", "||", "|&", "&>>", "&>", ">>", "<<-
 REDIRECTS = {"<", ">", ">>", "<<", "<<-", "<<<", "<&", ">&", "&>", "&>>", "<>", ">|"}
 # Reserved words that put the command after them in a branch, a loop or a group.
 COMPOUND = {"if", "then", "else", "elif", "while", "until", "do", "{", "for", "case", "select", "function"}
+OPENERS = {"if", "while", "until", "for", "case", "select", "{"}  # each opens a level a closer ends
+CLOSERS = {"fi", "done", "esac", "}"}
+# Commands that can end the shell, skip what follows, or run text as commands, so a later command may not run.
+STOPPERS = {"exit", "exec", "return", "logout", "set", "trap", "kill", "source", ".", "eval", "break", "continue"}
+LIST_ENDS = {";", "\n", "&", ";;", ";&", ";;&"}
 # Each prefix that runs the command after it, with its options that take a value.
 PREFIXES = {"!": (), "time": (), "nohup": (), "command": (), "exec": ("-a",), "env": ("-u", "-C", "-P")}
 # CommonMark's HTML blocks of kinds 1 to 6: what starts one and what ends it; a blank line ends kinds 6 and 7.
@@ -74,13 +79,20 @@ The pool is every ticket that meets all of these:
   time GitHub gives for the PR's opening falls between the call and its
   result, give or take {CLOCK_SLACK.seconds // 60} minute. No other session opened or may have opened
   the PR, and the session opened or may have opened no other PR.
-- A call runs `gh pr create` for certain when, read as shell words, it is the
-  command's first command, or comes after only `cd` commands each followed by
-  &&, ; or a new line, and no pipe or & follows it. Assignments and the
-  prefixes !, time, command, exec, env and nohup may come before it, and gh
-  may be named by its path. A call that runs it anywhere else, as in a branch,
-  a loop, a group, a pipeline, the background or a command substitution, or
-  that cannot be read, may have opened the PR its result names, if GitHub's
+- A call runs `gh pr create` for certain when the shell surely started it,
+  given the call's words and that it exited 0. Read as shell words, it is a
+  command outside any branch, loop, group, subshell or function, in any place
+  of a pipeline, the call holds no case, and no command before it can end the
+  shell or skip what follows: exit, exec with a command, return, logout, set,
+  trap, eval, source, ., kill, break, continue or a command named by an
+  expansion, even inside a branch or group. Its pipeline comes
+  first in its list, the commands up to the next ;, & or new line, or its
+  list is the last, not ended by &, and && joins every pipeline from just
+  before it to the list's end. Assignments and the prefixes !, time, command,
+  exec, env and nohup may come before it, gh may be named by its path, and a
+  command substitution in a command started for certain counts the same way.
+  A call that runs it anywhere else, as after || or in a branch, or that
+  cannot be read, may have opened the PR its result names, if GitHub's
   time falls in its span. So may a call whose line or whose result's line
   has a time that is missing, has no zone or is at an end of the calendar.
   A PR in a repo outside repos.json counts on the command alone: opened or
@@ -260,12 +272,14 @@ def closing(text: str, at: int, opener: str = "(", closer: str = ")") -> int:
 
 
 def shell_tokens(command: str) -> tuple[list[tuple], list[str]] | None:
-    """A command's tokens, and the text of each command it substitutes; None when it does not parse.
+    """A command's tokens, and each command it substitutes; None when it does not parse.
 
     A token is ("op", operator) or ("word", text, exact, quoted, assignment). Quotes and escapes are
-    decoded. A word that holds an expansion is not exact, and holds "\\0" where the expansion stands."""
+    decoded. A word that holds an expansion is not exact, and holds "\\0" where the expansion stands. A
+    substitution is (its text, the index of the token that holds it, whether it runs whenever its word is
+    expanded); one inside ${...} may not run."""
     tokens: list[tuple] = []
-    inner: list[str] = []
+    inner: list[tuple[str, int, bool]] = []
     word: list | None = None  # [text, exact, quoted, assignment]
 
     def add(text: str, quoted: bool = False, exact: bool = True) -> None:
@@ -281,7 +295,7 @@ def shell_tokens(command: str) -> tuple[list[tuple], list[str]] | None:
     def substitution(start: int, end: int, quoted: bool) -> int:
         if end < 0:
             raise ValueError("unclosed substitution")
-        inner.append(command[start:end])
+        inner.append((command[start:end], len(tokens), True))
         add("\0", quoted, exact=False)
         return end + 1
 
@@ -295,6 +309,8 @@ def shell_tokens(command: str) -> tuple[list[tuple], list[str]] | None:
             end = closing(command, at + 2, "{", "}") + 1
             if not end:
                 raise ValueError("unclosed expansion")
+            if found := re.search(r"\$\(|`", command[at:end]):  # as in ${name:-$(command)}, which may run
+                inner.append((command[at + found.end():end - 1], len(tokens), False))
         elif following.isalpha() or following == "_":
             while end < len(command) and (command[end].isalnum() or command[end] == "_"):
                 end += 1
@@ -396,23 +412,29 @@ def strip_here_documents(command: str) -> tuple[str, list[str]]:
     return "\n".join(kept), expanded
 
 
-def runs_gh_pr_create(command: str) -> str | None:
-    """Whether a Bash command runs `gh pr create`: "opens" when it does for certain, "maybe" when it may or
-    when the command cannot be read, None when it does not, as when it only holds the words as text.
+def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
+    """Whether a Bash command runs `gh pr create`: "opens" when the shell surely started it, "maybe" when
+    it may have or when the command cannot be read, None when it does not, as when it only holds the
+    words as text. `exited_zero` says the command is known to have exited 0.
 
-    For certain means, read as shell words: the first command, or one after only `cd` commands each
-    followed by &&, ; or a new line, and itself followed by no pipe and no &. Assignments and the
-    prefixes in PREFIXES may come before `gh`, and `gh` may be named by a path. Anywhere else, inside a
-    branch, a loop, a group, a pipeline, the background or a command substitution, it may run."""
+    Surely started, read as shell words: `gh pr create` is a simple command outside any branch, loop,
+    group, subshell or function, in any place of its pipeline, the command holds no case, and no simple
+    command before it, at any depth, is one of the STOPPERS, an exec that runs a command, or a command
+    named by an expansion, any of which can end the shell or skip what follows. Its pipeline
+    comes first in its list, the commands up to the next ;, & or new line; or its list is the command's
+    last, not ended by &, and && joins every pipeline from just before it to the list's end, so an exit of 0 means each
+    one ran. A command substitution in a word of a surely started command counts when its own command
+    surely starts `gh pr create`, its exit unknown."""
     command, expanded = strip_here_documents(command)
     read = shell_tokens(command)
     if read is None:
         return "maybe"
     tokens, inner = read
-    commands: list[tuple[list[tuple], str]] = []  # each simple command's words, and the operator after it
+    # Each simple command: its words, its tokens' span, the operator after it, and its level of nesting.
+    commands: list[dict] = []
     words: list[tuple] = []
-    target = False  # the next word names a redirection's file
-    for token in [*tokens, ("op", "\n")]:
+    target, depth, first = False, 0, 0  # target: the next word names a redirection's file
+    for index, token in enumerate([*tokens, ("op", "\n")]):
         if token[0] == "word":
             if not target:
                 words.append(token)
@@ -420,19 +442,85 @@ def runs_gh_pr_create(command: str) -> str | None:
         elif token[1] in REDIRECTS:
             target = True
         else:
-            commands.append((words, token[1]))
-            words, target = [], False
-    found = None
-    for number, (words, after) in enumerate(commands):
-        kind = gh_pr_create(words)
-        if kind == "opens" and after not in ("|", "|&", "&") and all(
-                (not earlier or earlier[0][1] == "cd" and earlier[0][2] and not earlier[0][4]) and (
-                    op in ("&&", ";", "\n") if earlier else op == "\n") for earlier, op in commands[:number]):
-            return "opens"
-        found = found or kind
-    if found or any(runs_gh_pr_create(text) for text in inner + expanded):
+            level = depth
+            for word in words:  # reserved words count only at the start of a command
+                if word[3] or word[1] not in COMPOUND | CLOSERS | {"!"}:
+                    break
+                if word[1] in OPENERS:
+                    depth += 1
+                elif word[1] in CLOSERS:
+                    depth -= 1
+                level = max(level, depth) if word[1] not in CLOSERS else level
+            commands.append({"words": words, "span": range(first, index), "after": token[1],
+                             "level": level if level else depth, "case": any(
+                                 not word[3] and word[1] == "case" for word in words)})
+            depth += {"(": 1, ")": -1}.get(token[1], 0)
+            words, target, first = [], False, index + 1
+    # Group the commands into lists of pipelines: (the list, the pipeline's place, and the and-or operators).
+    lists: list[list[list[dict]]] = [[[]]]
+    for item in commands:
+        lists[-1][-1].append(item)
+        if item["after"] in ("&&", "||"):
+            lists[-1].append([])
+        elif item["after"] in LIST_ENDS | {"(", ")"}:
+            lists.append([[]])
+    lists = [pipelines for pipelines in lists if any(item["words"] for pipeline in pipelines for item in pipeline)]
+    surely, found = True, None  # surely: no command so far can stop the ones after it
+    for number, pipelines in enumerate(lists):
+        last = number == len(lists) - 1 and pipelines[-1][-1]["after"] != "&"
+        for place, pipeline in enumerate(pipelines):
+            joined = [later[-1]["after"] for later in pipelines[place - 1:-1]] if place else []
+            started = surely and (place == 0 or exited_zero and last and all(op == "&&" for op in joined))
+            for item in pipeline:
+                started_here = started and item["level"] == 0 and not any(other["case"] for other in commands)
+                kind = gh_pr_create(item["words"])
+                if kind == "opens" and started_here:
+                    return "opens"
+                found = found or kind
+                for text, at, runs in inner:
+                    if at in item["span"]:
+                        within = runs_gh_pr_create(text, exited_zero=False)
+                        if within == "opens" and runs and started_here:
+                            return "opens"
+                        found = found or within
+            for item in pipeline:
+                if stops(item["words"]):
+                    surely = False
+    if found or any(runs_gh_pr_create(text) for text in expanded):
         return "maybe"
     return None
+
+
+def command_name(words: list[tuple]) -> tuple[int, tuple | None]:
+    """Where a simple command's name stands, past reserved words, assignments and the prefixes that run it."""
+    at = 0
+    while at < len(words):
+        _, text, exact, quoted, assignment = words[at]
+        if assignment or not quoted and text in COMPOUND | CLOSERS:
+            at += 1
+        elif text in PREFIXES and text != "exec":
+            at += 1
+            while at < len(words) and (words[at][1].startswith("-") or text == "env" and "=" in words[at][1]):
+                option = words[at][1]
+                at += 1
+                if option == "--":
+                    break
+                if option in PREFIXES[text]:
+                    at += 1
+        else:
+            return at, words[at]
+    return at, None
+
+
+def stops(words: list[tuple]) -> bool:
+    """Whether a simple command can end the shell or skip what follows it: one of the STOPPERS, an exec
+    that runs a command, or a command named by an expansion."""
+    at, name = command_name(words)
+    if name is None:
+        return False
+    if name[1] == "exec":
+        return at + 1 < len(words)  # exec with only redirections changes where output goes
+    return not name[2] or name[1] in STOPPERS
 
 
 def gh_pr_create(words: list[tuple]) -> str | None:

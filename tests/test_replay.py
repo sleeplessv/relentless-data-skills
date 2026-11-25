@@ -29,7 +29,9 @@ BODY = "## Acceptance criteria\n\n- [ ] The report prints the total."
 
 GH = r"""#!/bin/sh
 printf '%s\n' "$*" >> "$GH_LOG"
-if [ "$1 $2" = "repo clone" ]; then exec git clone -q "$GH_REMOTES/${3#*/}.git" "$4"; fi
+# GitHub reads a repo's name in any case; the remotes here are named in lower case.
+name=$(printf '%s' "${3#*/}" | tr '[:upper:]' '[:lower:]')
+if [ "$1 $2" = "repo clone" ]; then exec git clone -q "$GH_REMOTES/$name.git" "$4"; fi
 echo "stand-in gh: no answer for $*" >&2
 exit 1
 """
@@ -44,7 +46,9 @@ exit 1
 # make the session misbehave: STANDIN_LOG set to "none" writes no log, to "bad" writes a
 # line that is not JSON, to "no-usage" leaves out the response that holds token counts;
 # STANDIN_TRAP names a file that a post-commit hook and a required clean filter, which
-# the session leaves in the clone, would create if anything ran them.
+# the session leaves in the clone, would create if anything ran them. With STANDIN_TRACK
+# set, the session's only change is skills.lock, which the repo's .gitignore matches: it
+# adds the file to git with -f and commits it, and writes no replayed.txt.
 CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -77,7 +81,13 @@ if os.environ.get("STANDIN_LOG") != "no-usage":
 text = "".join(json.dumps(line) + "\n" for line in lines)
 if os.environ.get("STANDIN_LOG") != "none":
     (folder / (session + ".jsonl")).write_text("not json\n" + text if os.environ.get("STANDIN_LOG") == "bad" else text)
-(cwd / "replayed.txt").write_text("the replay's change\n")
+if os.environ.get("STANDIN_TRACK"):
+    import subprocess
+    (cwd / "skills.lock").write_text("pinned\n")
+    subprocess.run(["git", "add", "-f", "skills.lock"], check=True)
+    subprocess.run(["git", "commit", "-q", "-m", "pin"], check=True)
+else:
+    (cwd / "replayed.txt").write_text("the replay's change\n")
 if os.environ.get("STANDIN_TRAP"):
     trap = os.environ["STANDIN_TRAP"]
     for name, word in (("hooks/post-commit", "hook"), ("trap-filter", "filter")):
@@ -107,7 +117,7 @@ def run_git(*args: str, cwd: Path, env: dict[str, str]) -> str:
 class World:
     """A real repo with one merged change, a machine directory naming its ticket, and the stand-ins."""
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, branch: str = "main") -> None:
         self.root = root
         self.home = root / "home"
         self.state = self.home / ".local" / "state" / "deliver"
@@ -121,14 +131,15 @@ class World:
         for name, text in (("gh", GH), ("claude", CLAUDE)):
             (self.bin / name).write_text(text)
             (self.bin / name).chmod(0o755)
-        # Every git the tests start, and the replay's, reads this file and no other settings. Its default
-        # branch name differs from the repo's, as a user's can.
+        # Every git the tests start reads this file as its global settings, and no system settings; the
+        # replay's own git steps read neither. Its default branch name differs from the repo's, as a user's can.
         self.gitconfig = root / "gitconfig"
         self.gitconfig.write_text("[init]\n\tdefaultBranch = trunk\n[user]\n\tname = t\n\temail = t@example.com\n")
         work = root / "work"
         work.mkdir()
-        self.git("init", "-q", "-b", "main", cwd=work)
+        self.git("init", "-q", "-b", branch, cwd=work)
         (work / "README.md").write_text("A report.\n")
+        (work / ".gitignore").write_text("*.lock\n")
         self.git("add", ".", cwd=work)
         self.git("commit", "-q", "-m", "start", cwd=work)
         self.base = self.git("rev-parse", "HEAD", cwd=work)
@@ -326,7 +337,7 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         [version] = self.world.versions()
         commit, store = version["commit"], self.world.store
-        self.assertEqual(self.git("rev-parse", "refs/heads/direct", cwd=store), commit)
+        self.assertEqual(self.git("rev-parse", "refs/replay/direct", cwd=store), commit)
         self.assertEqual(self.git("show", f"{commit}:replayed.txt", cwd=store), "the replay's change")
         self.assertEqual(self.git("show", f"{commit}:.setup-done", cwd=store), "")
         self.assertEqual(version, {
@@ -354,17 +365,20 @@ class ReplayTest(unittest.TestCase):
                          "the replay's change")
         self.assertEqual(result.stdout, f"Recorded A-7 direct at {version['commit']}: session exit 2, "
                                         "skills unknown, marked not direct.\n")
+        [row] = self.world.rows()
+        self.assertEqual((row["session"], row["skills"], row["total_tokens"]), (self.session(), None, None))
 
     def test_a_log_that_cannot_be_scanned_still_records_the_version(self) -> None:
         result = self.replay("A", "7", STANDIN_LOG="bad")
         self.assertEqual(result.returncode, 0, result.stderr)
         [version] = self.world.versions()
         self.assertEqual((version["exit_status"], version["skills"], version["not_direct"]), (0, None, True))
-        self.assertEqual(self.world.rows(), [])
         session = self.session()
+        [row] = self.world.rows()
+        self.assertEqual((row["session"], row["skills"], row["total_tokens"]), (session, None, None))
         log = next(self.world.config.glob(f"projects/*/{session}.jsonl"))
         self.assertEqual(result.stderr, f"replay: the session's log could not be scanned ({log}:1: not a JSON line); "
-                                        f"`python3 scripts/scan.py {session}` reruns the scan.\n")
+                                        "its row is left blank.\n")
 
     def test_a_relative_claude_config_dir_still_finds_the_session_s_log(self) -> None:
         result = self.replay("A", "7", CLAUDE_CONFIG_DIR=os.path.relpath(self.world.config, self.world.root))
@@ -372,6 +386,36 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(version["skills"], [])
         self.assertEqual(len(self.world.rows()), 1)
+
+    def test_a_file_the_session_added_to_git_past_an_ignore_rule_is_in_the_version(self) -> None:
+        # With no log, the tracked file is also what tells a session that ran from a refused start.
+        result = self.replay("A", "7", STANDIN_TRACK="1", STANDIN_LOG="none")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(self.git("show", f"{version['commit']}:skills.lock", cwd=self.world.store), "pinned")
+
+    def test_an_untouched_file_keeps_its_base_bytes_whatever_the_operator_s_git_settings(self) -> None:
+        with open(self.world.gitconfig, "a") as config:
+            config.write("[core]\n\tautocrlf = true\n")
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        changed = self.git("diff", "--name-only", self.world.base, version["commit"], cwd=self.world.store)
+        self.assertEqual(changed.split(), [".setup-done", "replayed.txt"])
+
+    def test_no_file_of_the_version_s_repo_is_shared_with_the_clone(self) -> None:
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        def identities(folder: Path) -> set[tuple[int, int]]:
+            return {(path.stat().st_dev, path.stat().st_ino) for path in folder.rglob("*") if path.is_file()}
+        self.assertEqual(identities(self.world.store) & identities(self.world.clone), set())
+
+    def test_a_label_key_that_is_not_an_object_is_an_error(self) -> None:
+        self.world.write("project-labels.json", [])
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, "replay: project A is not in both project-labels.json and repos.json.\n")
 
     def test_the_session_is_scanned_into_a_row(self) -> None:
         result = self.replay("A", "7")
@@ -428,8 +472,19 @@ class ReplayTest(unittest.TestCase):
         shutil.rmtree(self.world.store)
         self.assertEqual(self.replay("A", "7").returncode, 0)
         [version] = self.world.versions()
-        self.assertEqual(version["commit"], self.git("rev-parse", "refs/heads/direct", cwd=self.world.store))
+        self.assertEqual(version["commit"], self.git("rev-parse", "refs/replay/direct", cwd=self.world.store))
         self.assertEqual(len(self.world.rows()), 2)
+
+    def test_the_version_is_recorded_beside_a_default_branch_named_under_it(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.world = World(Path(temp.name).resolve(), branch="direct/release")
+        self.git = self.world.git
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(self.git("rev-parse", "refs/replay/direct", cwd=self.world.store), version["commit"])
+        self.assertEqual(self.git("rev-parse", "origin/HEAD", cwd=self.world.clone), self.world.base)
 
     def test_a_ticket_in_no_replay_set_is_an_error(self) -> None:
         result = self.replay("A", "9")
@@ -447,6 +502,7 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("Usage: python3 scripts/replay.py LABEL TICKET", result.stdout)
         self.assertFalse(self.world.starts.exists())
+
 
 
 if __name__ == "__main__":

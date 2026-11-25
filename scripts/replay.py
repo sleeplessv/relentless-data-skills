@@ -28,7 +28,7 @@ REGISTRIES = ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
 KEPT = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN")
 DROPPED = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR")
 ORIGIN = "replay-origin.git"  # the clone's remote, inside its .git/
-REF = f"refs/heads/{VERSION}"  # the version's commit, in the version's repo
+REF = f"refs/replay/{VERSION}"  # the version's commit, in the version's repo, outside refs/heads/ where branches live
 
 HELP = f"""\
 Rerun one ticket of the replay set with one agent, as its `{VERSION}` version.
@@ -43,23 +43,28 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    clones the repo that project-labels.json gives the label with `gh repo
    clone`. It copies the history up to the entry's base_commit, and nothing
    after it, on the default branch's name, into the version's repo and into
-   the clone, whose only remote is a copy inside its own .git/. The full clone
-   is removed before the session.
+   the clone, whose only remote is a copy inside its own .git/. The clone and
+   its remote are copied without sharing a file with the version's repo, and
+   checked out with git's own settings only, as step 4 reads them. The full
+   clone is removed before the session.
 2. Runs the repo's setup command from repos.json, where it has one, with sh in
    the clone.
 3. Starts one headless Claude Code session in the clone: `claude -p` on the
    entry's model, with the ticket's title and body as its whole prompt on
    standard input, prompts switched off (--permission-mode bypassPermissions),
    and the confinement below.
-4. Commits whatever the clone's working tree holds into the version's repo,
-   with git's own settings only (none from the clone or the user), so nothing
-   the session left in the clone's .git/ runs. A start that left no session
-   log and changed nothing is taken as no session: nothing is recorded.
-5. Scans the session into scan-rows.jsonl.
+4. Commits whatever the clone's working tree holds into the version's repo:
+   every file git would add, and every file or link the clone's index lists,
+   ignored or not. Its git takes no settings but git's own: none from the clone's
+   .git/, the user's or the system's files, or GIT_* variables, so nothing the
+   session left in the clone's .git/ runs. A start that left no session log
+   and changed nothing is taken as no session: nothing is recorded.
+5. Scans the session. A log that is missing or cannot be scanned gives the
+   scan's row of blanks.
 6. Records the commit as the ticket's {VERSION} version with the session's exit
-   status. A session that loaded a skill of either generation
-   ({", ".join(MARKED)}), or whose skills the scan cannot tell,
-   is marked not direct.
+   status, then writes the row to scan-rows.jsonl. A session that loaded a
+   skill of either generation ({", ".join(MARKED)}), or whose
+   skills the scan cannot tell, is marked not direct.
 
 Every session starts with --setting-sources project,local, --strict-mcp-config
 with no MCP server, and these settings: the command sandbox on, a start refused
@@ -79,7 +84,8 @@ Files, all in the machine directory:
                 judged. Its remote is .git/{ORIGIN}.
   replays/<label>-<ticket>-{VERSION}.git/
                 The version's repo, out of the session's reach: the history
-                up to base_commit, and the version's commit at {REF}.
+                up to base_commit, the version's commit at {REF}, and
+                replay-index, the index the commit was written from.
   versions.jsonl
                 One JSON line per ticket and version, replaced when the same
                 one is recorded again: label, ticket, version, commit, repo,
@@ -89,10 +95,10 @@ Files, all in the machine directory:
                 true.
 
 Exit 0: the version is recorded, whatever the session's exit status; a scan
-that failed is reported, and `python3 scripts/scan.py SESSION` reruns it. Exit
-1: an error; no version is recorded, and what the replay made is removed unless
-a session ran. A clone or version repo already in place is an error: remove
-both to replay the ticket again. Exit 2: bad usage."""
+that failed is reported. Exit 1: an error; no version is recorded, and what
+the replay made is removed unless a session ran. A clone or version repo
+already in place is an error: remove both to replay the ticket again. Exit 2:
+bad usage."""
 
 
 class ReplayError(Exception):
@@ -103,8 +109,14 @@ def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedPr
     return subprocess.run(args, text=True, capture_output=True, stdin=subprocess.DEVNULL, env=env)
 
 
+def plain() -> dict[str, str]:
+    """The environment for the replay's own git: no GIT_* variable from the caller, and no user or system settings."""
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    return {**env, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
+
+
 def git(where: Path, *args: str, env: dict[str, str] | None = None) -> str:
-    result = run("git", "-C", str(where), *args, env=env)
+    result = run("git", "-C", str(where), *args, env=env or plain())
     if result.returncode:
         raise ReplayError(f"`git {args[0]}` failed with exit {result.returncode}: {result.stderr.strip()}")
     return result.stdout.strip()
@@ -120,7 +132,8 @@ def entry(drawer: draw.Draw, label: str, ticket: int) -> dict:
 
 def repo(drawer: draw.Draw, label: str) -> dict:
     path = drawer.state / "project-labels.json"
-    name = (draw.read_json(path) if path.is_file() else {}).get(label)
+    labels = draw.read_json(path) if path.is_file() else {}
+    name = labels.get(label) if isinstance(labels, dict) else None
     found = drawer.repos().get(name.lower()) if isinstance(name, str) else None
     if not found:
         raise ReplayError(f"project {label} is not in both project-labels.json and repos.json.")
@@ -161,21 +174,19 @@ def environment() -> dict[str, str]:
     return env
 
 
-def trusted(store: Path, clone: Path) -> dict[str, str]:
-    """Git with the version's repo as its repository and the clone as its working tree, and no settings but
-    git's own: nothing the session wrote in the clone's .git/ (hooks, filters, config) and nothing in the
-    user's or the system's git settings applies."""
-    return {**os.environ, "GIT_DIR": str(store), "GIT_WORK_TREE": str(clone),
-            "GIT_INDEX_FILE": str(store / "replay-index"), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_AUTHOR_NAME": "replay",
-            "GIT_AUTHOR_EMAIL": "replay@localhost", "GIT_COMMITTER_NAME": "replay",
-            "GIT_COMMITTER_EMAIL": "replay@localhost"}
+def trusted(store: Path, clone: Path, index: str = "replay-index") -> dict[str, str]:
+    """Git with the version's repo as its repository and the clone as its working tree, in the plain
+    environment: nothing the session wrote in the clone's .git/ (config, hooks, filters) applies."""
+    return {**plain(), "GIT_DIR": str(store), "GIT_WORK_TREE": str(clone), "GIT_INDEX_FILE": str(store / index),
+            "GIT_LITERAL_PATHSPECS": "1", "GIT_AUTHOR_NAME": "replay", "GIT_AUTHOR_EMAIL": "replay@localhost",
+            "GIT_COMMITTER_NAME": "replay", "GIT_COMMITTER_EMAIL": "replay@localhost"}
 
 
-def cut(drawer: draw.Draw, label: str, found: dict, clone: Path, store: Path) -> None:
+def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> None:
     """Fill the version's repo and the empty clone folder with the history up to base_commit and nothing after it."""
-    with tempfile.TemporaryDirectory(dir=drawer.state) as work:
+    with tempfile.TemporaryDirectory(dir=store.parent) as work:
         source = Path(work) / "source"
-        result = run("gh", "repo", "clone", repo(drawer, label)["repo"], str(source))
+        result = run("gh", "repo", "clone", source_repo, str(source))
         if result.returncode:  # gh's message can name the repo, so it is not printed
             raise ReplayError(f"`gh repo clone` failed for project {label} with exit {result.returncode}.")
         base = found["base_commit"]
@@ -183,13 +194,29 @@ def cut(drawer: draw.Draw, label: str, found: dict, clone: Path, store: Path) ->
         branch = git(source, "branch", "--show-current")  # the default branch, so origin/<it> is the base
         git(source, "init", "-q", "--bare", f"--initial-branch={branch}", str(store))
         git(source, "push", "-q", str(store), f"{base}:refs/heads/{branch}")
-    result = run("git", "clone", "-q", str(store), str(clone))  # origin/HEAD follows the store's HEAD
-    if result.returncode:
-        raise ReplayError(f"`git clone` of the local copy failed with exit {result.returncode}.")
-    git(clone, "clone", "-q", "--bare", str(store), str(clone / ".git" / ORIGIN))
+    # --no-local copies the objects instead of hard-linking them, so no file of the store is the clone's.
+    # origin/HEAD follows the store's HEAD.
+    git(store, "clone", "-q", "--no-local", str(store), str(clone))
+    git(clone, "clone", "-q", "--bare", "--no-local", str(store), str(clone / ".git" / ORIGIN))
     git(clone, "remote", "set-url", "origin", str(clone / ".git" / ORIGIN))
     for key, value in (("user.name", "replay"), ("user.email", "replay@localhost"), ("commit.gpgsign", "false")):
         git(clone, "config", key, value)
+
+
+def tracked(store: Path, clone: Path) -> list[str]:
+    """The paths the clone's index lists, read from a copy of the index file as data; none if it cannot be read."""
+    index = clone / ".git" / "index"
+    if index.is_symlink() or not index.is_file():
+        return []
+    shutil.copyfile(index, store / "replay-clone-index")
+    listed = run("git", "-C", str(clone), "ls-files", "-z", env=trusted(store, clone, "replay-clone-index"))
+    (store / "replay-clone-index").unlink()
+    paths = [Path(path) for path in listed.stdout.split("\0") if path] if listed.returncode == 0 else []
+    # Each path must name a file or link in the clone itself: not under .git/, and not reached through a link
+    # or as a folder, which a forced add would take whole, ignored files and all.
+    return [str(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
+            and not any((clone / Path(*path.parts[:end])).is_symlink() for end in range(1, len(path.parts)))
+            and ((clone / path).is_symlink() or (clone / path).is_file())]
 
 
 def snapshot(store: Path, clone: Path, base: str) -> str:
@@ -197,6 +224,11 @@ def snapshot(store: Path, clone: Path, base: str) -> str:
     env = trusted(store, clone)
     git(clone, "read-tree", base, env=env)
     git(clone, "add", "-A", env=env)
+    paths = tracked(store, clone)
+    if paths:
+        (store / "replay-tracked").write_text("\0".join(paths))
+        git(clone, "add", "-f", f"--pathspec-from-file={store / 'replay-tracked'}", "--pathspec-file-nul", env=env)
+        (store / "replay-tracked").unlink()
     return git(clone, "write-tree", env=env)
 
 
@@ -226,6 +258,7 @@ def replay(label: str, ticket: int) -> int:
     replays.mkdir(mode=0o700, exist_ok=True)
     name = f"{label}-{ticket}-{VERSION}"
     clone, store = replays / name, replays / f"{name}.git"
+    listed = repo(drawer, label)
     try:
         clone.mkdir(mode=0o700)  # the ticket's, from here on, until this replay ends
     except FileExistsError:
@@ -236,8 +269,8 @@ def replay(label: str, ticket: int) -> int:
         if store.exists():
             raise ReplayError(f"{store} is already in place. Remove it and {clone} to replay the ticket again.")
         made.append(store)
-        cut(drawer, label, found, clone, store)
-        setup = repo(drawer, label).get("setup")
+        cut(listed["repo"], label, found, clone, store)
+        setup = listed.get("setup")
         if setup:
             code = subprocess.run(setup, shell=True, cwd=clone, stdin=subprocess.DEVNULL).returncode
             if code:
@@ -257,20 +290,19 @@ def replay(label: str, ticket: int) -> int:
     commit = git(store, "commit-tree", "--no-gpg-sign", tree, "-p", found["base_commit"], "-m",
                  f"{VERSION} replay of {label}-{ticket}", env=trusted(store, clone))
     git(store, "update-ref", REF, commit, env=trusted(store, clone))
-    try:
+    try:  # nothing the log holds may stop the record
         row = scan.scan(session, log)
-    except (SystemExit, OSError, ValueError) as failure:  # scan exits on a line that is not JSON
-        print(f"replay: the session's log could not be scanned ({failure}); "
-              f"`python3 scripts/scan.py {session}` reruns the scan.", file=sys.stderr)
-        row = None
-    else:
-        scan.write_row(row)
-    skills = row["skills"] if row else None
+        skills = row["skills"]
+        not_direct = skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)
+    except (Exception, SystemExit) as failure:  # scan exits on a line that is not JSON
+        print(f"replay: the session's log could not be scanned ({failure}); its row is left blank.", file=sys.stderr)
+        row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: the row of blanks
     version = {"label": label, "ticket": ticket, "version": VERSION, "commit": commit,
                "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
                "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
-               "not_direct": skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)}
+               "not_direct": not_direct}
     record(state, version)
+    scan.write_row(row)
     print(f"Recorded {label}-{ticket} {VERSION} at {commit}: session exit {status}"
           + (", skills unknown, marked not direct." if skills is None
              else ", marked not direct." if version["not_direct"] else "."))

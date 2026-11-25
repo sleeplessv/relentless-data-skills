@@ -43,10 +43,9 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    clones the repo that project-labels.json gives the label with `gh repo
    clone`. It copies the history up to the entry's base_commit, and nothing
    after it, on the default branch's name, into the version's repo and into
-   the clone, whose only remote is a copy inside its own .git/. The clone and
-   its remote are copied without sharing a file with the version's repo, and
-   checked out with git's own settings only, as step 4 reads them. The full
-   clone is removed before the session.
+   the clone, whose only remote is a bare copy inside its own .git/. Neither
+   shares a file with the version's repo. The clone is checked out under the
+   git settings of step 4. The full clone is removed before the session.
 2. Runs the repo's setup command from repos.json, where it has one, with sh in
    the clone.
 3. Starts one headless Claude Code session in the clone: `claude -p` on the
@@ -55,10 +54,13 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    and the confinement below.
 4. Commits whatever the clone's working tree holds into the version's repo:
    every file git would add, and every file or link the clone's index lists,
-   ignored or not. Its git takes no settings but git's own: none from the clone's
-   .git/, the user's or the system's files, or GIT_* variables, so nothing the
-   session left in the clone's .git/ runs. A start that left no session log
-   and changed nothing is taken as no session: nothing is recorded.
+   ignored or not. The git settings of every git command the replay starts
+   itself, gh's aside: no config file but the repo's own (none from the clone's .git/ here, so nothing
+   the session left there runs; no user or system config file), and no GIT_*
+   variable from the caller. Git's default attribute and ignore files still
+   apply: $XDG_CONFIG_HOME/git/attributes and git/ignore (by default under
+   ~/.config/) and the system attributes file. A start that left no session
+   log and changed nothing is taken as no session: nothing is recorded.
 5. Scans the session. A log that is missing or cannot be scanned gives the
    scan's row of blanks.
 6. Records the commit as the ticket's {VERSION} version with the session's exit
@@ -95,8 +97,11 @@ Files, all in the machine directory:
                 true.
 
 Exit 0: the version is recorded, whatever the session's exit status; a scan
-that failed is reported. Exit 1: an error; no version is recorded, and what
-the replay made is removed unless a session ran. A clone or version repo
+that failed is reported. Exit 1: an error. Before a session ran, or for a
+start taken as no session, nothing is recorded and what the replay made is
+removed. After a session ran, the clone and the version's repo are kept; the
+version is recorded only when the error came while its row was written, and
+then it has no row. A clone or version repo
 already in place is an error: remove both to replay the ticket again. Exit 2:
 bad usage."""
 
@@ -110,7 +115,7 @@ def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedPr
 
 
 def plain() -> dict[str, str]:
-    """The environment for the replay's own git: no GIT_* variable from the caller, and no user or system settings."""
+    """The environment for the replay's own git: the settings --help gives in step 4."""
     env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     return {**env, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull}
 
@@ -204,7 +209,8 @@ def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> 
 
 
 def tracked(store: Path, clone: Path) -> list[str]:
-    """The paths the clone's index lists, read from a copy of the index file as data; none if it cannot be read."""
+    """The paths the clone's index lists, read from a copy of the index file as data. None when the index is a
+    link or not a file, or git cannot list the copy; a copy that cannot be made raises."""
     index = clone / ".git" / "index"
     if index.is_symlink() or not index.is_file():
         return []

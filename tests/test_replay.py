@@ -46,9 +46,9 @@ exit 1
 # make the session misbehave: STANDIN_LOG set to "none" writes no log, to "bad" writes a
 # line that is not JSON, to "no-usage" leaves out the response that holds token counts;
 # STANDIN_TRAP names a file that a post-commit hook and a required clean filter, which
-# the session leaves in the clone, would create if anything ran them. With STANDIN_TRACK
-# set, the session's only change is skills.lock, which the repo's .gitignore matches: it
-# adds the file to git with -f and commits it, and writes no replayed.txt.
+# the session leaves in the clone, would create if anything ran them. STANDIN_TRACK set
+# replaces replayed.txt with skills.lock, which the repo's .gitignore matches: the session
+# adds it to git with -f and commits it. The other knobs still act alongside it.
 CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -394,7 +394,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(self.git("show", f"{version['commit']}:skills.lock", cwd=self.world.store), "pinned")
 
-    def test_an_untouched_file_keeps_its_base_bytes_whatever_the_operator_s_git_settings(self) -> None:
+    def test_an_untouched_file_keeps_its_base_bytes_with_core_autocrlf_in_the_operator_s_settings(self) -> None:
         with open(self.world.gitconfig, "a") as config:
             config.write("[core]\n\tautocrlf = true\n")
         result = self.replay("A", "7")

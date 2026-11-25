@@ -114,11 +114,16 @@ def scan(session: str, log: Path) -> dict:
               for line in every if line.get("type") == "assistant"
               for part in (line.get("message") or {}).get("content") or []
               if isinstance(part, dict) and part.get("type") == "tool_use"}
+    metas = {}
+    for path, _ in helpers:
+        meta_path = path.with_name(path.stem + ".meta.json")
+        metas[path] = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+    # A helper's fork copies its context too, so a parent, one level shallower, takes its responses first.
+    owns = {path: tokens(lines, seen)
+            for path, lines in sorted(helpers, key=lambda helper: (metas[helper[0]].get("spawnDepth") or 1, helper[0]))}
     listed = []
     for path, lines in helpers:
-        own = tokens(lines, seen)
-        meta_path = path.with_name(path.stem + ".meta.json")
-        meta = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
+        own, meta = owns[path], metas[path]
         brief = briefs.get(meta.get("toolUseId")) or next(
             (line["message"]["content"] for line in lines
              if line.get("type") == "user" and isinstance((line.get("message") or {}).get("content"), str)), None)

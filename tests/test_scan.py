@@ -221,6 +221,33 @@ class TestScan(unittest.TestCase):
              "cache_read_tokens": None, "total_tokens": None},
         ])
 
+    def test_a_response_copied_into_a_nested_fork_belongs_to_the_helper_that_made_it(self) -> None:
+        main = Log(self.session).user(0, "Build it.")
+        main.agent_call(1, (1, 1, 1, 1), "toolu_parent", "Plan the work.")
+        main.write(self.log_path())
+        parent = Log(self.session, "aplan").user(1.5, "Plan the work.")
+        planned = parent.assistant(2, (1, 10, 100, 1000))
+        parent.agent_call(3, (1, 10, 100, 1000), "toolu_child", "Fork: draft part one.")
+        self.helper("aplan", "Plan", parent, "toolu_parent", spawnDepth=1)
+        # Forks of a helper copy its context. File names sort the grandchild first and the parent last.
+        child = Log(self.session, "adraft").user(1.5, "Plan the work.")
+        child.assistant(2, (1, 10, 100, 1000), message_id=planned)
+        drafted = child.agent_call(4, (2, 20, 200, 2000), "toolu_grandchild", "Fork: check part one.")
+        self.helper("adraft", "Draft", child, "toolu_child", isFork=True, spawnDepth=2, parentAgentId="aplan")
+        grandchild = Log(self.session, "acheck").user(1.5, "Plan the work.")
+        grandchild.assistant(2, (1, 10, 100, 1000), message_id=planned)
+        grandchild.assistant(4, (2, 20, 200, 2000), message_id=drafted)
+        grandchild.assistant(5, (3, 30, 300, 3000))
+        self.helper("acheck", "Check", grandchild, "toolu_grandchild",
+                    isFork=True, spawnDepth=3, parentAgentId="adraft")
+
+        self.scan(str(self.log_path()))
+
+        row = self.only_row()
+        self.assertEqual(row["total_tokens"], 4 + 2222 + 2222 + 3333)
+        self.assertEqual([(helper["id"], helper["total_tokens"]) for helper in row["helpers"]],
+                         [("acheck", 3333), ("adraft", 2222), ("aplan", 2222)])
+
     def test_brief_head_is_cut_to_its_first_200_characters(self) -> None:
         main = Log(self.session).user(0, "Go.")
         main.agent_call(1, (1, 1, 1, 1), "toolu_long", "x" * 500)

@@ -51,8 +51,9 @@ The pool is every ticket that meets all of these:
   ticket's PR's URL, and the time GitHub gives for the PR's opening falls
   between the run's call and its result, give or take {CLOCK_SLACK.seconds // 60} minute. The session
   opened no other PR: a URL from such a run in a repo outside repos.json counts
-  as opened. Lines copied from an earlier session, into the session's log or a
-  helper's, count as the earlier session's.
+  as opened. Lines in the session's log or a helper's that carry another
+  session's id, as lines a resumed session copied do, are left out of this
+  reading of the session and credited to no other.
 - The session's own responses name the model it ran on.
 - That session loaded a generation-one skill:
   {one_of(list(GENERATION_ONE))}.
@@ -108,9 +109,11 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
                         scanned into scan-rows.jsonl.
   draw-work/            Clones and checkouts, removed when the draw ends.
 
-Output names projects by label only. A session log is read only when its text
-holds the words gh and create; one of those that cannot be read as a session
-is skipped and counted.
+Output names projects by label only. A session log and its helpers' logs are
+read as a session only when the text of one of them holds the strings gh and
+create anywhere, even inside other words. An error while reading such a log or
+its helpers', or while scanning a session that names its model and loaded a
+generation-one skill, skips the log and adds one to the count of skipped logs.
 
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
@@ -354,7 +357,8 @@ class Draw:
         sessions, unreadable = [], 0
         for log in sorted((scan.config_dir() / "projects").glob("*/*.jsonl")):
             try:
-                # Each command runs_gh_pr_create accepts holds these words just as the log's JSON text does.
+                # A cheap filter, not a check: it can let through a log with no such run, and can
+                # pass over one whose command runs_gh_pr_create accepts but whose text splits the words.
                 if not any("gh" in text and "create" in text
                            for text in (path.read_text(errors="replace") for path in [log, *scan.helper_logs(log)])):
                     continue

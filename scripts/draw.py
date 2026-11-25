@@ -847,71 +847,80 @@ def requirements(body: str | None) -> list[str]:
 
     The body is read as CommonMark's blocks: code, fenced or indented, and HTML blocks hide what they
     hold; one of those ATX headings opens the section, and any heading of level one or two, ATX or
-    setext, ends it. A list inside a blockquote is not read. An item's text is its first line and the
-    lines that continue it, joined by spaces, without the item's marker or a task box: a line that follows
-    without a blank line, and after a blank line one indented to the item's text. A new marker starts a new
-    item, and a blockquote ends the item."""
+    setext, ends it. A list inside a blockquote is not read. A line belongs to the innermost open item
+    whose text it is indented to; a line of text that follows a paragraph and starts no block continues
+    that paragraph however far it is indented. An item's text is its paragraphs joined by spaces, without
+    its marker or a task box. A list inside an item gives items of its own, after their parent; a quote,
+    code or an HTML block inside an item is not its text and does not end it. In a paragraph only - * +
+    and 1. start a list, so a wrapped line that begins "3." stays in its item."""
     headings = {heading.lower() for heading in CRITERIA_HEADINGS}
     found: list[str] = []
-    under = paragraph = gap = False  # paragraph: the line before continues a paragraph; gap: a blank line since
-    item = None  # the column of the open item's text, when the lines that follow can be found[-1]'s
-    fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
+    under = False
+    items: list[list] = []  # the open items, outermost first: [the column of the item's text, its index in found or None]
+    owner: list | str | None = None  # the open paragraph: an item's, "quote", "text", or None
+    fence, fence_column, html = "", 0, None  # the open code fence and its container's column; the end of an HTML block
     for text in (body or "").expandtabs(4).splitlines():
-        if fence:  # a fence ends at a line of at least as many of its own character
-            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
-                fence = ""
-            continue
+        line = text.lstrip(" ")
+        indent = len(text) - len(line)
+        if fence:
+            if not line or indent >= fence_column:  # a line short of its item's column ends the item and the fence
+                if indent - fence_column < 4 and re.fullmatch(rf"{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", line):
+                    fence = ""
+                continue
+            fence = ""
         if html:
             if html.search(text):
                 html = None
             continue
-        line = text.lstrip(" ")
-        indent = len(text) - len(line)
         if not line:
-            paragraph, gap = False, item is not None
+            owner = None
             continue
-        if item is not None and gap and indent < item:  # after a blank line, a line the item's text is not over
-            item = None
-        if indent >= 4:  # indented code, or a line that continues a paragraph or an item
-            if item is not None and not (gap and indent >= item + 4):  # code inside an item is not its text
-                found[-1] += " " + line.strip()
-                gap = False
+        depth = sum(column <= indent for column, _ in items)
+        base = items[depth - 1][0] if depth else 0
+        block = marker = opening = start = None
+        if indent - base >= 4:
+            block = None if owner else "code"  # indented code cannot interrupt a paragraph
+        elif opening := re.match(r"`{3,}(?!.*`)|~{3,}", line):
+            block = "fence"
+        elif owner and depth == len(items) and re.fullmatch(r"(?:=+|-+)[ \t]*", line):
+            block = "setext"  # the paragraph above is a heading
+        elif start := (next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
+                       or ((None, BLANK) if not owner and TAG_LINE.fullmatch(line) else None)):
+            block = "html"
+        elif heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line):
+            block = "heading"
+        elif re.fullmatch(r"([-*_])(?:[ \t]*\1){2,}[ \t]*", line):  # - - - is a break, not an item
+            block = "break"
+        elif (marker := re.match(r"(?:[-*+]|(\d{1,9})[.)])[ \t]+(?=\S)", line)) and (
+                not owner or depth < len(items) or marker.group(1) in (None, "1")):
+            block = "item"  # in a paragraph of the same item, only - * + and 1. start a list
+        elif line.startswith(">"):
+            block = "quote"
+        if block is None:  # text: it continues the open paragraph, or starts one in the item it reaches
+            if not owner:
+                del items[depth:]
+                owner = items[-1] if items else "text"
+            if isinstance(owner, list) and owner[1] is not None:
+                found[owner[1]] += " " + line.strip()
             continue
-        if opening := re.match(r"`{3,}(?!.*`)|~{3,}", line):
-            fence, paragraph, item = opening.group(), False, None
-            continue
-        if paragraph and re.fullmatch(r"(?:=+|-+)[ \t]*", line):  # the paragraph above is a setext heading
-            under, paragraph, item = False, False, None
-            continue
-        start = next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
-        if start is None and not paragraph and TAG_LINE.fullmatch(line):
-            start = (None, BLANK)
-        if start:
+        del items[depth:]
+        owner = None
+        if block == "fence":
+            fence, fence_column = opening.group(), base
+        elif block == "setext" and not depth:
+            under = False
+        elif block == "html":
             begin, end = start
             html = None if begin and end is not BLANK and end.search(line, begin.match(line).end()) else end
-            paragraph, item = False, None
-            continue
-        if heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line):
-            if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
-                under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
-            paragraph, item = False, None
-            continue
-        if re.fullmatch(r"([-*_])(?:[ \t]*\1){2,}[ \t]*", line):  # - - - is a break, not an item
-            paragraph, item = False, None
-            continue
-        if (marker := re.match(r"(?:[-*+]|(\d{1,9})[.)])[ \t]+(?=\S)", line)) and (
-                not paragraph or item is not None or marker.group(1) in (None, "1")):
-            # inside a list any marker starts an item; inside a paragraph only - * + and 1. start a list
+        elif block == "heading" and not depth and len(heading.group(1)) <= 2:  # a deeper heading stays in the section
+            under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
+        elif block == "item":
+            items.append([indent + marker.end(), len(found) if under else None])
             if under:
                 found.append(re.sub(r"\A\[[ xX]\][ \t]+", "", line[marker.end():]).strip())
-            paragraph, gap, item = False, False, indent + marker.end() if under else None
-            continue
-        if item is not None and line.startswith(">"):  # a blockquote ends the item
-            item = None
-        if item is not None:
-            found[-1] += " " + line.strip()
-            gap = False
-        paragraph = True
+            owner = items[-1]
+        elif block == "quote":
+            owner = "quote"  # its lines, and the lines that lazily continue it, are not read
     return found
 
 

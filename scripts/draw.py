@@ -36,8 +36,9 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
                         {"repo": "owner/name", "check": "<command>",
                         "setup": "<command>"} objects. "setup" is optional.
   project-labels.json   The key from label to repo: {"A": "owner/name", ...}.
-                        A repo keeps its label. A new repo takes the next
-                        letter, in repos.json order.
+                        A repo keeps its label. A new repo takes the first
+                        label not in use, in repos.json order: A to Z, then
+                        AA, AB and on.
   replay-set-<n>.json   Set n, as {"set", "seed", "drawn_at", "tickets",
                         "set_aside"}. A ticket entry holds label, ticket,
                         bucket, size, title, body, base_commit, ready_commit,
@@ -86,6 +87,15 @@ EXIT_SHORT = 3
 
 class DrawError(Exception):
     """Ends the draw with exit 1 and no set written."""
+
+
+def label_name(number: int) -> str:
+    """1 is A, 26 is Z, 27 is AA."""
+    label = ""
+    while number:
+        number, rest = divmod(number - 1, 26)
+        label = chr(ord("A") + rest) + label
+    return label
 
 
 def generation_one(skills: list[str] | None) -> bool:
@@ -146,6 +156,13 @@ def write_private(path: Path, text: str) -> None:
     partial.replace(path)
 
 
+def read_json(path: Path) -> object:
+    try:
+        return json.loads(path.read_text())
+    except ValueError:
+        raise DrawError(f"{path} is not JSON.")
+
+
 class Draw:
     def __init__(self, seed: int) -> None:
         self.seed = seed
@@ -164,12 +181,9 @@ class Draw:
 
     def repos(self) -> dict[str, dict]:
         path = self.state / "repos.json"
-        try:
-            entries = json.loads(path.read_text())
-        except FileNotFoundError:
+        if not path.is_file():
             raise DrawError(f"{path} does not exist. Write the repo list there first; --help gives its format.")
-        except ValueError:
-            raise DrawError(f"{path} is not JSON.")
+        entries = read_json(path)
         if not isinstance(entries, list) or not all(
                 isinstance(entry, dict) and isinstance(entry.get("repo"), str)
                 and re.fullmatch(r"[\w.-]+/[\w.-]+", entry["repo"])
@@ -182,23 +196,26 @@ class Draw:
     def labels(self, repos: dict[str, dict]) -> dict[str, str]:
         """Each listed repo's label, from the key file; a new repo gets the next free label."""
         path = self.state / "project-labels.json"
-        key = json.loads(path.read_text()) if path.is_file() else {}
+        key = read_json(path) if path.is_file() else {}
         labels = {repo.lower(): label for label, repo in key.items()}
-        for repo, entry in repos.items():
-            if repo not in labels:
-                number, label = len(key) + 1, ""
-                while number:
-                    number, rest = divmod(number - 1, 26)
-                    label = chr(ord("A") + rest) + label
-                labels[repo], key[label] = label, entry["repo"]
-                write_private(path, json.dumps(key, indent=2) + "\n")
+        new = [repo for repo in repos if repo not in labels]
+        for repo in new:
+            label = next(label for label in map(label_name, range(1, len(key) + 2)) if label not in key)
+            labels[repo], key[label] = label, repos[repo]["repo"]
+        if new:
+            write_private(path, json.dumps(key, indent=2) + "\n")
         return labels
+
+    def sets(self) -> dict[int, Path]:
+        """The sets earlier calls wrote, by number."""
+        return {int(found.group(1)): path for path in self.state.iterdir()
+                if (found := re.fullmatch(r"replay-set-(\d+)\.json", path.name))}
 
     def used(self) -> set[tuple[str, int]]:
         """Every (label, ticket) an earlier set kept or set aside."""
         used = set()
-        for path in self.state.glob("replay-set-*.json"):
-            earlier = json.loads(path.read_text())
+        for path in self.sets().values():
+            earlier = read_json(path)
             used |= {(entry["label"], entry["ticket"]) for entry in earlier["tickets"] + earlier["set_aside"]}
         return used
 
@@ -231,20 +248,24 @@ class Draw:
                 continue
             for pr in prs:
                 openers.setdefault(pr, []).append((log, len(prs)))
-        if unreadable:
-            print(f"Skipped {unreadable} session logs that hold a line that is not JSON.")
         tickets: dict[tuple[str, int], dict | None] = {}
         for (repo, pr), sessions in sorted(openers.items()):
             if repo not in repos or len(sessions) != 1 or sessions[0][1] != 1:
                 continue
             log = sessions[0][0]
-            row = scan.scan(log.stem, log)
+            try:
+                row = scan.scan(log.stem, log)
+            except (SystemExit, ValueError):  # a truncated meta.json or a malformed timestamp
+                unreadable += 1
+                continue
             if not generation_one(row["skills"]):
                 continue
             found = self.candidate(repos[repo], labels[repo], pr, log, row)
             if found:
                 key = (found["label"], found["ticket"])
                 tickets[key] = None if key in tickets else found  # a ticket with two PRs has no PR of its own
+        if unreadable:
+            print(f"Skipped {unreadable} session logs that could not be read.")
         used = self.used()
         buckets: dict[str, list[dict]] = {name: [] for name in BUCKETS}
         for key, found in sorted(tickets.items()):
@@ -365,12 +386,15 @@ class Draw:
             if len(kept) < PER_BUCKET * len(BUCKETS):
                 print(f"No set written: a bucket cannot reach {PER_BUCKET} tickets.")
                 return EXIT_SHORT
-            for candidate in kept:
-                candidate["log"] = self.save_log(candidate)
+            try:
+                for candidate in kept:
+                    candidate["log"] = self.save_log(candidate)
+            except OSError as error:
+                raise DrawError(f"could not save the session log of project {candidate['label']} ticket "
+                                f"{candidate['ticket']}: {error.strerror}.")
             fields = ("label", "ticket", "bucket", "size", "title", "body", "base_commit", "ready_commit", "model",
                       "pr", "session", "log", "check_output")
-            number = 1 + max((int(path.stem.rsplit("-", 1)[1]) for path in self.state.glob("replay-set-*.json")),
-                             default=0)
+            number = 1 + max(self.sets(), default=0)
             path = self.state / f"replay-set-{number}.json"
             write_private(path, json.dumps({
                 "set": number, "seed": self.seed, "drawn_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

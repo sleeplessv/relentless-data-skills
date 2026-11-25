@@ -37,8 +37,9 @@ directory, $DELIVER_STATE_DIR (default ~/.local/state/deliver). The replay:
 
 1. Clones the repo that project-labels.json gives the label, with `gh repo
    clone`, and copies the history up to the entry's base_commit, and nothing
-   after it, into a local bare repo. The kept clone is cut from that copy,
-   which is its only remote. The full clone is removed before the session.
+   after it, into a local bare repo, on the default branch's name. The kept
+   clone is cut from that copy, which is its only remote. The full clone is
+   removed before the session.
 2. Runs the repo's setup command from repos.json, where it has one, with sh in
    the clone.
 3. Starts one headless Claude Code session in the clone: `claude -p` on the
@@ -154,9 +155,10 @@ def cut(state: Path, label: str, ticket: int, found: dict, clone: Path, remote: 
             raise ReplayError(f"`gh repo clone` failed for project {label} with exit {result.returncode}.")
         base = found["base_commit"]
         git(source, "cat-file", "-e", f"{base}^{{commit}}")
+        branch = git(source, "branch", "--show-current")  # the default branch, so origin/<it> is the base
         git(source, "init", "-q", "--bare", str(remote))
-        git(source, "push", "-q", str(remote), f"{base}:refs/heads/replay")
-    result = run("git", "clone", "-q", "--branch", "replay", str(remote), str(clone))
+        git(source, "push", "-q", str(remote), f"{base}:refs/heads/{branch}")
+    result = run("git", "clone", "-q", "--branch", branch, str(remote), str(clone))
     if result.returncode:
         raise ReplayError(f"`git clone` of the local copy failed with exit {result.returncode}.")
     for key, value in (("user.name", "replay"), ("user.email", "replay@localhost"), ("commit.gpgsign", "false")):

@@ -226,6 +226,9 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(git("remote", cwd=self.world.clone), "origin")
         self.assertEqual(git("remote", "get-url", "origin", cwd=self.world.clone), str(self.world.remote))
+        # The default branch keeps its name, so origin/main is where the ticket's author found it.
+        self.assertEqual(git("branch", "--show-current", cwd=self.world.clone), "main")
+        self.assertEqual(git("rev-parse", "origin/main", cwd=self.world.clone), self.world.base)
         self.assertNotIn(self.world.merged, git("rev-list", "--all", cwd=self.world.remote).split())
         self.assertEqual(git("for-each-ref", cwd=self.world.bare), refs)
         calls = self.world.gh_log.read_text().splitlines()

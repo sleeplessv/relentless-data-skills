@@ -172,6 +172,163 @@ class TestJudge(unittest.TestCase):
         output = (self.world.state / verdict["check"]["output"]).read_text()
         self.assertEqual(output, f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 1\n")
 
+    def test_a_version_it_has_not_seen_is_judged_from_its_own_repo(self) -> None:
+        result = self.world.judge("A-7", "zeta", "--commit", self.world.replay[:12], "--from", str(self.world.replay_clone))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [verdict] = self.world.verdicts()
+        self.assertEqual((verdict["label"], verdict["ticket"], verdict["version"], verdict["commit"]),
+                         ("A", 7, "zeta", self.world.replay))
+        self.assertEqual(verdict["check"], {"passed": True, "reason": None, "output": "judged/A-7-zeta/check.txt"})
+        self.assertEqual(verdict["review"], {
+            "passed": True, "reason": None, "requirements": {"R1": "met", "R2": "met", "R3": "met"}, "findings": [],
+            "proven": 0, "lines": "judged/A-7-zeta/review.txt"})
+        self.assertIs(verdict["right_first_time"], True)
+        self.assertEqual(result.stdout.splitlines()[1:], [
+            f"Test 2, the review: passed. Answer in {self.world.state / 'judged/A-7-zeta/review.txt'}.",
+            "A-7 zeta is right first time."])
+        self.assertEqual((self.world.state / "judged/A-7-zeta/review.txt").read_text(), "R1: met\nR2: met\nR3: met\n")
+        self.assertFalse((self.world.records / "gh").exists())  # its repo is on this machine; GitHub is not asked
+        self.assertEqual(list((self.world.state / "judge-work").iterdir()), [])
+
+    def test_the_review_starts_headless_on_opus_at_medium_effort_with_read_tools_only(self) -> None:
+        self.world.judge("A-7", "generation-one")
+        self.assertEqual(self.world.record("args").splitlines(), [
+            "-p", "--model", "opus", "--effort", "medium", "--output-format", "json", "--safe-mode",
+            "--strict-mcp-config", "--tools", "Read,Grep,Glob", "--permission-prompts", "none",
+            "--no-session-persistence"])
+
+    def test_the_reviewer_is_given_the_ticket_and_the_diff_and_nothing_that_names_the_version(self) -> None:
+        for version, args in (("generation-one", ()),
+                              ("direct", ("--commit", self.world.replay, "--from", str(self.world.replay_clone)))):
+            with self.subTest(version=version):
+                self.assertEqual(self.world.judge("A-7", version, *args).returncode, 0)
+                prompt = self.world.record("prompt")
+                self.assertIn("<ticket>\nPrint the total\n\n" + BODY.strip() + "\n</ticket>\n", prompt)
+                self.assertIn("".join(f"R{at}: {text}\n" for at, text in enumerate(REQUIREMENTS, 1)), prompt)
+                added = "+total\n" if version == "generation-one" else "+total from replay\n"
+                self.assertIn(f" rows\n{added}", prompt)
+                self.assertEqual(prompt, (self.world.state / f"judged/A-7-{version}/prompt.txt").read_text())
+                seen = prompt + self.world.record("args") + self.world.record("cwd") + self.world.record("files")
+                for secret in (*SECRETS, version, self.world.ready, self.world.replay, "A-7"):
+                    self.assertNotIn(secret, seen)
+                self.assertEqual(self.world.record("git"), "outside\n")
+                self.assertNotIn(".git", self.world.record("files").split())
+
+    def test_the_diff_for_generation_one_runs_from_where_its_branch_started(self) -> None:
+        self.world.judge("A-7", "generation-one")
+        prompt = self.world.record("prompt")
+        self.assertIn("+++ b/broken\n", prompt)
+        self.assertNotIn("Squash", prompt)
+
+    def test_the_review_lines_decide_test_two(self) -> None:
+        cases = {  # answer: (test 2 passed, proven findings, right first time)
+            "R1: met\nR2: met\nR3: met": (True, 0, True),
+            "R1: met\n\nR2: met\nR3: met\nF1: report.txt:2: Wording. Evidence: none": (True, 0, True),
+            "R1: met\nR2: not met\nR3: met\nF1: report.txt:2: No blank rows. Evidence: R2 needs blank rows; "
+            "report.txt:2 counts none.": (False, 1, False),
+            "R1: met\nR2: not met\nR3: met": (False, 0, False),
+            "R1: met\nR2: cannot tell\nR3: met": (False, 1, False),
+            "R1: met\nR2: met\nR3: met\nF1: report.txt:1: Breaks the count. Evidence: wc -l prints 3.": (False, 1, False),
+        }
+        for answer, (passed, proven, right) in cases.items():
+            with self.subTest(answer=answer):
+                self.world.answer(answer)
+                result = self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from",
+                                          str(self.world.replay_clone))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                [verdict] = self.world.verdicts()
+                self.assertEqual((verdict["review"]["passed"], verdict["review"]["proven"], verdict["right_first_time"]),
+                                 (passed, proven, right))
+                self.assertEqual(result.stdout.splitlines()[-1],
+                                 f"A-7 direct is {'right' if right else 'not right'} first time.")
+
+    def test_a_finding_line_is_read_into_its_parts(self) -> None:
+        self.world.answer("R1: met\nR2: met\nR3: met\nF1: docs/a b.md:12: Says 3. Evidence: R1 needs the total.")
+        self.world.judge("A-7", "generation-one")
+        self.assertEqual(self.world.verdicts()[0]["review"]["findings"], [
+            {"finding": "F1", "file": "docs/a b.md", "line": 12, "what": "Says 3.", "evidence": "R1 needs the total.",
+             "proven": True}])
+
+    def test_an_answer_outside_the_fixed_lines_gives_no_verdict(self) -> None:
+        cases = {
+            "```\nR1: met\nR2: met\nR3: met\n```": "the answer is not in the fixed lines",
+            "All three are met.\nR1: met\nR2: met\nR3: met": "the answer is not in the fixed lines",
+            "R1: met\nR2: met": "the answer is not in the fixed lines",
+            "R1: met\nR3: met\nR2: met": "the answer is not in the fixed lines",
+            "R1: met\nR2: met\nR3: met\nR4: met": "the answer is not in the fixed lines",
+            "R1: Met\nR2: met\nR3: met": "the answer is not in the fixed lines",
+            "R1: met\nR2: met\nR3: met\nF1: report.txt: no line. Evidence: x": "the answer is not in the fixed lines",
+            "R1: met\nR2: met\nR3: met\nF2: report.txt:1: Skips F1. Evidence: none": "the answer is not in the fixed lines",
+            "": "the answer is not in the fixed lines",
+        }
+        for answer, reason in cases.items():
+            with self.subTest(answer=answer):
+                self.world.answer(answer)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 3, result.stderr)
+                [verdict] = self.world.verdicts()
+                self.assertEqual((verdict["right_first_time"], verdict["review"]["passed"], verdict["review"]["reason"]),
+                                 (None, None, reason))
+                self.assertEqual(result.stdout.splitlines()[-1], "No verdict for A-7 generation-one.")
+                self.assertEqual((self.world.state / "judged/A-7-generation-one/review.txt").read_text(), answer)
+
+    def test_a_review_session_that_fails_gives_no_verdict(self) -> None:
+        cases = [("R1: met\nR2: met\nR3: met", 1, None),
+                 (None, 0, json.dumps({"type": "result", "is_error": True, "result": "R1: met\nR2: met\nR3: met"})),
+                 (None, 0, "not JSON")]
+        for text, exit, raw in cases:
+            with self.subTest(exit=exit, raw=raw):
+                self.world.answer(text or "", exit, raw)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 3, result.stderr)
+                [verdict] = self.world.verdicts()
+                self.assertIsNone(verdict["right_first_time"])
+                self.assertEqual(verdict["review"]["reason"], f"the review session failed with exit {exit}")
+
+    def test_the_review_changes_neither_the_version_nor_its_repo(self) -> None:
+        clone = self.world.replay_clone
+        before = (git(clone, "rev-parse", "HEAD"), git(clone, "rev-parse", f"{self.world.replay}^{{tree}}"),
+                  git(clone, "status", "--porcelain"), (clone / "counter").read_text())
+        self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from", str(clone))
+        # The stand-in wrote app.txt and removed counter in its working folder, which is a copy.
+        self.assertEqual(self.world.record("files").split(), ["counter", "report.txt"])
+        after = (git(clone, "rev-parse", "HEAD"), git(clone, "rev-parse", f"{self.world.replay}^{{tree}}"),
+                 git(clone, "status", "--porcelain"), (clone / "counter").read_text())
+        self.assertEqual(after, before)
+
+    def test_judging_a_version_again_replaces_its_verdict(self) -> None:
+        self.world.judge("A-7", "generation-one")
+        self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
+        self.world.answer("R1: met\nR2: cannot tell\nR3: met")
+        self.world.judge("A-7", "generation-one")
+        verdicts = self.world.verdicts()
+        self.assertEqual([(verdict["version"], verdict["review"]["passed"]) for verdict in verdicts],
+                         [("direct", True), ("generation-one", False)])
+
+    def test_bad_usage_exits_2_with_the_help(self) -> None:
+        for args in ([], ["A-7"], ["a-7", "generation-one"], ["A-07", "generation-one"], ["A-7", "Direct"],
+                     ["A-7", "direct"], ["A-7", "direct", "--commit", "abc"],
+                     ["A-7", "direct", "--commit", "abc", "--commit", "abc"],
+                     ["A-7", "generation-one", "--commit", "abc", "--from", "."]):
+            with self.subTest(args=args):
+                result = self.world.judge(*args)
+                self.assertEqual(result.returncode, 2)
+                self.assertTrue(result.stderr.startswith("Judge one version of a replay ticket by the two tests "
+                                                         "every version gets.\n"))
+        self.assertFalse((self.world.state / "verdicts.jsonl").exists())
+
+    def test_a_ticket_in_no_set_is_an_error(self) -> None:
+        result = self.world.judge("A-9", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: no replay set in {self.world.state} holds ticket A-9.\n")
+        self.assertFalse((self.world.state / "verdicts.jsonl").exists())
+
+    def test_a_commit_its_repo_lacks_is_an_error(self) -> None:
+        result = self.world.judge("A-7", "direct", "--commit", "f" * 40, "--from", str(self.world.replay_clone))
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: commit {'f' * 40} is not in the version's repo.\n")
+        self.assertFalse((self.world.state / "verdicts.jsonl").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

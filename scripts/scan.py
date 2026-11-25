@@ -15,6 +15,7 @@ null is a blank, never a zero.
 from __future__ import annotations
 
 import fcntl
+import glob
 import json
 import os
 import sys
@@ -34,7 +35,7 @@ SKILL_LINE = "Base directory for this skill: "
 
 def read_lines(path: Path) -> list[dict]:
     lines = []
-    for text in path.read_text(errors="replace").splitlines():
+    for text in path.read_text(errors="replace").split("\n"):  # splitlines() would also split on U+2028
         try:
             line = json.loads(text)
         except ValueError:
@@ -145,7 +146,7 @@ def resolve(target: str) -> tuple[str, Path]:
         path = Path(target).expanduser()
         return path.stem, path
     config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    found = sorted((config / "projects").glob(f"*/{target}.jsonl"))
+    found = sorted((config / "projects").glob(f"*/{glob.escape(target)}.jsonl"))
     return target, found[0] if found else config / "projects" / f"{target}.jsonl"
 
 

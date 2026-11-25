@@ -162,6 +162,26 @@ class TestScan(unittest.TestCase):
         row = self.only_row()
         self.assertEqual((row["session"], row["total_tokens"]), (self.session, 10))
 
+    def test_a_line_holding_a_unicode_line_separator_is_read_whole(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 2, 3, 4), content=[{"type": "text", "text": "one\u2028two\x85three"}])
+        path = log.write(self.log_path())
+        # Claude Code writes such characters raw, not as \\u escapes.
+        path.write_text("".join(json.dumps(line, ensure_ascii=False) + "\n" for line in log.lines))
+
+        self.scan(str(path))
+
+        self.assertEqual(self.only_row()["total_tokens"], 10)
+
+    def test_an_id_is_matched_literally_not_as_a_pattern(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 2, 3, 4))
+        log.write(self.log_path())
+
+        self.scan("*")
+
+        self.assertIsNone(self.only_row()["total_tokens"])
+
     def test_helpers_tokens_are_in_the_total_and_each_helper_is_listed(self) -> None:
         main = Log(self.session).user(0, "Build it.")
         shared = main.assistant(1, (1, 10, 100, 1000))

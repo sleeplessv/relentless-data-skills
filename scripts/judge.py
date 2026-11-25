@@ -119,9 +119,12 @@ holds the ticket, project-labels.json and repos.json, and writes:
   judged/<label>-<ticket>-<version>/<attempt>/
                         check.txt, the output of setup and check; prompt.txt,
                         what the reviewer was given; review.txt, the
-                        review's answer as it came. The folder of the
-                        attempt a line replaces is removed once the
-                        new line is written.
+                        review's answer as it came. The line on record
+                        names the three files of its own attempt. Once a
+                        new line is written the judge tries to remove the
+                        folder of the attempt it replaced; a folder no
+                        line names can stay behind after an interrupt or
+                        a failed removal.
   judge-work/           Clones and checkouts, removed when the judge ends.
 
 Exit 0: a verdict was recorded. Exit 1: an error; nothing was recorded, and

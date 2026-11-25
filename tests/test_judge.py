@@ -303,7 +303,7 @@ class TestJudge(unittest.TestCase):
             "R1: The report prints the total.", "R2: The total counts every row. Blank rows count too.",
             "R3: The help names the total.", "R4: A list of its own:", "R5: its item is one too."])
 
-    def test_each_item_is_one_requirement_and_what_sits_inside_an_item_is_not_its_text(self) -> None:
+    def test_each_item_is_one_requirement_whose_text_is_its_paragraphs_without_quotes_or_code(self) -> None:
         sys.path.insert(0, str(SCRIPTS))
         self.addCleanup(sys.path.remove, str(SCRIPTS))
         with mock.patch.object(sys, "dont_write_bytecode", True):  # no scripts/__pycache__ in the checkout

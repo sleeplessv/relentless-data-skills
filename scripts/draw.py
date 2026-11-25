@@ -851,8 +851,9 @@ def requirements(body: str | None) -> list[str]:
     whose text it is indented to; a line of text that follows a paragraph and starts no block continues
     that paragraph however far it is indented. An item's text is its paragraphs joined by spaces, without
     its marker or a task box. A list inside an item gives items of its own, after their parent; a quote,
-    code or an HTML block inside an item is not its text and does not end it. In a paragraph only - * +
-    and 1. start a list, so a wrapped line that begins "3." stays in its item."""
+    code or an HTML block inside an item is not its text and does not end it. In a paragraph of the same
+    item only - * + and an ordered marker numbered 1, as 1. or 1), start a list, so a wrapped line that
+    begins "3." stays in its item."""
     headings = {heading.lower() for heading in CRITERIA_HEADINGS}
     found: list[str] = []
     under = False
@@ -893,7 +894,7 @@ def requirements(body: str | None) -> list[str]:
             block = "break"
         elif (marker := re.match(r"(?:[-*+]|(\d{1,9})[.)])[ \t]+(?=\S)", line)) and (
                 not owner or depth < len(items) or marker.group(1) in (None, "1")):
-            block = "item"  # in a paragraph of the same item, only - * + and 1. start a list
+            block = "item"  # in a paragraph of the same item, only - * + and 1. or 1) start a list
         elif line.startswith(">"):
             block = "quote"
         if block is None:  # text: it continues the open paragraph, or starts one in the item it reaches

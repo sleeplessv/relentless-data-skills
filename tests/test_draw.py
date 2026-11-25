@@ -314,9 +314,9 @@ class TestDraw(unittest.TestCase):
         kept = [
             *sized(1, 6, 20), Ticket(7, 20, by_helper=True), Ticket(8, 20, copied=True),
             Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total."),
-            Ticket(10, 20, criteria="## Done when\n\n* The report prints the total."),
-            *sized(101, 9, 100), Ticket(110, 100, skill="some-plugin:implement-backlog"),
-            *sized(201, 9, 800, draft=True), Ticket(210, 1500)]
+            Ticket(10, 50, criteria="## Done when\n\n* The report prints the total."),
+            *sized(101, 8, 100), Ticket(109, 51), Ticket(110, 300, skill="some-plugin:implement-backlog"),
+            *sized(201, 8, 800, draft=True), Ticket(209, 301, draft=True), Ticket(210, 1500)]
         left_out = [
             Ticket(11, 20, skill="tdd"), Ticket(12, 20, prs=2), Ticket(13, 20, closes=2), Ticket(14, 1501),
             Ticket(15, 20, criteria="## Acceptance criteria\n\nThe report prints the total."),

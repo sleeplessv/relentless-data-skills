@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -32,14 +33,17 @@ SETUP = "touch .setup-done"
 CHECK = "test -e .setup-done && test ! -e broken"
 
 # Records each call as one line, clones a bare repo for `repo clone`, and prints the
-# saved answer for `pr view`, `issue view` and `api`. A call with no saved answer exits 1,
-# and so does the first clone of a repo beside whose bare repo lies <name>.fail-once.
+# saved answer for `pr view`, `issue view` and `api`. A call with no saved answer exits 1.
+# So does a call with a saved failure, <answer>.fails, after printing it, and so does the
+# first clone of a repo beside whose bare repo lies <name>.fail-once, after writing the
+# clone's folder, as git does when a hook fails.
 GH = r"""#!/bin/bash
 printf '%s\n' "$*" >> "$GH_LOG"
 case "$1 $2" in
   "repo clone")
     if [ -e "$GH_REMOTES/$3.fail-once" ]; then
-      mv "$GH_REMOTES/$3.fail-once" "$GH_REMOTES/$3.failed"; echo "stand-in gh: the clone failed" >&2; exit 1
+      mv "$GH_REMOTES/$3.fail-once" "$GH_REMOTES/$3.failed"; git clone -q "$GH_REMOTES/$3.git" "$4"
+      echo "stand-in gh: the clone failed" >&2; exit 1
     fi
     exec git clone -q "$GH_REMOTES/$3.git" "$4" ;;
   "pr view"|"issue view")
@@ -49,6 +53,7 @@ case "$1 $2" in
   *) key="$*" ;;
 esac
 file="$GH_ANSWERS/${key//[ \/]/_}"
+[ -f "$file.fails" ] && { cat "$file.fails"; echo "stand-in gh: the request failed" >&2; exit 1; }
 [ -f "$file" ] || { echo "stand-in gh: no saved answer for $key" >&2; exit 1; }
 cat "$file"
 """
@@ -69,13 +74,13 @@ class Ticket:
     state: str = "MERGED"
     draft: bool = False  # opened as a draft and marked ready later
     by_helper: bool = False  # a helper of the session opened the PR
-    twin: bool = False  # a second session also opened the PR
+    rival: str = ""  # a Bash command a second session runs at 10:04, whose result at 10:05 prints the PR's URL
     copied: bool = False  # a resumed session's log starts with copies of this session's lines
     issue: int = 0  # the issue the PR closes, when not `number`
     command: str = OPENS  # the Bash command whose result prints the PR's URL
     again: str = ""  # a later Bash command, at 10:40, whose result prints the PR's URL again
     also: int = 0  # another ticket whose PR's URL the opening command's result prints too
-    model: str = MODEL  # the model the session's responses name; "" for none
+    model: object = MODEL  # the model the session's responses name; "" for none
     created: str = CREATED  # when GitHub says the PR was opened
     inherited: str = ""  # a skill loaded in lines this session's log copied from an earlier session
     pushed: bool = True  # GitHub records the pushes to the PR's branch
@@ -92,6 +97,10 @@ class Ticket:
     @property
     def session(self) -> str:
         return f"00000000-0000-4000-8000-{self.number:012d}"
+
+    @property
+    def rival_session(self) -> str:
+        return f"00000000-0000-4000-9000-{self.number:012d}"
 
     def commit(self, letter: str) -> str:
         return f"{self.number:08d}" + letter * 32
@@ -130,6 +139,25 @@ def opening(session: str, minute: int, url: str, command: str = OPENS, model: st
 def write_lines(path: Path, lines: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(json.dumps(entry) + "\n" for entry in lines))
+
+
+def read_lines(path: Path) -> list[dict]:
+    return [json.loads(text) for text in path.read_text().splitlines()]
+
+
+def retime(path: Path, moment: str | None, kind: str = "") -> None:
+    """Give every line of a log, or every line of one kind, the time `moment`, or no time when it is None."""
+    write_lines(path, [entry if kind and entry["type"] != kind else
+                       {key: value for key, value in entry.items() if key != "timestamp"}
+                       | ({"timestamp": moment} if moment else {}) for entry in read_lines(path)])
+
+
+def counts(result: subprocess.CompletedProcess[str]) -> tuple[int, int, int]:
+    """The 0-50 pool, the 51-300 pool and the count of skipped logs a draw printed."""
+    printed = result.stdout.splitlines()
+    pools = {text.split(":")[0]: int(text.split()[2].rstrip(",")) for text in printed if ": pool " in text}
+    skipped = [int(text.split()[1]) for text in printed if text.startswith("Skipped ")]
+    return pools["0-50"], pools["51-300"], (skipped or [0])[0]
 
 
 class World:
@@ -272,9 +300,9 @@ class World:
             write_lines(helper, copied + [{**entry, "agentId": "a1", "isSidechain": True} for entry in opened])
             opened = [assistant(session, 30, [{"type": "text", "text": "The helper opened the PR."}], ticket.model)]
         write_lines(self.log_path(ticket), lines + opened)
-        if ticket.twin:
-            other = f"00000000-0000-4000-9000-{ticket.number:012d}"
-            write_lines(self.log_path(ticket, other), opening(other, 4, f"https://github.com/{ticket.repo}/pull/{ticket.pr}"))
+        if ticket.rival:
+            write_lines(self.log_path(ticket, ticket.rival_session), opening(
+                ticket.rival_session, 4, f"https://github.com/{ticket.repo}/pull/{ticket.pr}", ticket.rival))
         if ticket.copied:
             other = f"00000000-0000-4000-a000-{ticket.number:012d}"
             own = line(other, "user", 40, message={"role": "user", "content": "Carry on."})
@@ -286,6 +314,16 @@ class World:
 
     def draw(self, *args: str, state: Path | None = None, prelude: str = "") -> subprocess.CompletedProcess[str]:
         """Run the draw; `prelude` is Python run in the same process first, to break something the world cannot."""
+        program, env = self.command(args, state, prelude)
+        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True)
+
+    def start(self, *args: str) -> subprocess.Popen[str]:
+        """Start the draw and return at once."""
+        program, env = self.command(args, None, "")
+        return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE)
+
+    def command(self, args: tuple[str, ...], state: Path | None, prelude: str) -> tuple[list[str], dict[str, str]]:
         answers = self.root / "answers"
         shutil.rmtree(answers, ignore_errors=True)
         answers.mkdir()
@@ -295,13 +333,12 @@ class World:
         env = {**env, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(state or self.state),
                "CLAUDE_CONFIG_DIR": str(self.config), "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}",
                "GH_LOG": str(self.gh_log), "GH_ANSWERS": str(answers), "GH_REMOTES": str(self.remotes)}
-        work = self.root / "cwd"
-        work.mkdir(exist_ok=True)
+        (self.root / "cwd").mkdir(exist_ok=True)
         program = [str(self.source / "draw.py"), *args]
         if prelude:
             program = ["-c", f"{prelude}\nimport runpy, sys\nsys.argv = {program!r}\n"
                              f"runpy.run_path(sys.argv[0], run_name='__main__')"]
-        return subprocess.run([sys.executable, *program], cwd=work, env=env, text=True, capture_output=True)
+        return [sys.executable, *program], env
 
     def set_file(self, number: int = 1, state: Path | None = None) -> dict:
         return json.loads(((state or self.state) / f"replay-set-{number}.json").read_text())
@@ -397,7 +434,7 @@ class TestDraw(unittest.TestCase):
 
     def test_pool_holds_only_tickets_that_meet_readings_2_and_3_in_listed_repos(self) -> None:
         kept = [
-            Ticket(1, 20, command="cd .\ngh pr create --fill"), Ticket(2, 20, command="if true; then gh\tpr create; fi"),
+            Ticket(1, 20, command="cd .\ngh pr create --fill"), Ticket(2, 20, command="gh\tpr 'cre'ate --fill"),
             Ticket(3, 20, criteria="```html\n<!-- a literal comment opener\n```\n\n## Acceptance\n\n- yes"),
             Ticket(4, 20, criteria="  ## Acceptance\n\n- The report prints the total."),
             Ticket(5, 20, command="cd ../alpha && GH_PROMPT_DISABLED=1 gh  pr create --fill"),
@@ -412,7 +449,7 @@ class TestDraw(unittest.TestCase):
             Ticket(15, 20, criteria="## Acceptance criteria\n\nThe report prints the total."),
             Ticket(16, 20, criteria="## Notes\n\n- The report prints the total."),
             Ticket(17, 20, criteria="## Acceptance criteria\n\n```\n- not a list item\n```"),
-            Ticket(18, 20, state="OPEN"), Ticket(19, 20, twin=True), Ticket(20, 20, repo=BETA),
+            Ticket(18, 20, state="OPEN"), Ticket(19, 20, rival=OPENS), Ticket(20, 20, repo=BETA),
             Ticket(21, 20, issue=300), Ticket(22, 100, issue=300),
             Ticket(23, 20, command="echo 'gh pr create'; gh pr view --json url --jq .url"),
             Ticket(24, 20, command="gh pr create --fill || gh pr view --json url --jq .url", created="2026-01-04T09:00:00Z"),
@@ -423,21 +460,22 @@ class TestDraw(unittest.TestCase):
             Ticket(29, 20, criteria="Acceptance criteria\n---\n\n- under a heading made by underlining"),
             Ticket(30, 20, criteria="    Acceptance\n---\n\n- under an indented code line"),
             Ticket(31, 20, skill="tdd", inherited="implement-ticket", by_helper=True),
-            Ticket(32, 20, model="")]
+            Ticket(32, 20, model=""), Ticket(33, 20, command="if true; then gh pr create --fill; fi"),
+            Ticket(34, 20)]
         world = self.world(kept + left_out)
         projects = world.config / "projects" / "-work-example"
-        # Logs that are no session the draw can read: times with no zone, which it counts, and prose that names
-        # the command beside an empty skill line, which it passes over.
+        # A session whose times have no zone, which the draw counts, and whose run keeps ticket 34 out of the pool;
+        # and a log of prose that names the command beside an empty skill line, which it passes over.
         write_lines(projects / "00000000-0000-4000-d000-000000000001.jsonl", [
             {**entry, "timestamp": entry["timestamp"].removesuffix("Z")} for entry in
-            opening("00000000-0000-4000-d000-000000000001", 4, f"https://github.com/{ALPHA}/pull/501")])
+            opening("00000000-0000-4000-d000-000000000001", 4, f"https://github.com/{ALPHA}/pull/534")])
         write_lines(projects / "00000000-0000-4000-d000-000000000002.jsonl", [
             line("00000000-0000-4000-d000-000000000002", "user", 0, message={"role": "user", "content": "Run gh pr create."}),
             line("00000000-0000-4000-d000-000000000002", "user", 1, isMeta=True, message={"role": "user", "content": [
                 {"type": "text", "text": "Base directory for this skill: "}]})])
-        # And one whose line holds a message that is not an object.
+        # And one whose line holds a message that is not an object, which it counts.
         write_lines(projects / "00000000-0000-4000-d000-000000000003.jsonl", [
-            line("00000000-0000-4000-d000-000000000003", "assistant", 4, message=["gh pr create"])])
+            line("00000000-0000-4000-d000-000000000003", "assistant", 4, message=[f"https://github.com/{ALPHA}/pull/599"])])
         result = world.draw("--seed", "1")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[1], "Skipped 2 session logs that could not be read.")
@@ -448,6 +486,101 @@ class TestDraw(unittest.TestCase):
             ticket = world.tickets[entry["ticket"]]
             self.assertEqual((entry["ready_commit"], entry["model"]), (ticket.commit("b" if ticket.draft else "a"), MODEL),
                              ticket.number)
+
+    def test_a_command_makes_its_session_the_opener_only_when_it_surely_ran_gh_pr_create(self) -> None:
+        url = f"https://github.com/{ALPHA}/pull/501"
+        forms = {  # what the command does to its session: opens the PR, may have (vetoes only), or neither
+            "opens": ["gh pr create", "cd x && GH=1 gh  pr create", "gh pr 'cre'ate", "command -- gh pr create",
+                      "envflag='two words' gh pr create", '"gh" pr create', "/usr/local/bin/gh pr create",
+                      "time gh pr create", "exec gh pr create", "! gh pr create", "nohup gh pr create",
+                      "env A=1 gh pr create", "command gh pr create", "cd .\ngh pr create", "gh pr create  # open it",
+                      "gh pr create \\\n  --fill", "gh pr create 2>&1",
+                      "gh pr create --body \"$(cat <<'EOF'\nBody text.\nEOF\n)\""],
+            "may": ["if true; then gh pr create --fill; fi", f"if false; then gh pr create; fi; printf '%s\\n' {url}",
+                    "true && gh pr create", "false || gh pr create", 'url=$(gh pr create) && echo "$url"',
+                    "gh pr create | cat", "gh pr create &", "{ gh pr create; }", "(gh pr create)", "$GH pr create",
+                    "git push -u origin HEAD && gh pr create --fill", "gh pr create --title 'unclosed",
+                    "cat <<EOF\n$(gh pr create)\nEOF", "for i in 1; do gh pr create; done", "echo `gh pr create`"],
+            "neither": [f"printf '%s\\n' 'ok' ';' gh pr create {url}", "echo 'gh pr create'", "command -v gh pr create",
+                        "bash -c 'gh pr create'", "cat <<'EOF'\n$(gh pr create)\nEOF", "# gh pr create"]}
+        for does, commands in forms.items():
+            for command in commands:
+                with self.subTest(command=command):
+                    # Ticket 1's session runs the command; ticket 101's opens its PR and a second session runs it.
+                    world = self.world([Ticket(1, 20, command=command), Ticket(101, 100, rival=command)])
+                    result = world.draw()
+                    self.assertEqual(result.returncode, 3, result.stderr)
+                    self.assertEqual(counts(result), (does == "opens", does == "neither", 0))
+
+    def test_a_list_counts_only_in_a_criteria_section_read_as_markdown(self) -> None:
+        bodies = {
+            "## Acceptance\n\n- yes": 1,
+            "## Acceptance\n\nNone yet.\n\nOther work\n----------\n\n- unrelated task": 0,
+            "## Acceptance\n\nIntro.\n---\n\n- under a heading made by underlining": 0,
+            "## Acceptance\n\nIntro.\n\n# Other\n\n- unrelated": 0,
+            "## Acceptance\n\nIntro.\n### Detail\n\n- yes": 1,
+            "Acceptance criteria\n===\n\n- under a heading made by underlining": 0,
+            "    Acceptance\n---\n\n- under an indented code line": 0,
+            "## Acceptance\n\n    code\n---\n\n- yes": 1,
+            "## Acceptance\n\nSee `<!--` here.\n\n- yes": 1,
+            "## Acceptance\n\n    <!--\n\n- yes": 1,
+            "## Acceptance\n\n```\n<!--\n```\n\n- yes": 1,
+            "## Acceptance\n\n<!-- never closed\n\n- hidden": 0,
+            "## Acceptance\n\n<div>\n- inside raw HTML\n</div>": 0,
+            "## Acceptance\n\n<pre>\n- inside\n\n- still inside\n</pre>": 0,
+            "## Acceptance\n\n<my-note>\n- inside a custom element\n</my-note>": 0}
+        for body, pool in bodies.items():
+            with self.subTest(body=body):
+                result = self.world([Ticket(1, 20, criteria=body)]).draw()
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertEqual(counts(result), (pool, 0, 0))
+
+    def test_the_model_is_a_name_from_the_session_s_own_responses_or_a_helper_s_copy_of_one(self) -> None:
+        for case, pool in (("a helper's copy", 1), ("a helper's own", 0), (17, 0), (" ", 0)):
+            with self.subTest(case=case):
+                ticket = Ticket(1, 20, model=case if isinstance(case, int) or case == " " else "")
+                world = self.world([ticket])
+                response = next(entry for entry in read_lines(world.log_path(ticket)) if entry["type"] == "assistant")
+                if case == "a helper's copy":  # the same response, with the model the main log's copy lacks
+                    write_lines(world.log_path(ticket).with_suffix("") / "subagents" / "agent-a1.jsonl", [
+                        {**response, "message": {**response["message"], "model": MODEL}}])
+                elif case == "a helper's own":
+                    write_lines(world.log_path(ticket).with_suffix("") / "subagents" / "agent-a1.jsonl", [
+                        assistant(ticket.session, 50, [{"type": "text", "text": "Done."}])])
+                result = world.draw()
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertEqual(counts(result), (pool, 0, 0))
+
+    def test_a_session_that_cannot_be_scanned_still_counts_as_another_opener(self) -> None:
+        ticket = Ticket(1, 20)
+        world = self.world([ticket])
+        rival = world.log_path(ticket, ticket.rival_session)
+        rival.write_text(world.log_path(ticket).read_text().replace(ticket.session, ticket.rival_session))
+        write_lines(rival.with_suffix("") / "subagents" / "agent-r1.jsonl", [line(ticket.rival_session, "user", 50)])
+        (rival.with_suffix("") / "subagents" / "agent-r1.meta.json").write_text("[]\n")
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(counts(result), (0, 0, 1))
+
+    def test_a_run_whose_time_is_missing_or_out_of_range_vetoes_and_is_counted_without_ending_the_draw(self) -> None:
+        for case in ("a PR in an unlisted repo", "a rival with no time", "a rival at the first moment",
+                     "the session's results at the last moment"):
+            with self.subTest(case=case):
+                ticket = Ticket(1, 20, rival=OPENS if "rival" in case else "")
+                world = self.world([ticket])
+                if case == "a PR in an unlisted repo":  # the session opened a second PR, timing aside
+                    log = world.log_path(ticket)
+                    write_lines(log, read_lines(log) + [
+                        {key: value for key, value in entry.items() if key != "timestamp"} for entry in
+                        opening(ticket.session, 20, "https://github.com/example-org/gamma/pull/9")])
+                elif "rival" in case:
+                    retime(world.log_path(ticket, ticket.rival_session),
+                           None if "no time" in case else "0001-01-01T00:00:00Z")
+                else:
+                    retime(world.log_path(ticket), "9999-12-31T23:59:59Z", "user")
+                result = world.draw()
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertEqual(counts(result), (0, 0, int(case != "a PR in an unlisted repo")))
 
     def test_a_ticket_whose_check_fails_before_the_change_is_replaced_by_the_next_in_seed_order(self) -> None:
         passing = self.world(full_pool())
@@ -576,6 +709,55 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
+    def test_a_gh_answer_that_fails_or_cannot_be_read_sets_its_ticket_aside_with_what_gh_printed(self) -> None:
+        bad = [Ticket(11, 20), Ticket(12, 20), Ticket(13, 20, draft=True)]
+        world = self.world(full_pool(10) + bad)  # seed 2 tries all three before the last good ticket
+        timeline = f"api repos/{ALPHA}/issues/511/timeline"
+        world.answers[timeline + ".fails"] = '{"message": "Server Error"}'
+        world.answers[f"api repos/{ALPHA}/activity?ref=refs/heads/ticket-12&per_page=100"] = "["
+        world.answers[f"api repos/{ALPHA}/issues/513/timeline"] = json.dumps(
+            [{"event": "ready_for_review", "created_at": 17}])
+        result = world.draw("--seed", "2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[1], "0-50: pool 13, set aside 3, kept 10.")
+        aside = {entry["ticket"]: entry for entry in world.set_file()["set_aside"]}
+        self.assertEqual({number: entry["reason"] for number, entry in aside.items()}, dict.fromkeys(
+            (11, 12, 13), "GitHub's record of the PR's history or of the pushes to its branch could not be read"))
+        outputs = {number: (world.state / entry["check_output"]).read_text().splitlines()
+                   for number, entry in aside.items()}
+        self.assertEqual(outputs[11], [f"$ gh {timeline.replace('api', 'api --paginate', 1)}", '{"message": "Server Error"}',
+                                       "stand-in gh: the request failed", "gh exit 1"])
+        self.assertEqual(outputs[12][1:], ["[", "the draw cannot read the answer (JSONDecodeError)"])
+        self.assertEqual(outputs[13][-1], "the draw cannot read the answer (TypeError)")
+
+    def test_what_setup_starts_runs_through_the_check_and_ends_with_the_try(self) -> None:
+        late = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, late)
+        setup = f"{SETUP} && {{ (sleep 0.2; touch ready; sleep 1; touch {late}/$$) & }}"
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": f"{CHECK} && sleep 0.4 && test -e ready",
+                                                  "setup": setup}])
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(world.set_file()["set_aside"], [])
+        subprocess.run(["sleep", "1.5"])
+        self.assertEqual(list(late.iterdir()), [])
+
+    def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
+        marks = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, marks)
+        check = f"{CHECK} && touch {marks}/started && sleep 1 && touch {marks}/late"
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
+        draw = world.start("--seed", "1")
+        self.addCleanup(draw.kill)
+        for _ in range(600):
+            if (marks / "started").exists() or draw.poll() is not None:
+                break
+            subprocess.run(["sleep", "0.05"])
+        draw.send_signal(signal.SIGINT)
+        draw.communicate(timeout=60)
+        subprocess.run(["sleep", "1.5"])
+        self.assertEqual(sorted(path.name for path in marks.iterdir()), ["started"])
+
     def test_a_log_that_cannot_be_saved_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))
         (world.state / "scan-rows.lock").mkdir()  # the scan row cannot be written
@@ -598,6 +780,53 @@ class TestDraw(unittest.TestCase):
                                         r"\(OSError\)\.\n\Z")
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
         self.assertFalse((world.state / "scan-rows.jsonl").exists())
+
+    def test_a_helper_folder_that_cannot_be_listed_skips_its_session(self) -> None:
+        ticket = Ticket(1, 20, by_helper=True)
+        world = self.world([ticket])
+        hidden = world.log_path(ticket).with_suffix("") / "subagents" / "workflows" / "run-1"
+        hidden.mkdir(parents=True)
+        hidden.chmod(0)
+        self.addCleanup(hidden.chmod, 0o755)
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(counts(result), (0, 0, 1))
+
+    def test_a_log_that_shrinks_after_its_session_qualified_ends_the_draw_before_a_set(self) -> None:
+        world = self.world(full_pool(10))
+        projects = world.config / "projects" / "-work-example"
+        setup = f'{SETUP} && for log in {projects}/*.jsonl; do : > "$log"; done'
+        world.write_repos([{"repo": ALPHA, "check": CHECK, "setup": setup}])
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(result.stderr, r"\Adraw: could not save the session log of project A ticket \d+ "
+                                        r"\(OSError\)\.\n\Z")
+        self.assertEqual(list(world.state.glob("replay-set-*")), [])
+
+    def test_a_retry_keeps_nothing_from_the_archive_of_an_earlier_draw(self) -> None:
+        world = self.world(full_pool(10, by_helper=True))
+        for ticket in world.tickets.values():
+            folder = world.log_path(ticket).with_suffix("") / "subagents"
+            write_lines(folder / "agent-a2.jsonl", [{**entry, "agentId": "a2"} for entry in read_lines(folder / "agent-a1.jsonl")])
+        (world.state / "scan-rows.lock").mkdir()  # the first draw copies a log and then cannot write its row
+        self.assertEqual(world.draw("--seed", "1").returncode, 1)
+        (world.state / "scan-rows.lock").rmdir()
+        for ticket in world.tickets.values():
+            (world.log_path(ticket).with_suffix("") / "subagents" / "agent-a2.jsonl").unlink()
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        rows = [json.loads(text) for text in (world.state / "scan-rows.jsonl").read_text().splitlines()]
+        self.assertEqual({tuple(helper["id"] for helper in row["helpers"]) for row in rows}, {("a1",)})
+        self.assertEqual(list((world.state / "logs").rglob("agent-a2*")), [])
+
+    def test_a_scan_row_file_that_cannot_be_read_ends_the_draw_naming_its_label_and_no_path(self) -> None:
+        world = self.world(full_pool(10))
+        (world.state / "scan-rows.jsonl").write_text("[]\n")
+        result = world.draw("--seed", "1")
+        self.assertEqual(result.returncode, 1)
+        self.assertRegex(result.stderr, r"\Adraw: could not save the session log of project A ticket \d+ "
+                                        r"\(AttributeError\)\.\n\Z")
+        self.assertEqual(list(world.state.glob("replay-set-*")), [])
 
     def test_a_failed_gh_call_names_the_label_keeps_gh_s_message_in_a_file_and_writes_no_set(self) -> None:
         world = self.world(full_pool(10))

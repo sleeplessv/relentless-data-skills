@@ -5,7 +5,8 @@ Usage: python3 scripts/scan.py SESSION
 
 SESSION is a session id or the path of its .jsonl log. An id is looked up as
 $CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl (default ~/.claude). Helpers' logs
-are read from <log without .jsonl>/subagents/ and every folder below it. The
+are read from <log without .jsonl>/subagents/ and every folder below it; a
+folder there that cannot be listed stops the scan with an error. The
 row is keyed by the file's name when the log's lines carry it, else by the
 first session id inside the log.
 
@@ -18,6 +19,7 @@ exit 1 and no row written, unless it is the last line, cut off mid-write.
 from __future__ import annotations
 
 import fcntl
+import fnmatch
 import glob
 import json
 import os
@@ -138,8 +140,16 @@ def skills(lines: list[dict]) -> list[str]:
 
 
 def helper_logs(log: Path) -> list[Path]:
+    """The helpers' logs; a folder below subagents/ that cannot be listed raises OSError, not leaves one out."""
     # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
-    return sorted((log.parent / log.stem / "subagents").rglob("agent-*.jsonl"))
+    folder = log.parent / log.stem / "subagents"
+    if not folder.is_dir():
+        return []
+
+    def fail(error: OSError) -> None:
+        raise error
+    return sorted(Path(root) / name for root, _, names in os.walk(folder, onerror=fail)
+                  for name in fnmatch.filter(names, "agent-*.jsonl"))
 
 
 def scan(session: str, log: Path) -> dict:

@@ -5,12 +5,14 @@ Usage: python3 scripts/scan.py SESSION
 
 SESSION is a session id or the path of its .jsonl log. An id is looked up as
 $CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl (default ~/.claude). Helpers' logs
-are read from <log without .jsonl>/subagents/.
+are read from <log without .jsonl>/subagents/ and its subfolders. The row is
+keyed by the session id inside the log, else by the file's name.
 
 The row replaces any earlier row for the same session in scan-rows.jsonl in the
 machine directory: $DELIVER_STATE_DIR, default ~/.local/state/deliver. A
 session whose log is gone, or holds no token counts, gets a row of nulls; a
-null is a blank, never a zero.
+null is a blank, never a zero. A line that is not JSON stops the scan with
+exit 1 and no row written, unless it is the last line, cut off mid-write.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import glob
 import json
 import os
 import sys
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
 
@@ -35,11 +38,16 @@ SKILL_LINE = "Base directory for this skill: "
 
 def read_lines(path: Path) -> list[dict]:
     lines = []
-    for text in path.read_text(errors="replace").split("\n"):  # splitlines() would also split on U+2028
+    raw = path.read_text(errors="replace").split("\n")  # splitlines() would also split on U+2028
+    for number, text in enumerate(raw, 1):
+        if not text.strip():
+            continue
         try:
             line = json.loads(text)
         except ValueError:
-            continue  # a line cut off while the session was still writing
+            if number == len(raw):
+                continue  # the last line, cut off while the session was still writing
+            sys.exit(f"{path}:{number}: not a JSON line")
         if isinstance(line, dict):
             lines.append(line)
     return lines
@@ -52,24 +60,28 @@ def texts(line: dict) -> list[str]:
     return [part.get("text", "") for part in content or [] if isinstance(part, dict) and part.get("type") == "text"]
 
 
-def tokens(lines: list[dict], seen: set[str]) -> dict | None:
-    """Sum usage once per API message id not already in `seen`; None when no line has usage."""
-    total = dict.fromkeys(KINDS, 0)
-    counted = False
+def usages(lines: list[dict]) -> dict[str, dict]:
+    """Each response's usage by API message id, from lines that hold a token count.
+
+    Claude Code writes a response's usage on each of its content blocks' lines, and a later line can
+    hold a larger, final count, so the last line wins.
+    """
+    found = {}
     for line in lines:
         message = line.get("message") or {}
         usage = message.get("usage")
-        if line.get("type") != "assistant" or not usage or message.get("model") == "<synthetic>":
-            continue
-        key = message.get("id") or line.get("uuid")
-        if key in seen:
-            continue  # Claude Code repeats one response's usage on each of its content blocks
-        seen.add(key)
-        counted = True
-        for column, field in KINDS.items():
-            total[column] += usage.get(field) or 0
-    if not counted:
+        if (line.get("type") == "assistant" and isinstance(usage, dict) and message.get("model") != "<synthetic>"
+                and any(isinstance(usage.get(field), (int, float)) for field in KINDS.values())):
+            found[message.get("id") or line.get("uuid")] = usage
+    return found
+
+
+def tokens(keys: Iterable[str], final: dict[str, dict]) -> dict | None:
+    """Sum the final usage of the responses in `keys`; None when there are none."""
+    keys = list(keys)
+    if not keys:
         return None
+    total = {column: sum(final[key].get(field) or 0 for key in keys) for column, field in KINDS.items()}
     total["total_tokens"] = sum(total.values())
     return total
 
@@ -101,45 +113,56 @@ def scan(session: str, log: Path) -> dict:
     if not log.is_file():
         return {**row, **blank}
     main = read_lines(log)
-    helper_logs = sorted((log.parent / log.stem / "subagents").glob("*.jsonl"))
+    # A copy of a log keeps its session's id inside, whatever the file is called.
+    row["session"] = next((line["sessionId"] for line in main if isinstance(line.get("sessionId"), str)), session)
+    # A workflow's helpers sit one folder deeper, under subagents/workflows/<run>/.
+    helper_logs = sorted((log.parent / log.stem / "subagents").rglob("agent-*.jsonl"))
     helpers = [(path, read_lines(path)) for path in helper_logs]
     every = main + [line for _, lines in helpers for line in lines]
-    total = tokens(every, set())
+    final = usages(every)
+    total = tokens(final, final)
     if total is None:
         return {**row, **blank}
 
-    seen: set[str] = set()
-    tokens(main, seen)  # a forked helper's log repeats its parent's responses; those are the parent's spend
-    briefs = {part.get("id"): (part.get("input") or {}).get("prompt")
-              for line in every if line.get("type") == "assistant"
-              for part in (line.get("message") or {}).get("content") or []
-              if isinstance(part, dict) and part.get("type") == "tool_use"}
+    seen = set(usages(main))  # a forked helper's log repeats its parent's responses; those are the parent's spend
+    calls = {part.get("id"): part for line in every if line.get("type") == "assistant"
+             for part in (line.get("message") or {}).get("content") or []
+             if isinstance(part, dict) and part.get("type") == "tool_use"}
     metas = {}
     for path, _ in helpers:
         meta_path = path.with_name(path.stem + ".meta.json")
         metas[path] = json.loads(meta_path.read_text()) if meta_path.is_file() else {}
     # A helper's fork copies its context too, so a parent, one level shallower, takes its responses first.
-    owns = {path: tokens(lines, seen)
-            for path, lines in sorted(helpers, key=lambda helper: (metas[helper[0]].get("spawnDepth") or 1, helper[0]))}
+    owns = {}
+    for path, lines in sorted(helpers, key=lambda helper: (metas[helper[0]].get("spawnDepth") or 1, helper[0])):
+        own = usages(lines).keys() - seen
+        seen |= own
+        owns[path] = tokens(own, final)
     listed = []
     for path, lines in helpers:
         own, meta = owns[path], metas[path]
-        brief = briefs.get(meta.get("toolUseId")) or next(
+        call = (calls.get(meta.get("toolUseId")) or {}).get("input") or {}
+        brief = call.get("prompt") or next(
             (line["message"]["content"] for line in lines
              if line.get("type") == "user" and isinstance((line.get("message") or {}).get("content"), str)), None)
-        listed.append({"id": path.stem.removeprefix("agent-"), "description": meta.get("description"),
+        listed.append({"id": path.stem.removeprefix("agent-"), "description": meta.get("description") or call.get("description"),
                        "brief_head": brief[:BRIEF_HEAD] if brief else None, **(own or blank_tokens())})
 
     compactions = {line.get("uuid"): (line.get("compactMetadata") or {}).get("trigger")
                    for line in every if line.get("subtype") == "compact_boundary"}
     skills: list[str] = []
     for line in every:
-        if line.get("type") == "user" and line.get("isMeta"):
-            for text in texts(line):
-                if text.startswith(SKILL_LINE):
-                    name = Path(text[len(SKILL_LINE):].splitlines()[0].strip()).name
-                    if name not in skills:
-                        skills.append(name)
+        if line.get("type") != "user":
+            continue
+        names = [Path(text[len(SKILL_LINE):].splitlines()[0].strip()).name
+                 for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
+        # A bundled skill has no folder, so no such line: its successful Skill call names it.
+        content = (line.get("message") or {}).get("content")
+        for part in content if isinstance(content, list) else []:
+            call = calls.get(part.get("tool_use_id")) if isinstance(part, dict) else None
+            if call and call.get("name") == "Skill" and part.get("type") == "tool_result" and not part.get("is_error"):
+                names.append(str((call.get("input") or {}).get("skill", "")).split(":")[-1])
+        skills.extend(name for name in dict.fromkeys(names) if name and name not in skills)
     return {**row, **total, "active_minutes": active_minutes(every),
             "auto_compactions": sum(t == "auto" for t in compactions.values()),
             "typed_compactions": sum(t == "manual" for t in compactions.values()),
@@ -161,14 +184,16 @@ def resolve(target: str) -> tuple[str, Path]:
 
 def write_row(row: dict) -> Path:
     state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
-    state.mkdir(parents=True, exist_ok=True)
+    state.mkdir(mode=0o700, parents=True, exist_ok=True)  # rows hold the head of each helper's brief
     rows = state / "scan-rows.jsonl"
     with open(state / "scan-rows.lock", "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
         kept = [text for text in (rows.read_text().splitlines() if rows.is_file() else [])
                 if text.strip() and json.loads(text).get("session") != row["session"]]
         partial = rows.with_name(rows.name + ".partial")
-        partial.write_text("".join(text + "\n" for text in [*kept, json.dumps(row)]))
+        with os.fdopen(os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as file:
+            os.fchmod(file.fileno(), 0o600)
+            file.write("".join(text + "\n" for text in [*kept, json.dumps(row)]))
         partial.replace(rows)
     return rows
 

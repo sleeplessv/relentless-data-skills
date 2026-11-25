@@ -110,7 +110,7 @@ class TestScan(unittest.TestCase):
     def log_path(self, session: str | None = None) -> Path:
         return self.project / f"{session or self.session}.jsonl"
 
-    def helper(self, agent: str, description: str, log: Log, tool_use_id: str, **meta: object) -> None:
+    def helper(self, agent: str, description: str | None, log: Log, tool_use_id: str, **meta: object) -> None:
         folder = self.project / self.session / "subagents"
         log.write(folder / f"agent-{agent}.jsonl")
         (folder / f"agent-{agent}.meta.json").write_text(json.dumps(
@@ -402,6 +402,117 @@ class TestScan(unittest.TestCase):
         self.assertEqual([process.wait() for process in scans], [0] * 40)
 
         self.assertEqual(len(self.rows()), 40)
+
+    def test_a_workflow_helper_in_a_subfolder_is_read(self) -> None:
+        main = Log(self.session).user(0, "Run the workflow.")
+        main.assistant(1, (1, 2, 3, 4))
+        main.write(self.log_path())
+        worker = Log(self.session, "aworker").user(2, "Step one.")
+        worker.assistant(11, (2, 4, 6, 8))
+        worker.write(self.project / self.session / "subagents" / "workflows" / "wf_example1" / "agent-aworker.jsonl")
+
+        self.scan(str(self.log_path()))
+
+        row = self.only_row()
+        self.assertEqual((row["total_tokens"], row["active_minutes"]), (30, 11.0))
+        self.assertEqual([(helper["id"], helper["total_tokens"]) for helper in row["helpers"]], [("aworker", 20)])
+
+    def test_a_response_counts_at_its_last_and_final_usage(self) -> None:
+        main = Log(self.session).user(0, "Go.")
+        main.agent_call(1, (1, 1, 1, 1), "toolu_one", "Write it.")
+        main.write(self.log_path())
+        helper = Log(self.session, "aone").user(1.5, "Write it.")
+        response = helper.assistant(2, (10, 1, 0, 0))
+        helper.assistant(2.5, (10, 90, 0, 0), message_id=response)
+        self.helper("aone", "Write", helper, "toolu_one")
+
+        self.scan(str(self.log_path()))
+
+        row = self.only_row()
+        self.assertEqual((row["total_tokens"], row["helpers"][0]["total_tokens"]), (104, 100))
+
+    def test_usage_with_no_token_counts_gives_a_row_of_blanks(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (0, 0, 0, 0))
+        log.lines[-1]["message"]["usage"] = {"service_tier": "standard"}
+        log.write(self.log_path())
+
+        self.scan(str(self.log_path()))
+
+        self.assert_blank_row(self.session)
+
+    def test_a_skill_loaded_by_a_skill_call_is_listed_and_a_failed_call_is_not(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        for minute, tool_use_id, name, failed in ((1, "toolu_ok", "example-plugin:bundled", False),
+                                                  (2, "toolu_failed", "missing", True)):
+            log.assistant(minute, (1, 1, 1, 1), content=[
+                {"type": "tool_use", "id": tool_use_id, "name": "Skill", "input": {"skill": name}}])
+            log.user(minute + 0.5, [{"type": "tool_result", "tool_use_id": tool_use_id, "is_error": failed,
+                                     "content": "Launching skill"}])
+        log.write(self.log_path())
+
+        self.scan(str(self.log_path()))
+
+        self.assertEqual(self.only_row()["skills"], ["bundled"])
+
+    def test_a_log_is_keyed_by_the_session_id_inside_it(self) -> None:
+        sessions = [str(uuid.uuid4()), str(uuid.uuid4())]
+        for number, session in enumerate(sessions):
+            log = Log(session).user(0, "Go.")
+            log.assistant(1, (1, 1, 1, 1))
+            log.write(self.root / f"saved-{number}" / "saved.jsonl")
+            self.scan(str(self.root / f"saved-{number}" / "saved.jsonl"))
+
+        self.assertEqual(sorted(row["session"] for row in self.rows()), sorted(sessions))
+
+    def test_the_rows_file_and_a_new_machine_directory_are_owner_only(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.log_path())
+
+        self.scan(str(self.log_path()))
+        self.scan(str(self.log_path()))
+
+        for path in (self.state, self.state / "scan-rows.jsonl"):
+            self.assertEqual(path.stat().st_mode & 0o077, 0, path)
+
+    def test_a_helper_without_a_description_takes_its_dispatch_description(self) -> None:
+        main = Log(self.session).user(0, "Go.")
+        main.agent_call(1, (1, 1, 1, 1), "toolu_one", "Look.")
+        main.write(self.log_path())
+        self.helper("aone", None, Log(self.session, "aone").user(1.5, "Look."), "toolu_one")
+
+        self.scan(str(self.log_path()))
+
+        self.assertEqual(self.only_row()["helpers"][0]["description"], "helper")
+
+    def test_a_damaged_line_before_the_last_stops_the_scan_and_keeps_the_row(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.assistant(2, (2, 2, 2, 2))
+        log.write(self.log_path())
+        self.scan(str(self.log_path()))
+        text = self.log_path().read_text().split("\n")
+        text[1] = text[1][:40]
+        self.log_path().write_text("\n".join(text))
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual(result.returncode, 1)
+        self.assertIn(":2:", result.stderr)
+        self.assertEqual(self.only_row()["total_tokens"], 12)
+
+    def test_a_last_line_cut_off_mid_write_is_skipped(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.log_path())
+        with self.log_path().open("a") as file:
+            file.write('{"type": "assistant", "message": {"usa')
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.only_row()["total_tokens"], 4)
 
     def test_help_prints_usage_and_writes_no_row(self) -> None:
         result = self.scan("--help")

@@ -266,7 +266,7 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
         base = fetch(clone, entry["base_commit"])
         trees = {place: tree_of(commit, place) for place in (clone, source) if place}
 
-        check = state / "judged" / saved.name / "check.txt"
+        check = saved / "check.txt"
         failed = Checkout(work).run_check({"label": label, "ticket": number, "repo": repo}, clone, commit, check)
 
         diff = git("-c", "core.quotepath=off", "diff", "--no-color", "--no-ext-diff", "--no-textconv",

@@ -40,7 +40,11 @@ exit 1
 # sandbox cannot start and sandbox.failIfUnavailable is set: it prints an error and
 # exits 1 before the session starts, writing no log. Otherwise it writes the session's
 # log under $CLAUDE_CONFIG_DIR/projects/, loads the skill STANDIN_SKILL names, writes
-# replayed.txt in its working folder and exits with STANDIN_EXIT (default 0).
+# replayed.txt in its working folder and exits with STANDIN_EXIT (default 0). Other knobs
+# make the session misbehave: STANDIN_LOG set to "none" writes no log, to "bad" writes a
+# line that is not JSON, to "no-usage" leaves out the response that holds token counts;
+# STANDIN_TRAP names a file that a post-commit hook and a required clean filter, which
+# the session leaves in the clone, would create if anything ran them.
 CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -64,13 +68,25 @@ if os.environ.get("STANDIN_SKILL"):
     lines.append({**base, "type": "user", "uuid": "u2", "timestamp": "2026-01-05T10:00:30.000Z", "isMeta": True,
                   "message": {"role": "user", "content": [{"type": "text", "text":
                       "Base directory for this skill: /skills/" + os.environ["STANDIN_SKILL"] + "\n\n# Body"}]}})
-lines.append({**base, "type": "assistant", "uuid": "a1", "timestamp": "2026-01-05T10:02:00.000Z",
-              "message": {"model": args[args.index("--model") + 1], "id": "msg_1", "type": "message",
-                          "role": "assistant", "content": [{"type": "text", "text": "Done."}],
-                          "usage": {"input_tokens": 10, "output_tokens": 20, "cache_creation_input_tokens": 30,
-                                    "cache_read_input_tokens": 40}}})
-(folder / (session + ".jsonl")).write_text("".join(json.dumps(line) + "\n" for line in lines))
+if os.environ.get("STANDIN_LOG") != "no-usage":
+    lines.append({**base, "type": "assistant", "uuid": "a1", "timestamp": "2026-01-05T10:02:00.000Z",
+                  "message": {"model": args[args.index("--model") + 1], "id": "msg_1", "type": "message",
+                              "role": "assistant", "content": [{"type": "text", "text": "Done."}],
+                              "usage": {"input_tokens": 10, "output_tokens": 20, "cache_creation_input_tokens": 30,
+                                        "cache_read_input_tokens": 40}}})
+text = "".join(json.dumps(line) + "\n" for line in lines)
+if os.environ.get("STANDIN_LOG") != "none":
+    (folder / (session + ".jsonl")).write_text("not json\n" + text if os.environ.get("STANDIN_LOG") == "bad" else text)
 (cwd / "replayed.txt").write_text("the replay's change\n")
+if os.environ.get("STANDIN_TRAP"):
+    trap = os.environ["STANDIN_TRAP"]
+    for name, word in (("hooks/post-commit", "hook"), ("trap-filter", "filter")):
+        script = cwd / ".git" / name
+        script.write_text(f"#!/bin/sh\necho {word} >> '{trap}'\nexec cat\n")
+        script.chmod(0o755)
+    (cwd / ".gitattributes").write_text("* filter=trap\n")
+    with open(cwd / ".git" / "config", "a") as config:
+        config.write(f'[filter "trap"]\n\tclean = "{cwd / '.git' / 'trap-filter'}"\n\trequired = true\n')
 sys.exit(int(os.environ.get("STANDIN_EXIT", "0")))
 '''
 
@@ -83,14 +99,15 @@ PARENT = {"CLAUDECODE": "1", "CLAUDE_CODE_ENTRYPOINT": "cli", "CLAUDE_CODE_SESSI
 CACHES = (".cache/uv", ".cache/pip", "Library/Caches/pip", ".npm")
 
 
-def git(*args: str, cwd: Path) -> str:
-    return subprocess.run(["git", *args], cwd=cwd, check=True, text=True, capture_output=True).stdout.strip()
+def run_git(*args: str, cwd: Path, env: dict[str, str]) -> str:
+    return subprocess.run(["git", *args], cwd=cwd, env=env, check=True, text=True,
+                          capture_output=True).stdout.strip()
 
 
 class World:
     """A real repo with one merged change, a machine directory naming its ticket, and the stand-ins."""
 
-    def __init__(self, root: Path, setup: str = "touch .setup-done") -> None:
+    def __init__(self, root: Path) -> None:
         self.root = root
         self.home = root / "home"
         self.state = self.home / ".local" / "state" / "deliver"
@@ -104,19 +121,23 @@ class World:
         for name, text in (("gh", GH), ("claude", CLAUDE)):
             (self.bin / name).write_text(text)
             (self.bin / name).chmod(0o755)
+        # Every git the tests start, and the replay's, reads this file and no other settings. Its default
+        # branch name differs from the repo's, as a user's can.
+        self.gitconfig = root / "gitconfig"
+        self.gitconfig.write_text("[init]\n\tdefaultBranch = trunk\n[user]\n\tname = t\n\temail = t@example.com\n")
         work = root / "work"
         work.mkdir()
-        git("init", "-q", "-b", "main", cwd=work)
+        self.git("init", "-q", "-b", "main", cwd=work)
         (work / "README.md").write_text("A report.\n")
-        git("add", ".", cwd=work)
-        git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "start", cwd=work)
-        self.base = git("rev-parse", "HEAD", cwd=work)
+        self.git("add", ".", cwd=work)
+        self.git("commit", "-q", "-m", "start", cwd=work)
+        self.base = self.git("rev-parse", "HEAD", cwd=work)
         (work / "total.py").write_text("print(42)\n")
-        git("add", ".", cwd=work)
-        git("-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "the merged change", cwd=work)
-        self.merged = git("rev-parse", "HEAD", cwd=work)
+        self.git("add", ".", cwd=work)
+        self.git("commit", "-q", "-m", "the merged change", cwd=work)
+        self.merged = self.git("rev-parse", "HEAD", cwd=work)
         self.bare = self.remotes / "alpha.git"
-        git("clone", "-q", "--bare", str(work), str(self.bare), cwd=root)
+        self.git("clone", "-q", "--bare", str(work), str(self.bare), cwd=root)
         shutil.rmtree(work)
         entry = {"label": "A", "ticket": 7, "bucket": "0-50", "size": 1, "title": TITLE, "body": BODY,
                  "base_commit": self.base, "ready_commit": self.merged, "model": MODEL, "pr": 507,
@@ -125,18 +146,25 @@ class World:
         self.write("replay-set-1.json", {"set": 1, "seed": 1, "drawn_at": "2026-01-05T00:00:00+00:00",
                                          "tickets": [entry], "set_aside": []})
         self.write("project-labels.json", {"A": REPO})
-        self.write("repos.json", [{"repo": REPO, "check": "true", **({"setup": setup} if setup else {})}])
+        self.write("repos.json", [{"repo": REPO, "check": "true", "setup": "touch .setup-done"}])
+
+    def git(self, *args: str, cwd: Path) -> str:
+        return run_git(*args, cwd=cwd, env=self.git_env())
+
+    def git_env(self) -> dict[str, str]:
+        env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+        return {**env, "HOME": str(self.home), "GIT_CONFIG_GLOBAL": str(self.gitconfig), "GIT_CONFIG_NOSYSTEM": "1"}
 
     def write(self, name: str, data: object) -> None:
         (self.state / name).write_text(json.dumps(data))
 
     def env(self, **extra: str) -> dict[str, str]:
-        env = {key: value for key, value in os.environ.items()
+        env = {key: value for key, value in self.git_env().items()
                if not key.startswith(("CLAUDE", "STANDIN_", "GH_", "GITHUB_"))}
-        env.update(PATH=f"{self.bin}{os.pathsep}{env['PATH']}", HOME=str(self.home), DELIVER_STATE_DIR=str(self.state),
+        env.update(PATH=f"{self.bin}{os.pathsep}{env['PATH']}", DELIVER_STATE_DIR=str(self.state),
                    CLAUDE_CONFIG_DIR=str(self.config), GH_LOG=str(self.gh_log), GH_REMOTES=str(self.remotes),
-                   STANDIN_STARTS=str(self.starts), TMPDIR=str(self.root), **PARENT, **extra)
-        return env
+                   STANDIN_STARTS=str(self.starts), TMPDIR=str(self.root), **PARENT)
+        return {**env, **extra}
 
     def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
@@ -147,19 +175,20 @@ class World:
         return self.state / "replays" / "A-7-direct"
 
     @property
-    def remote(self) -> Path:
+    def store(self) -> Path:
         return self.state / "replays" / "A-7-direct.git"
 
+    def jsonl(self, path: Path) -> list[dict]:
+        return [json.loads(line) for line in path.read_text().splitlines()] if path.is_file() else []
+
     def starts_made(self) -> list[dict]:
-        return [json.loads(line) for line in self.starts.read_text().splitlines()] if self.starts.is_file() else []
+        return self.jsonl(self.starts)
 
     def versions(self) -> list[dict]:
-        path = self.state / "versions.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.is_file() else []
+        return self.jsonl(self.state / "versions.jsonl")
 
     def rows(self) -> list[dict]:
-        path = self.state / "scan-rows.jsonl"
-        return [json.loads(line) for line in path.read_text().splitlines()] if path.is_file() else []
+        return self.jsonl(self.state / "scan-rows.jsonl")
 
 
 class ReplayTest(unittest.TestCase):
@@ -167,6 +196,7 @@ class ReplayTest(unittest.TestCase):
         temp = tempfile.TemporaryDirectory()
         self.addCleanup(temp.cleanup)
         self.world = World(Path(temp.name).resolve())
+        self.git = self.world.git
 
     def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
         """Run the replay, then hold every session it started to the whole confinement."""
@@ -194,45 +224,57 @@ class ReplayTest(unittest.TestCase):
                 "failIfUnavailable": True,
                 "allowUnsandboxedCommands": False,
                 "excludedCommands": [],
-                # The clone's remote is let back in too, so `git fetch origin` works in the sandbox.
-                "filesystem": {"denyRead": [str(home)], "allowRead": [clone, str(self.world.remote), *caches],
-                               "allowWrite": caches},
+                "filesystem": {"denyRead": [str(home)], "allowRead": [clone, *caches], "allowWrite": caches},
                 "network": {"allowedDomains": ["pypi.org", "files.pythonhosted.org", "registry.npmjs.org"],
                             "strictAllowlist": True},
             },
-            "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True},
+            # The web tools are not commands, so the sandbox's network list does not bind them.
+            "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True,
+                            "deny": ["WebFetch", "WebSearch"]},
             "disableClaudeAiConnectors": True,
             "disableAllHooks": True,
         })
         env = start["env"]
         self.assertEqual(sorted(key for key in env if key.startswith("CLAUDE")),
                          ["CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CONFIG_DIR"])
+        self.assertTrue(Path(env["CLAUDE_CONFIG_DIR"]).is_absolute())
         self.assertEqual(env["CLAUDE_CODE_OAUTH_TOKEN"], "login-token")
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotIn("GITHUB_TOKEN", env)
         self.assertEqual(env["ENABLE_CLAUDEAI_MCP_SERVERS"], "false")
 
-    def test_the_clone_is_cut_at_the_commit_before_the_merged_pr_with_no_later_history(self) -> None:
+    def session(self) -> str:
+        [start] = self.world.starts_made()
+        return start["args"][start["args"].index("--session-id") + 1]
+
+    def test_the_version_is_cut_at_the_commit_before_the_merged_pr_with_no_later_history(self) -> None:
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        store, clone = self.world.store, self.world.clone
+        self.assertEqual(self.git("rev-parse", f"{version['commit']}^", cwd=store), self.world.base)
+        self.assertEqual(self.git("rev-parse", "HEAD", cwd=clone), self.world.base)
+        for repo in (store, clone, clone / ".git" / "replay-origin.git"):
+            with self.subTest(repo=repo.name):
+                self.assertNotIn(self.world.merged, self.git("rev-list", "--all", cwd=repo).split())
+                missing = subprocess.run(["git", "cat-file", "-e", self.world.merged], cwd=repo, capture_output=True,
+                                         env=self.world.git_env())
+                self.assertNotEqual(missing.returncode, 0)
+
+    def test_the_clone_fetches_from_a_copy_inside_it_and_nothing_is_pushed_to_the_real_repo(self) -> None:
+        refs = self.git("for-each-ref", cwd=self.world.bare)
         result = self.replay("A", "7")
         self.assertEqual(result.returncode, 0, result.stderr)
         clone = self.world.clone
-        self.assertEqual(git("rev-parse", "HEAD^", cwd=clone), self.world.base)
-        every = git("rev-list", "--all", cwd=clone).split()
-        self.assertNotIn(self.world.merged, every)
-        missing = subprocess.run(["git", "cat-file", "-e", self.world.merged], cwd=clone, capture_output=True)
-        self.assertNotEqual(missing.returncode, 0)
-
-    def test_the_clone_has_only_the_local_copy_as_remote_and_nothing_is_pushed_to_the_real_repo(self) -> None:
-        refs = git("for-each-ref", cwd=self.world.bare)
-        result = self.replay("A", "7")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(git("remote", cwd=self.world.clone), "origin")
-        self.assertEqual(git("remote", "get-url", "origin", cwd=self.world.clone), str(self.world.remote))
-        # The default branch keeps its name, so origin/main is where the ticket's author found it.
-        self.assertEqual(git("branch", "--show-current", cwd=self.world.clone), "main")
-        self.assertEqual(git("rev-parse", "origin/main", cwd=self.world.clone), self.world.base)
-        self.assertNotIn(self.world.merged, git("rev-list", "--all", cwd=self.world.remote).split())
-        self.assertEqual(git("for-each-ref", cwd=self.world.bare), refs)
+        self.assertEqual(self.git("remote", cwd=clone), "origin")
+        self.assertEqual(self.git("remote", "get-url", "origin", cwd=clone), str(clone / ".git" / "replay-origin.git"))
+        self.git("fetch", "-q", "origin", "main", cwd=clone)
+        # The default branch keeps its name, though git's default here is trunk, so origin/main and
+        # origin/HEAD are where the ticket's author found them.
+        self.assertEqual(self.git("branch", "--show-current", cwd=clone), "main")
+        self.assertEqual(self.git("rev-parse", "origin/main", cwd=clone), self.world.base)
+        self.assertEqual(self.git("rev-parse", "origin/HEAD", cwd=clone), self.world.base)
+        self.assertEqual(self.git("for-each-ref", cwd=self.world.bare), refs)
         calls = self.world.gh_log.read_text().splitlines()
         self.assertEqual(len(calls), 1)
         self.assertTrue(calls[0].startswith(f"repo clone {REPO} "), calls[0])
@@ -245,6 +287,19 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(start["prompt"], f"{TITLE}\n\n{BODY}")
         self.assertEqual(start["args"][start["args"].index("--model") + 1], MODEL)
 
+    def test_the_sets_and_repo_list_are_read_as_the_draw_reads_them(self) -> None:
+        stale = json.loads((self.world.state / "replay-set-1.json").read_text())
+        stale["tickets"][0]["title"] = "A stale title"
+        self.world.write("replay-set-0-backup.json", stale)
+        # The draw keeps the last of two entries that differ only in case.
+        self.world.write("repos.json", [{"repo": REPO, "check": "true", "setup": "exit 9"},
+                                        {"repo": REPO.upper(), "check": "true", "setup": "touch .setup-done"}])
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [start] = self.world.starts_made()
+        self.assertEqual(start["prompt"], f"{TITLE}\n\n{BODY}")
+        self.assertTrue(start["setup_done"])
+
     def test_a_failed_setup_starts_no_session_and_keeps_nothing(self) -> None:
         self.world.write("repos.json", [{"repo": REPO, "check": "true", "setup": "exit 4"}])
         result = self.replay("A", "7")
@@ -252,34 +307,71 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.stderr.splitlines()[-1], "replay: the setup command exited 4; no session started.")
         self.assertEqual(self.world.starts_made(), [])
         self.assertFalse(self.world.clone.exists())
-        self.assertFalse(self.world.remote.exists())
+        self.assertFalse(self.world.store.exists())
         self.assertEqual(self.world.versions(), [])
 
     def test_a_sandbox_that_cannot_start_records_no_version(self) -> None:
         result = self.replay("A", "7", STANDIN_NO_SANDBOX="1")
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stderr.splitlines()[-1],
-                         "replay: claude exited 1 and left no session log, so no session started.")
+        self.assertEqual(result.stderr.splitlines()[-1], "replay: claude exited 1, left no session log and changed "
+                                                         "nothing, so no session started.")
         self.assertEqual(len(self.world.starts_made()), 1)
         self.assertEqual(self.world.versions(), [])
         self.assertEqual(self.world.rows(), [])
         self.assertFalse(self.world.clone.exists())
-        self.assertFalse(self.world.remote.exists())
+        self.assertFalse(self.world.store.exists())
 
-    def test_the_clone_is_committed_and_recorded_as_the_direct_version_with_the_session_exit_status(self) -> None:
+    def test_the_working_tree_is_committed_and_recorded_as_the_direct_version_with_the_exit_status(self) -> None:
         result = self.replay("A", "7", STANDIN_EXIT="3")
         self.assertEqual(result.returncode, 0, result.stderr)
-        [start] = self.world.starts_made()
-        session = start["args"][start["args"].index("--session-id") + 1]
-        clone = self.world.clone
-        commit = git("rev-parse", "HEAD", cwd=clone)
-        self.assertEqual(git("status", "--porcelain", cwd=clone), "")
-        self.assertEqual(git("show", "HEAD:replayed.txt", cwd=clone), "the replay's change")
-        self.assertEqual(self.world.versions(), [{
-            "label": "A", "ticket": 7, "version": "direct", "commit": commit, "base_commit": self.world.base,
-            "clone": "replays/A-7-direct", "exit_status": 3, "session": session, "skills": [], "not_direct": False}])
+        [version] = self.world.versions()
+        commit, store = version["commit"], self.world.store
+        self.assertEqual(self.git("rev-parse", "refs/heads/direct", cwd=store), commit)
+        self.assertEqual(self.git("show", f"{commit}:replayed.txt", cwd=store), "the replay's change")
+        self.assertEqual(self.git("show", f"{commit}:.setup-done", cwd=store), "")
+        self.assertEqual(version, {
+            "label": "A", "ticket": 7, "version": "direct", "commit": commit, "repo": "replays/A-7-direct.git",
+            "base_commit": self.world.base, "clone": "replays/A-7-direct", "exit_status": 3,
+            "session": self.session(), "skills": [], "not_direct": False})
         self.assertEqual((self.world.state / "versions.jsonl").stat().st_mode & 0o777, 0o600)
         self.assertEqual(result.stdout, f"Recorded A-7 direct at {commit}: session exit 3.\n")
+
+    def test_nothing_the_session_left_in_the_clone_s_git_folder_runs_when_the_version_is_committed(self) -> None:
+        trap = self.world.root / "trap.txt"
+        result = self.replay("A", "7", STANDIN_TRAP=str(trap))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(trap.exists(), trap.read_text() if trap.exists() else "")
+        [version] = self.world.versions()
+        self.assertEqual(self.git("show", f"{version['commit']}:replayed.txt", cwd=self.world.store),
+                         "the replay's change")
+
+    def test_a_session_that_ran_without_a_log_found_is_still_recorded(self) -> None:
+        result = self.replay("A", "7", STANDIN_LOG="none", STANDIN_EXIT="2")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual((version["exit_status"], version["skills"], version["not_direct"]), (2, None, True))
+        self.assertEqual(self.git("show", f"{version['commit']}:replayed.txt", cwd=self.world.store),
+                         "the replay's change")
+        self.assertEqual(result.stdout, f"Recorded A-7 direct at {version['commit']}: session exit 2, "
+                                        "skills unknown, marked not direct.\n")
+
+    def test_a_log_that_cannot_be_scanned_still_records_the_version(self) -> None:
+        result = self.replay("A", "7", STANDIN_LOG="bad")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual((version["exit_status"], version["skills"], version["not_direct"]), (0, None, True))
+        self.assertEqual(self.world.rows(), [])
+        session = self.session()
+        log = next(self.world.config.glob(f"projects/*/{session}.jsonl"))
+        self.assertEqual(result.stderr, f"replay: the session's log could not be scanned ({log}:1: not a JSON line); "
+                                        f"`python3 scripts/scan.py {session}` reruns the scan.\n")
+
+    def test_a_relative_claude_config_dir_still_finds_the_session_s_log(self) -> None:
+        result = self.replay("A", "7", CLAUDE_CONFIG_DIR=os.path.relpath(self.world.config, self.world.root))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(version["skills"], [])
+        self.assertEqual(len(self.world.rows()), 1)
 
     def test_the_session_is_scanned_into_a_row(self) -> None:
         result = self.replay("A", "7")
@@ -293,7 +385,7 @@ class ReplayTest(unittest.TestCase):
         for skill, marked in (("implement-ticket", True), ("deliver", True), ("fan-out", True), ("tdd", False)):
             with self.subTest(skill=skill):
                 shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.remote, ignore_errors=True)
+                shutil.rmtree(self.world.store, ignore_errors=True)
                 result = self.replay("A", "7", STANDIN_SKILL=skill)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 [version] = self.world.versions()
@@ -302,23 +394,41 @@ class ReplayTest(unittest.TestCase):
                 if marked:
                     self.assertTrue(result.stdout.endswith(": session exit 0, marked not direct.\n"), result.stdout)
 
-    def test_a_clone_already_in_place_is_refused_and_starts_no_session(self) -> None:
-        self.assertEqual(self.replay("A", "7").returncode, 0)
-        commit = git("rev-parse", "HEAD", cwd=self.world.clone)
+    def test_a_session_whose_skills_the_scan_cannot_tell_is_marked_not_direct(self) -> None:
+        result = self.replay("A", "7", STANDIN_SKILL="tdd", STANDIN_LOG="no-usage")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual((version["skills"], version["not_direct"]), (None, True))
+
+    def test_a_ticket_another_replay_holds_is_refused_and_left_as_it_is(self) -> None:
+        self.world.clone.parent.mkdir()
+        self.world.clone.mkdir()
+        (self.world.clone / "theirs.txt").write_text("another replay's\n")
         result = self.replay("A", "7")
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stderr, f"replay: {self.world.clone} or {self.world.remote} is already in place. "
-                                        "Remove both to replay the ticket again.\n")
-        self.assertEqual(len(self.world.starts_made()), 1)
-        self.assertEqual(git("rev-parse", "HEAD", cwd=self.world.clone), commit)
+        self.assertEqual(result.stderr, f"replay: {self.world.clone} is already in place. "
+                                        f"Remove it and {self.world.store} to replay the ticket again.\n")
+        self.assertEqual(self.world.starts_made(), [])
+        self.assertEqual((self.world.clone / "theirs.txt").read_text(), "another replay's\n")
 
-    def test_replaying_again_after_removing_the_clone_replaces_the_record(self) -> None:
+    def test_a_version_repo_already_in_place_is_refused_and_left_as_it_is(self) -> None:
+        self.world.store.mkdir(parents=True)
+        (self.world.store / "theirs.txt").write_text("kept\n")
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"replay: {self.world.store} is already in place. "
+                                        f"Remove it and {self.world.clone} to replay the ticket again.\n")
+        self.assertEqual(self.world.starts_made(), [])
+        self.assertEqual((self.world.store / "theirs.txt").read_text(), "kept\n")
+        self.assertFalse(self.world.clone.exists())
+
+    def test_replaying_again_after_removing_the_clone_and_repo_replaces_the_record(self) -> None:
         self.assertEqual(self.replay("A", "7").returncode, 0)
         shutil.rmtree(self.world.clone)
-        shutil.rmtree(self.world.remote)
+        shutil.rmtree(self.world.store)
         self.assertEqual(self.replay("A", "7").returncode, 0)
         [version] = self.world.versions()
-        self.assertEqual(version["commit"], git("rev-parse", "HEAD", cwd=self.world.clone))
+        self.assertEqual(version["commit"], self.git("rev-parse", "refs/heads/direct", cwd=self.world.store))
         self.assertEqual(len(self.world.rows()), 2)
 
     def test_a_ticket_in_no_replay_set_is_an_error(self) -> None:

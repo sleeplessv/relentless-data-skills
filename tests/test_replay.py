@@ -194,7 +194,9 @@ class ReplayTest(unittest.TestCase):
                 "failIfUnavailable": True,
                 "allowUnsandboxedCommands": False,
                 "excludedCommands": [],
-                "filesystem": {"denyRead": [str(home)], "allowRead": [clone, *caches], "allowWrite": caches},
+                # The clone's remote is let back in too, so `git fetch origin` works in the sandbox.
+                "filesystem": {"denyRead": [str(home)], "allowRead": [clone, str(self.world.remote), *caches],
+                               "allowWrite": caches},
                 "network": {"allowedDomains": ["pypi.org", "files.pythonhosted.org", "registry.npmjs.org"],
                             "strictAllowlist": True},
             },

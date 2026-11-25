@@ -55,7 +55,8 @@ Every session starts with --setting-sources project,local, --strict-mcp-config
 with no MCP server, and these settings: the command sandbox on, a start refused
 when the sandbox cannot start, no command run outside it; sandboxed writes only
 to the clone, the temporary folder and the tool caches ~/{", ~/".join(CACHES)};
-no sandboxed read under the home folder but the clone and those caches; network
+no sandboxed read under the home folder but the clone, its remote and those
+caches; network
 only to {", ".join(REGISTRIES)}; the file tools held to the
 clone; no claude.ai connector and no hook. It does not inherit the variables a
 parent Claude Code session sets (CLAUDECODE, CLAUDE_CODE_*, and the rest of
@@ -86,8 +87,8 @@ class ReplayError(Exception):
     """Ends the replay with exit 1."""
 
 
-def run(*args: str, cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, stdin=subprocess.DEVNULL)
+def run(*args: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, text=True, capture_output=True, stdin=subprocess.DEVNULL)
 
 
 def git(clone: Path, *args: str) -> str:
@@ -114,6 +115,11 @@ def repo(state: Path, label: str) -> dict:
     raise ReplayError(f"project {label} is not in both project-labels.json and repos.json.")
 
 
+def remote(clone: Path) -> Path:
+    """The clone's only remote: the local copy of the history up to base_commit."""
+    return clone.with_name(clone.name + ".git")
+
+
 def settings(clone: Path) -> dict:
     """The confinement every session starts with."""
     home = Path.home()
@@ -124,7 +130,8 @@ def settings(clone: Path) -> dict:
             "failIfUnavailable": True,
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
-            "filesystem": {"denyRead": [str(home)], "allowRead": [str(clone), *caches], "allowWrite": caches},
+            "filesystem": {"denyRead": [str(home)], "allowRead": [str(clone), str(remote(clone)), *caches],
+                           "allowWrite": caches},
             "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True},
         },
         "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True},
@@ -146,7 +153,7 @@ def environment() -> dict[str, str]:
     return env
 
 
-def cut(state: Path, label: str, ticket: int, found: dict, clone: Path, remote: Path) -> None:
+def cut(state: Path, label: str, found: dict, clone: Path, copy: Path) -> None:
     """Make the clone and its remote, holding the history up to base_commit and nothing after it."""
     with tempfile.TemporaryDirectory(dir=state) as work:
         source = Path(work) / "source"
@@ -156,9 +163,9 @@ def cut(state: Path, label: str, ticket: int, found: dict, clone: Path, remote: 
         base = found["base_commit"]
         git(source, "cat-file", "-e", f"{base}^{{commit}}")
         branch = git(source, "branch", "--show-current")  # the default branch, so origin/<it> is the base
-        git(source, "init", "-q", "--bare", str(remote))
-        git(source, "push", "-q", str(remote), f"{base}:refs/heads/{branch}")
-    result = run("git", "clone", "-q", "--branch", branch, str(remote), str(clone))
+        git(source, "init", "-q", "--bare", str(copy))
+        git(source, "push", "-q", str(copy), f"{base}:refs/heads/{branch}")
+    result = run("git", "clone", "-q", "--branch", branch, str(copy), str(clone))
     if result.returncode:
         raise ReplayError(f"`git clone` of the local copy failed with exit {result.returncode}.")
     for key, value in (("user.name", "replay"), ("user.email", "replay@localhost"), ("commit.gpgsign", "false")):
@@ -181,12 +188,13 @@ def replay(label: str, ticket: int) -> int:
     replays = state / "replays"
     replays.mkdir(mode=0o700, exist_ok=True)
     name = f"{label}-{ticket}-{VERSION}"
-    clone, remote = replays / name, replays / f"{name}.git"
-    if clone.exists() or remote.exists():
-        raise ReplayError(f"{clone} or {remote} is already in place. Remove both to replay the ticket again.")
+    clone = replays / name
+    copy = remote(clone)
+    if clone.exists() or copy.exists():
+        raise ReplayError(f"{clone} or {copy} is already in place. Remove both to replay the ticket again.")
     session = str(uuid.uuid4())
     try:
-        cut(state, label, ticket, found, clone, remote)
+        cut(state, label, found, clone, copy)
         setup = repo(state, label).get("setup")
         if setup:
             code = subprocess.run(setup, shell=True, cwd=clone, stdin=subprocess.DEVNULL).returncode
@@ -200,7 +208,7 @@ def replay(label: str, ticket: int) -> int:
             raise ReplayError(f"claude exited {status} and left no session log, so no session started.")
     except BaseException:
         shutil.rmtree(clone, ignore_errors=True)
-        shutil.rmtree(remote, ignore_errors=True)
+        shutil.rmtree(copy, ignore_errors=True)
         raise
     git(clone, "add", "-A")
     git(clone, "commit", "-q", "--allow-empty", "--no-verify", "-m", f"{VERSION} replay of {label}-{ticket}")
@@ -226,10 +234,7 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         return replay(argv[0], int(argv[1]))
-    except ReplayError as error:
-        print(f"replay: {error}", file=sys.stderr)
-        return 1
-    except draw.DrawError as error:
+    except (ReplayError, draw.DrawError) as error:
         print(f"replay: {error}", file=sys.stderr)
         return 1
 

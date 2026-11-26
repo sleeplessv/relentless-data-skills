@@ -329,6 +329,20 @@ def stopped(number: int, frame: object) -> None:
         raise Stopped(number)
 
 
+def held(cleanup: Callable[[], None]) -> None:
+    """Run `cleanup` with SIGINT and SIGTERM held. A signal during it is raised once it is done; so is one that came
+    just before it, which holding the signals raises."""
+    try:
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    except Stopped:  # the signals are held all the same
+        cleanup()
+        raise
+    try:
+        cleanup()
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+
+
 class GhFailed(DrawError):
     """A gh call that failed or gave an answer the draw cannot read; `output` holds the command, what gh
     printed on both streams, and its exit or why its answer cannot be read."""
@@ -949,6 +963,11 @@ class Draw:
                 process.wait()
             if started:
                 started[0].stdin.close()
+
+        def cleanup() -> None:
+            stop()
+            self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
+            self.git("-C", str(clone), "worktree", "prune")
         try:
             added = self.git("-C", str(clone), "worktree", "add", "--detach", "--quiet", str(tree), base)
             if added.returncode:
@@ -980,14 +999,8 @@ class Draw:
                     out.write(f"\n{step} exit {code}\n")
                     if code:
                         return f"{step} exited {code}"
-        finally:  # on success, failure, timeout, interrupt or SIGTERM alike, with both held until it is done
-            held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
-            try:
-                stop()
-                self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
-                self.git("-C", str(clone), "worktree", "prune")
-            finally:
-                signal.pthread_sigmask(signal.SIG_SETMASK, held)
+        finally:  # on success, failure, timeout, interrupt or SIGTERM alike
+            held(cleanup)
         return None
 
     def try_ticket(self, candidate: dict) -> str | None:
@@ -1072,23 +1085,19 @@ class Draw:
             finally:  # a signal held off is raised here
                 signal.pthread_sigmask(signal.SIG_SETMASK, mask)
         except (Exception, SystemExit, Stopped) as error:  # its message can name the project's folder
-            try:
-                mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
-            except Stopped as late:  # a signal that came just before; the signals are held all the same
-                error, mask = late, None
-            for name in names if old.exists() else ():  # put back the earlier copy where it was moved
-                if (old / name).exists():
-                    if (logs / name).is_dir():
-                        shutil.rmtree(logs / name)
-                    elif (logs / name).exists():
-                        (logs / name).unlink()
-                    os.replace(old / name, logs / name)
-            shutil.rmtree(old, ignore_errors=True)
-            shutil.rmtree(staged, ignore_errors=True)
-            if mask is not None:
-                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+            def restore() -> None:
+                for name in names if old.exists() else ():  # put back the earlier copy where it was moved
+                    if (old / name).exists():
+                        if (logs / name).is_dir():
+                            shutil.rmtree(logs / name)
+                        elif (logs / name).exists():
+                            (logs / name).unlink()
+                        os.replace(old / name, logs / name)
+                shutil.rmtree(old, ignore_errors=True)
+                shutil.rmtree(staged, ignore_errors=True)
+            held(restore)
             if isinstance(error, Stopped):
-                raise error
+                raise
             raise DrawError(f"could not save the session log of project {candidate['label']} ticket "
                             f"{candidate['ticket']} ({type(error).__name__}).")
         return str((logs / source.name).relative_to(self.state))

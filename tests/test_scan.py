@@ -7,6 +7,7 @@ directory at temporary folders.
 """
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import stat
@@ -34,6 +35,14 @@ def figures(given: int, output: int, write: int, read: int) -> dict[str, int]:
             "total_tokens": given + output + write + read}
 
 
+def whole_row(session: str, tokens: tuple[int, int, int, int], minutes: float, *, copied: int = 0,
+              skills: tuple[str, ...] = (), helpers: tuple[dict, ...] = ()) -> dict:
+    """A row of a log with no compaction whose responses name MODEL."""
+    return {"session": session, **figures(*tokens), "copied_tokens": copied, "active_minutes": minutes,
+            "auto_compactions": 0, "typed_compactions": 0, "model": MODEL, "skills": list(skills),
+            "helpers": list(helpers)}
+
+
 class Log:
     """Builds one transcript file line by line."""
 
@@ -59,10 +68,24 @@ class Log:
         self.lines.append(line)
         return self
 
-    def skill(self, minute: float, path: str) -> "Log":
-        """The meta line Claude Code writes when a skill loads."""
+    def skill(self, minute: float, path: str, **extra: object) -> "Log":
+        """The meta line Claude Code writes when a skill loads; a Skill call's id goes in sourceToolUseID."""
         return self.user(minute, [{"type": "text", "text": f"Base directory for this skill: {path}\n\n# Body"}],
-                         isMeta=True)
+                         isMeta=True, **extra)
+
+    def skill_call(self, minute: float, tool_use_id: str, skill: object, *, folder: str | None = None,
+                   failed: bool = False, answered: bool = True, tool_input: object = None) -> "Log":
+        """A Skill call, its result unless not `answered`, and the folder line that names the call, if any.
+
+        `tool_input` replaces the call's {"skill": skill}."""
+        self.assistant(minute, None, content=[{"type": "tool_use", "id": tool_use_id, "name": "Skill",
+                                               "input": {"skill": skill} if tool_input is None else tool_input}])
+        if answered:
+            self.user(minute, [{"type": "tool_result", "tool_use_id": tool_use_id, "content": "Launching skill",
+                                **({"is_error": True} if failed else {})}])
+        if folder is not None:
+            self.skill(minute, folder, sourceToolUseID=tool_use_id)
+        return self
 
     def assistant(self, minute: float, usage: tuple[int, int, int, int] | None, *, message_id: str | None = None,
                   model: str = MODEL, content: list | None = None, blocks: int = 1) -> str:
@@ -255,15 +278,13 @@ class TestScan(unittest.TestCase):
                 result = self.scan(str(self.log_path()))
 
                 self.assertEqual(result.returncode, 0, result.stderr)
-                self.assertEqual(self.rows(), [{
-                    "session": self.session, **figures(8, 71, 701, 7001), "active_minutes": 5.0,
-                    "auto_compactions": 0, "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": [
-                        {"id": "acheck", "description": "Check", "brief_head": "Fork: check part one.",
-                         **figures(3, 30, 300, 3000)},
-                        {"id": "adraft", "description": "Draft", "brief_head": "Fork: draft part one.",
-                         **figures(2, 20, 200, 2000)},
-                        {"id": "aplan", "description": "Plan", "brief_head": "Plan the work.",
-                         **figures(2, 20, 200, 2000)}]}])
+                self.assertEqual(self.rows(), [whole_row(self.session, (8, 71, 701, 7001), 5.0, helpers=(
+                    {"id": "acheck", "description": "Check", "brief_head": "Fork: check part one.",
+                     **figures(3, 30, 300, 3000)},
+                    {"id": "adraft", "description": "Draft", "brief_head": "Fork: draft part one.",
+                     **figures(2, 20, 200, 2000)},
+                    {"id": "aplan", "description": "Plan", "brief_head": "Plan the work.",
+                     **figures(2, 20, 200, 2000)}))])
 
     def test_brief_head_is_cut_to_its_first_200_characters(self) -> None:
         main = Log(self.session).user(0, "Go.")
@@ -313,11 +334,9 @@ class TestScan(unittest.TestCase):
                          (0, 0, [], []))
 
     def assert_blank_row(self, session: str) -> None:
-        text = (self.state / "scan-rows.jsonl").read_text()
-        row = self.only_row()
-        self.assertEqual(row["session"], session)
-        self.assertEqual({key for key, value in row.items() if value is not None}, {"session"})
-        self.assertNotIn(": 0", text)
+        self.assertEqual(self.rows(), [{"session": session, **dict.fromkeys([
+            "input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens", "total_tokens", "copied_tokens",
+            "active_minutes", "auto_compactions", "typed_compactions", "model", "skills", "helpers"])}])
 
     def test_a_session_whose_log_is_gone_gets_a_row_of_blanks(self) -> None:
         missing = str(uuid.uuid4())
@@ -487,6 +506,288 @@ class TestScan(unittest.TestCase):
 
         self.assertEqual(self.only_row()["skills"], ["bundled"])
 
+    def assert_skills(self, log: Log, skills: list[str]) -> None:
+        """Scan `log`, ended by one response at minute 10, and check its whole row."""
+        log.assistant(10, (1, 1, 1, 1))
+        result = self.scan(str(log.write(self.log_path())))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [whole_row(self.session, (1, 1, 1, 1), 10.0, skills=tuple(skills))])
+
+    def test_a_skill_a_call_loaded_takes_the_calls_name_and_its_folder_adds_none(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.skill_call(1, "toolu_alpha", "plug:alpha", folder="/home/someone/.claude/plugins/plug/alpha-folder")
+
+        self.assert_skills(log, ["alpha"])
+
+    def test_a_typed_skill_takes_its_folders_name(self) -> None:
+        log = Log(self.session).user(0, "/alpha-folder")
+        log.skill(1, "/home/someone/.claude/skills/alpha-folder")
+
+        self.assert_skills(log, ["alpha-folder"])
+
+    def test_a_bundled_skill_takes_the_calls_name_without_its_prefix(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.skill_call(1, "toolu_bundled", "plug:bundled")
+
+        self.assert_skills(log, ["bundled"])
+
+    def test_a_folder_loaded_by_a_call_and_typed_is_one_entry_named_by_the_call(self) -> None:
+        folder = "/home/someone/.claude/plugins/plug/alpha-folder"
+        for typed_first in (True, False):
+            with self.subTest(typed_first=typed_first):
+                self.state = self.root / f"state-{typed_first}"
+                log = Log(self.session).user(0, "Go.")
+                if typed_first:
+                    log.skill(1, folder)
+                log.skill_call(2, "toolu_beta", "plug:beta", folder="/home/someone/.claude/plugins/plug/beta")
+                log.skill_call(3, "toolu_alpha", "plug:alpha", folder=folder)
+                if not typed_first:
+                    log.skill(4, folder)
+
+                self.assert_skills(log, ["alpha", "beta"] if typed_first else ["beta", "alpha"])
+
+    def test_two_plugins_skills_of_one_name_are_one_entry(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.skill_call(1, "toolu_one", "one:alpha", folder="/home/someone/.claude/plugins/one/alpha")
+        log.skill_call(2, "toolu_two", "two:alpha", folder="/home/someone/.claude/plugins/two/alpha")
+
+        self.assert_skills(log, ["alpha"])
+
+    def test_each_shape_of_a_skill_load_gives_one_name(self) -> None:
+        alpha, beta = "/home/someone/.claude/skills/alpha-folder", "/home/someone/.claude/skills/beta-folder"
+
+        def bash(log: Log) -> None:
+            log.assistant(1, None, content=[{"type": "tool_use", "id": "toolu_bash", "name": "Bash", "input": {}}])
+            log.skill(1, alpha, sourceToolUseID="toolu_bash")
+
+        def two_texts(log: Log) -> None:
+            log.user(1, [{"type": "text", "text": f"Base directory for this skill: {folder}\n\n# Body"}
+                         for folder in (alpha, beta)], isMeta=True)
+        # The rule is in the scan's docstring. Each shape: what the log holds after its first line, and the skills.
+        shapes = {
+            "a folder line naming a call not in the lines": (
+                lambda log: log.skill(1, alpha, sourceToolUseID="toolu_gone"), ["alpha-folder"]),
+            "a folder line naming a call that is no Skill call": (bash, ["alpha-folder"]),
+            "a folder line naming a failed Skill call": (
+                lambda log: log.skill_call(1, "toolu_a", "plug:alpha", folder=alpha, failed=True), ["alpha-folder"]),
+            "a folder line naming a Skill call with no result": (
+                lambda log: log.skill_call(1, "toolu_a", "plug:alpha", folder=alpha, answered=False),
+                ["alpha-folder"]),
+            "a sourceToolUseID that is not text": (
+                lambda log: log.skill(1, alpha, sourceToolUseID=["toolu_a"]), ["alpha-folder"]),
+            "a call with no skill input": (
+                lambda log: log.skill_call(1, "toolu_a", None, folder=alpha, tool_input={}), ["alpha-folder"]),
+            "a call whose skill input is not text": (
+                lambda log: log.skill_call(1, "toolu_a", 7, folder=alpha), ["alpha-folder"]),
+            "a call whose skill input is empty": (
+                lambda log: log.skill_call(1, "toolu_a", "", folder=alpha), ["alpha-folder"]),
+            "a call for a plugin and no skill": (
+                lambda log: log.skill_call(1, "toolu_a", "plug:", folder=alpha), ["alpha-folder"]),
+            "a call for a plugin and no skill, with no folder line": (
+                lambda log: log.skill_call(1, "toolu_a", "plug:"), []),
+            "a call whose skill input holds two colons": (
+                lambda log: log.skill_call(1, "toolu_a", "one:two:alpha", folder=alpha), ["alpha"]),
+            "a call whose input is not an object": (
+                lambda log: log.skill_call(1, "toolu_a", None, folder=alpha, tool_input="plug:alpha"),
+                ["alpha-folder"]),
+            "two folders with the same last name": (
+                lambda log: log.skill(1, "/one/alpha").skill(2, "/two/alpha"), ["alpha"]),
+            "a folder whose name is another skill's call name": (
+                lambda log: log.skill(1, "/one/alpha").skill_call(2, "toolu_a", "plug:alpha", folder=beta),
+                ["alpha"]),
+            "one line with two folder texts": (two_texts, ["alpha-folder", "beta-folder"]),
+            "a folder path that ends in a slash": (
+                lambda log: log.skill_call(1, "toolu_a", "plug:alpha", folder=alpha).skill(2, alpha + "/")
+                .skill(3, beta + "/"), ["alpha", "beta-folder"]),
+            "one skill loaded by two calls": (
+                lambda log: log.skill_call(1, "toolu_a", "plug:alpha", folder=alpha)
+                .skill_call(2, "toolu_b", "plug:alpha", folder=alpha), ["alpha"]),
+            "a later call of another name for an earlier call's folder": (
+                lambda log: log.skill_call(1, "toolu_old", "plug:old", folder=alpha)
+                .skill_call(2, "toolu_middle", "plug:middle", folder=beta)
+                .skill_call(3, "toolu_new", "plug:new", folder=alpha), ["old", "middle", "new"]),
+            "a typed load of a folder two calls of other names loaded": (
+                lambda log: log.skill(1, alpha).skill_call(2, "toolu_new", "plug:new", folder=alpha)
+                .skill_call(3, "toolu_old", "plug:old", folder=alpha), ["new", "old"]),
+        }
+        for number, (shape, (build, skills)) in enumerate(shapes.items()):
+            with self.subTest(shape=shape):
+                self.state = self.root / f"state-{number}"
+                log = Log(self.session).user(0, "Go.")
+                build(log)
+
+                self.assert_skills(log, skills)
+
+    def test_a_call_and_its_folder_line_pair_across_the_main_log_and_a_helpers(self) -> None:
+        plugins = "/home/someone/.claude/plugins/plug"
+        main = Log(self.session).user(0, "Go.")
+        main.skill_call(1, "toolu_alpha", "plug:alpha")
+        main.agent_call(2, (1, 1, 1, 1), "toolu_one", "Look.")
+        main.skill(3, f"{plugins}/beta-folder", sourceToolUseID="toolu_beta")
+        main.skill_call(4, "toolu_gamma", "plug:gamma", folder=f"{plugins}/gamma-folder")
+        main.agent_call(5, (1, 1, 1, 1), "toolu_fork", "Fork: go on.")
+        main.write(self.log_path())
+        helper = Log(self.session, "aone").user(2, "Look.")
+        helper.skill(2, f"{plugins}/alpha-folder", sourceToolUseID="toolu_alpha")
+        helper.skill_call(2, "toolu_beta", "plug:beta")
+        helper.assistant(3, (2, 2, 2, 2))
+        self.helper("aone", "Look", helper, "toolu_one")
+        # A forked helper's log starts with a copy of its parent's lines, the Skill call's among them.
+        fork = Log(self.session, "afork").raw({"type": "fork-context-ref", "agentId": "afork"})
+        for line in main.lines:
+            fork.raw(line)
+        fork.assistant(6, (3, 3, 3, 3))
+        self.helper("afork", "Fork", fork, "toolu_fork", agentType="fork")
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [whole_row(
+            self.session, (7, 7, 7, 7), 6.0, skills=("alpha", "beta", "gamma"), helpers=(
+                {"id": "afork", "description": "Fork", "brief_head": "Fork: go on.", **figures(3, 3, 3, 3)},
+                {"id": "aone", "description": "Look", "brief_head": "Look.", **figures(2, 2, 2, 2)}))])
+
+    def test_skills_are_in_the_order_of_first_load_by_time_across_the_logs(self) -> None:
+        main = Log(self.session).user(0, "Go.")
+        main.agent_call(0, (1, 1, 1, 1), "toolu_one", "Look.")
+        main.agent_call(0, (1, 1, 1, 1), "toolu_two", "Look again.")
+        main.skill(1, "/skills/first").skill(5, "/skills/last")
+        main.write(self.log_path())
+        for agent, prompt, minute, folder in (("aone", "Look.", 3, "/skills/third"),
+                                              ("atwo", "Look again.", 2, "/skills/second")):
+            helper = Log(self.session, agent).user(2, prompt).skill(minute, folder)
+            helper.assistant(minute, (1, 1, 1, 1))
+            self.helper(agent, prompt.rstrip("."), helper, "toolu_one" if agent == "aone" else "toolu_two")
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [whole_row(
+            self.session, (4, 4, 4, 4), 5.0, skills=("first", "second", "third", "last"), helpers=(
+                {"id": "aone", "description": "Look", "brief_head": "Look.", **figures(1, 1, 1, 1)},
+                {"id": "atwo", "description": "Look again", "brief_head": "Look again.", **figures(1, 1, 1, 1)}))])
+
+    def test_a_load_with_no_time_takes_the_time_of_the_line_before_it(self) -> None:
+        main = Log(self.session).user(0, "Go.")
+        main.agent_call(0, (1, 1, 1, 1), "toolu_one", "Look.")
+        main.skill(4, "/skills/main-four").skill(4.5, "/skills/main-untimed").skill(6, "/skills/main-six")
+        del main.lines[-2]["timestamp"]
+        main.write(self.log_path())
+        helper = Log(self.session, "aone").user(1, "Look.").skill(2, "/skills/helper-untimed")
+        helper.lines[-1]["timestamp"] = None
+        helper.skill(5, "/skills/helper-five").assistant(5, (1, 1, 1, 1))
+        self.helper("aone", "Look", helper, "toolu_one")
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [whole_row(
+            self.session, (2, 2, 2, 2), 6.0,
+            skills=("helper-untimed", "main-four", "main-untimed", "helper-five", "main-six"),
+            helpers=({"id": "aone", "description": "Look", "brief_head": "Look.", **figures(1, 1, 1, 1)},))])
+
+    def test_skills_read_lines_whose_times_the_scan_would_refuse_without_stopping(self) -> None:
+        # The draw passes skills() lines whose times nothing has checked, so this calls it in the scan's module.
+        spec = importlib.util.spec_from_file_location("scan_under_test", SCAN)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        log = Log(self.session)
+        for stamp_given, folder in ((7, "/skills/not-text"), ("soon", "/skills/unreadable"),
+                                    ("2026-01-05T10:03:00", "/skills/no-zone"), ("2026-01-05T10:02:00Z", "/skills/utc"),
+                                    ("2026-01-05T10:01:00+01:00", "/skills/an-hour-east")):
+            log.skill(0, folder)
+            log.lines[-1]["timestamp"] = stamp_given
+
+        self.assertEqual(module.skills(log.lines), ["not-text", "unreadable", "an-hour-east", "utc", "no-zone"])
+
+    def test_copied_tokens_hold_the_responses_only_copied_lines_carry(self) -> None:
+        earlier = str(uuid.uuid4())
+
+        def resumed(copied: list[tuple[str | None, tuple | None]], own: list[tuple[str | None, tuple | None]]) -> Log:
+            """A log whose lines carry the earlier session's id, then its own; each response is (id, usage)."""
+            log, later = Log(earlier).user(0, "Go."), Log(self.session).user(2, "Go on.")
+            for message_id, usage in copied:
+                log.assistant(1, usage, message_id=message_id)
+            for message_id, usage in own:
+                later.assistant(3, usage, message_id=message_id)
+            log.lines += later.lines
+            return log
+
+        def no_session_id(value: object) -> Log:
+            log = resumed([(None, (0, 100, 0, 0))], [(None, (0, 10, 0, 0))])
+            log.lines[-1]["sessionId"] = value
+            if value == "missing":
+                del log.lines[-1]["sessionId"]
+            return log
+        cases = {  # the log, its row's output_tokens, copied_tokens and active_minutes
+            "100 copied output tokens and 10 of its own": (
+                resumed([(None, (0, 100, 0, 0))], [(None, (0, 10, 0, 0))]), 110, 100, 3.0),
+            "no copied line": (Log(self.session).raw(resumed([], [(None, (0, 10, 0, 0))]).lines[-1]), 10, 0, 0.0),
+            "a response on a copied line and on the session's own": (
+                resumed([("msg_both", (0, 100, 0, 0))], [("msg_both", (0, 100, 0, 0)), (None, (0, 10, 0, 0))]),
+                110, 0, 3.0),
+            "a response on a copied line and on an own line with no token counts": (
+                resumed([("msg_both", (0, 100, 0, 0))], [("msg_both", None), (None, (0, 10, 0, 0))]), 110, 0, 3.0),
+            "a larger final count on the copied line": (
+                resumed([("msg_both", (0, 100, 0, 0))], [("msg_both", (0, 40, 0, 0))]), 100, 0, 3.0),
+            "a larger final count on the session's own line": (
+                resumed([("msg_both", (0, 40, 0, 0))], [("msg_both", (0, 100, 0, 0))]), 100, 0, 3.0),
+            "a line with no session id": (no_session_id("missing"), 110, 100, 3.0),
+            "a line with a null session id": (no_session_id(None), 110, 100, 3.0),
+            "a line whose session id is not text": (no_session_id(7), 110, 100, 3.0),
+            "copied lines with no token counts": (resumed([(None, None)], [(None, (0, 10, 0, 0))]), 10, 0, 3.0),
+            "token counts on copied lines alone": (resumed([(None, (0, 100, 0, 0))], [(None, None)]), 100, 100, 3.0),
+        }
+        for number, (case, (log, output, copied, minutes)) in enumerate(cases.items()):
+            with self.subTest(case=case):
+                self.state = self.root / f"state-{number}"
+
+                result = self.scan(str(log.write(self.log_path())))
+
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                self.assertEqual(self.rows(), [whole_row(self.session, (0, output, 0, 0), minutes, copied=copied)])
+
+    def test_an_own_line_whose_response_id_is_a_nonempty_list_or_object_carries_no_response(self) -> None:
+        earlier = str(uuid.uuid4())
+        for number, message_id in enumerate((["msg_listed"], {"id": "msg_listed"})):
+            with self.subTest(message_id=message_id):
+                self.state = self.root / f"state-{number}"
+                log = Log(earlier).user(0, "Go.")
+                log.assistant(1, (0, 100, 0, 0))
+                own = Log(self.session).user(2, "Go on.")
+                own.assistant(3, None)
+                own.lines[-1]["message"]["id"] = message_id
+                own.assistant(3, (0, 10, 0, 0))
+                log.lines += own.lines
+
+                result = self.scan(str(log.write(self.log_path())))
+
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                self.assertEqual(self.rows(), [whole_row(self.session, (0, 110, 0, 0), 3.0, copied=100)])
+
+    def test_copied_lines_in_a_helpers_log_count_and_a_response_a_helper_repeats_does_not(self) -> None:
+        earlier = str(uuid.uuid4())
+        main = Log(earlier).user(0, "Go.")
+        shared = main.assistant(0, (0, 0, 0, 100))
+        later = Log(self.session).user(0.5, "Go on.")
+        later.agent_call(1, (1, 0, 0, 0), "toolu_one", "Look.")
+        main.lines += later.lines
+        main.write(self.log_path())
+        helper = Log(self.session, "aone").user(1.5, "Look.")
+        helper.assistant(2, (0, 0, 0, 100), message_id=shared)
+        copied = Log(earlier, "aone")
+        copied.assistant(2.5, (0, 0, 100, 0))
+        helper.lines += copied.lines
+        helper.assistant(3, (0, 1, 0, 0))
+        self.helper("aone", "Look", helper, "toolu_one")
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [whole_row(self.session, (1, 1, 100, 100), 3.0, copied=100, helpers=(
+            {"id": "aone", "description": "Look", "brief_head": "Look.", **figures(0, 1, 100, 0)},))])
+
     def test_a_log_is_keyed_by_the_session_id_inside_it(self) -> None:
         sessions = [str(uuid.uuid4()), str(uuid.uuid4())]
         for number, session in enumerate(sessions):
@@ -611,13 +912,11 @@ class TestScan(unittest.TestCase):
         result = self.scan(str(self.log_path()))
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.rows(), [{
-            "session": self.session, **figures(2, 2, 2, 2), "active_minutes": 3.0, "auto_compactions": 0,
-            "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": [
-                {"id": "aloop", "description": "aloop", "brief_head": "Work.", **figures(1, 0, 0, 0)},
-                {"id": "aorphan", "description": "aorphan", "brief_head": "Work.", **figures(0, 0, 0, 1)},
-                {"id": "aself", "description": "aself", "brief_head": "Work.", **figures(0, 0, 1, 0)},
-                {"id": "bloop", "description": "bloop", "brief_head": "Work.", **figures(0, 1, 0, 0)}]}])
+        self.assertEqual(self.rows(), [whole_row(self.session, (2, 2, 2, 2), 3.0, helpers=(
+            {"id": "aloop", "description": "aloop", "brief_head": "Work.", **figures(1, 0, 0, 0)},
+            {"id": "aorphan", "description": "aorphan", "brief_head": "Work.", **figures(0, 0, 0, 1)},
+            {"id": "aself", "description": "aself", "brief_head": "Work.", **figures(0, 0, 1, 0)},
+            {"id": "bloop", "description": "bloop", "brief_head": "Work.", **figures(0, 1, 0, 0)}))])
 
     def test_a_timestamp_that_is_not_an_iso_time_stops_the_scan_naming_the_log(self) -> None:
         for number, (stamp, usage) in enumerate((("yesterday", (1, 1, 1, 1)), (1767607200, (1, 1, 1, 1)),
@@ -645,9 +944,7 @@ class TestScan(unittest.TestCase):
         result = self.scan(str(log.write(self.log_path())))
 
         self.assertEqual((result.returncode, result.stderr), (0, ""))
-        self.assertEqual(self.rows(), [{
-            "session": self.session, **figures(2, 2, 2, 2), "active_minutes": 0.0, "auto_compactions": 0,
-            "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}])
+        self.assertEqual(self.rows(), [whole_row(self.session, (2, 2, 2, 2), 0.0)])
 
     def test_times_with_no_time_zone_anywhere_are_read(self) -> None:
         log = Log(self.session).user(0, "Go.")
@@ -658,9 +955,7 @@ class TestScan(unittest.TestCase):
         result = self.scan(str(log.write(self.log_path())))
 
         self.assertEqual((result.returncode, result.stderr), (0, ""))
-        self.assertEqual(self.rows(), [{
-            "session": self.session, **figures(1, 1, 1, 1), "active_minutes": 5.0, "auto_compactions": 0,
-            "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}])
+        self.assertEqual(self.rows(), [whole_row(self.session, (1, 1, 1, 1), 5.0)])
 
     def test_times_with_and_without_a_time_zone_stop_the_scan_naming_the_log_that_breaks_the_pattern(self) -> None:
         main = Log(self.session).user(0, "Go.")
@@ -748,8 +1043,7 @@ class TestScan(unittest.TestCase):
 
         self.assertEqual((result.returncode, result.stderr), (0, "".join(
             f"{rows}:{number}: not a JSON object, kept as it is\n" for number, _, named in lines if named)))
-        row = {"session": self.session, **figures(1, 1, 1, 1), "active_minutes": 1.0, "auto_compactions": 0,
-               "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}
+        row = whole_row(self.session, (1, 1, 1, 1), 1.0)
         self.assertEqual(rows.read_bytes(), b"".join(data + b"\n" for _, data, _ in lines)
                          + json.dumps(row).encode() + b"\n")
 
@@ -766,10 +1060,8 @@ class TestScan(unittest.TestCase):
         for path in (self.log_path(), self.root / "saved" / "copy.jsonl"):
             self.scan(str(path))
 
-        common = {"auto_compactions": 0, "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}
-        self.assertEqual(self.rows(), [
-            {"session": self.session, **figures(1, 1, 1, 1), "active_minutes": 1.0, **common},
-            {"session": later, **figures(3, 3, 3, 3), "active_minutes": 3.0, **common}])
+        self.assertEqual(self.rows(), [whole_row(self.session, (1, 1, 1, 1), 1.0),
+                                       whole_row(later, (3, 3, 3, 3), 3.0, copied=4)])
 
     def test_a_log_with_no_session_id_is_keyed_by_the_files_name(self) -> None:
         log = Log(self.session).user(0, "Go.")
@@ -779,7 +1071,7 @@ class TestScan(unittest.TestCase):
 
         self.scan(str(log.write(self.root / "saved.jsonl")))
 
-        self.assertEqual(self.only_row()["session"], "saved")
+        self.assertEqual(self.rows(), [whole_row("saved", (1, 1, 1, 1), 1.0)])
 
     def test_a_machine_directory_and_lock_reached_through_symlinks_are_made_owner_only(self) -> None:
         log = Log(self.session).user(0, "Go.")
@@ -816,6 +1108,33 @@ class TestScan(unittest.TestCase):
                 "that is not an ISO time, or one session's times with and without a time zone; or a helper's "
                 "meta.json that is not a JSON object, or whose parentAgentId, toolUseId or description is neither "
                 "text nor null."):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, help_text)
+
+    def test_help_gives_the_naming_rule_and_the_copied_lines(self) -> None:
+        help_text = " ".join(self.scan("--help").stdout.split())
+
+        for sentence in (
+                "The row's skills list each skill the logs show loaded once, never with a plugin prefix.",
+                "A skill that a successful Skill call loaded takes the name the call gives, less everything up to "
+                "its last colon.",
+                "The line that gives that load's folder names the call in sourceToolUseID, takes the call's name and "
+                "adds no second entry.",
+                "Any other load of that folder, as a typed one, takes the name of the call the first such line "
+                "names.",
+                "A skill that no such call loaded takes its folder's last name.",
+                "A call that failed, has no result or gives no name adds no entry.",
+                "So two skills of one name from two plugins are one entry: a typed skill leaves no prefix to recover.",
+                "A line whose sessionId is text other than the row's session is a copied line, as the lines a "
+                "resumed session copied from an earlier one are.",
+                "Copied lines, in the session's log or a helper's, count in every other column like the session's own.",
+                "copied_tokens is the part of total_tokens from the responses that only copied lines carry: 0 when "
+                "there are none, blank when total_tokens is blank.",
+                "A line carries a response when it holds part of it, with or without token counts.",
+                "The skills are in the order of first load by time, across the session's log and its helpers' logs.",
+                "A time with no zone is read as UTC.",
+                "A line with no timestamp, or a null one, takes the time of the line before it, or comes first "
+                "when there is none, and loads at one time keep the order of the lines."):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, help_text)
 

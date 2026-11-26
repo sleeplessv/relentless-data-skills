@@ -134,22 +134,25 @@ holds the ticket, project-labels.json and repos.json, and writes:
                         log being written. When the session ends, the judge
                         moves its log and folder here from
                         $CLAUDE_CONFIG_DIR/projects (default ~/.claude; a
-                        relative one is read from where the judge was
-                        started, and an empty one is an error).
-                        session.jsonl and each file in session/ are mode
-                        0600. The line on record names the files of its
-                        own attempt. Once a new line is written the judge
-                        tries to remove the folder of the attempt it
+                        CLAUDE_CONFIG_DIR that is set must be an absolute
+                        path with no .. part, and the session gets it as
+                        set). session.jsonl and each file in session/ are
+                        mode 0600. The line on record names the files of
+                        its own attempt. Once a new line is written the
+                        judge tries to remove the folder of the attempt it
                         replaced, its log included; when that fails or is
-                        interrupted, the folder stays and no line names it.
+                        interrupted, what it has not removed stays and no
+                        line names it.
   judge-work/           Clones and checkouts, removed when the judge ends.
 
 Exit 0: a verdict was recorded. Exit 1: an error. Until a new line is
 written, the line and files of the version's earlier attempt stay as they
-were. On an error or an interrupt the judge removes its own attempt's folder
-when no line names it and it holds neither review.txt nor session.jsonl;
-otherwise the folder stays. When copying or removing the log fails, the
-error names where it still is. Exit 2: bad usage.
+were. On an error or an interrupt the judge tries to remove its own attempt's
+folder when no line names it and it holds neither review.txt nor
+session.jsonl; otherwise the folder stays. When an error, not an interrupt,
+stops the judge as it copies the log or removes it from
+$CLAUDE_CONFIG_DIR/projects, the error says where the whole log is.
+Exit 2: bad usage.
 Exit {EXIT_NO_VERDICT}: the review gave no verdict, recorded as null."""
 
 PROMPT = f"""\
@@ -311,12 +314,10 @@ def read_answer(text: str, count: int) -> dict | None:
     return {"requirements": answers, "findings": findings, "proven": proven, "passed": proven == 0}
 
 
-def review(prompt: str, folder: Path, session: str, config: Path) -> tuple[str, str | None]:
-    """Run the review in `folder` as session `session`, with `config` as its Claude Code folder when the caller set
-    one: the answer as it came, and why it gives no verdict when it fails."""
+def review(prompt: str, folder: Path, session: str) -> tuple[str, str | None]:
+    """Run the review in `folder` as session `session`: the answer as it came, and why it gives no verdict when it
+    fails."""
     env = {key: value for key, value in os.environ.items() if key != NO_LOG}
-    if "CLAUDE_CONFIG_DIR" in env:
-        env["CLAUDE_CONFIG_DIR"] = str(config)
     try:
         done = subprocess.run([*CLAUDE, "--session-id", session], input=prompt, cwd=folder, capture_output=True,
                               timeout=REVIEW_TIMEOUT, env=env, **TEXT)
@@ -341,14 +342,17 @@ def review(prompt: str, folder: Path, session: str, config: Path) -> tuple[str, 
 
 
 def private_copy(source: str | Path, target: str | Path) -> None:
-    """Copy a file's bytes to `target`, a file only its owner can read, which then holds all of them or is absent."""
+    """Copy a file's bytes to `target`, a file only its owner can read, which gets that name only once it holds all
+    of them."""
+    target = Path(target)
+    handle, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".partial")
     try:
-        with open(source, "rb") as found, os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
-                                                    "wb") as kept:
+        with open(source, "rb") as found, os.fdopen(handle, "wb") as kept:
             os.fchmod(kept.fileno(), 0o600)  # whatever the umask
             shutil.copyfileobj(found, kept)
+        os.replace(name, target)
     except BaseException:
-        Path(target).unlink(missing_ok=True)
+        Path(name).unlink(missing_ok=True)
         raise
 
 
@@ -361,10 +365,15 @@ def keep_log(session: str, saved: Path, config: Path) -> Path | None:
         private_copy(log, saved / "session.jsonl")
         if log.with_suffix("").is_dir():
             shutil.copytree(log.with_suffix(""), saved / "session", copy_function=private_copy)
+    except OSError as error:
+        raise JudgeError(f"the review session's log could not be copied; it is still at {log}.") from error
+    try:
+        if log.with_suffix("").is_dir():
             shutil.rmtree(log.with_suffix(""))
         log.unlink()
     except OSError as error:
-        raise JudgeError(f"the review session's log could not be kept; it is still at {log}.") from error
+        raise JudgeError(f"the review session's log is kept whole in {saved}; its original in {log.parent} could "
+                         "not be removed.") from error
     try:
         log.parent.rmdir()  # the folder Claude Code made for the review's working folder, once empty
     except OSError:
@@ -408,7 +417,7 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
         scan.write_private(saved / "prompt.txt", prompt)
         session = str(uuid.uuid4())
         try:
-            answer, reason = review(prompt, folder, session, config)
+            answer, reason = review(prompt, folder, session)
             scan.write_private(saved / "review.txt", answer)
         finally:  # on an interrupt too
             log = keep_log(session, saved, config)
@@ -458,6 +467,13 @@ def publish(state: Path, record: dict, saved: Path) -> list[Path]:
 
 
 def judge(label: str, number: int, version: str, commit: str | None, source: Path | None) -> int:
+    # The session gets the value as set (Claude Code 2.1.332 names its Keychain login from the string), and the judge
+    # looks where it leads. A relative value leads elsewhere from the review's folder, and a .. after a link can lead
+    # elsewhere than the same path without it, so both are refused, as is an empty one.
+    value = os.environ.get("CLAUDE_CONFIG_DIR")
+    if value is not None and not (os.path.isabs(value) and ".." not in Path(value).parts):
+        raise JudgeError("CLAUDE_CONFIG_DIR must be unset or an absolute path with no .. part.")
+    config = scan.config_dir() if value is None else Path(value)
     state = scan.state_dir()
     entry = find_ticket(state, label, number)
     required = entry.get("requirements")
@@ -466,11 +482,6 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
         raise JudgeError(f"the set entry of ticket {label}-{number} holds no requirements: a list of strings, each "
                          "with text, as the draw writes it.")
     repo = repo_entry(state, label)
-    value = os.environ.get("CLAUDE_CONFIG_DIR")
-    if value == "":  # Claude Code 2.1.332 would write the log in the review's folder
-        raise JudgeError("CLAUDE_CONFIG_DIR is set and empty: unset it, or name the Claude Code folder.")
-    # The session runs in the review's folder, so it is handed the folder the judge looks in, whole.
-    config = scan.config_dir() if value is None else Path(os.path.abspath(value))
     # Each attempt keeps its files apart, so one that fails leaves the files of the line on record as they were.
     versions = state / "judged" / f"{label}-{number}-{version}"
     versions.mkdir(parents=True, exist_ok=True)

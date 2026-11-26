@@ -384,6 +384,31 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(kept.read_text(), "a large result\n")
         self.assertEqual(stat.S_IMODE(kept.stat().st_mode), 0o600)
 
+    def test_each_kept_file_gets_its_name_only_once_whole(self) -> None:
+        self.world.log_folder = "1"
+        copying, seen = shutil.copyfileobj, {}
+
+        def copy(found, kept, *args):  # writes 8 bytes, then looks for the file's final name, then writes the rest
+            kept.write(found.read(8))
+            kept.flush()
+            name = Path(found.name).name
+            final = "session.jsonl" if name.endswith(".jsonl") else f"session/tool-results/{name}"
+            seen[final] = [str(path.relative_to(self.world.state)) for path in
+                           self.world.state.glob(f"judged/*/*/{final}")]
+            return copying(found, kept, *args)
+        code = self.world.judge_here(["A-7", "generation-one"],
+                                     lambda judge: mock.patch.object(judge.shutil, "copyfileobj", copy))
+        self.assertEqual(code, 0, self.world.stderr)
+        self.assertEqual(seen, {"session.jsonl": [], "session/tool-results/r1.txt": []})
+        [verdict] = self.world.verdicts()
+        folder = (self.world.state / verdict["review"]["log"]).parent
+        self.assertEqual(sorted(str(path.relative_to(folder)) for path in folder.rglob("*") if path.is_file()),
+                         ["check.txt", "prompt.txt", "review.txt", "session.jsonl", "session/tool-results/r1.txt"])
+        self.assertEqual((folder / "session.jsonl").read_bytes(), self.world.written())
+        self.assertEqual((folder / "session/tool-results/r1.txt").read_bytes(), b"a large result\n")
+        for kept in (folder / "session.jsonl", folder / "session/tool-results/r1.txt"):
+            self.assertEqual(stat.S_IMODE(kept.stat().st_mode), 0o600)
+
     def test_the_review_s_log_is_moved_out_of_claude_code_s_projects(self) -> None:
         self.world.log_folder = "1"
         projects = Path(self.world.config) / "projects"
@@ -391,24 +416,25 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
         self.assertEqual(list(projects.iterdir()), [])  # the stand-in made a folder here for the session
 
-    def test_an_empty_claude_code_folder_is_an_error_before_any_checkout(self) -> None:
-        self.world.config = ""
-        result = self.world.judge("A-7", "generation-one")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stderr, "judge: CLAUDE_CONFIG_DIR is set and empty: unset it, or name the Claude Code "
-                                        "folder.\n")
-        self.assertFalse((self.world.records / "config").exists())  # no session started
-        self.assertFalse((self.world.state / "judged").exists())
-        self.assertFalse((self.world.state / "judge-work").exists())
+    def test_a_claude_code_folder_that_is_empty_relative_or_has_a_dot_dot_part_is_an_error_before_any_checkout(
+            self) -> None:
+        before = sorted(self.world.state.rglob("*"))
+        for config in ("", "claude-config", str(self.world.root / "missing" / ".." / "claude")):
+            with self.subTest(config=config):
+                self.world.config = config
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr, "judge: CLAUDE_CONFIG_DIR must be unset or an absolute path with no "
+                                                ".. part.\n")
+                self.assertFalse((self.world.records / "gh").exists())  # no checkout
+                self.assertFalse((self.world.records / "config").exists())  # no session started
+                self.assertEqual(sorted(self.world.state.rglob("*")), before)  # nothing written
 
-    def test_the_log_is_found_in_the_claude_code_folder_the_caller_named(self) -> None:
-        cwd = self.world.root / "cwd"
+    def test_the_session_is_handed_the_claude_code_folder_as_the_caller_set_it(self) -> None:
+        claude = str(self.world.root / "claude")
         # (CLAUDE_CONFIG_DIR as given, where the log is written, what the session is handed)
         for config, folder, seen in ((None, self.world.root / "home" / ".claude", "<unset>"),
-                                     ("claude-config", cwd / "claude-config", str(cwd / "claude-config")),
-                                     ("missing/../ordinary", cwd / "ordinary", str(cwd / "ordinary")),
-                                     (str(self.world.root / "claude"), self.world.root / "claude",
-                                      str(self.world.root / "claude"))):
+                                     (claude, Path(claude), claude), (f"{claude}/", Path(claude), f"{claude}/")):
             with self.subTest(config=config):
                 self.world.config = config
                 result = self.world.judge("A-7", "generation-one")
@@ -822,6 +848,11 @@ class TestJudge(unittest.TestCase):
                 raise KeyboardInterrupt
             return removing(path, *args, **kwargs)
 
+        def denied(path, *args, **kwargs):  # the judge may not remove what Claude Code wrote
+            if Path(path).is_relative_to(config):
+                raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+            return removing(path, *args, **kwargs)
+
         def full(suffix):  # the disk fills after 8 bytes of the copy of a file whose name ends in `suffix`
             def copy(found, kept, *args):
                 if not found.name.endswith(suffix):
@@ -843,6 +874,8 @@ class TestJudge(unittest.TestCase):
                     judge.shutil, "copyfileobj", side_effect=KeyboardInterrupt)), KeyboardInterrupt, None, True),
             "a full disk as the log is copied": (full(".jsonl"), 1, answered, True),
             "a full disk as the log's folder is copied": (full("r1.txt"), 1, [*answered, "session.jsonl"], True),
+            "a denied removal of the source": (lambda judge: mock.patch.object(judge.shutil, "rmtree", denied), 1,
+                                               [*answered, *logged], True),
             "an interrupt as the source is removed": (
                 lambda judge: mock.patch.object(judge.shutil, "rmtree", unremoved), KeyboardInterrupt,
                 [*answered, *logged], True),
@@ -861,26 +894,36 @@ class TestJudge(unittest.TestCase):
                     with self.assertRaises(ending):
                         self.world.judge_here(version, patch)
                 [source] = [*config.glob("projects/*/*.jsonl")] or [None]
-                if ending == 1:
-                    self.assertEqual(self.world.stderr,
-                                     f"judge: the review session's log could not be kept; it is still at {source}.\n")
-                self.assertEqual(self.world.verdicts(), verdicts)
                 folders = self.unnamed()
+                if ending == 1 and case == "a denied removal of the source":
+                    self.assertEqual(self.world.stderr, f"judge: the review session's log is kept whole in "
+                                                        f"{folders[0]}; its original in {source.parent} could not be "
+                                                        "removed.\n")
+                elif ending == 1:
+                    self.assertEqual(self.world.stderr,
+                                     f"judge: the review session's log could not be copied; it is still at {source}.\n")
+                self.assertEqual(self.world.verdicts(), verdicts)
                 self.assertEqual(self.outside(*folders), files)
                 self.assertEqual([sorted(str(path.relative_to(folder)) for path in folder.rglob("*") if path.is_file())
                                   for folder in folders], [] if left is None else [sorted(left)])
                 for folder in folders:  # each file kept is whole
+                    if (folder / "review.txt").exists():
+                        self.assertEqual((folder / "review.txt").read_bytes(), b"R1: met\nR2: met\nR3: met\n")
                     if (folder / "session.jsonl").exists():
                         self.assertEqual((folder / "session.jsonl").read_bytes(), self.world.written())
                     for kept in folder.glob("session/*/*"):
-                        self.assertEqual(kept.read_text(), "a large result\n")
+                        self.assertEqual(kept.read_bytes(), b"a large result\n")
                 self.assertEqual(source is not None, source_left)
-                if source_left:
+                if source_left:  # the log and its folder where Claude Code wrote them, whole
                     self.assertEqual(source.read_bytes(), self.world.written())
+                    self.assertEqual({str(path.relative_to(source.with_suffix(""))): path.is_file() and path.read_bytes()
+                                      for path in source.with_suffix("").rglob("*")},
+                                     {"tool-results": False, "tool-results/r1.txt": b"a large result\n"})
         help_text = " ".join(self.world.judge("--help").stdout.split())
-        for sentence in ("On an error or an interrupt the judge removes its own attempt's folder when no line names "
-                         "it and it holds neither review.txt nor session.jsonl; otherwise the folder stays.",
-                         "When copying or removing the log fails, the error names where it still is."):
+        for sentence in ("On an error or an interrupt the judge tries to remove its own attempt's folder when no line "
+                         "names it and it holds neither review.txt nor session.jsonl; otherwise the folder stays.",
+                         "When an error, not an interrupt, stops the judge as it copies the log or removes it from "
+                         "$CLAUDE_CONFIG_DIR/projects, the error says where the whole log is."):
             self.assertEqual(help_text.count(sentence), 1)
 
     def test_a_text_file_that_is_not_utf8_reaches_the_reviewer(self) -> None:

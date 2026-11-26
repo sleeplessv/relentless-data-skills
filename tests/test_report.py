@@ -190,7 +190,8 @@ def copied_tokens(copied: int | float, total: int | float, share: str | None, bl
 
 
 def sign_two_copied(first: Copied, second: Copied) -> str:
-    """Warning sign 2's line on the copied tokens inside each side's sum, a side given as copied_tokens takes it."""
+    """Warning sign 2's line on the copied tokens inside each side's sum: each side as (copied, total, share, blank),
+    the share as copied_tokens takes it."""
     return (f"  Copied tokens in these sums: {first[0]} of the {first[1]} total tokens of generation-one's tickets "
             f"with a copied count{shown(first[2])}, and {second[0]} of the {second[1]} of direct's{shown(second[2])}. "
             f"Left out of the copied tokens: {first[3]} of generation-one's tickets and {second[3]} of direct's, with "

@@ -417,8 +417,8 @@ def figures(results: list[str | dict]) -> str:
 
 
 def copied_of(results: list[dict]) -> tuple[str, str, int]:
-    """Of the results whose row gives a copied count: their copied tokens and total tokens, and the share as ", " and
-    a percent, or nothing when that total is 0. Then how many results have a blank copied count."""
+    """Of the results whose row gives a copied count: "<copied tokens> of the <total tokens>", then ", <share>", or
+    nothing when that total is 0. Then how many results have a blank copied count."""
     known = [result for result in results if result["copied"] is not None]
     copied, total = sum(result["copied"] for result in known), sum(result["tokens"] for result in known)
     return (f"{number(copied)} of the {number(total)}", f", {copied / total:.1%}" if total else "",

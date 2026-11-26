@@ -32,6 +32,15 @@ def session(number: int) -> str:
     return f"00000000-0000-4000-8000-{number:012d}"
 
 
+def helper(description: str | None, brief: str | None, tokens: int | float | None) -> dict:
+    """One helper of a session's scan row, as scripts/scan.py lists it: blank counts when it has no tokens of its
+    own."""
+    counts = [None] * 4 if tokens is None else [tokens, 0, 0, 0]
+    return {"id": f"a{len(str(description)):04x}{len(str(brief)):012x}", "description": description,
+            "brief_head": brief, **dict(zip(("input_tokens", "output_tokens", "cache_write_tokens",
+                                             "cache_read_tokens"), counts)), "total_tokens": tokens}
+
+
 class World:
     """A machine directory holding replay sets and what was replayed, judged and scanned for them."""
 
@@ -94,19 +103,19 @@ class World:
                               "review": {"passed": right, "reason": None},
                               "right_first_time": right})
 
-    def scan(self, name: str, tokens: int | None, minutes: float | None) -> None:
+    def scan(self, name: str, tokens: int | None, minutes: float | None, helpers: list[dict] | None = None) -> None:
         self.rows.append({"session": name, "input_tokens": None if tokens is None else 1,
                           "output_tokens": None if tokens is None else 1, "cache_write_tokens": None,
                           "cache_read_tokens": None, "total_tokens": tokens, "active_minutes": minutes,
                           "auto_compactions": 0, "typed_compactions": 0, "model": "claude-test-model",
-                          "skills": [], "helpers": []})
+                          "skills": [], "helpers": [] if helpers is None else helpers})
 
     def run(self, version: str, ticket: dict, right: bool | None, tokens: int | None = 100,
-            minutes: float | None = 10.0) -> None:
+            minutes: float | None = 10.0, helpers: list[dict] | None = None) -> None:
         """A version of a ticket replayed where it is not generation one's, judged and scanned."""
         name = ticket["session"] if version == "generation-one" else self.replay(ticket, version)["session"]
         self.judge(ticket, version, right)
-        self.scan(name, tokens, minutes)
+        self.scan(name, tokens, minutes, helpers)
 
     def baseline(self, first: int, second: int, sets: int = 1) -> None:
         """Sets of 30 with both versions judged on every ticket: generation one right on `first` tickets, the
@@ -136,6 +145,41 @@ def tree(folder: Path) -> dict[str, tuple]:
             for path in sorted(folder.rglob("*"))}
 
 
+# One helper of each of generation one's steps, with tokens of 2**n each so that every step's sum tells which
+# helpers it took, then helpers sorted by the head of the brief, one sorted into no step, and one with no tokens of
+# its own. Each re-check, fix and review names a step that comes later in the sort.
+EVERY_STEP = [
+    helper("Re-check fix round 1", "This is a re-check after one fix round. Read the review skill.", 10),
+    helper("Closing verification on the final head", "You are the closing verifier for ticket #12.", 20),
+    helper("Fix round 2: the review findings", "# Fix round 2 for ticket #12", 40),
+    helper("Standards review", "You are a Standards reviewer. Review one change, read-only.", 80),
+    helper("Implement ticket #12", '# Implementing brief: ticket #12, "Fix the total and verify it"', 160),
+    helper("Publish the PR body", "# Publish brief for ticket #12", 320),
+    helper("Explore the scan's helpers", "Find where scan.py lists each helper.", 640),
+    helper(None, "You are the closing verifier for ticket #12.", 1),
+    helper("Ticket #12 worker", '# Implementing brief: ticket #12, "Print the total"', 2),
+    helper("Tidy the notes", "Tidy the notes folder.", 4),
+    helper("Fix round 3", "# Fix round 3 for ticket #12", None),
+]
+
+
+def no_helpers(spent: int) -> list[str]:
+    """Warning sign 2's lines between its first line and its verdicts, for sessions with no helpers."""
+    return ["  Left out of both sides: 0 tickets with a blank token count, 0 with no list of generation-one's helpers.",
+            "  generation-one's helpers by step: re-check 0, closing verification 0, fix 0, review 0, implement 0, "
+            "publish 0, explore 0. 0 helpers have no tokens of their own.",
+            "  The cut, closing verification, fix and re-check: 0 tokens, 0.0% of generation-one's.",
+            "  Not sorted into a step: 0 tokens, 0.0% of generation-one's.",
+            f"  The sessions' own, in no helper: {spent} tokens, 100.0% of generation-one's.",
+            "  A helper resumed for a fix round counts under the step it started as."]
+
+
+def section(lines: list[str], sign: int) -> list[str]:
+    """The report's lines on one warning sign, up to the blank line after them."""
+    start = next(at for at, line in enumerate(lines) if line.startswith(f"Warning sign {sign}"))
+    return lines[start:next((at for at in range(start, len(lines)) if not lines[at]), len(lines))]
+
+
 class TestReport(unittest.TestCase):
     def setUp(self) -> None:
         folder = tempfile.TemporaryDirectory()
@@ -153,7 +197,7 @@ class TestReport(unittest.TestCase):
 
     def sign(self, first: int, second: int, sets: int = 1) -> list[str]:
         self.world.baseline(first, second, sets)
-        return self.lines()[-2:]
+        return section(self.lines(), 1)
 
     def test_it_prints_each_version_per_bucket_and_over_the_set(self) -> None:
         tickets = self.world.draw(per_bucket=2)  # buckets in turn: 0-50, 51-300, 301-1500, 0-50, 51-300, 301-1500
@@ -183,7 +227,100 @@ class TestReport(unittest.TestCase):
             "",
             "Warning sign 1: generation-one was right first time on 5 of 6 tickets, direct on 2 of 6, a difference "
             "of 3.",
-            "No verdict: the table of warning sign 1 has lines for 30 and 60 tickets, not 6."])
+            "No verdict: the table of warning sign 1 has lines for 30 and 60 tickets, not 6.",
+            "",
+            "Warning sign 2: on 6 of 6 tickets, generation-one spent 21000 tokens and direct 2100, an extra cost of "
+            "18900.",
+            *no_helpers(21000),
+            "Without the spend not sorted, the cut is 0 tokens against half the extra cost, 9450. The sign does not "
+            "appear.",
+            "With it counted as cut, the cut is 0 tokens. The sign does not appear."])
+
+    def two(self, helpers: list[dict], spent: int, direct: int) -> list[str]:
+        """Warning sign 2 on a set of 30 tickets with both versions judged on each: generation one spends `spent`
+        tokens on each ticket, with these helpers, and the direct replay `direct`."""
+        for ticket in self.world.draw():
+            self.world.run("generation-one", ticket, True, tokens=spent, helpers=helpers)
+            self.world.run("direct", ticket, True, tokens=direct)
+        return section(self.lines(), 2)
+
+    def test_sign_two_sorts_each_helper_into_its_step(self) -> None:
+        self.assertEqual(self.two(EVERY_STEP, 2277, 1000), [
+            "Warning sign 2: on 30 of 30 tickets, generation-one spent 68310 tokens and direct 30000, an extra cost of "
+            "38310.",
+            "  Left out of both sides: 0 tickets with a blank token count, 0 with no list of generation-one's helpers.",
+            "  generation-one's helpers by step: re-check 300, closing verification 630, fix 1200, review 2400, "
+            "implement 4860, publish 9600, explore 19200. 30 helpers have no tokens of their own.",
+            "  The cut, closing verification, fix and re-check: 2130 tokens, 3.1% of generation-one's.",
+            "  Not sorted into a step: 120 tokens, 0.2% of generation-one's.",
+            "  The sessions' own, in no helper: 30000 tokens, 43.9% of generation-one's.",
+            "  A helper resumed for a fix round counts under the step it started as.",
+            "Without the spend not sorted, the cut is 2130 tokens against half the extra cost, 19155. The sign does "
+            "not appear.",
+            "With it counted as cut, the cut is 2250 tokens. The sign does not appear."])
+
+    def test_sign_two_appears_when_the_cut_is_more_than_half_the_extra_cost(self) -> None:
+        # 30 tickets: an extra cost of 6000 tokens, half of it 3000.
+        for verification, verdict in ((101, "The sign appears."), (100, "The sign does not appear."),
+                                      (99, "The sign does not appear.")):
+            with self.subTest(cut=30 * verification):
+                self.setUp()
+                lines = self.two([helper("Closing verification", None, verification)], 1000, 800)
+                self.assertEqual(lines[0], "Warning sign 2: on 30 of 30 tickets, generation-one spent 30000 tokens "
+                                           "and direct 24000, an extra cost of 6000.")
+                self.assertEqual(lines[-2:], [
+                    f"Without the spend not sorted, the cut is {30 * verification} tokens against half the extra "
+                    f"cost, 3000. {verdict}",
+                    f"With it counted as cut, the cut is {30 * verification} tokens. {verdict}"])
+
+    def test_sign_two_says_when_the_spend_not_sorted_decides_it(self) -> None:
+        lines = self.two([helper("Fix round 1", None, 90), helper("Tidy the notes", None, 20)], 1000, 800)
+        self.assertEqual(lines[-3:], [
+            "Without the spend not sorted, the cut is 2700 tokens against half the extra cost, 3000. The sign does not "
+            "appear.",
+            "With it counted as cut, the cut is 3300 tokens. The sign appears.",
+            "The two verdicts differ: the spend not sorted decides the sign."])
+
+    def test_sign_two_gives_no_verdict_with_no_extra_cost(self) -> None:
+        for direct, extra in ((1000, 0), (1001, -30)):
+            with self.subTest(extra=extra):
+                self.setUp()
+                lines = self.two([helper("Re-check", None, 400)], 1000, direct)
+                self.assertEqual(lines[0], f"Warning sign 2: on 30 of 30 tickets, generation-one spent 30000 tokens "
+                                           f"and direct {30 * direct}, an extra cost of {extra}.")
+                self.assertEqual(lines[-1], "No verdict: generation-one cost no more than direct, so there is no "
+                                            "extra cost to cut.")
+
+    def test_a_ticket_left_out_of_the_token_figures_is_left_out_of_both_sides(self) -> None:
+        cut = [helper("Closing verification", None, 100)]
+        for at, ticket in enumerate(self.world.draw()):  # the other side of each ticket left out spends 99999
+            self.world.run("generation-one", ticket, True, tokens=None if at == 1 else 99999 if at in (0, 2) else 1000,
+                           helpers=None if at == 1 else cut)
+            self.world.run("direct", ticket, True, tokens=None if at == 0 else 99999 if at in (1, 2) else 800)
+            if at == 2:
+                self.world.rows[-2]["helpers"] = None  # generation one's row, with a total and no list of helpers
+        self.assertEqual(section(self.lines(), 2), [
+            "Warning sign 2: on 27 of 30 tickets, generation-one spent 27000 tokens and direct 21600, an extra cost of "
+            "5400.",
+            "  Left out of both sides: 2 tickets with a blank token count, 1 with no list of generation-one's helpers.",
+            "  generation-one's helpers by step: re-check 0, closing verification 2700, fix 0, review 0, implement 0, "
+            "publish 0, explore 0. 0 helpers have no tokens of their own.",
+            "  The cut, closing verification, fix and re-check: 2700 tokens, 10.0% of generation-one's.",
+            "  Not sorted into a step: 0 tokens, 0.0% of generation-one's.",
+            "  The sessions' own, in no helper: 24300 tokens, 90.0% of generation-one's.",
+            "  A helper resumed for a fix round counts under the step it started as.",
+            "Without the spend not sorted, the cut is 2700 tokens against half the extra cost, 2700. The sign does not "
+            "appear.",
+            "With it counted as cut, the cut is 2700 tokens. The sign does not appear."])
+
+    def test_sign_two_gives_no_verdict_when_no_ticket_is_left(self) -> None:
+        for ticket in self.world.draw():
+            self.world.run("generation-one", ticket, True, tokens=1000)
+            self.world.run("direct", ticket, True, tokens=None)
+        self.assertEqual(section(self.lines(), 2), [
+            "Warning sign 2: no verdict. No ticket has both token counts and generation-one's helpers.",
+            "  Left out of both sides: 30 tickets with a blank token count, 0 with no list of generation-one's "
+            "helpers."])
 
     def test_a_count_out_of_fewer_than_20_is_never_a_rate(self) -> None:
         self.world.baseline(17, 14)
@@ -315,7 +452,14 @@ class TestReport(unittest.TestCase):
             "",
             "Warning sign 1: generation-one was right first time on 30 of 60 (50%) tickets, direct on 20 of 60 "
             "(33%), a difference of 10.",
-            "The sign appears."])
+            "The sign appears.",
+            "",
+            "Warning sign 2: on 60 of 60 tickets, generation-one spent 6870 tokens and direct 3870, an extra cost of "
+            "3000.",
+            *no_helpers(6870),
+            "Without the spend not sorted, the cut is 0 tokens against half the extra cost, 1500. The sign does not "
+            "appear.",
+            "With it counted as cut, the cut is 0 tokens. The sign does not appear."])
 
     def test_a_third_version_is_printed_beside_the_other_two(self) -> None:
         tickets = self.world.draw(per_bucket=1)
@@ -366,14 +510,16 @@ class TestReport(unittest.TestCase):
         self.world.verdicts = [line for line in self.world.verdicts
                                if (line["version"], line["ticket"]) not in (("direct", 1), ("generation-one", 2))]
         self.world.verdicts[-1]["right_first_time"] = None
-        self.assertEqual(self.lines()[-1],
-                         "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 3 of 30.")
+        lines = self.lines()
+        for sign in (1, 2):
+            self.assertEqual(section(lines, sign), [f"Warning sign {sign}: no verdict. Tickets without both "
+                                                    "generation-one and direct judged: 3 of 30."])
 
     def test_a_second_set_not_yet_judged_holds_back_the_verdict(self) -> None:
         self.world.baseline(20, 10)
         self.world.draw()
-        self.assertEqual(self.lines()[-1],
-                         "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 60.")
+        self.assertEqual(section(self.lines(), 1),
+                         ["Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 60."])
 
     def test_lines_for_a_ticket_in_no_set_are_left_out_and_counted(self) -> None:
         self.world.baseline(20, 15)
@@ -383,7 +529,7 @@ class TestReport(unittest.TestCase):
         lines = self.lines()
         self.assertEqual(lines[:2], ["Replay set 1: 30 tickets, of project A.",
                                      "Left out: 3 lines of versions.jsonl and verdicts.jsonl name a ticket in no set."])
-        self.assertEqual(lines[-1], "The sign appears.")
+        self.assertEqual(section(lines, 1)[-1], "The sign appears.")
 
     def test_it_writes_nothing(self) -> None:
         self.world.baseline(20, 15)
@@ -430,7 +576,7 @@ class TestReport(unittest.TestCase):
         self.world.draw()
         result = self.world.report(save=False)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.splitlines()[-1],
+        self.assertEqual(section(result.stdout.splitlines(), 1)[-1],
                          "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 30.")
 
     def test_input_it_cannot_read_with_certainty_stops_it_with_nothing_printed(self) -> None:
@@ -469,6 +615,26 @@ class TestReport(unittest.TestCase):
             ("versions.jsonl", field("version", REPO), "versions.jsonl:2: version is not a version name."),
             ("replay-set-2.json", "copy", "replay-set-2.json: ticket entry 1: a second line for the same label, "
                                           "ticket."),
+            ("scan-rows.jsonl", field("helpers", None), "scan-rows.jsonl:2: helpers is missing or of the wrong type."),
+            ("scan-rows.jsonl", field("helpers", {"a": 1}),
+             "scan-rows.jsonl:2: helpers is missing or of the wrong type."),
+            ("scan-rows.jsonl", field("helpers", [helper("Fix round 1", None, 1), 1]),
+             "scan-rows.jsonl:2: helper 2: not a JSON object."),
+            ("scan-rows.jsonl", field("helpers", [{**helper(None, None, 1), "description": 5}]),
+             "scan-rows.jsonl:2: helper 1: description is missing or of the wrong type."),
+            ("scan-rows.jsonl", field("helpers", [{**helper(None, None, 1), "brief_head": ["x"]}]),
+             "scan-rows.jsonl:2: helper 1: brief_head is missing or of the wrong type."),
+            ("scan-rows.jsonl", field("helpers", [helper(None, None, "7")]),
+             "scan-rows.jsonl:2: helper 1: total_tokens is missing or of the wrong type."),
+            ("scan-rows.jsonl", field("helpers", [helper(None, None, -1)]),
+             "scan-rows.jsonl:2: helper 1: total_tokens is not a count of tokens."),
+            ("scan-rows.jsonl", field("helpers", [helper(None, None, float("inf"))]),
+             "scan-rows.jsonl:2: helper 1: total_tokens is not a count of tokens."),
+            ("scan-rows.jsonl", field("total_tokens", -100), "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
+            ("scan-rows.jsonl", field("total_tokens", float("nan")),
+             "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
+            ("scan-rows.jsonl", field("helpers", [helper(None, None, 60), helper(None, None, 41)]),
+             "scan-rows.jsonl:2: its helpers hold more tokens than its total_tokens."),
         ]
         for name, change, message in cases:
             with self.subTest(message=message):
@@ -496,7 +662,11 @@ class TestReport(unittest.TestCase):
             result = self.world.report(*args)
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout.splitlines()[0], "Print the comparison between versions on the replay set "
-                                                            "and the verdict on")
+                                                            "and the verdicts on")
+            self.assertIn("  re-check, closing verification, fix, review, implement, publish and explore.",
+                          result.stdout.splitlines())
+            self.assertIn("The cut is the helpers' tokens in closing verification, fix and re-check.",
+                          result.stdout.splitlines())
             self.assertIn("  30 tickets: appears at 5 or more, not decided at 3 to 4, not at 2 or fewer.",
                           result.stdout.splitlines())
             self.assertIn("  60 tickets: appears at 8 or more, not at 7 or fewer.", result.stdout.splitlines())
@@ -505,7 +675,7 @@ class TestReport(unittest.TestCase):
                 result = self.world.report(*args)
                 self.assertEqual((result.returncode, result.stdout), (2, ""))
                 self.assertEqual(result.stderr.splitlines()[0], "Print the comparison between versions on the "
-                                                                "replay set and the verdict on")
+                                                                "replay set and the verdicts on")
 
 
 if __name__ == "__main__":

@@ -708,6 +708,39 @@ class TestDraw(unittest.TestCase):
             with self.subTest(sentence=sentence):
                 self.assertEqual(help_text.count(sentence), 1)
 
+    def test_help_states_each_known_limit_and_the_exit_on_a_signal_each_once(self) -> None:
+        sentences = [
+            "A Bash call and its result are paired only inside one transcript: a call in the session's log whose "
+            "result is in a helper's log gives no evidence.",
+            "A log is split into lines at line feeds only, so a log whose lines end in a bare carriage return is read "
+            "as one line.",
+            "SIGKILL or a crash between the two renames that put a saved log in place can leave the new log without "
+            "its folder, the earlier copy in logs/.old-<session>/ and the rest of the new one in "
+            "logs/.new-<session>/, until that session is saved again.",
+            "Ctrl-C or SIGTERM while a step that ran too long is being stopped can leave the draw waiting until that "
+            "step ends.",
+            "A helper's response whose message id is a number can stand in for a response in the session's log that "
+            "has no id, and supply the session's model.",
+            "When one helper folder of a session cannot be listed, none of that session's helpers is read, the "
+            "readable ones included.",
+            "When the scan row cannot be written after a log was saved, the new copy of the log stays in place, no "
+            "copy of the earlier one is kept, and scan-rows.jsonl.partial can be left.",
+            "The draw takes an answer from gh as it comes: a timeline that is blank or holds an empty event picks the "
+            "head at the PR's creation, a push whose after is not a commit id is saved as the commit, and a byte that "
+            "is not UTF-8 ends the draw before the answer is saved.",
+            "Output of git that is not UTF-8, such as a hook's message, ends the draw with Python's traceback and "
+            "exit 1, and no set written; so does the judge, which runs its check through the draw's git runner.",
+            "Exit 130: Ctrl-C stopped the draw.",
+            "Exit 143: SIGTERM stopped the draw.",
+            "Either stop prints one line that says so, and no set was written.",
+            "Once the set file is in place, a signal leaves the exit at 0 and the last line as the one that names the "
+            "set.",
+            "A SIGINT the caller ignored stays ignored."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+
     def test_the_reader_s_docstrings_leave_the_forms_to_the_help(self) -> None:
         # The help names the other commands from OTHERS; neither docstring of the reader lists them again.
         sys.path.insert(0, str(SCRIPTS))

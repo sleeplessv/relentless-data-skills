@@ -328,10 +328,36 @@ under a criteria heading. That count is taken before the rules on a
 ticket's other PRs and earlier sets, so it is the most tickets the reader can
 have cost the pool.
 
+The draw has these known limits. A Bash call and its result are paired only
+inside one transcript: a call in the session's log whose result is in a
+helper's log gives no evidence. A log is split into lines at line feeds only,
+so a log whose lines end in a bare carriage return is read as one line.
+SIGKILL or a crash between the two renames that put a saved log in place can
+leave the new log without its folder, the earlier copy in logs/.old-<session>/
+and the rest of the new one in logs/.new-<session>/, until that session is
+saved again. Ctrl-C or SIGTERM while a step that ran too long is being stopped
+can leave the draw waiting until that step ends. A helper's response whose
+message id is a number can stand in for a response in the session's log that
+has no id, and supply the session's model. When one helper folder of a session
+cannot be listed, none of that session's helpers is read, the readable ones
+included. When the scan row cannot be written after a log was saved, the new
+copy of the log stays in place, no copy of the earlier one is kept, and
+scan-rows.jsonl.partial can be left. The draw takes an answer from gh as it
+comes: a timeline that is blank or holds an empty event picks the head at the
+PR's creation, a push whose after is not a commit id is saved as the commit,
+and a byte that is not UTF-8 ends the draw before the answer is saved. Output
+of git that is not UTF-8, such as a hook's message, ends the draw with
+Python's traceback and exit 1, and no set written; so does the judge, which
+runs its check through the draw's git runner.
+
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds no ticket that passes, because its pool is
 empty or every ticket in it is set aside; no set was written, and the count per
-bucket is printed."""
+bucket is printed.
+Exit 130: Ctrl-C stopped the draw. Exit 143: SIGTERM stopped the draw. Either
+stop prints one line that says so, and no set was written. Once the set file is
+in place, a signal leaves the exit at 0 and the last line as the one that names
+the set. A SIGINT or SIGTERM the caller ignored stays ignored."""
 
 
 class DrawError(Exception):
@@ -346,12 +372,43 @@ class Unreadable(ValueError):
         self.number, self.line = number, line
 
 
-class Terminated(BaseException):
-    """SIGTERM, raised where the draw is so that each cleanup runs; no handler for errors catches it."""
+SIGNALS = (signal.SIGINT, signal.SIGTERM)  # what stops the draw, with one line that says so
+
+
+class Stopped(BaseException):
+    """SIGINT or SIGTERM, whose number it holds, raised where the draw is so that each cleanup runs; no handler for
+    errors catches it."""
+
+
+STOPPED_BY: list[int] = []  # the signal that stopped the draw; a later one does nothing, so the cleanups run whole
+
+
+def stopped(number: int, frame: object) -> None:
+    if not STOPPED_BY:
+        STOPPED_BY.append(number)
+        raise Stopped(number)
+
+
+Terminated = Stopped  # the name scripts/replay.py catches
 
 
 def terminated(number: int, frame: object) -> None:
-    raise Terminated
+    """scripts/replay.py's SIGTERM handler: raises at each signal, as it did before the draw had `stopped`."""
+    raise Stopped(number)
+
+
+def held(cleanup: Callable[[], None]) -> None:
+    """Run `cleanup` with SIGINT and SIGTERM held. A signal during it is raised once it is done; so is one that came
+    just before it, which holding the signals raises."""
+    try:
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    except Stopped:  # the signals are held all the same
+        cleanup()
+        raise
+    try:
+        cleanup()
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
 
 
 class GhFailed(DrawError):
@@ -874,9 +931,11 @@ class Draw:
 
     def sessions(self) -> tuple[list[dict], int]:
         """Each session with a run that runs or may run `gh pr create` and prints a PR's URL, and how many
-        session logs could not be read. Each transcript, the log's and each helper's, is read once, and its
-        runs count whatever happens to another transcript of the session or to finding its helpers. A
-        session with any failure is counted and not eligible, but its readable runs count against others."""
+        session logs could not be read. The draw decides on one read of each transcript, the log's and each
+        helper's, and its runs count whatever happens to another transcript of the session or to finding its
+        helpers. A session that would be eligible is then scanned, which reads its live log and helpers' logs
+        again; a scan that fails makes it not eligible. A session with any failure is counted and not eligible,
+        but its readable runs count against others."""
         sessions, unreadable = [], 0
         for log in sorted((scan.config_dir() / "projects").glob("*/*.jsonl")):
             failed = False
@@ -1033,6 +1092,12 @@ class Draw:
                 process.wait()
             if started:
                 started[0].stdin.close()
+
+        def cleanup() -> None:
+            stop()
+            self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
+            remove(tree)  # what git leaves, such as a folder the check made read-only
+            self.git("-C", str(clone), "worktree", "prune")
         try:
             added = self.git("-C", str(clone), "worktree", "add", "--detach", "--quiet", str(tree), base)
             if added.returncode:
@@ -1064,15 +1129,8 @@ class Draw:
                     out.write(f"\n{step} exit {code}\n")
                     if code:
                         return f"{step} exited {code}"
-        finally:  # on success, failure, timeout, interrupt or SIGTERM alike, with both held until it is done
-            held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
-            try:
-                stop()
-                self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
-                remove(tree)  # what git leaves, such as a folder the check made read-only
-                self.git("-C", str(clone), "worktree", "prune")
-            finally:
-                signal.pthread_sigmask(signal.SIG_SETMASK, held)
+        finally:  # on success, failure, timeout, interrupt or SIGTERM alike
+            held(cleanup)
         return None
 
     def try_ticket(self, candidate: dict) -> str | None:
@@ -1110,7 +1168,9 @@ class Draw:
         Each transcript, the log's and each helper's, is copied as the bytes the draw read when the session
         qualified, checked by their digest; a helper transcript that appeared later is left out. The copy is
         made in logs/.new-<session>; an earlier copy of the session moves to logs/.old-<session> only once
-        the new one is whole and scanned, and is removed once the new one is in place."""
+        the new one is whole and scanned, and is removed once the new one is in place. A signal holds off from that
+        move until the scan row is written; before it, the earlier copy stays as it was and no .new- folder is
+        left."""
         source = candidate["source"]
         logs = self.state / "logs"
         staged, old = logs / f".new-{source.stem}", logs / f".old-{source.stem}"
@@ -1140,26 +1200,34 @@ class Draw:
                 if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
                     raise OSError(f"{target.name} changed after the draw read it")
             row = scan.scan(source.stem, staged / source.name)
-            old.mkdir()
-            for name in names:
-                if (logs / name).exists():
-                    os.replace(logs / name, old / name)
-            for name in names:
-                if (staged / name).exists():
-                    os.replace(staged / name, logs / name)
-            shutil.rmtree(old)
-            shutil.rmtree(staged)
-            scan.write_row(row)
-        except (Exception, SystemExit) as error:  # its message can name the project's folder
-            for name in names if old.exists() else ():  # put back the earlier copy where it was moved
-                if (old / name).exists():
-                    if (logs / name).is_dir():
-                        shutil.rmtree(logs / name)
-                    elif (logs / name).exists():
-                        (logs / name).unlink()
-                    os.replace(old / name, logs / name)
-            shutil.rmtree(old, ignore_errors=True)
-            shutil.rmtree(staged, ignore_errors=True)
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+            try:
+                old.mkdir()
+                for name in names:
+                    if (logs / name).exists():
+                        os.replace(logs / name, old / name)
+                for name in names:
+                    if (staged / name).exists():
+                        os.replace(staged / name, logs / name)
+                shutil.rmtree(old)
+                shutil.rmtree(staged)
+                scan.write_row(row)
+            finally:  # a signal held off is raised here
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        except (Exception, SystemExit, Stopped) as error:  # its message can name the project's folder
+            def restore() -> None:
+                for name in names if old.exists() else ():  # put back the earlier copy where it was moved
+                    if (old / name).exists():
+                        if (logs / name).is_dir():
+                            shutil.rmtree(logs / name)
+                        elif (logs / name).exists():
+                            (logs / name).unlink()
+                        os.replace(old / name, logs / name)
+                shutil.rmtree(old, ignore_errors=True)
+                shutil.rmtree(staged, ignore_errors=True)
+            held(restore)
+            if isinstance(error, Stopped):
+                raise
             raise DrawError(f"could not save the session log of project {candidate['label']} ticket "
                             f"{candidate['ticket']} ({type(error).__name__}).")
         return str((logs / source.name).relative_to(self.state))
@@ -1203,6 +1271,9 @@ class Draw:
                       "ready_commit", "model", "pr", "session", "log", "check_output")
             number = 1 + max(self.sets(), default=0)
             path = self.state / f"replay-set-{number}.json"
+            # From here the draw ends with its set: a signal stays held past its exit, and a signal that came just
+            # before is raised here, with no set written.
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
             scan.write_private(path, json.dumps({
                 "set": number, "seed": self.seed, "drawn_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "tickets": [{field: entry[field] for field in fields} for entry in kept],
@@ -1223,12 +1294,18 @@ def main(argv: list[str]) -> int:
     else:
         print(HELP, file=sys.stderr)
         return 2
-    signal.signal(signal.SIGTERM, terminated)
+    for number in SIGNALS:  # a signal the caller ignored stays ignored, as a job started with & expects
+        if signal.getsignal(number) != signal.SIG_IGN:
+            signal.signal(number, stopped)
     try:
-        return Draw(seed).run()
-    except Terminated:
-        print("draw: stopped by SIGTERM; no set written.", file=sys.stderr)
-        return 128 + signal.SIGTERM
+        try:
+            return Draw(seed).run()
+        finally:  # the draw's last line is printed, or is printed below: no signal follows it
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    except Stopped as stop:
+        number = signal.Signals(stop.args[0])
+        print(f"draw: stopped by {number.name}; no set written.", file=sys.stderr)
+        return 128 + number
     except DrawError as error:
         print(f"draw: {error}", file=sys.stderr)
         return 1

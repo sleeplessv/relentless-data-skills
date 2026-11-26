@@ -999,10 +999,27 @@ class TestDraw(unittest.TestCase):
                          "cannot read with certainty keeps each out of the pool.")
         self.assertEqual(counts(result), (1, 0, 0))
 
+    def test_the_refused_count_leaves_out_a_body_with_no_possible_item_under_a_criteria_heading(self) -> None:
+        # Tickets 1 to 3 hold no line that may start an item at or after their first possible criteria heading,
+        # outside a block closed before the line the draw cannot be sure of. Ticket 4 holds one, and is refused.
+        world = self.world([
+            Ticket(1, 20, criteria="- - -\n\n> ## Acceptance\n> Nothing yet."),
+            Ticket(2, 20, criteria="## Notes\n- Run:\n  ~~~sh\n  date\n  ~~~\n\n## Acceptance\nNothing yet."),
+            Ticket(3, 20, criteria="## Acceptance\n\n~~~\n- example\n~~~\n\n> Pending."),
+            Ticket(4, 20, criteria="- - -\n\n> ## Acceptance\n> - Real")])
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        printed = result.stdout.splitlines()
+        self.assertEqual(printed[printed.index(next(line for line in printed if line.startswith("Vetoed "))) + 1],
+                         "Refused 1 tickets of the listed repos: a list under a criteria heading that the draw "
+                         "cannot read with certainty keeps each out of the pool.")
+        self.assertEqual(counts(result), (0, 0, 0))
+
     def test_help_states_the_lists_the_draw_reads_and_the_refused_count(self) -> None:
         sentences = [
             "The draw reads the body as CommonMark's blocks, and a line ends only at a line feed, a carriage return "
             "or both.",
+            "One U+FEFF at the very start of the body is dropped first, as GitHub drops it.",
             "Code, fenced or indented, and HTML blocks hide what they hold.",
             "In the section the draw reads lists of items marked - * + or ASCII digits and . or ), each with its text "
             "on its marker line.",
@@ -1024,8 +1041,7 @@ class TestDraw(unittest.TestCase):
             "at least to the text of the last open item.",
             "Anywhere in the body but inside a fence or an HTML block the draw holds open, which it opens only at a "
             "line indented at most 3 spaces, with no > or marker, that starts a fence or one of CommonMark's HTML "
-            "blocks of kinds 1 to 6, and holds until a later line ends it or its first line does past the text that "
-            "opens it, so is a line that is a \"## \" criteria heading once its indent, the > of any quotes and any "
+            "blocks of kinds 1 to 6, and holds until a later line ends it or its first line does, so is a line that is a \"## \" criteria heading once its indent, the > of any quotes and any "
             "list markers are taken off, when it had a > or a marker, or when it is indented and a line outside such "
             "a block that starts, at most 3 spaces in, with a list marker came before it, as it may stand inside a "
             "quote or an item; and a line indented at most 3 spaces that holds one HTML tag alone and starts none of "
@@ -1046,9 +1062,10 @@ class TestDraw(unittest.TestCase):
             "Its requirements are a list of strings.",
             "After the count of vetoed PRs and before the count per bucket, the draw prints how many tickets of the "
             "listed repos it left out because it refused their body as above.",
-            "A body is never refused when none of its lines is a \"## \" criteria heading once its indent, any > and "
-            "any list markers are taken off, or when none of its lines starts with a list marker once its indent and "
-            "any > are taken off, as it then holds no item.",
+            "A body is never refused when no line that starts with a list marker once its indent and any > are taken "
+            "off comes at or after its first line that is a \"## \" criteria heading once its indent, any > and any "
+            "list markers are taken off, leaving out the lines inside a fence or an HTML block the draw held open "
+            "and that ended before the line it refused, as no item can then stand under a criteria heading.",
             "That count is taken before the rules on a ticket's other PRs and earlier sets, so it is the most tickets "
             "the reader can have cost the pool."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
@@ -1227,7 +1244,7 @@ class TestDraw(unittest.TestCase):
             f"## Acceptance\n\n- One.\n- Two.\n\n{notes}": ["One.", "Two."],
             f"{notes}\n## Acceptance\n\n- One.\n": "- ```sh",
             f"## Acceptance\n\n- One.\n\n{notes}\n## Done when\n\n- Two.\n": "- ```sh",
-            f"{notes}\n```\n## Acceptance\n```\n": "- ```sh",  # a criteria heading's line, even in a fence
+            f"{notes}\n```\n## Acceptance\n```\n": [],  # no line that may start an item after the heading's line
         })
 
     def test_a_body_with_no_line_that_may_start_an_item_is_never_refused(self) -> None:
@@ -1261,6 +1278,58 @@ class TestDraw(unittest.TestCase):
             "## Acceptance\n\n- \u2028[ ] Save.\n": ["\u2028[ ] Save."],
             "## Acceptance\n\n- [x] \u2028Save.\t\n": ["\u2028Save."],
             "## Acceptance\u2028\n\n- Not under a criteria heading.\n": [],
+        })
+
+    def test_an_html_block_whose_first_line_ends_it_holds_no_line_after_it(self) -> None:
+        # Of CommonMark's HTML kinds 1 to 5 only a comment and a processing instruction can end on text that
+        # overlaps their opener: <!-->, <!---> and <?>. The block is that one line. The ticket's body, with an item
+        # that opens a fence in the Notes section, is refused at that item; without it the body is read. The last
+        # rows are controls: an opener whose end comes later on its line, a block that ends on a later line, and a
+        # block of kind 6, which a blank line ends.
+        first, after = "## Acceptance\n- First\n## Notes\n", "\n## Done when\n- Save"
+        cases: dict[str, list[str] | str] = {}
+        for opener in ("<!-->", "<!--->", "<?>"):
+            cases[f"{first}{opener}\n- ```sh\n  ls\n  ```{after}"] = "- ```sh"
+            cases[f"{first}{opener}{after}"] = ["First", "Save"]
+        for opener in ("<!-- x -->", "<!A>", "<![CDATA[]]>", "<pre></pre>", "<? x ?>"):
+            cases[f"{first}{opener}{after}"] = ["First", "Save"]
+        cases[f"{first}<!--\n## Done when\n- Hidden\n-->{after}"] = ["First", "Save"]
+        cases[f"{first}<div>\n## Done when\n- Hidden\n{after}"] = ["First", "Save"]
+        self.read_or_refuse(cases)
+
+    def test_a_u_feff_that_starts_the_body_is_dropped_as_github_drops_it(self) -> None:
+        # GitHub's renderer drops one U+FEFF at the very start of the text; any other U+FEFF is text.
+        self.read_or_refuse({
+            "\ufeff- Note\n  ## Acceptance\n  - Fake\n## Done when\n- Real": "  ## Acceptance",
+            "\ufeff## Acceptance\n- Real": ["Real"],
+            "\ufeff```\n## Acceptance\n- Fake\n```\n## Done when\n- Real": ["Real"],
+            "\ufeffNotes\n\n## Acceptance\n- Real": ["Real"],
+            "\ufeff\ufeff## Acceptance\n- Real": [],
+            "## Acceptance\n- Real\ufeff\n- \ufeffSave": ["Real\ufeff", "\ufeffSave"],
+        })
+
+    def test_a_line_that_may_start_an_item_costs_a_list_only_at_or_after_a_possible_criteria_heading(self) -> None:
+        # An item under a criteria heading starts on a line after the heading's, so a refusal costs no list when no
+        # line that may start an item comes at or after the first line that may be a criteria heading. The last
+        # rows have one, and are refused.
+        quoted = "- - -\n\n> ## Acceptance\n> Nothing yet."
+        fenced = "## Notes\n- Run:\n  ~~~sh\n  date\n  ~~~\n\n## Acceptance\nNothing yet."
+        self.read_or_refuse({
+            quoted: [],
+            fenced: [],
+            quoted.replace("> Nothing yet.", "> - Real"): "> ## Acceptance",
+            f"{fenced}\n- Real": "  ~~~sh",
+        })
+
+    def test_a_line_inside_a_block_closed_before_the_refusal_costs_no_list(self) -> None:
+        # The lines of a fence or HTML block the reader opened and closed before the line it refuses are code or
+        # HTML, and start no item. The lines of a block still open at the refusal may start one.
+        fenced = "## Acceptance\n\n~~~\n- example\n~~~\n\n> Pending."
+        self.read_or_refuse({
+            fenced: [],
+            fenced.replace("~~~", "<!--", 1).replace("~~~", "-->"): [],
+            f"{fenced}\n\n- Real": "> Pending.",
+            "## Acceptance\n\n  ~~~\n- maybe\n": "- maybe",
         })
 
     def test_the_model_is_a_name_from_the_session_s_own_responses_or_a_helper_s_copy_of_one(self) -> None:

@@ -167,7 +167,8 @@ The pool is every ticket that meets all of these:
   set aside.
 
 The draw reads the body as CommonMark's blocks, and a line ends only at a line
-feed, a carriage return or both. Code, fenced or indented, and HTML blocks
+feed, a carriage return or both. One U+FEFF at the very start of the body is
+dropped first, as GitHub drops it. Code, fenced or indented, and HTML blocks
 hide what they hold. In the section the draw reads lists of items marked - * +
 or ASCII digits and . or ), each with its text on its marker line. An item's
 text can wrap onto the lines after it, however they are indented, until a
@@ -189,7 +190,7 @@ text of the last open item. Anywhere in the body but inside a fence or an HTML
 block the draw holds open, which it opens only at a line indented at most 3
 spaces, with no > or marker, that starts a fence or one of CommonMark's HTML
 blocks of kinds 1 to 6, and holds until a later line ends it or its first line
-does past the text that opens it, so is a line that is a "## " criteria
+does, so is a line that is a "## " criteria
 heading once its indent, the > of any quotes and any list markers are taken
 off, when it had a > or a marker, or when it is indented and a line outside
 such a block that starts, at most 3 spaces in, with a list marker came before
@@ -288,10 +289,12 @@ opened it.
 
 After the count of vetoed PRs and before the count per bucket, the draw prints
 how many tickets of the listed repos it left out because it refused their body
-as above. A body is never refused when none of its lines is a "## " criteria
-heading once its indent, any > and any list markers are taken off, or when
-none of its lines starts with a list marker once its indent and any > are
-taken off, as it then holds no item. That count is taken before the rules on a
+as above. A body is never refused when no line that starts with a list marker
+once its indent and any > are taken off comes at or after its first line that
+is a "## " criteria heading once its indent, any > and any list markers are
+taken off, leaving out the lines inside a fence or an HTML block the draw held
+open and that ended before the line it refused, as no item can then stand
+under a criteria heading. That count is taken before the rules on a
 ticket's other PRs and earlier sets, so it is the most tickets the reader can
 have cost the pool.
 
@@ -574,26 +577,25 @@ def requirements(body: str | None) -> list[str]:
     """The text of each item of a list under a "## " heading among the CRITERIA_HEADINGS, in the order written.
     Unreadable names the first line the reader cannot read with certainty. HELP says which lists it reads."""
     # CommonMark ends a line only at \n, \r or both; str.splitlines also ends one at \v, \f, \x85 and others.
-    lines = re.split(r"\r\n|\r|\n", (body or "").expandtabs(4))
+    lines = re.split(r"\r\n|\r|\n", (body or "").removeprefix("\ufeff").expandtabs(4))  # as GitHub reads it
     found: list[str] = []
     columns: list[int] = []  # the text column of each open item of the section, outermost first
     under = paragraph = False  # paragraph: the line before is text that a line of text continues
     after_item = False  # a line that starts with a list marker came before: an item may still be open
     loose = False  # such a line came outside the criteria sections since the last heading at the margin
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
-    block_indent = 0  # the indent of the open fence or HTML block's first line
+    block_indent = opener = 0  # the indent and the number of the open fence or HTML block's first line
+    hidden: set[int] = set()  # the lines after the first of each fence or HTML block closed so far
     try:
         for number, text in enumerate(lines, 1):
             if (fence or html) and text.strip(" \t") and len(text) - len(text.lstrip(" ")) < block_indent:
                 # Inside an item the block ends with the item, and at the top level it does not: no telling which.
                 raise Unreadable(number, text)
-            if fence:  # a fence ends at a line of at least as many of its own character
-                if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
-                    fence = ""
-                continue
-            if html:
-                if html.search(text):
-                    html = None
+            if fence or html:  # a fence ends at a line of at least as many of its own character
+                if (re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text) if fence
+                        else html.search(text)):
+                    fence, html = "", None
+                    hidden.update(range(opener + 1, number + 1))
                 continue
             line = text.lstrip(" ")
             indent = len(text) - len(line)
@@ -628,11 +630,11 @@ def requirements(body: str | None) -> list[str]:
                 continue
             start = indent < 4 and next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
             if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
-                fence, block_indent = opening.group(), indent
+                fence, block_indent, opener = opening.group(), indent, number
             elif start:
                 begin, end = start
-                html = None if end is not BLANK and end.search(line, begin.match(line).end()) else end
-                block_indent = indent
+                html = None if end is not BLANK and end.search(line) else end  # the end may overlap the opener: <!-->
+                block_indent, opener = indent, number
             elif indent < 4 and TAG_LINE.fullmatch(line):  # an HTML block, or a paragraph's text: the line above says
                 raise Unreadable(number, text)
             elif indent < 4 and (heading := HEADING.fullmatch(line)):
@@ -650,11 +652,14 @@ def requirements(body: str | None) -> list[str]:
             columns.clear()  # any other block ends the list and the paragraph
             paragraph = False
     except Unreadable as refusal:
+        # An item under a criteria heading starts on a line after the heading's, with a list marker once its indent
+        # and quotes are taken off, and outside the blocks the reader closed, which every line before the refusal
+        # read with certainty. With no such line no refusal can cost a list, and the items read so far are none.
+        first = next((at for at, text in enumerate(lines, 1) if criteria(unmarked(text))), len(lines) + 1)
+        if not any(MARKER.match(unquoted(text)) for at, text in enumerate(lines[first - 1:], first) if at not in hidden):
+            return found
         # Outside every criteria section, a line the reader cannot be sure of costs the list only when a criteria
         # heading may come at or after it; the items read before it stand.
-        # A body with no line that may start an item has no list: no refusal can cost it one.
-        if not any(MARKER.match(unquoted(text)) for text in lines):
-            return found
         if under or any(criteria(unmarked(text)) for text in lines[refusal.number - 1:]):
             raise
     return found

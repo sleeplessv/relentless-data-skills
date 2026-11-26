@@ -127,9 +127,9 @@ JSON object (json_object in scripts/scan.py says which) or when it is an object
 whose session is not text. The scan keeps such a line, and the report leaves it
 out: it names the line once on standard error, with the file, the line number and
 the reason, as it reads the file, and prints on standard output how many lines it
-left out. A line of nothing but whitespace is blank, and is passed over and not
-counted. A session whose row was such a line is left out of the token figures and
-counted, like one with no row.
+left out when it prints the report. A line of nothing but whitespace is blank,
+and is passed over and not counted. A session whose row was such a line is left
+out of the token figures and counted, like one with no row.
 
 
 Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s,
@@ -199,7 +199,7 @@ one ticket of the sets stops the report. The error names the folder or file, and
 the ledger line, helper or set ticket entry that fails a check. A set file that
 is not JSON, or not an object holding a list of tickets, and a versions.jsonl or
 verdicts.jsonl that is not UTF-8 are named by file alone. It never prints a
-refused label or version name, and nothing else is printed.
+refused label or version name, and prints nothing on standard output.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:
@@ -207,7 +207,8 @@ bad usage."""
 
 
 class Unreadable(Exception):
-    """Ends the report with exit 1 and nothing printed."""
+    """Ends the report with exit 1: the error goes to standard error and nothing to standard output. Lines of
+    scan-rows.jsonl already named on standard error stay named."""
 
 
 def checked(where: str, line: object, **wanted: tuple) -> dict:
@@ -247,10 +248,9 @@ def blank(line: bytes) -> bool:
 
 
 def row_lines(path: Path) -> tuple[list[tuple[str, dict]], int]:
-    """Each nonblank line of scan-rows.jsonl that can be a row, with where it is, and how many others there are; none
-    of either for a file that does not exist. The scan keeps a line it cannot read as a JSON object, and the report
-    leaves it out: scan.json_object says which lines those are. Each is named on standard error as it is found, so
-    that a later failure leaves it named."""
+    """The lines of scan-rows.jsonl that can be rows, each with where it is, and how many nonblank lines are left out;
+    none of either for a file that does not exist. Each line left out is named on standard error as it is found. --help
+    states which lines those are."""
     try:
         data = path.read_bytes()
     except FileNotFoundError:  # any other OSError reaches main()

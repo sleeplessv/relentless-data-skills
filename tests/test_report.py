@@ -810,7 +810,7 @@ class TestReport(unittest.TestCase):
             without[0], "Left out: scan-rows.jsonl lines that are no scan row: 1.", *without[1:]],
             f"report: {rows}:1: not a JSON object, left out.\n"))
 
-    def test_a_row_that_names_a_session_stops_the_report_and_the_line_left_out_before_it_is_still_named(self) -> None:
+    def test_a_bad_total_tokens_stops_the_report_and_the_line_left_out_before_it_is_still_named(self) -> None:
         self.world.baseline(20, 15)
         self.world.save()
         good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
@@ -825,11 +825,11 @@ class TestReport(unittest.TestCase):
 
     def test_blank_lines_of_the_rows_file_are_passed_over_and_not_counted(self) -> None:
         self.world.baseline(20, 15)
-        clean = self.lines()
+        clean = self.world.report()
         good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
         self.write_rows(b"", b"  ", *good, b"\t", "\u00a0\u2003".encode())
         result = self.world.report(save=False)
-        self.assertEqual((result.returncode, result.stdout.splitlines(), result.stderr), (0, clean, ""))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, clean.stdout, ""))
 
     def test_a_damaged_line_of_versions_or_verdicts_still_stops_it_whatever_the_rows_file_holds(self) -> None:
         for name, damage in (("versions.jsonl", b"{broken"), ("verdicts.jsonl", b"[]"), ("versions.jsonl", b"\xff"),
@@ -855,9 +855,11 @@ class TestReport(unittest.TestCase):
             "whose session is not text. The scan keeps such a line, and the report leaves it\n"
             "out: it names the line once on standard error, with the file, the line number and\n"
             "the reason, as it reads the file, and prints on standard output how many lines it\n"
-            "left out. A line of nothing but whitespace is blank, and is passed over and not\n"
-            "counted. A session whose row was such a line is left out of the token figures and\n"
-            "counted, like one with no row.\n", text + "\n")
+            "left out when it prints the report. A line of nothing but whitespace is blank,\n"
+            "and is passed over and not counted. A session whose row was such a line is left\n"
+            "out of the token figures and counted, like one with no row.\n", text + "\n")
+        self.assertIn("verdicts.jsonl that is not UTF-8 are named by file alone. It never prints a\n"
+                      "refused label or version name, and prints nothing on standard output.\n", text + "\n")
 
     def test_help_exits_0_and_bad_usage_exits_2(self) -> None:
         self.world.draw()

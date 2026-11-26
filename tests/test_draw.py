@@ -14,6 +14,7 @@ import importlib
 import json
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -21,6 +22,7 @@ import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -539,11 +541,19 @@ class World:
         program, env = self.command(args, state, prelude)
         return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True)
 
+    @staticmethod
+    def default_sigint() -> None:
+        signal.signal(signal.SIGINT, signal.SIG_DFL)
+        signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+
     def start(self, *args: str) -> subprocess.Popen[str]:
-        """Start the draw and return at once."""
+        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited.
+
+        A job a script starts with `&` with job control off has SIGINT ignored, and a caller may block it;
+        either way the draw would not stop on the interrupt a test sends it."""
         program, env = self.command(args, None, "")
         return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.PIPE, preexec_fn=self.default_sigint)
 
     def command(self, args: tuple[str, ...], state: Path | None, prelude: str) -> tuple[list[str], dict[str, str]]:
         answers = self.root / "answers"
@@ -1470,21 +1480,48 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
-    def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
+    def draw_signalled_in_a_check(self, number: signal.Signals) -> World:
+        """Signal a draw whose check blocks until its private folder is removed, so only the signal ends it, and
+        assert the check is gone once the draw has ended. The folder's removal at cleanup releases a check the
+        draw left running. The waits: a poll for the check's pid, `communicate(timeout=60)` for the draw's exit, then a
+        poll for the check's exit, each ending after 60 seconds; the cleanup's `communicate` follows the kill."""
         marks = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, marks)
-        check = f"{CHECK} && touch {marks}/started && sleep 1 && touch {marks}/late"
+        folder = shlex.quote(str(marks))
+        check = (f"{CHECK} && echo $$ > {folder}/pid.tmp && mv {folder}/pid.tmp {folder}/pid"
+                 f" && while test -d {folder}; do sleep 0.05; done")
         world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
         draw = world.start("--seed", "1")
+        self.addCleanup(draw.communicate)  # closes the pipes, after the kill
         self.addCleanup(draw.kill)
-        for _ in range(600):
-            if (marks / "started").exists() or draw.poll() is not None:
-                break
-            subprocess.run(["sleep", "0.05"])
-        draw.send_signal(signal.SIGINT)
+        self.wait_for(lambda: (marks / "pid").exists() or draw.poll() is not None)
+        self.assertTrue((marks / "pid").exists(), "the draw ended before the check started")
+        pid = int((marks / "pid").read_text())
+        draw.send_signal(number)
         draw.communicate(timeout=60)
-        subprocess.run(["sleep", "1.5"])
-        self.assertEqual(sorted(path.name for path in marks.iterdir()), ["started"])
+        self.assertTrue(self.wait_for(lambda: not self.alive(pid)),
+                        f"the check (pid {pid}) is still running after the draw ended")
+        return world
+
+    @staticmethod
+    def alive(pid: int) -> bool:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def wait_for(self, ready: Callable[[], bool]) -> bool:
+        """Poll `ready` until it holds; False once a minute has passed."""
+        deadline = time.monotonic() + 60
+        while not ready():
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
+        self.draw_signalled_in_a_check(signal.SIGINT)
 
     def test_a_log_that_cannot_be_saved_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))
@@ -1649,20 +1686,7 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(result.stderr.splitlines()[-1], "KeyboardInterrupt")
 
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
-        marks = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, marks)
-        check = f"{CHECK} && touch {marks}/started && sleep 1 && touch {marks}/late"
-        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
-        draw = world.start("--seed", "1")
-        self.addCleanup(draw.kill)
-        for _ in range(600):
-            if (marks / "started").exists() or draw.poll() is not None:
-                break
-            subprocess.run(["sleep", "0.05"])
-        draw.send_signal(signal.SIGTERM)
-        draw.communicate(timeout=60)
-        subprocess.run(["sleep", "1.5"])
-        self.assertEqual(sorted(path.name for path in marks.iterdir()), ["started"])
+        world = self.draw_signalled_in_a_check(signal.SIGTERM)
         self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_model_takes_one_vote_per_parent_response_however_many_helpers_copy_it(self) -> None:

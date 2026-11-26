@@ -33,10 +33,10 @@ when there is none, and loads at one time keep the order of the lines.
 
 A line whose sessionId is text other than the row's session is a copied line,
 as the lines a resumed session copied from an earlier one are. Copied lines, in
-the session's log or a helper's, count in every column like the session's own.
-copied_tokens is the part of total_tokens from the responses that only copied
-lines carry: 0 when there are none, blank when total_tokens is blank. A line
-carries a response when it holds part of it, with or without token counts.
+the session's log or a helper's, count in every other column like the session's
+own. copied_tokens is the part of total_tokens from the responses that only
+copied lines carry: 0 when there are none, blank when total_tokens is blank. A
+line carries a response when it holds part of it, with or without token counts.
 
 The row replaces any earlier row for the same session in scan-rows.jsonl in the
 machine directory: $DELIVER_STATE_DIR, default ~/.local/state/deliver. The scan

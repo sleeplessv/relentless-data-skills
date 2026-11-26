@@ -748,7 +748,7 @@ class TestScan(unittest.TestCase):
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
                 self.assertEqual(self.rows(), [whole_row(self.session, (0, output, 0, 0), minutes, copied=copied)])
 
-    def test_an_own_line_whose_response_id_is_a_list_or_an_object_carries_no_response(self) -> None:
+    def test_an_own_line_whose_response_id_is_a_nonempty_list_or_object_carries_no_response(self) -> None:
         earlier = str(uuid.uuid4())
         for number, message_id in enumerate((["msg_listed"], {"id": "msg_listed"})):
             with self.subTest(message_id=message_id):
@@ -1127,7 +1127,7 @@ class TestScan(unittest.TestCase):
                 "So two skills of one name from two plugins are one entry: a typed skill leaves no prefix to recover.",
                 "A line whose sessionId is text other than the row's session is a copied line, as the lines a "
                 "resumed session copied from an earlier one are.",
-                "Copied lines, in the session's log or a helper's, count in every column like the session's own.",
+                "Copied lines, in the session's log or a helper's, count in every other column like the session's own.",
                 "copied_tokens is the part of total_tokens from the responses that only copied lines carry: 0 when "
                 "there are none, blank when total_tokens is blank.",
                 "A line carries a response when it holds part of it, with or without token counts.",

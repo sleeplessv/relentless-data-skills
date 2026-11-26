@@ -32,7 +32,7 @@ person for report and measure edits.
 ## Requirements
 
 - macOS with Parallels Desktop (`prlctl`) and `jq`.
-- A Windows VM with a signed-in user, Power BI Desktop and Node.js.
+- A Windows VM with a signed-in user, Node.js 20+ with npm, and Power BI Desktop with Desktop Bridge access enabled.
 - The project in PBIP format, in a Mac folder shared with the VM.
 
 ## Install

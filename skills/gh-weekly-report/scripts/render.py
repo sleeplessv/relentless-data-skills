@@ -78,6 +78,12 @@ def main(argv: list[str] | None = None) -> None:
     opts = parser.parse_args(argv)
 
     week = json.loads(Path(opts.data).read_text())
+    for period in (week["current"], week["previous"]):
+        if "issues_duplicate" not in period:
+            # Older receipts filed duplicate closes under issues_resolved.
+            closed = period.get("issues_resolved", [])
+            period["issues_duplicate"] = [i for i in closed if i.get("state_reason") == "duplicate"]
+            period["issues_resolved"] = [i for i in closed if i.get("state_reason") != "duplicate"]
     buckets = json.loads(Path(opts.buckets).read_text())
     narratives = (json.loads(Path(opts.narratives).read_text())
                   if opts.narratives else {})

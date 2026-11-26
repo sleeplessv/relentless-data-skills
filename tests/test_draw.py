@@ -1692,6 +1692,46 @@ class TestDraw(unittest.TestCase):
         self.assertNotIn("PermissionError", result.stderr)
         self.assertEqual(result.stderr.splitlines()[-1], "draw: stopped by SIGINT; no set written.")
 
+    def test_a_signal_once_the_set_file_is_in_place_leaves_the_draw_ending_with_its_set(self) -> None:
+        world = self.world(full_pool(10))
+        short = self.world(sized(1, 12, 20))  # writes no set: exit 3
+        # Python the draw runs first: it sends the draw the signal {number} right after one of its steps.
+        steps = {"the set file is in place": "import scan\nreal_write = scan.write_private\n"
+                                             "def write(path, text):\n"
+                                             "    real_write(path, text)\n"
+                                             "    if path.name.startswith('replay-set-'):\n"
+                                             "        os.kill(os.getpid(), {number})\n"
+                                             "scan.write_private = write",
+                 "the Wrote line": "import builtins\nreal_print = builtins.print\n"
+                                   "def print_(*args, **options):\n"
+                                   "    real_print(*args, **options)\n"
+                                   "    if str(args[0]).startswith('Wrote '):\n"
+                                   "        os.kill(os.getpid(), {number})\n"
+                                   "builtins.print = print_",
+                 "main returns": "real_exit = sys.exit\n"
+                                 "def exit_(status):\n"
+                                 "    os.kill(os.getpid(), {number})\n"
+                                 "    real_exit(status)\n"
+                                 "sys.exit = exit_"}
+        cases = [(world, signal.SIGTERM, "the set file is in place"), (world, signal.SIGINT, "the Wrote line"),
+                 (world, signal.SIGTERM, "main returns"), (short, signal.SIGINT, "main returns")]
+        for at, (each, number, step) in enumerate(cases):
+            with self.subTest(signal=number.name, after=step, sets=each is world):
+                state = each.root / f"state-{at}"
+                shutil.copytree(each.state, state)
+                prelude = (f"import os, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(each.source)!r})\n"
+                           + steps[step].format(number=int(number)))
+                result = each.draw("--seed", "1", state=state, prelude=prelude)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stderr, "")
+                if each is world:
+                    self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
+                                     (0, f"Wrote {state / 'replay-set-1.json'}."))
+                    self.assertEqual(len(each.set_file(state=state)["tickets"]), 30)
+                else:
+                    self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
+                                     (3, "No set written: a bucket cannot reach 10 tickets."))
+
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
         world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]
         self.assertFalse((world.state / "draw-work").exists())

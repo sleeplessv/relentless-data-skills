@@ -240,22 +240,62 @@ class PackagesCheckTests(unittest.TestCase):
 
     def test_manifest_without_dbt_packages_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "packages.yml").write_text("packages: []")
+            (Path(tmp) / "packages.yml").write_text("packages:\n  - local: ../dep")
             status, msg = preflight.check_packages(Path(tmp))
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("<runner> deps", msg)
 
     def test_missing_dbt_packages_names_context_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "packages.yml").write_text("packages: []")
+            (Path(tmp) / "packages.yml").write_text("packages:\n  - local: ../dep")
             status, msg = preflight.check_packages(Path(tmp), "uv run dbt")
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("`uv run dbt deps`", msg)
 
+    def test_dependency_manifest_distinguishes_packages_from_mesh_projects(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            manifest = root / "dependencies.yml"
+            for value, expected in [
+                ("projects:\n  - name: upstream", preflight.SKIP),
+                ("packages: [ ] # no packages", preflight.SKIP),
+                ("packages:  # installed by dbt deps\n- local: ../dep", preflight.FAIL),
+                ("packages: [{local: ../dep}]", preflight.FAIL),
+            ]:
+                with self.subTest(value=value):
+                    manifest.write_text(value)
+                    status, _ = preflight.check_packages(root)
+                    self.assertEqual(status, expected)
+
+    def test_packages_install_path_is_relative_to_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dependencies.yml").write_text("packages:\n  - local: ../dep")
+            (root / "dbt_project.yml").write_text(
+                'packages-install-path: "vendor packages" # local install'
+            )
+            (root / "dbt_packages").mkdir()
+            status, msg = preflight.check_packages(root)
+            self.assertEqual(status, preflight.FAIL)
+            self.assertIn("vendor packages", msg)
+            (root / "vendor packages" / "dep").mkdir(parents=True)
+            self.assertEqual(preflight.check_packages(root)[0], preflight.OK)
+
+    def test_templated_package_directory_requires_manual_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "packages.yml").write_text("packages: [{local: ../dep}]")
+            (root / "dbt_project.yml").write_text(
+                """packages-install-path: "{{ env_var('PACKAGE_DIR') }}" """
+            )
+            status, msg = preflight.check_packages(root)
+            self.assertEqual(status, preflight.SKIP)
+            self.assertIn("verify the resolved directory", msg)
+
     def test_clean_lockfile_ok(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "package-lock.yml").write_text("packages: []")
+            (root / "package-lock.yml").write_text("packages:\n  - local: ../dep")
             (root / "dbt_packages").mkdir()
             clean = types.SimpleNamespace(returncode=0, stdout=b"")
             with mock.patch.object(subprocess, "run", return_value=clean):
@@ -265,7 +305,7 @@ class PackagesCheckTests(unittest.TestCase):
     def test_dirty_lockfile_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "package-lock.yml").write_text("packages: []")
+            (root / "package-lock.yml").write_text("packages:\n  - local: ../dep")
             (root / "dbt_packages").mkdir()
             dirty = types.SimpleNamespace(
                 returncode=0, stdout=b" M package-lock.yml\n"
@@ -325,6 +365,16 @@ class ProfileCheckTests(unittest.TestCase):
                 )
         self.assertEqual(status, preflight.OK)
         self.assertIn(str(project.profiles), msg)
+
+    def test_recorded_relative_profiles_path_uses_the_dbt_project_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile_dir = root / "config with spaces"
+            profile_dir.mkdir()
+            (profile_dir / "profiles.yml").write_text(PROFILES_YML)
+            ctx = {"profiles_path": "config with spaces/profiles.yml",
+                   "profile": "corp_dt", "target": "local"}
+            self.assertEqual(preflight.check_profile(ctx, root)[0], preflight.OK)
 
     def test_dbt_profiles_dir_beats_project_root(self):
         with contextlib.ExitStack() as stack:
@@ -552,6 +602,15 @@ class ConnectTests(unittest.TestCase):
         self.assertIn("OK connect", out)
         self.assertEqual(run.call_args[0][0],
                          ["uv", "run", "dbt", "debug", "--target", "local"])
+
+    def test_connect_uses_context_profile_and_recorded_directory(self):
+        ctx = dict(self.CTX, profile="analytics",
+                   profiles_path="config with spaces/profiles.yml")
+        _, _, run = self._run(ctx=ctx, return_value=types.SimpleNamespace(returncode=0))
+        self.assertEqual(run.call_args.args[0], [
+            "uv", "run", "dbt", "debug", "--target", "local", "--profile", "analytics",
+            "--profiles-dir", str(Path("config with spaces").resolve()),
+        ])
 
     def test_path_runner(self):
         ok = types.SimpleNamespace(returncode=0)

@@ -4,6 +4,7 @@ Only relevant when the context file says `engine: v2` (legacy: `fusion`).
 These are dbt v2 (the engine formerly called dbt Fusion) behaviors whose
 error messages point *away* from the real cause. Generic triage (and dbt
 v1 experience) will mislead you here.
+For command examples expand `<connection>` from [invocation rule 1](../SKILL.md#invocation-rules-every-dbt-command).
 On dbt v1 the unit-test fixture gap below reads `Invalid column name … in unit
 test fixture`; see [failures.md](failures.md).
 
@@ -17,7 +18,7 @@ looks like a model bug. It usually isn't:
    model is **not in the build selection**, dbt v2 cannot infer the input's
    schema and throws `invalid identifier` on any column the model selects
    from it. Discriminate: does the same test pass when the upstream is
-   included in the selection (`<runner> build --select <upstream>+<model>`)?
+   included in the selection (`<runner> build <connection> --select <upstream>+<model>`)?
    If yes, this is the inference gap, not a regression.
    Fixes, best first:
    - add the referenced columns (even with null values) to the fixture's
@@ -37,8 +38,8 @@ model are simply absent from the output:
    "green-ish" log can hide an unverified model. Workaround to run them
    anyway:
    ```bash
-   <runner> run --select <model> > /tmp/dbt_run.log 2>&1
-   <runner> test --select <model>,test_name:relationships > /tmp/dbt_test.log 2>&1
+   <runner> run <connection> --select <model> > /tmp/dbt_run.log 2>&1
+   <runner> test <connection> --select <model>,test_name:relationships > /tmp/dbt_test.log 2>&1
    ```
    (swap the `test_name:` filter for the tests you need). Fix the unit
    test separately, often the fixture-inference entry above.

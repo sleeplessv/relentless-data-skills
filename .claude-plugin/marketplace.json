@@ -51,7 +51,7 @@
       "name": "dbt-runner",
       "source": "./skills/dbt-runner",
       "description": "Run dbt commands and diagnose failures with project setup checks and captured output.",
-      "version": "0.1.9",
+      "version": "0.1.10",
       "author": {
         "name": "sleeplessv"
       },

@@ -38,7 +38,7 @@ uv run --python 3.13 --no-project <skill-dir>/scripts/preflight.py --project-roo
 Without `uv`, plain `python3` works if it is 3.13 or newer.
 
 Static checks only (sandbox-safe, no network): required env vars set, the
-private key file exists, `dbt_packages/` present with a clean
+private key file exists, the configured package directory is present with a clean
 `package-lock.yml`, the profile/target resolve in `profiles.yml`, and
 `<runner> --version` reports the context file's `engine` and the major.minor
 of its `engine_version`. Exception: a `uv run` runner may sync an
@@ -48,7 +48,7 @@ before running dbt; each line says how. Don't re-run it before every
 command; once per session is the contract, plus once more after any
 environment change (new shell, edited `.env`, switched target).
 A fresh worktree or scratch checkout is such a change, and the place the
-preflight pays: it starts without `dbt_packages/`, often without `.env`,
+preflight pays: it starts without installed packages, often without `.env`,
 and a worktree-isolated agent's shell guard rejects `source` and chained
 commands (failures.md, `isolated in the worktree`). Run it there before
 the first command.
@@ -64,6 +64,11 @@ the first command.
    `poetry.lock` → `poetry run dbt`, `.venv/` → `.venv/bin/dbt`) and record
    it. Before trusting a parse-stage failure, confirm the engine with
    `<runner> --version` (major version 1 or 2).
+   For commands that load a profile, run from the project root and pass
+   `--profile <profile> --target <target>` from the context. If it records
+   `profiles_path`, also pass `--profiles-dir "<directory containing profiles.yml>"`.
+   Examples use `<connection>` for these arguments. Omit them for version
+   checks and commands that do not load a profile, such as `deps`.
 2. **Run outside the sandbox.** dbt needs network access to the warehouse.
    In a sandboxed shell it fails with DNS/connection errors that masquerade
    as auth problems. If you see a connection error, suspect the sandbox
@@ -71,7 +76,7 @@ the first command.
 3. **Never pipe dbt output; redirect to a logfile.** Piped output
    (`dbt build | tail`) can buffer and return blank. Always:
    ```bash
-   <runner> build --select <sel> > /tmp/dbt_run.log 2>&1
+   <runner> build <connection> --select <sel> > /tmp/dbt_run.log 2>&1
    ```
    then grep/tail the logfile. Exit code first, log second.
 4. **Long runs go to the background.** Full builds or large facts can
@@ -86,23 +91,24 @@ the first command.
    trivially. `PASS=n ERROR=0` on an empty model proves it compiles, nothing
    more. When a model's source is populated outside dbt's DAG (ML scores,
    externally-loaded tables), count the rows before reporting success, and
-   exercise the logic on synthetic rows via `<runner> show --inline`,
+   exercise the logic on synthetic rows via `<runner> show <connection> --inline`,
    capping rows with `--limit N` (`show` appends its own `limit`; one
    inside the SQL is a syntax error).
 
 ## Reading the result
 
-`dbt build` exiting non-zero does **not** mean models failed to build.
-Read the summary line, `PASS=… WARN=… ERROR=…`, and distinguish three
-outcomes before reacting (this trichotomy is the authoritative reference;
-failures.md points here):
+Read the exit code and first error in the log. When available, use this
+invocation's `run_results.json` to identify which selected resources ran or
+were skipped. Report materialized models and skipped resources separately.
 
-- **Run error.** A model errored; its SQL or upstream is broken.
-- **Test failure.** Models built fine, a data test failed. Fix data or
-  test, don't touch the build invocation.
-- **Warning.** `severity: warn` tests print WARN and do *not* fail the
-  run. Don't "fix" a warning as if it were a failure, and don't report a
-  warned run as broken.
+- **Before materialization.** A parse or compile error can stop the build.
+  In dbt v2 a failing project check can stop it before models run.
+- **Resource error.** Identify the resource and its error. A failed unit test
+  can prevent its model from building. An upstream model error or failing
+  data test can skip downstream models in the selection.
+- **Warning.** A warning normally allows the build to continue. If the engine
+  supports warning escalation and the invocation enabled it, check whether
+  dbt treated the warning as an error.
 
 ## When something fails
 

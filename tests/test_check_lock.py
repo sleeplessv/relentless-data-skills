@@ -272,8 +272,8 @@ class CheckLockTest(unittest.TestCase):
         """End the run and anything left in its process group, such as a killed holder's body."""
         try:
             os.killpg(proc.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
+        except (ProcessLookupError, PermissionError):
+            pass  # macOS can answer EPERM once every process in the group has exited
         proc.wait()
 
     def run_check(self, *args: str, **kwargs) -> tuple[int, str, str]:

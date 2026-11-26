@@ -118,8 +118,8 @@ drafts, the reviewer (resumed) answers the quiz, the tickets worker (resumed) ap
 once and publishes. A closed spec skips this stage. For a `needs-tickets` spec the log is its
 decision-log comment and the quiz goes to a fresh reviewer briefed per
 [Reviewer](references/workers.md#reviewer). Done when the tickets worker's return lists every
-ticket with its triage label and a parent equal to the spec, or returns `edges: body`, or the
-stage ended on a [blocked write](references/workers.md#blocked-writes).
+ticket with its verified label, spec parent and blockers, including relationships recorded in
+the ticket body, or the stage ended on a [blocked write](references/workers.md#blocked-writes).
 
 ### 5. Report
 

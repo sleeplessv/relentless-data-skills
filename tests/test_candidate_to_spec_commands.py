@@ -46,6 +46,14 @@ if [ -n "${GH_FAIL:-}" ] && [ "$1 $2" = "$GH_FAIL" ]; then
   echo "gh: $GH_FAIL failed on request" >&2
   exit 1
 fi
+if [ "$1 $2" = "issue view" ] && [ -n "${GH_MISSING_FIELDS:-}" ]; then
+  for field in ${GH_MISSING_FIELDS//,/ }; do
+    if [[ ",$5," == *",$field,"* ]]; then
+      echo "GraphQL: Field '$field' doesn't exist on type 'Issue'" >&2
+      exit 1
+    fi
+  done
+fi
 prev=""
 for a in "$@"; do
   if [ "$prev" = "--body-file" ]; then
@@ -64,8 +72,14 @@ case "$1 $2" in
       *"--json url"*) echo "https://github.com/o/r/issues/$3" ;;
       *"--json labels,parent,blockedBy"*)
         echo '{"labels":[{"name":"ready-for-agent"}],"parent":{"number":42},"blockedBy":[]}' ;;
+      *"--json labels,parent,body"*)
+        echo '{"labels":[{"name":"ready-for-agent"}],"parent":{"number":17},"body":"## Blocked by\n#40\n#41"}' ;;
+      *"--json labels,body"*)
+        echo '{"labels":[{"name":"ready-for-agent"}],"body":"## Parent\n#17\n## Blocked by\n#40\n#41"}' ;;
       *"--json labels,state"*) echo '{"labels":[],"state":"OPEN"}' ;;
       *"--json comments --jq .comments[].body"*) printf '%s\n' "${GH_COMMENT_BODIES-}" ;;
+      *"--json state,stateReason,labels")
+        echo '{"state":"OPEN","stateReason":"REOPENED","labels":[{"name":"needs-triage"}]}' ;;
       *"--json state,stateReason,"*)
         echo '{"state":"OPEN","stateReason":"REOPENED","labels":[{"name":"needs-triage"}],"subIssues":[],"closedByPullRequestsReferences":[]}' ;;
     esac ;;
@@ -323,7 +337,14 @@ class GhSequenceTests(unittest.TestCase):
 
     # Tickets
 
-    TICKET_BLOCK = ("Tickets", "--add-blocked-by")
+    @staticmethod
+    def ticket_blocks():
+        return "\n".join(doc_block(SPEC_TICKETS, "Tickets", marker) for marker in
+                         ("gh issue create", "--parent", "--add-blocked-by",
+                          'gh issue view "$TICKET_N"'))
+
+    def publish_ticket(self, extra, unset=None):
+        return self.run_script(self.ticket_blocks(), extra, unset)
 
     def ticket_create(self, run: ScriptRun) -> List[str]:
         self.assertEqual(run.subcommands().count("issue create"), 1, run)
@@ -334,7 +355,7 @@ class GhSequenceTests(unittest.TestCase):
         return run.calls[0]
 
     def test_ticket_publish_without_blockers_sets_only_the_parent(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17"})
+        run = self.publish_ticket({"SPEC_N": "17"})
         self.assertEqual(run.rc, 0, run)
         self.ticket_create(run)
         self.assertEqual(run.calls[1:], [
@@ -343,36 +364,34 @@ class GhSequenceTests(unittest.TestCase):
         ])
 
     def test_ticket_publish_with_two_blockers_passes_them_once(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17", "BLOCKED_BY": "40,41"})
+        run = self.publish_ticket({"SPEC_N": "17", "BLOCKED_BY": "40,41"})
         self.assertEqual(run.rc, 0, run)
         self.ticket_create(run)
-        edit = run.calls[1]
-        self.assertEqual(edit[:3], ["issue", "edit", "42"])
-        self.assertEqual(edit.count("--add-blocked-by"), 1)
-        self.assertEqual(edit[edit.index("--add-blocked-by") + 1], "40,41")
-        self.assertEqual(edit[edit.index("--parent") + 1], "17")
-        self.assertEqual(run.calls[2][:3], ["issue", "view", "42"])
+        self.assertEqual(run.calls[1:], [
+            ["issue", "edit", "42", "--parent", "17"],
+            ["issue", "edit", "42", "--add-blocked-by", "40,41"],
+            ["issue", "view", "42", "--json", "labels,parent,blockedBy"],
+        ])
 
     def test_ticket_publish_carries_the_human_label(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17", "TICKET_LABEL": "needs-triage"})
+        run = self.publish_ticket({"SPEC_N": "17", "TICKET_LABEL": "needs-triage"})
         self.assertEqual(run.rc, 0, run)
         create = run.calls[0]
         self.assertEqual(create[create.index("--label") + 1], "needs-triage")
         self.assertEqual(create.count("--label"), 1)
 
     def test_ticket_publish_fails_on_an_unset_label(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17"}, unset=["TICKET_LABEL"])
+        run = self.publish_ticket({"SPEC_N": "17"}, unset=["TICKET_LABEL"])
         self.assertNotEqual(run.rc, 0, run)
         self.assertEqual(run.calls, [])
 
     @unittest.skipUnless(ZSH, "zsh is required")
     def test_ticket_publish_from_zsh_keeps_blockers_a_separate_argument(self):
-        run = self.run_from_zsh(doc_block(SPEC_TICKETS, *self.TICKET_BLOCK), {
+        run = self.run_from_zsh(self.ticket_blocks(), {
             "EDGES": "native", "TICKET_TITLE": "Expand", "TICKET_LABEL": "ready-for-agent",
             "TICKET_BODY": self.files["TICKET_BODY"], "SPEC_N": "17", "BLOCKED_BY": "40,41"})
         self.assertEqual(run.rc, 0, run)
-        self.assertEqual(run.calls[1], ["issue", "edit", "42", "--parent", "17",
-                                        "--add-blocked-by", "40,41"])
+        self.assertEqual(run.calls[2], ["issue", "edit", "42", "--add-blocked-by", "40,41"])
 
     @unittest.skipUnless(ZSH, "zsh is required")
     def test_spec_publish_from_zsh_survives_an_empty_deferred_directory(self):
@@ -383,27 +402,65 @@ class GhSequenceTests(unittest.TestCase):
         self.assertEqual(run.subcommands(), ["issue create", "issue comment"])
 
     def test_ticket_publish_with_edges_in_the_body_skips_the_edit(self):
-        run = self.run_block(*self.TICKET_BLOCK,
-                             {"SPEC_N": "17", "BLOCKED_BY": "40,41", "EDGES": "body"})
+        run = self.publish_ticket({"SPEC_N": "17", "BLOCKED_BY": "40,41", "EDGES": "body",
+                                   "GH_MISSING_FIELDS": "parent,blockedBy"})
         self.assertEqual(run.rc, 0, run)
         self.ticket_create(run)
         self.assertEqual(run.subcommands(), ["issue create", "issue view"])
+        self.assertIn("## Blocked by", run.out)
+
+    def test_parent_only_schema_verifies_blockers_in_body(self):
+        run = self.publish_ticket({"SPEC_N": "17", "BLOCKED_BY": "40,41", "EDGES": "parent",
+                                   "GH_MISSING_FIELDS": "blockedBy"})
+        self.assertEqual(run.rc, 0, run)
+        self.ticket_create(run)
+        self.assertEqual(run.calls[1:], [
+            ["issue", "edit", "42", "--parent", "17"],
+            ["issue", "view", "42", "--json", "labels,parent,body"],
+        ])
+        self.assertIn("## Blocked by", run.out)
+
+    def test_missing_blocked_by_read_resumes_at_verification_on_the_same_ticket(self):
+        missing = {"GH_MISSING_FIELDS": "blockedBy"}
+        run = self.publish_ticket({"SPEC_N": "17", **missing})
+        self.assertNotEqual(run.rc, 0)
+        self.assertIn("Field 'blockedBy'", run.err)
+        self.assertIn("https://github.com/o/r/issues/42", run.out)
+        prior_calls = run.calls
+        resumed = self.run_block("Tickets", 'gh issue view "$TICKET_N"',
+                                 {"TICKET_N": "42", "EDGES": "parent", **missing})
+        self.assertEqual(resumed.rc, 0, resumed)
+        self.assertEqual(resumed.calls, prior_calls + [
+            ["issue", "view", "42", "--json", "labels,parent,body"]])
 
     def test_ticket_publish_rejects_an_unknown_edges_value_before_creating(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17", "EDGES": "api"})
+        run = self.publish_ticket({"SPEC_N": "17", "EDGES": "api"})
         self.assertNotEqual(run.rc, 0, run)
         self.assertEqual(run.calls, [])
 
     def test_ticket_publish_stops_when_create_fails(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17", "GH_FAIL": "issue create"})
+        run = self.publish_ticket({"SPEC_N": "17", "GH_FAIL": "issue create"})
         self.assertNotEqual(run.rc, 0, run)
         self.assertEqual(run.subcommands(), ["issue create"], "no edit or view of a missing ticket")
 
     def test_ticket_publish_edge_failure_leaves_one_ticket(self):
-        run = self.run_block(*self.TICKET_BLOCK, {"SPEC_N": "17", "GH_FAIL": "issue edit"})
+        run = self.publish_ticket({"SPEC_N": "17", "GH_FAIL": "issue edit"})
         self.assertNotEqual(run.rc, 0, run)
         self.assertEqual(run.subcommands(), ["issue create", "issue edit"])
         self.assertEqual(self.counter.read_text().strip(), "42", "exactly one ticket exists")
+        self.assertIn("https://github.com/o/r/issues/42", run.out)
+        self.assertIn("gh: issue edit failed on request", run.err)
+
+    def test_failed_blocker_edit_retries_without_repeating_the_parent_or_create(self):
+        block = doc_block(SPEC_TICKETS, "Tickets", "--add-blocked-by")
+        env = {"TICKET_N": "42", "EDGES": "native", "BLOCKED_BY": "40,41"}
+        failed = self.run_script(block, {**env, "GH_FAIL": "issue edit"})
+        self.assertNotEqual(failed.rc, 0)
+        self.assertIn("issue edit failed", failed.err)
+        resumed = self.run_script(block, env)
+        self.assertEqual(resumed.rc, 0, resumed)
+        self.assertEqual(resumed.calls, [
+            ["issue", "edit", "42", "--add-blocked-by", "40,41"]] * 2)
 
     def test_breakdown_comment_lands_on_the_spec(self):
         run = self.run_block("Tickets", "BREAKDOWN", {"SPEC_N": "42"})
@@ -425,6 +482,15 @@ class GhSequenceTests(unittest.TestCase):
         self.assertTrue({"state", "stateReason", "labels", "subIssues",
                          "closedByPullRequestsReferences"} <= fields, call)
         self.assertIn('"stateReason":"REOPENED"', run.out)
+
+    def test_planner_can_read_an_existing_spec_on_an_older_schema(self):
+        block = doc_block(WORKERS, "Planning", "closedByPullRequestsReferences")
+        env = {"SPEC_N": "42", "GH_MISSING_FIELDS": "subIssues,closedByPullRequestsReferences"}
+        self.assertNotEqual(self.run_script(block, env).rc, 0)
+        run = self.run_script(block, {**env, "SPEC_FIELDS": "state,stateReason,labels"})
+        self.assertEqual(run.rc, 0, run)
+        self.assertIn('"stateReason":"REOPENED"', run.out)
+        self.assertEqual(run.calls[-1], ["issue", "view", "42", "--json", "state,stateReason,labels"])
 
     def test_loader_reads_the_comment_bodies(self):
         bodies = "## Deferred candidate: a-billing\n\nbody\n"

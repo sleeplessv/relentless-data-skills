@@ -109,11 +109,14 @@ policy file, and the repository.
    A slug match whose `report:` line names another review report is the same candidate only
    when its Problem Statement describes this card's Problem; otherwise the planner reports the
    match and records `absent`. With `SPEC_N` the matched spec's number, read its state and
-   sub-issues, and its comments with the [Candidate file](#candidate-file) command:
+   sub-issues, and its comments with the [Candidate file](#candidate-file) command.
+   `SPEC_FIELDS` defaults to the fields below. If the server explicitly reports that
+   `subIssues` or `closedByPullRequestsReferences` is unsupported, remove the named field
+   from `SPEC_FIELDS` and retry the read. Return any other error.
 
    ```bash
    set -euo pipefail
-   gh issue view "$SPEC_N" --json state,stateReason,labels,subIssues,closedByPullRequestsReferences
+   gh issue view "$SPEC_N" --json "${SPEC_FIELDS:-state,stateReason,labels,subIssues,closedByPullRequestsReferences}"
    ```
 
    Record one state per candidate: `absent` (no match); `reopened` (open, `stateReason`
@@ -125,9 +128,10 @@ policy file, and the repository.
    `DUPLICATE`). Two cases are `open_questions` entries,
    skipped until the user answers: a spec closed `COMPLETED` with no PR reference ("treat as
    done?"), and a `needs-tickets` spec whose `subIssues` is non-empty ("finish by hand, or
-   re-ticket?"). A `done`, `in-flight`, or `rejected` candidate is reported with its spec URL
-   and skipped. On a re-run from a spec number, record that spec's state the same way: it
-   precedes every candidate it carries.
+   re-ticket?"). An unavailable field leaves the same question open when that classification
+   depends on it. Include any ticket URLs already recorded in the run directory. Report a
+   `done`, `in-flight`, or `rejected` candidate with its spec URL and skip it. On a re-run
+   from a spec number, record that spec's state the same way. It precedes every candidate it carries.
 3. **Hold.** A candidate is `held` when its Solution contradicts an ADR or its Files fall in
    the policy's off-limits areas, with the ADR number or the area named. The planner reads the
    ADRs that cover the candidate's Files, and the card's ADR callout against the ADR it names:

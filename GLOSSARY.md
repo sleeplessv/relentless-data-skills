@@ -25,9 +25,10 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Closing verification**: the clean-checkout rerun of a change's checks on the commit that will ship, by a worker that wrote none of the change. _Avoid_: independent verification, mop-up.
 - **One-way door**: a change whose effects reverting it would not undo, such as a data migration, a published release, or a permissions change. A change of uncertain type is treated as one-way.
 - **Two-way door**: a change that reverting fully undoes.
-- **Model class**: a level of model capability that a role is assigned to. In generation two the classes are strong, standard and light, and each supported harness's harness files name the model for each. Generation one's classes are session, strong and standard, each named by an alias that follows the level's newest version. _Avoid_: model tier, model version.
+- **Model class**: a level of model capability that a role or a task is assigned to. The classes are apex, strong, standard and light, and model-router assigns tasks across all four. Generation two assigns roles to strong, standard and light, and each supported harness's harness files name the model for each. Generation one's classes are session, strong and standard, each named by an alias that follows the level's newest version. _Avoid_: model tier, model version.
 - **Session class**: the model a session runs on, chosen by the person who started it. Generation one assigns work to it as a model class; generation two assigns no role to it.
-- **Class escalation**: in generation one, moving a task whose result failed its check to a fresh worker on the next model class up. Generation two has no class escalation.
+- **Class escalation**: moving a task whose result failed its check to a fresh agent on the next **model class** up. Generation one and model-router escalate. Generation two has no class escalation.
+- **Route**: the model, reasoning effort and **harness** chosen for one task, with the same-class model to use when the chosen one cannot be reached. _Avoid_: dispatch channel, mode.
 - **Promotion**: moving one version of the work to its next stage, such as a release branch, a deployment stage, or production. _Avoid_: advancing.
 - **Promotion check**: a check required before a promotion, tied to the place where it must pass.
 - **Review workspace**: the directory a verifier or reviewer owns under the run directory. It holds the worker's detached checkout and scratch files. _Avoid_: reviewer worktree, scratch checkout.
@@ -40,6 +41,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Generation one**: the implementation and orchestration skills in use before the redesign: orchestrator-mode, implement-ticket, implement-feature and implement-backlog. _Avoid_: v1, the old stack.
 - **Generation two**: the skills built beside generation one to replace it: deliver for ticket work and fan-out for non-ticket work. _Avoid_: v2, the new stack.
 - **Harness**: the agent program a session runs in, such as Claude Code, Cortex Code, Codex, Cursor or Antigravity. A harness is distinct from the model it runs. _Avoid_: tool, agent, IDE.
+- **Carry**: a **harness** carries a model when it can run a session or a **helper** on that model. One harness can carry models from several vendors. _Avoid_: support, host, have.
 - **Supported harness**: a harness on which every generation-two skill must reach the same result and pass the same checks as on any other supported harness.
 - **Adapter**: the text a session on one supported harness reads for the steps that harness does differently from the harness a skill is written for. That harness itself has none. _Avoid_: harness notes.
 - **Harness files**: the definition files, hook registration and preflight figures that one supported harness needs. Every supported harness has them, where only some have an adapter. _Avoid_: adapter (the text only).
@@ -76,8 +78,11 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Ticket PR**: in generation two, the pull request one author opens for one ticket. In a feature run it targets the integration branch; in a backlog run, the default branch.
 - **Run record**: the durable record of one multi-ticket run: its work-set, the state of each ticket, and the decisions that cross tickets, each with its reason and who made it. _Avoid_: decision list (generation one's record, which holds decisions only), handoff file.
 - **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
-- **Helper**: an agent a session starts to do some of its work and report back.
-- **Fan-out**: handing the independent parts of one non-ticket task to helpers, one part each. The session that fans out has no role name. _Avoid_: orchestrator mode, coordinator (the session that runs a multi-ticket run), delegation (handing work to a person or to another harness's agent).
+- **Main session**: the session a person started and talks to, at the head of any tree of agents it starts. _Avoid_: main thread, root session.
+- **Delegator**: a session that hands whole tasks to **executors**, decides the trade-offs between them and checks their results. The **main session** is one whenever it hands tasks out. _Avoid_: orchestrator, manager, chief of staff.
+- **Executor**: an agent a **delegator** starts to carry out one task and report its result. It chooses no model or **harness** for any part of that task and starts no other executor.
+- **Helper**: an agent a **delegator** or an **executor** starts for a small piece of its own task, to keep that work's bulk out of its starter's context. Its result returns to its starter and is not checked on its own, and it starts no other agent.
+- **Fan-out**: handing the independent parts of one non-ticket task to helpers, one part each. The session that fans out has no role name. _Avoid_: orchestrator mode, coordinator (the session that runs a multi-ticket run), delegation (handing a whole task to an **executor** or to a person).
 - **Part**: one piece of a fan-out, which depends on no other piece.
 - **Brief**: in generation two, the text a helper is given when it starts. A script writes it in a fixed form, and no agent adds to it. _Avoid_: handoff, prompt; local brief (a repo's own rules are run rules).
 - **Author's report**: the fixed final message of an author a coordinator started: its PR, its final commit, its state, and each decision that affects another ticket. _Avoid_: handoff, summary.

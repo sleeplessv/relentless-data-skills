@@ -179,6 +179,8 @@ FORMS: dict[str, dict[str, str]] = {
         # with a program's path: where none is found, zsh runs no gh and the pipe still exits 0.
         "cat url.txt; gh pr create --fill | tail -1": "starts",
         "gh pr create --fill | tail -1 && cat url.txt": "starts",
+        "gh pr create --fill | tail -1 && cat url.txt >&2": "starts",
+        "gh pr create --fill || cat url.txt": "starts",
         "cd x && gh pr create --fill 2>&1 | tail -1": "starts",
         "gh pr create --title =SUM --fill 2>&1 | tail -1": "starts",
         # A plain = after another piece of its word, which zsh replaces as at the word's start when the piece is
@@ -200,6 +202,9 @@ FORMS: dict[str, dict[str, str]] = {
         "$'\\U00000067'h pr create": "starts",
         "g$'\\550' pr create": "starts",
         "gh pr $'\\c\\x72'eate": "none",
+        "gh $'\\x70\\0zz'r create": "starts",
+        "gh pr cre$'\\c@zz'ate": "starts",
+        "printf '" + "\\0" * 65 + "'": "none",
         # A compound command, a function, prefixes, another program, and calls with an && before and a ; after.
         "if true; then gh pr create --fill; fi": "starts",
         "{ gh pr create; }": "starts",
@@ -244,7 +249,8 @@ FORMS: dict[str, dict[str, str]] = {
         "command -v gh pr create": "none"},
     # The known limit: a call that builds the words when it runs, or a script that runs gh pr create.
     "neither": {
-        "gh pr view --json url --jq .url": "none", "echo done": "none", "sh ./open-pr.sh": "starts"}}
+        "gh pr view --json url --jq .url": "none", "echo done": "none", "sh ./open-pr.sh": "starts",
+        "printf '" + "\\0" * 64 + "'": "none"}}
 # The shells --help takes for granted: the version each must reach, what prints it, and the flags that start one
 # without its startup files.
 SHELLS = {"bash": ((5, 2), "BASH_VERSINFO[0]} ${BASH_VERSINFO[1]", []),
@@ -256,7 +262,8 @@ IN_ZSH = {
     "git log ''=x; gh pr create": "none", "gh pr create --title 't'=SUM": "starts",
     **dict.fromkeys(["g$'\\150' pr create", "gh p$'\\x72' create", "gh pr cre$'\\141'te", "gh pr $'cre\\x61te'",
                      "gh pr $'\\u0063'reate", "$'\\U00000067'h pr create", "g$'\\550' pr create",
-                     "gh pr $'\\c\\x72'eate"], "starts")}
+                     "gh pr $'\\c\\x72'eate"], "starts"),
+    "gh $'\\x70\\0zz'r create": "none", "gh pr cre$'\\c@zz'ate": "none"}
 
 
 def shell_forms(does: tuple[str, ...] = ("opens", "maybe", "neither")) -> list[tuple[str, str, str]]:
@@ -702,7 +709,8 @@ class TestDraw(unittest.TestCase):
             "and nothing else, as in gh pr create --fill 2>&1 | tail -1",
             "Each but a tail that reads gh's pipe may, after its name, write its output to a file with > or >>, send "
             "its errors to its output with 2>&1, and read a here-document",
-            "No word starts with a plain =.",
+            "No = written plain starts a word or comes right after text in quotes, a backslash and the character "
+            "after it, or a body.",
             "Each of those redirections is a word of its own, with a blank before it and a blank, an operator or the "
             "end of the call after it.",
             "The draw takes for granted that the call ran in bash 5.2 or later, or in zsh 5.9 or later, with its "
@@ -713,6 +721,9 @@ class TestDraw(unittest.TestCase):
             "its quotes, backslashes, $ signs and backslash-new lines are taken out, may have opened the PR its result "
             "names, "
             "if GitHub's time falls in its span.",
+            "The text is read as written, again with each backslash escape read as bash reads it inside $'...', "
+            "where a NUL also ends the quote, and again as zsh does.",
+            "A call that writes more than 64 NULs that way may have opened the PR, whatever its text holds.",
             "A call whose text does not hold the three words does not count.",
             "So a command that builds the words when it runs, or a script or program that runs gh pr create, leaves "
             "no evidence.",
@@ -841,8 +852,8 @@ class TestDraw(unittest.TestCase):
         return shell, root
 
     def run_form(self, shell: str, root: Path, command: str, arrangement: dict[str, str]) -> tuple[int, bool, str]:
-        """The shell's exit for one form, whether it started the stand-in gh with `pr create`, and what it printed.
-        The form runs from a file, so that a long one is no argument of the shell's own."""
+        """The shell's exit for one form, whether it started the stand-in gh with `pr create`, and what it printed on
+        its output and its errors. The form runs from a file, so that a long one is no argument of the shell's own."""
         calls, creates, form = root / "calls", root / "creates", root / "form"
         calls.write_text("")
         creates.write_text("")
@@ -856,7 +867,7 @@ class TestDraw(unittest.TestCase):
             if creates.read_text() or "&" not in command:
                 break
             time.sleep(0.05)
-        return result.returncode, creates.read_text() != "", result.stdout
+        return result.returncode, creates.read_text() != "", result.stdout + result.stderr
 
     def each_form(self, name: str, does: tuple[str, ...], outcomes: dict[str, str] | None = None) -> None:
         """Run each form of the kinds in `does` under the shell `name` in every arrangement of the stand-ins, and
@@ -898,10 +909,17 @@ class TestDraw(unittest.TestCase):
         self.assertEqual((code, started), (0, False))
 
     def test_no_opening_form_prints_the_url_of_a_creation_that_failed_silently_and_exits_0(self) -> None:
-        # gh starts, prints nothing and fails. Then a call with an opening form exits non-zero or prints no URL; the
-        # calls beside them, whose other commands print it, read "maybe".
-        beside = ["cat url.txt; gh pr create --fill | tail -1", "gh pr create --fill | tail -1 && cat url.txt",
-                  "gh pr create --fill || cat url.txt"]
+        # gh starts, prints nothing and fails. Then no runnable row of the table that has an opening form, or that the
+        # reader says opens, exits 0 with the URL on either stream in any run. The rows whose other commands print the
+        # URL read "maybe", start gh and leak it in every run, so the test sees a leak where there is one.
+        leaking = {"cat url.txt; gh pr create --fill | tail -1", "gh pr create --fill | tail -1 && cat url.txt",
+                   "gh pr create --fill || cat url.txt", "gh pr create --fill | tail -1 && cat url.txt >&2"}
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        forms = [command for kind, command, _ in shell_forms()
+                 if kind == "opens" or draw.runs_gh_pr_create(command) == "opens" or command in leaking]
+        self.assertLessEqual(leaking, set(forms))
         shells = [name for name in ("bash", "zsh") if supported_shell(name)[0]]
         if not shells:
             self.skipTest("no bash 5.2 or zsh 5.9 or later on this host")
@@ -909,24 +927,30 @@ class TestDraw(unittest.TestCase):
             shell, root = self.shell(name)
             arrangements = [{"GIT_EXIT": git, "CREATE_EXIT": "1", "CREATE_SILENT": "1", "VIEW_EXIT": view, "GH": "gh"}
                             for git in "01" for view in "01"]
-            for command in [*FORMS["opens"], *beside]:
+            for command in forms:
                 with self.subTest(shell=name, command=label(command)):
-                    leaks = [(code, URL in printed) == (0, True) for code, _, printed in
-                             (self.run_form(shell, root, command, arrangement) for arrangement in arrangements)]
-                    self.assertEqual(any(leaks), command in beside)
+                    runs = [(started, code == 0 and URL in printed) for code, started, printed in
+                            (self.run_form(shell, root, command, arrangement) for arrangement in arrangements)]
+                    if command in leaking:
+                        self.assertEqual(draw.runs_gh_pr_create(command), "maybe")
+                        self.assertEqual(runs, [(True, True)] * len(arrangements))
+                    else:
+                        self.assertEqual([leaks for _, leaks in runs], [False] * len(arrangements), runs)
 
     def test_a_piped_call_too_long_for_the_system_to_start_gh_is_no_opening(self) -> None:
-        # Too long for one argument on Linux and for all of them on macOS: the system refuses to start gh, the pipe
-        # hides that, and the URL comes from the cat before it.
-        command = f"cat url.txt; gh pr create --body {'x' * 2_100_000} 2>&1 | tail -1"
+        # Too long for one argument on Linux and for all of them on macOS: the system refuses to start gh and the pipe
+        # hides that. The same pipe with a short body starts gh and is an opening.
+        oversized, short = (f"gh pr create --body {body} 2>&1 | tail -1" for body in ("x" * 2_100_000, "x"))
         sys.path.insert(0, str(SCRIPTS))
         self.addCleanup(sys.path.remove, str(SCRIPTS))
         draw = importlib.import_module("draw")
-        self.assertEqual(draw.runs_gh_pr_create(command), "maybe")
         shell, root = self.shell("bash")
-        code, started, printed = self.run_form(shell, root, command, {"GIT_EXIT": "0", "CREATE_EXIT": "0",
-                                                                      "VIEW_EXIT": "0", "GH": "gh"})
-        self.assertEqual((code, started, URL in printed), (0, False, True))
+        for command, reading, started in ((oversized, "maybe", False), (short, "opens", True)):
+            with self.subTest(command=label(command)):
+                self.assertEqual(draw.runs_gh_pr_create(command), reading)
+                code, ran, printed = self.run_form(shell, root, command, {"GIT_EXIT": "0", "CREATE_EXIT": "0",
+                                                                          "VIEW_EXIT": "0", "GH": "gh"})
+                self.assertEqual((code, ran, URL in printed), (0, started, started))
 
     def test_a_call_that_cannot_be_written_as_utf_8_gets_an_answer(self) -> None:
         sys.path.insert(0, str(SCRIPTS))

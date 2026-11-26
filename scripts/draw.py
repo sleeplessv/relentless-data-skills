@@ -38,8 +38,18 @@ MODEL_NAME = re.compile(r"[A-Za-z][\w.:@/-]*")
 # the shell or skip what follows it.
 OTHERS = ("cd", "git", "cat", "tail")
 # The longest opening call, in bytes of UTF-8. No piece of a call expands to more than its text in bash or zsh, as no
-# word starts with a plain =, so this bounds the arguments of each command in it.
+# plain piece of a word starts with =, so this bounds the arguments of each command in it.
 LONGEST = 64 * 1024
+# A backslash and what follows it, as bash and then zsh read them in a $'...' quote. Each match outside the groups
+# octal, code and none keeps its text.
+ESCAPES = (re.compile(r"\\(?:(?P<octal>[0-7]{1,3})|(?P<code>x\{[0-9A-Fa-f]*\}?|x[0-9A-Fa-f]{1,2}|u[0-9A-Fa-f]{1,4}"
+                      r"|U[0-9A-Fa-f]{1,8})|(?P<none>c.)|.)", re.S),
+           re.compile(r"\\(?:(?P<octal>[0-7]{1,3})|(?P<code>x[0-9A-Fa-f]{0,2}|u[0-9A-Fa-f]{0,4}|U[0-9A-Fa-f]{0,8})"
+                      r"|(?P<none>[CM]-)|.)", re.S))
+# The text of a $'...' quote from where it is read to its end, and how many NULs a call may write before it is read as
+# able to spell the words whatever it says.
+QUOTED = re.compile(r"(?:[^'\\]|\\.)*", re.S)
+MOST_NULS = 64
 # The pieces an opening call is made of, tried in turn at each point. A call with any other text has no opening form.
 # APART and AFTER hold a redirection to a word of its own.
 APART = r"(?<![^ \t\n;|&])"
@@ -129,8 +139,9 @@ The pool is every ticket that meets all of these:
       Body text.
       EOF
       )"
-    No word starts with a plain =. A backslash that ends a line, after a
-    blank, joins the next line to it.
+    No = written plain starts a word or comes right after text in quotes, a
+    backslash and the character after it, or a body. A backslash that ends a
+    line, after a blank, joins the next line to it.
   The draw takes for granted that the call ran in bash 5.2 or later, or in
   zsh 5.9 or later, with its default options; that no alias, function,
   variable or option set before the call changes what a name in it runs;
@@ -140,15 +151,19 @@ The pool is every ticket that meets all of these:
   Any other call whose text holds gh, pr and create, in any order or case,
   with any text beside each, once its quotes, backslashes, $ signs and
   backslash-new lines are taken out, may have opened the PR its result
-  names, if GitHub's time falls in its span. A call whose text does not hold
-  the three words does not count. So a command that builds the words when it
-  runs, or a script or program that runs gh pr create, leaves no evidence. A
-  call may also have opened the PR when its line or its result's line has a
-  time that is missing, has no zone or is at an end of the calendar. A PR in a
-  repo outside repos.json counts on the command alone: opened or may have
-  opened. Lines in the session's log or a helper's that carry another
-  session's id, as lines a resumed session copied do, are left out of this
-  reading of the session and credited to no other.
+  names, if GitHub's time falls in its span. The text is read as written,
+  again with each backslash escape read as bash reads it inside $'...', where
+  a NUL also ends the quote, and again as zsh does. A call that writes more
+  than {MOST_NULS} NULs that way may have opened the PR, whatever its text
+  holds. A call whose text does not hold the three words does not count. So
+  a command that builds the words when it runs, or a script or program that
+  runs gh pr create, leaves no evidence. A call may also have
+  opened the PR when its line or its result's line has a time that is
+  missing, has no zone or is at an end of the calendar. A PR in a repo
+  outside repos.json counts on the command alone: opened or may have opened.
+  Lines in the session's log or a helper's that carry another session's id,
+  as lines a resumed session copied do, are left out of this reading of the
+  session and credited to no other.
 - The session's own responses name the model it ran on: the name most of
   them give, one vote per response, that starts with a letter and holds only
   letters, digits and . _ : @ / -. A helper's copy of one of those responses,
@@ -380,10 +395,32 @@ def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
     granted."""
     # With every quote, backslash, $ and backslash-newline taken out, text bash may join is joined. A word is matched
     # with any text on either side, since an expansion or a quote beside it may still leave it whole when bash runs.
-    letters = re.sub(r"\\\n|[\\'\"$]", "", command).lower()
-    if not all(word in letters for word in ("gh", "pr", "create")):
+    # The text is read as it is, and with each escape read as bash, or zsh, reads it in a $'...' quote. In bash a NUL
+    # ends the quote's text, so for each NUL the text is also read with the rest of its quote gone.
+    readings = [command, *(escape.sub(character, command) for escape in ESCAPES)]
+    nuls = [found for found in ESCAPES[0].finditer(command) if character(found) == "\0"]
+    if len(nuls) > MOST_NULS:
+        return "maybe"
+    readings += [ESCAPES[0].sub(character, command[:found.start()] + QUOTED.sub("", command[found.end():], 1))
+                 for found in nuls]
+    if not any(all(word in re.sub(r"\\\n|[\\'\"$]", "", text).lower() for word in ("gh", "pr", "create"))
+               for text in readings):
         return None
     return "opens" if exited_zero and opening_form(command) else "maybe"
+
+
+def character(found: re.Match[str]) -> str:
+    """The character an escape of ESCAPES stands for, NUL for one that is no letter, or its own text."""
+    if found["octal"]:
+        return chr(int(found["octal"], 8) & 0xFF)
+    if found["none"]:
+        return "\0"
+    if not found["code"]:
+        return found[0]
+    value = int(found["code"][1:].strip("{}") or "0", 16)
+    if found["code"][0] == "x":
+        value &= 0xFF  # as octal: both shells keep the low byte
+    return chr(value) if value < 0x110000 else "\0"
 
 
 def opening_form(command: str) -> bool:
@@ -417,7 +454,7 @@ def opening_form(command: str) -> bool:
             return False
         kind, text, at = found.lastgroup, found.group(), found.end()
         if kind in ("plain", "quoted", "body"):
-            if here and "\n" in text or not word and text.startswith("=") or kind == "body" and any(
+            if here and "\n" in text or text.startswith("=") or kind == "body" and any(
                     line.startswith(found["inner"]) for line in found["lines"].splitlines()):
                 return False
             word.append((kind, text))

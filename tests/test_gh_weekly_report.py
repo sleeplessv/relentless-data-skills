@@ -97,28 +97,28 @@ class TestSplitClosedIssues(unittest.TestCase):
     closes by the actor are a separate line; other people's closes vanish."""
 
     def test_actor_completed_close_is_resolved(self):
-        resolved, not_planned = collect.split_closed_issues(
+        resolved, not_planned, duplicates = collect.split_closed_issues(
             [issue(1, "alice", "completed")], "alice"
         )
         self.assertEqual([i["key"] for i in resolved], ["acme/data#1"])
-        self.assertEqual(not_planned, [])
+        self.assertEqual((not_planned, duplicates), ([], []))
 
     def test_actor_not_planned_close_is_separate(self):
-        resolved, not_planned = collect.split_closed_issues(
+        resolved, not_planned, duplicates = collect.split_closed_issues(
             [issue(2, "alice", "not_planned")], "alice"
         )
-        self.assertEqual(resolved, [])
+        self.assertEqual((resolved, duplicates), ([], []))
         self.assertEqual([i["key"] for i in not_planned], ["acme/data#2"])
 
     def test_close_by_someone_else_is_dropped(self):
-        resolved, not_planned = collect.split_closed_issues(
+        resolved, not_planned, duplicates = collect.split_closed_issues(
             [issue(3, "bob", "completed")], "alice"
         )
-        self.assertEqual((resolved, not_planned), ([], []))
+        self.assertEqual((resolved, not_planned, duplicates), ([], [], []))
 
     def test_missing_state_reason_counts_as_resolved(self):
         # Issues closed via the API can carry no reason; a close is a close.
-        resolved, _ = collect.split_closed_issues([issue(4, "alice", None)], "alice")
+        resolved, _, _ = collect.split_closed_issues([issue(4, "alice", None)], "alice")
         self.assertEqual([i["key"] for i in resolved], ["acme/data#4"])
 
 
@@ -370,6 +370,10 @@ def fake_run_gh(args):
              "url": "https://github.com/acme/data/issues/3",
              "repository": {"nameWithOwner": "acme/data"},
              "labels": [], "closedAt": "2026-07-02T12:00:00Z", "state": "closed"},
+            {"number": 9, "title": "same request",
+             "url": "https://github.com/acme/data/issues/9",
+             "repository": {"nameWithOwner": "acme/data"},
+             "labels": [{"name": "triage"}], "closedAt": "2026-07-03T10:00:00Z", "state": "closed"},
             {"number": 4, "title": "someone else's close",
              "url": "https://github.com/acme/data/issues/4",
              "repository": {"nameWithOwner": "acme/data"},
@@ -377,6 +381,8 @@ def fake_run_gh(args):
         ])
     if joined.startswith("api repos/acme/data/issues/3"):
         return json.dumps({"closed_by": {"login": "alice"}, "state_reason": "completed"})
+    if joined.startswith("api repos/acme/data/issues/9"):
+        return json.dumps({"closed_by": {"login": "alice"}, "state_reason": "duplicate"})
     if joined.startswith("api repos/acme/data/issues/4"):
         return json.dumps({"closed_by": {"login": "bob"}, "state_reason": "completed"})
     if args[:2] == ["search", "prs"] and "--reviewed-by" in joined:
@@ -395,9 +401,12 @@ def fake_run_gh(args):
     if args[:2] == ["search", "prs"] and "--created" in joined:
         return only_current([_pr(7, "feat: drill-down")])
     if joined.startswith("api repos/acme/tools/pulls/5/reviews"):
-        return json.dumps([{"user": {"login": "alice"},
-                            "submitted_at": "2026-07-01T10:00:00Z",
-                            "state": "APPROVED"}])
+        old = {"user": {"login": "alice"}, "submitted_at": "2026-06-12T09:00:00Z",
+               "state": "COMMENTED"}
+        first = json.dumps([old] * 30)
+        second = [{"user": {"login": "alice"}, "submitted_at": "2026-07-01T10:00:00Z",
+                   "state": "APPROVED"}]
+        return first + "\n" + json.dumps(second) if "--paginate" in args else first
     if args[:2] == ["search", "commits"]:
         # Author date deliberately differs from committer date: the window
         # and committed_at must follow the committer date (a squash merge
@@ -499,7 +508,7 @@ class TestWeekJsonContract(unittest.TestCase):
         for period in ("current", "previous"):
             self.assertEqual(
                 set(self.week[period]),
-                {"issues_created", "issues_resolved", "issues_not_planned",
+                {"issues_created", "issues_resolved", "issues_not_planned", "issues_duplicate",
                  "prs_created", "prs_merged", "prs_abandoned",
                  "reviews_given", "commits", "discussions"},
             )
@@ -509,10 +518,17 @@ class TestWeekJsonContract(unittest.TestCase):
         self.assertEqual([i["key"] for i in cur["issues_created"]], ["acme/data#1"])
         self.assertEqual([i["key"] for i in cur["issues_resolved"]], ["acme/data#3"])
         self.assertEqual(cur["issues_not_planned"], [])
+        (duplicate,) = cur["issues_duplicate"]
+        self.assertEqual((duplicate["key"], duplicate["labels"]), ("acme/data#9", ["triage"]))
         self.assertEqual([p["key"] for p in cur["prs_merged"]], ["acme/data#7"])
         self.assertEqual([p["key"] for p in cur["prs_abandoned"]], ["acme/data#8"])
-        self.assertEqual([r["key"] for r in cur["reviews_given"]], ["acme/tools#5"])
         self.assertEqual([d["key"] for d in cur["discussions"]], ["acme/tools#10"])
+
+    def test_reviews_include_the_actor_submission_after_page_one(self):
+        reviews = self.week["current"]["reviews_given"]
+        self.assertEqual([(r["key"], r["review_states"], r["reviewed_at"]) for r in reviews],
+                         [("acme/tools#5", ["APPROVED"], "2026-07-01T10:00:00Z")])
+        self.assertEqual(self.week["previous"]["reviews_given"], [])
 
     def test_items_carry_drilldown_fields_and_signal(self):
         item = self.week["current"]["issues_created"][0]

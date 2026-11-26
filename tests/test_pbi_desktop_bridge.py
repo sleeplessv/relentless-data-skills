@@ -205,6 +205,27 @@ class PbiVmTest(unittest.TestCase):
         self.assertIn("safe-reload", result.stderr)
         self.assertEqual(self.calls("bridge.ps1 reload"), [])
 
+    def test_unavailable_instance_reports_its_reason_before_looking_for_a_project(self):
+        for status, detail, reason in [
+            ("not_connected", {"unavailableReason": "Local API disabled"}, "Local API disabled"),
+            ("error", {"error": {"message": "State request failed"}}, "State request failed"),
+        ]:
+            with self.subTest(status=status):
+                self.answers(status=[{"pid": 100, "bridgeStatus": status, **detail}])
+                for args in [(), ("--pid", "100")]:
+                    result = self.run_vm("safe-reload", *args)
+                    self.assertEqual(result.returncode, 5, result.stderr)
+                    self.assertIn(status, result.stderr)
+                    self.assertIn(reason, result.stderr)
+                self.assertEqual(self.calls("bridge.ps1 reload"), [])
+
+    def test_connected_blank_project_is_distinct_from_a_bridge_failure(self):
+        self.answers(status=[{"pid": 100, "bridgeStatus": "connected"}])
+        result = self.run_vm("safe-reload", "--pid", "100")
+        self.assertEqual(result.returncode, 4)
+        self.assertIn("file open", result.stderr)
+        self.assertEqual(self.calls("bridge.ps1 reload"), [])
+
     def test_several_open_files_need_a_pid(self):
         self.answers(status=[instance(100, False), instance(200, False), instance(300, False, path="")])
         result = self.run_vm("safe-reload")
@@ -216,7 +237,7 @@ class PbiVmTest(unittest.TestCase):
 
     def test_an_unknown_pid_is_refused(self):
         result = self.run_vm("safe-reload", "--pid", "999")
-        self.assertEqual(result.returncode, 3)
+        self.assertEqual(result.returncode, 4)
         self.assertEqual(self.calls("bridge.ps1 reload"), [])
 
     def test_pid_without_a_number_is_a_usage_error(self):

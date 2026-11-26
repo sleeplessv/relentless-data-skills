@@ -48,11 +48,12 @@ uv run --python 3.13 --no-project <skill-dir>/scripts/collect.py --out <scratchp
 Without `uv`, plain `python3` works if it is 3.13 or newer.
 
 Emits `week.json` with the report week plus the week before, already
-rule-applied: *resolved* means the actor closed it as `completed`
-(not-planned closes and abandoned PRs are separate lines), reviews are
-window-checked, commits come from `gh search commits` windowed on
-committer date and are attributed to their PR or marked direct pushes,
-and `discussions` holds items the actor commented on but did not author.
+rule-applied: *resolved* means the actor closed the issue as `completed` or
+without a recorded reason. Duplicate and not-planned closes and abandoned
+PRs have their own lines. The collector checks review submission dates
+on every page. It finds commits by committer date with `gh search commits`
+and attributes each to its PR or marks it as a direct push. The
+`discussions` list holds items the actor commented on but did not author.
 Surface any stderr warnings (result caps) to the user; a capped search
 means missing items. Rate limits: one run makes ~14 search calls against
 GitHub's 30/min search quota; the script waits 60 s and retries once on
@@ -69,7 +70,7 @@ included, to one bucket:
 - **refactor**: restructures without behaviour change
 - **docs**: documentation, ADRs, glossaries
 - **chore/infra**: CI, build, dependencies, tests, housekeeping
-- **triage/review**: reviews given, not-planned/wontfix closes, label work
+- **triage/review**: reviews given, duplicate and not-planned/wontfix closes, label work
 - **other**: a deliberate judgment that nothing above fits
 
 Each item carries a `signal` (conventional-commit prefix) and `labels`,
@@ -106,6 +107,9 @@ uv run --python 3.13 --no-project <skill-dir>/scripts/render.py --data <...>/wee
   user named a destination.
 - Copy `week.json` beside the report; it is the re-render receipt, so
   on tweak requests re-run render from it instead of re-collecting.
+  Rendering an older receipt moves known duplicate closes into their own
+  count in both weeks. Recovering reviews the old collector missed requires
+  collecting those weeks again.
 - The report embeds all data but pulls Tailwind and Chart.js from CDNs:
   offline, charts are skipped with a visible note and the page stays
   readable.

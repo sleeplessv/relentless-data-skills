@@ -537,23 +537,26 @@ class World:
         (self.state / "repos.json").write_text(json.dumps(repos))
 
     def draw(self, *args: str, state: Path | None = None, prelude: str = "") -> subprocess.CompletedProcess[str]:
-        """Run the draw; `prelude` is Python run in the same process first, to break something the world cannot."""
+        """Run the draw, with SIGINT as `start` leaves it; `prelude` is Python run in the same process first, to break
+        something the world cannot."""
         program, env = self.command(args, state, prelude)
-        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True)
+        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True,
+                              preexec_fn=self.default_sigint)
 
     @staticmethod
     def default_sigint() -> None:
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
 
-    def start(self, *args: str) -> subprocess.Popen[str]:
-        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited.
+    def start(self, *args: str, caller: Callable[[], None] = default_sigint) -> subprocess.Popen[str]:
+        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited,
+        or as `caller` leaves it.
 
         A job a script starts with `&` with job control off has SIGINT ignored, and a caller may block it;
         either way the draw would not stop on the interrupt a test sends it."""
         program, env = self.command(args, None, "")
         return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, preexec_fn=self.default_sigint)
+                                stderr=subprocess.PIPE, preexec_fn=caller)
 
     def command(self, args: tuple[str, ...], state: Path | None, prelude: str) -> tuple[list[str], dict[str, str]]:
         answers = self.root / "answers"
@@ -1480,9 +1483,10 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
-    def draw_signalled_in_a_check(self, number: signal.Signals) -> World:
-        """Signal a draw whose check blocks until its private folder is removed, so only the signal ends it, and
-        assert the check is gone once the draw has ended. The folder's removal at cleanup releases a check the
+    def draw_signalled_in_a_check(self, *numbers: signal.Signals) -> tuple[World, int, str]:
+        """Send each signal in turn to a draw whose check blocks until its private folder is removed, so only a signal
+        ends it, and assert the check is gone once the draw has ended. Return the world, the draw's exit status and its
+        standard error. The folder's removal at cleanup releases a check the
         draw left running. The waits: a poll for the check's pid, `communicate(timeout=60)` for the draw's exit, then a
         poll for the check's exit, each ending after 60 seconds; the cleanup's `communicate` follows the kill."""
         marks = Path(tempfile.mkdtemp())
@@ -1497,11 +1501,12 @@ class TestDraw(unittest.TestCase):
         self.wait_for(lambda: (marks / "pid").exists() or draw.poll() is not None)
         self.assertTrue((marks / "pid").exists(), "the draw ended before the check started")
         pid = int((marks / "pid").read_text())
-        draw.send_signal(number)
-        draw.communicate(timeout=60)
+        for number in numbers:
+            draw.send_signal(number)
+        _, stderr = draw.communicate(timeout=60)
         self.assertTrue(self.wait_for(lambda: not self.alive(pid)),
                         f"the check (pid {pid}) is still running after the draw ended")
-        return world
+        return world, draw.returncode, stderr
 
     @staticmethod
     def alive(pid: int) -> bool:
@@ -1521,7 +1526,9 @@ class TestDraw(unittest.TestCase):
         return True
 
     def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
-        self.draw_signalled_in_a_check(signal.SIGINT)
+        _, status, stderr = self.draw_signalled_in_a_check(signal.SIGINT)
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual((status, stderr), (130, "draw: stopped by SIGINT; no set written.\n"))
 
     def test_a_log_that_cannot_be_saved_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))
@@ -1666,7 +1673,7 @@ class TestDraw(unittest.TestCase):
     def test_an_interrupt_while_a_timed_out_check_is_stopped_signals_its_group_once(self) -> None:
         world = self.world(full_pool(10))
         record = world.root / "killpg.txt"
-        result = world.draw("--seed", "1", prelude="import os, subprocess\n"
+        result = world.draw("--seed", "1", prelude="import os, signal, subprocess\n"
                             "real_wait = subprocess.Popen.wait\n"
                             "def wait(self, timeout=None):\n"
                             "    if timeout == 3600:  # every step times out at once\n"
@@ -1678,15 +1685,15 @@ class TestDraw(unittest.TestCase):
                             f"    with open({str(record)!r}, 'a') as out:\n"
                             "        out.write(f'{number}\\n')\n"
                             "    real_killpg(group, number)\n"
-                            "    raise KeyboardInterrupt  # as if Ctrl-C came right after the signal\n"
+                            "    os.kill(os.getpid(), signal.SIGINT)  # as if Ctrl-C came right after the signal\n"
                             "os.killpg = killpg")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(record.read_text(), f"{int(signal.SIGKILL)}\n")
         self.assertNotIn("PermissionError", result.stderr)
-        self.assertEqual(result.stderr.splitlines()[-1], "KeyboardInterrupt")
+        self.assertEqual(result.stderr.splitlines()[-1], "draw: stopped by SIGINT; no set written.")
 
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
-        world = self.draw_signalled_in_a_check(signal.SIGTERM)
+        world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]
         self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_model_takes_one_vote_per_parent_response_however_many_helpers_copy_it(self) -> None:

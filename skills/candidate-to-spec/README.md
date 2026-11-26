@@ -18,7 +18,8 @@ separate reviewer worker, briefed as the maintainer and carrying `ponytail-revie
 checklist, reviews the log once. The designer revises or rejects with evidence; rejections
 become "Contested decisions" in the spec. The spec is published at `needs-triage`, the user
 approves it, and the reviewer answers `to-tickets`' quiz before the tickets publish as
-sub-issues with native blocking edges.
+sub-issues with native blocking edges. On older servers the ticket bodies carry any
+relationships the server does not support.
 
 A planning worker orders several candidates by dependency and holds any that contradict an ADR or
 sit in a policy's off-limits area until the user says reopen, park, or drop. Every other pick

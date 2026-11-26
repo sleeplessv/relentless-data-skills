@@ -31,11 +31,11 @@ One setup worker, with the run directory chosen per `orchestrator-mode`. It:
    with the native sub-issue and blocked-by flags); a `gh` that fails it is a missing required
    dependency. Optional, each with its fallback at the step that uses it: `prototype`,
    `ponytail-review`, `technical-writing`, `unslop`, `domain-modeling`.
-2. Records the repository root, the tracker repo as `owner/repo`
-   (`gh repo view --json nameWithOwner`), and the project's issue-tracker doc and triage-label
-   doc, each a path or `absent`. The tracker is GitHub through `gh`: `gh issue list --limit 1`
-   run from the repository root exits 0, and a failure is a missing required dependency. The
-   references write the canonical label names `needs-triage`, `ready-for-agent`, and `spec`;
+2. Records the repository root, the tracker as `host/owner/repo` per
+   [Tracker setup](references/workers.md#tracker-setup), and the project's issue-tracker and
+   triage-label docs, each a path or `absent`. With the recorded tracker exported per
+   [Briefs](references/workers.md#briefs), `gh issue list --limit 1` must exit 0. A failure
+   is a missing required dependency. The references use `needs-triage`, `ready-for-agent`, and `spec`;
    where the triage-label doc maps a canonical name to another string, substitute that string
    in every command. It lists the repo's labels per
    [Labels](references/spec-and-tickets.md#labels), compared case-insensitively, and names each
@@ -118,8 +118,8 @@ drafts, the reviewer (resumed) answers the quiz, the tickets worker (resumed) ap
 once and publishes. A closed spec skips this stage. For a `needs-tickets` spec the log is its
 decision-log comment and the quiz goes to a fresh reviewer briefed per
 [Reviewer](references/workers.md#reviewer). Done when the tickets worker's return lists every
-ticket with its triage label and a parent equal to the spec, or returns `edges: body`, or the
-stage ended on a [blocked write](references/workers.md#blocked-writes).
+ticket with its verified label, spec parent and blockers, including relationships recorded in
+the ticket body, or the stage ended on a [blocked write](references/workers.md#blocked-writes).
 
 ### 5. Report
 

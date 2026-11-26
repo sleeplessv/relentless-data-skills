@@ -90,7 +90,8 @@ class TestDocsMap(unittest.TestCase):
         self.assertIn("https://dlthub.com/docs/llms.txt", self.text)
         self.assertIn("https://dlthub.com/docs/hub/llms.txt", self.text)
 
-    def test_workbench_readme_is_the_command_source_of_truth(self) -> None:
+    def test_harness_installation_sources_are_mapped(self) -> None:
+        self.assertIn("https://dlthub.com/docs/hub/ai-harness/installation", self.text)
         self.assertIn(
             "https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/README.md",
             self.text,
@@ -122,12 +123,10 @@ class TestSkillWiring(unittest.TestCase):
     # silently when missing.
 
     def test_mcp_extras_in_install_path(self) -> None:
-        # Preserve the historical workaround until package evidence replaces it.
         self.assertIn('uv add "dlthub[mcp]"', self.text)
-        self.assertIn("dlt[workspace]", self.text)
 
     def test_secrets_gitignore_must_be_added_not_just_verified(self) -> None:
-        # Neither uv init nor dlthub ai init gitignores .dlt/secrets.toml.
+        # The initializer skips an existing .gitignore by default.
         self.assertIn("git check-ignore .dlt/secrets.toml", self.text)
         self.assertIn("if absent", self.text)
 

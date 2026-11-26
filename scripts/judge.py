@@ -377,9 +377,22 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
             "right_first_time": None if reading is None else failed is None and reading["passed"]}
 
 
-def ledger(state: Path) -> list[dict]:
+def ledger(state: Path, readable: bool = False) -> list[dict]:
+    """The lines of verdicts.jsonl. A line that is not a JSON object is an error, or, with `readable`, left out."""
     path = state / "verdicts.jsonl"
-    return [json.loads(text) for text in (path.read_text().splitlines() if path.is_file() else []) if text.strip()]
+    lines = []
+    for at, text in enumerate(path.read_bytes().splitlines() if path.is_file() else [], 1):
+        if not text.strip():
+            continue
+        try:
+            line = json.loads(text)
+        except ValueError:
+            line = None
+        if isinstance(line, dict):
+            lines.append(line)
+        elif not readable:
+            raise JudgeError(f"{path} line {at} cannot be read as a JSON object.")
+    return lines
 
 
 def folder_of(state: Path, line: dict) -> Path:
@@ -402,6 +415,7 @@ def publish(state: Path, record: dict, saved: Path) -> list[Path]:
 
 def judge(label: str, number: int, version: str, commit: str | None, source: Path | None) -> int:
     state = scan.state_dir()
+    ledger(state)  # a line it cannot read ends the judge here, before a review is paid for
     entry = find_ticket(state, label, number)
     required = entry.get("requirements")
     if not (isinstance(required, list) and required
@@ -418,7 +432,7 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
         replaced = publish(state, record, saved)
     except BaseException:
         # Only an attempt that no line names is taken back: an interrupt can land after the line is written.
-        if all(folder_of(state, line) != saved for line in ledger(state)):
+        if all(folder_of(state, line) != saved for line in ledger(state, readable=True)):
             shutil.rmtree(saved, ignore_errors=True)
         raise
     for folder in replaced:  # once the new line is written; an interrupt here leaves only an unnamed folder

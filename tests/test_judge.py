@@ -607,6 +607,36 @@ class TestJudge(unittest.TestCase):
                                         '"setup": "..."} objects, with setup optional.\n')
         self.assertFalse((self.world.state / "verdicts.jsonl").exists())
 
+    def test_a_ledger_line_that_is_not_json_is_an_error_before_any_checkout(self) -> None:
+        path = self.world.state / "verdicts.jsonl"
+        path.write_text('{"label": "A", "ticket": 7, "version": "direct"}\n\nnot json\n')
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: {path} line 3 cannot be read as a JSON object.\n")
+        self.assertFalse((self.world.records / "gh").exists())
+        self.assertFalse((self.world.records / "args").exists())
+        self.assertFalse((self.world.state / "judged").exists())
+        self.assertFalse((self.world.state / "judge-work").exists())
+        self.assertEqual(path.read_text(), '{"label": "A", "ticket": 7, "version": "direct"}\n\nnot json\n')
+
+    def test_a_ledger_that_breaks_during_the_review_is_one_error_and_takes_back_the_attempt(self) -> None:
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        verdicts, files = self.world.verdicts(), self.world.files()
+        # The stand-in adds a line that is not JSON to the ledger before it answers.
+        path = self.world.state / "verdicts.jsonl"
+        stand_in = self.world.bin / "claude"
+        shebang, rest = stand_in.read_text().split("\n", 1)
+        stand_in.write_text(f"{shebang}\necho 'not json' >> \"$DELIVER_STATE_DIR/verdicts.jsonl\"\n{rest}")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: {path} line 2 cannot be read as a JSON object.\n")
+        self.assertTrue((self.world.records / "args").exists())
+        [line, broken] = path.read_text().splitlines()
+        self.assertEqual(([json.loads(line)], broken), (verdicts, "not json"))
+        # Only the files of the line on record are left: the attempt's own folder is gone.
+        self.assertEqual(self.world.files(), files)
+        self.assertEqual(len(list((self.world.state / "judged" / "A-7-generation-one").iterdir())), 1)
+
     def test_bad_usage_exits_2_with_the_help(self) -> None:
         for args in ([], ["A-7"], ["a-7", "generation-one"], ["A-07", "generation-one"], ["A-7", "Direct"],
                      ["A-7", "direct"], ["A-7", "direct", "--commit", "abc"],

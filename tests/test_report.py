@@ -175,6 +175,53 @@ EVERY_STEP = [
     helper("Tidy the notes", "Tidy the notes folder.", 4),
     helper("Fix round 3", "# Fix round 3 for ticket #12", None),
 ]
+# The 26 texts of ticket #339, the reviews' probes of the sort: id, description, head of the brief, the step the
+# helper took, and the step the sorter gives it (None: not sorted).
+PROBES = [
+    ("W1", "Follow-up review of the fix head", None, "re-check", "re-check"),
+    ("W2", "Standards review", "Re-check the fix diff against accepted findings.", "re-check", "re-check"),
+    ("W3", "Implement ticket: verify CSV headers", "Implement the parser.", "implement", "implement"),
+    ("W4", "Ticket worker", '# Implementing brief: ticket #12, "Fix the total and verify it"', "implement",
+     "implement"),
+    ("R1", "Fix header parsing", "Implement the parser change for ticket #12.", "implement", "implement"),
+    ("R2", "Follow-up check on required CI", "Poll the PR checks and mark the PR ready when green.", "publish",
+     "publish"),
+    ("R3", "Ticket worker", "Read the closing verification brief and run its checks on the final commit.",
+     "closing verification", "closing verification"),
+    ("R4", "Review the fix round 1 diff", "Confirm that each accepted finding is closed.", "re-check", "re-check"),
+    ("R5", "Standards review", "Ticket #12: Re-check cached credentials. Review the implementation against the "
+                               "coding standards.", "review", "review"),
+    ("R6", "Standards review: follow-up on the fix head", "Confirm the accepted findings are closed.", "re-check",
+     "re-check"),
+    ("R7", "Standards review", "You are the Standards reviewer. Re-check the accepted findings on the fixed commit.",
+     "re-check", "re-check"),
+    ("R8", "Ticket #12: Verify CSV headers", "# Implementing brief. Implement CSV header validation.", "implement",
+     "implement"),
+    ("R9", "Standards review, round 2", None, "re-check", "re-check"),
+    ("R10", "Apply the late fix", None, "fix", "fix"),
+    ("R11", "Address the two discrepancies in the cached-token accounting the final reviewer identified", None,
+     "fix", "fix"),
+    ("Q4", "Ticket worker", "For ticket #12: run closing verification on the final commit.", "closing verification",
+     None),
+    ("Q5a", "Standards review", "Review the implementation against the coding standards. List follow-up work "
+                                "separately.", "review", "review"),
+    ("Q5b", "Standards review", "Review the implementation on this first pass. The coordinator will re-check any "
+                                "fixes.", "review", "review"),
+    ("Q5c", "Standards review of round 2 scheduling", "Review the tournament scheduler change against the coding "
+                                                      "standards.", "review", None),
+    ("Q5d", "Ticket worker", "Fix CSV header parsing in the importer and implement the normalization needed by the "
+                             "review screen.", "implement", "implement"),
+    ("Q6a", "Follow-up check", "Confirm that the accepted findings are closed on the fixed commit.", "re-check", None),
+    ("Q6b", "Read the schema", "Summarize which columns are nullable. Return the source paths without editing any "
+                               "files.", "explore", None),
+    ("Q7a", "Verify CSV headers", "Implement CSV header validation.", "implement", None),
+    ("Q7b", "Ticket #12: Parse config.json and verify headers", "Implement CSV header validation.", "implement",
+     None),
+    ("Q7c", "Apply the lint fixes", "Correct the two lint errors flagged by the reviewer on the previous commit.",
+     "fix", None),
+    ("Q1", "Ticket worker", "Compare with the first review. Your assignment is to re-check the accepted findings.",
+     "re-check", "re-check"),
+]
 
 
 Copied = tuple[int | float, int | float, str | None, int]  # copied, total, share as printed or None, blank count
@@ -328,50 +375,90 @@ class TestReport(unittest.TestCase):
                                    "fix 7680, review 300, implement 1440, publish 1920, explore 0. 0 helpers have no "
                                    "tokens of their own.")
 
-    def test_each_probe_text_lands_on_its_step_beside_a_contrast_case(self) -> None:
-        # The texts two reviews probed the sort with, each followed by a contrast case that shares its words: a helper
-        # of another step or, for "Apply the late fix", one not sorted (its_step None).
+    def alone(self, description: str | None, brief: str | None) -> list[str]:
+        """Warning sign 2's lines on helpers by step, the cut and the spend not sorted, in a fresh machine directory
+        where one helper of 800 tokens is the only one in each of 30 sessions of 1000."""
+        self.setUp()
+        return self.two([helper(description, brief, 800)], 1000, 200)[2:5]
+
+    @staticmethod
+    def sorted_alone(its_step: str | None) -> list[str]:
+        """alone()'s lines when the sorter puts the helper in its_step, or leaves it not sorted (None)."""
+        return ["  generation-one's helpers by step: " + ", ".join(
+                    f"{name} {24000 if name == its_step else 0}" for name in (
+                        "re-check", "closing verification", "fix", "review", "implement", "publish", "explore"))
+                + ". 0 helpers have no tokens of their own.",
+                f"  Not sorted into a step: {30000 if its_step is None else 6000} tokens, "
+                f"{100 if its_step is None else 20}.0% of generation-one's: {24000 if its_step is None else 0} in "
+                f"helpers that name no step, 6000 the sessions' own, in no helper."]
+
+    def test_no_probe_text_is_sorted_across_the_cut_and_each_lands_where_it_is_pinned(self) -> None:
+        for at, description, brief, its_step, sorted_as in PROBES:
+            with self.subTest(at):
+                by_step, cut, not_sorted = self.alone(description, brief)
+                cut = cut.split(":")[0].removeprefix("  The cut, ").replace(" and ", ", ").split(", ")
+                given = next((part.rsplit(" ", 1)[0] for part in by_step.split("by step: ")[1].split(". ")[0]
+                              .split(", ") if not part.endswith(" 0")), None)
+                self.assertTrue(given is None or (given in cut) == (its_step in cut),
+                                f"{at}: a helper of {its_step} sorted as {given}, across the cut")
+                self.assertEqual([by_step, not_sorted], self.sorted_alone(sorted_as), at)
+
+    def test_each_contrast_case_lands_on_its_own_step(self) -> None:
+        # Each shares its words with one of the probe texts R1 to R11 in PROBES but is a helper of another step or,
+        # beside R10 "Apply the late fix", one not sorted (its_step None).
         for description, brief, its_step in [
-            ("Fix header parsing", "Implement the parser change for ticket #12.", "implement"),
             ("Review the fix head", "Confirm the accepted findings are closed.", "re-check"),
-            ("Follow-up check on required CI", "Poll the PR checks and mark the PR ready when green.", "publish"),
             ("Follow-up review on required CI", "Confirm the accepted findings are closed.", "re-check"),
-            ("Ticket worker", "Read the closing verification brief and run its checks on the final commit.",
-             "closing verification"),
             ("Ticket worker", "Read the issue and find where the parser lives.", "explore"),
-            ("Review the fix round 1 diff", "Confirm that each accepted finding is closed.", "re-check"),
             ("Fix round 1 worker", "Address each accepted review finding.", "fix"),
-            ("Standards review", "Ticket #12: Re-check cached credentials. Review the implementation against the "
-                                 "coding standards.", "review"),
             ("Standards review", "Ticket #12: Cache credentials. Re-check the accepted findings.", "re-check"),
-            ("Standards review: follow-up on the fix head", "Confirm the accepted findings are closed.", "re-check"),
             ("Standards review: the header fix", "Review the diff against the standards.", "review"),
-            ("Standards review", "You are the Standards reviewer. Re-check the accepted findings on the fixed "
-                                 "commit.", "re-check"),
             ("Standards review", "You are the Standards reviewer. Review the implementation on the final commit.",
              "review"),
-            ("Ticket #12: Verify CSV headers", "# Implementing brief. Implement CSV header validation.", "implement"),
             ("Ticket #12: Verify CSV headers", "Run the closing verification on the final commit.",
              "closing verification"),
-            ("Standards review, round 2", None, "re-check"),
             ("Fix round 2", None, "fix"),
-            ("Apply the late fix", None, "fix"),
             ("Apply the lint fixes", None, None),
-            ("Address the two discrepancies in the cached-token accounting the final reviewer identified", None,
-             "fix"),
             ("Final review: address the cached-token accounting", None, "review"),
         ]:
             with self.subTest(description=description, brief=brief):
-                self.setUp()
-                lines = self.two([helper(description, brief, 800)], 1000, 200)
-                self.assertEqual(lines[2], "  generation-one's helpers by step: " + ", ".join(
-                    f"{name} {24000 if name == its_step else 0}" for name in (
-                        "re-check", "closing verification", "fix", "review", "implement", "publish", "explore"))
-                                 + ". 0 helpers have no tokens of their own.")
-                self.assertEqual(lines[4], f"  Not sorted into a step: {30000 if its_step is None else 6000} tokens, "
-                                           f"{100 if its_step is None else 20}.0% of generation-one's: "
-                                           f"{24000 if its_step is None else 0} in helpers that name no step, 6000 "
-                                           f"the sessions' own, in no helper.")
+                lines = self.alone(description, brief)
+                self.assertEqual([lines[0], lines[2]], self.sorted_alone(its_step))
+
+    def test_a_text_naming_both_sides_of_the_cut_says_nothing_and_texts_that_disagree_sort_nothing(self) -> None:
+        # Two helpers for each rule of step(), one it sorts and one it leaves not sorted.
+        lines = self.two([
+            helper("Verify the build", None, 1),  # the description names both sides, and no brief: not sorted
+            helper("Verify the build", "Implement the importer.", 2),  # the brief alone is read: implement
+            helper("Survey the open issues", "Publish the PR body.", 4),  # one side: the description, explore
+            helper("Publish the PR body", "Run the closing verification.", 8),  # two sides: not sorted
+            helper(None, "# Publish brief. Verify the CI first.", 16),  # the heading alone is read: publish
+            helper(None, "# Notes. Publish the PR body, then verify it.", 32),  # the heading names none: not sorted
+            helper("Standards review", "Re-verify the closed findings.", 64),  # a review and a re-check: re-check
+            helper("Implement the parser", "Re-verify the closed findings.", 128),  # two sides: not sorted
+        ], 1000, 900)
+        self.assertEqual(lines[2:5], [
+            "  generation-one's helpers by step: re-check 1920, closing verification 0, fix 0, review 0, implement 60, "
+            "publish 480, explore 120. 0 helpers have no tokens of their own.",
+            "  The cut, closing verification, fix and re-check: 1920 tokens, 6.4% of generation-one's.",
+            "  Not sorted into a step: 27420 tokens, 91.4% of generation-one's: 5070 in helpers that name no step, "
+            "22350 the sessions' own, in no helper."])
+
+    def test_a_text_that_names_a_re_check_and_a_review_names_a_re_check(self) -> None:
+        # A re-check is a review of a fix, so a brief that names one and says "review" later names one role.
+        lines = self.two([
+            helper("Review the parser", "Re-check the accepted findings. The review covers only the fixed diff.", 1),
+            helper("Standards review", "You are a re-check reviewer. Review one fix commit range, read-only, and "
+                                       "write one report file.", 2),
+            helper("Spec review", "Re-check: confirm each accepted finding of the Spec review is closed.", 4),
+            helper("Ticket worker", "Re-check the accepted findings of the first review on the fixed commit.", 8),
+        ], 1000, 900)
+        self.assertEqual(lines[2:5], [
+            "  generation-one's helpers by step: re-check 450, closing verification 0, fix 0, review 0, implement 0, "
+            "publish 0, explore 0. 0 helpers have no tokens of their own.",
+            "  The cut, closing verification, fix and re-check: 450 tokens, 1.5% of generation-one's.",
+            "  Not sorted into a step: 29550 tokens, 98.5% of generation-one's: 0 in helpers that name no step, "
+            "29550 the sessions' own, in no helper."])
 
     def test_a_fix_names_its_finding_and_a_skill_name_names_no_step(self) -> None:
         lines = self.two([helper("Fix the Standards finding on the total", None, 1),
@@ -1144,6 +1231,16 @@ class TestReport(unittest.TestCase):
                       "copied_tokens more than its row's total_tokens or beside a blank one, or a\n"
                       "second line for one ticket and version, one session or\n"
                       "one ticket of the sets stops the report.", text)
+
+    def test_help_names_every_place_that_holds_the_words_the_sorter_reads(self) -> None:
+        self.assertIn(
+            "The report reads each helper's description and the head of its brief, and\n"
+            "puts the helper in a step of generation one or leaves it not sorted. How it\n"
+            "chooses, and where it can sort wrong, are in step() and named() in\n"
+            "scripts/report.py, with each step's words in STEPS, the words read past in\n"
+            "NO_ROLE and those that make a review a re-check in AGAIN. A helper sorted\n"
+            "into the wrong step can move the cut either way. The steps:\n",
+            self.world.report("--help").stdout)
 
     def test_help_states_the_rule_of_warning_sign_1(self) -> None:
         text = " ".join(self.world.report("--help").stdout.split())  # the help is wrapped at any word

@@ -1483,7 +1483,8 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
-    def draw_signalled_in_a_check(self, *numbers: signal.Signals) -> tuple[World, int, str]:
+    def draw_signalled_in_a_check(self, *numbers: signal.Signals,
+                                  caller: Callable[[], None] = World.default_sigint) -> tuple[World, int, str]:
         """Send each signal in turn to a draw whose check blocks until its private folder is removed, so only a signal
         ends it, and assert the check is gone once the draw has ended. Return the world, the draw's exit status and its
         standard error. The folder's removal at cleanup releases a check the
@@ -1495,7 +1496,7 @@ class TestDraw(unittest.TestCase):
         check = (f"{CHECK} && echo $$ > {folder}/pid.tmp && mv {folder}/pid.tmp {folder}/pid"
                  f" && while test -d {folder}; do sleep 0.05; done")
         world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
-        draw = world.start("--seed", "1")
+        draw = world.start("--seed", "1", caller=caller)
         self.addCleanup(draw.communicate)  # closes the pipes, after the kill
         self.addCleanup(draw.kill)
         self.wait_for(lambda: (marks / "pid").exists() or draw.poll() is not None)
@@ -1784,6 +1785,54 @@ class TestDraw(unittest.TestCase):
                                  (128 + number, f"draw: stopped by {number.name}; no set written.\n"))
                 self.assertEqual(files(copied / "logs"), after)
                 self.assertEqual(list(copied.glob("replay-set-*")), [])
+
+    def test_a_second_signal_does_not_change_how_the_draw_ends(self) -> None:
+        world = self.world(full_pool(10))
+        # Python the draw runs first: the first signal comes as the draw scans a session's new copy, the second
+        # while the draw cleans up after the first.
+        prelude = ("import os, signal, shutil, scan\nreal_scan, real_rmtree = scan.scan, shutil.rmtree\n"
+                   "both = {signal.SIGINT, signal.SIGTERM}\nstopping = []\n"
+                   "def scan_(session, path):\n"
+                   "    if '.new-' in str(path) and not stopping:\n"
+                   "        stopping.append(True)\n"
+                   "        {first}\n"
+                   "    return real_scan(session, path)\n"
+                   "def rmtree(path, *args, **options):\n"
+                   "    if stopping and os.path.basename(path).startswith('.new-'):\n"
+                   "        {second}\n"
+                   "    return real_rmtree(path, *args, **options)\n"
+                   "scan.scan, shutil.rmtree = scan_, rmtree")
+        together = "signal.pthread_sigmask(signal.SIG_BLOCK, both); os.kill(os.getpid(), signal.SIGTERM); " \
+                   "os.kill(os.getpid(), signal.SIGINT); signal.pthread_sigmask(signal.SIG_UNBLOCK, both)"
+        cases = [(signal.SIGINT, "SIGTERM at once after SIGINT", together, "pass"),
+                 (signal.SIGTERM, "SIGINT during the cleanup", "os.kill(os.getpid(), signal.SIGTERM)",
+                  "os.kill(os.getpid(), signal.SIGINT)")]
+        for at, (first, then, sent, second) in enumerate(cases):
+            with self.subTest(first=first.name, then=then):
+                state = world.root / f"state-{at}"
+                shutil.copytree(world.state, state)
+                prelude_ = (f"import sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(world.source)!r})\n"
+                            + prelude.replace("{first}", sent).replace("{second}", second))
+                result = world.draw("--seed", "1", state=state, prelude=prelude_)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual((result.returncode, result.stderr),
+                                 (128 + first, f"draw: stopped by {first.name}; no set written.\n"))
+                self.assertEqual(sorted(path.name for path in state.iterdir() if path.name.startswith(("draw-work", "replay-set"))), [])
+                self.assertEqual([path.name for path in (state / "logs").iterdir() if path.name.startswith(".")], [])
+
+    def test_a_caller_that_ignored_or_blocked_sigint_keeps_it_so_and_sigterm_still_stops_the_draw(self) -> None:
+        def ignored() -> None:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        def blocked() -> None:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        for caller in (ignored, blocked):
+            with self.subTest(sigint=caller.__name__):
+                world, status, stderr = self.draw_signalled_in_a_check(signal.SIGINT, signal.SIGTERM, caller=caller)
+                self.assertNotIn("Traceback", stderr)
+                self.assertEqual((status, stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
+                self.assertFalse((world.state / "draw-work").exists())
 
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
         world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]

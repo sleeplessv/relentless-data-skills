@@ -44,12 +44,29 @@ if [ -z "$base" ]; then
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo main)"
 fi
 
+if [ "$fast" -eq 0 ]; then
+  # This process holds the lock on fd 9 until it exits; run() closes fd 9 for
+  # each check, so nothing a check leaves running keeps the lock.
+  lock_file="${CHECK_LOCK_FILE:-$(git rev-parse --path-format=absolute --git-common-dir)/check.sh.lock}"
+  if { exec 9>>"$lock_file"; } 2>/dev/null; then
+    lock_rc=0
+    python3 scripts/check_lock.py 9 "$lock_file" "$$" || lock_rc=$?
+    case "$lock_rc" in
+      0) ;;
+      3) exec 9>&- ;;
+      *) exit "$lock_rc" ;;
+    esac
+  else
+    echo "check.sh: cannot open $lock_file; running without the lock." >&2
+  fi
+fi
+
 run() {
   local name="$1"
   shift
   echo "==> $name"
   local rc=0
-  "$@" || rc=$?
+  "$@" 9>&- || rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "PASS: $name"
   else

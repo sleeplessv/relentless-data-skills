@@ -52,11 +52,11 @@ Write "none" when you can show neither. A finding names a requirement by its
 R<n> in <what is wrong> or right after "breaks" or "fails". An R<n> later in
 the evidence, such as a label in what to give, names none. A finding with
 "breaks" or "fails" names each requirement it is about, and names no other; a
-finding with "none" names no requirement. A finding is proven when its evidence is "breaks" or
-"fails", and each "cannot tell" counts as a proven finding. A requirement that
-is not met needs a proven finding that names it. The review passes when no
-finding is proven, so with every requirement met and nothing wrong the answer
-is the R lines alone."""
+finding with "none" names no requirement. A finding is proven when its
+evidence is "breaks" or "fails", and each "cannot tell" counts as a proven
+finding. A requirement that is not met needs a proven finding that names it.
+The review passes when no finding is proven, so with every requirement met and
+nothing wrong the answer is the R lines alone."""
 REQUIREMENT_LINE = re.compile(rf"R([1-9]\d*): ({'|'.join(ANSWERS)})")
 FINDING_LINE = re.compile(r"F([1-9]\d*): (\S.*?):([1-9]\d*): (\S.*?) Evidence: (.+)")
 NAMED = re.compile(r"\bR([1-9]\d*)\b")

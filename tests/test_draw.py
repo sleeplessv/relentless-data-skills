@@ -20,7 +20,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import tokenize
 import unittest
 from dataclasses import dataclass
 from pathlib import Path
@@ -172,6 +171,18 @@ FORMS: dict[str, dict[str, str]] = {
         "cat <<'END-PR'\nBody text.\nEND-PR\ngh pr create": "starts",
         'gh pr create --title "costs \\$5"': "starts",
         "gh pr create\\\n  --fill": "starts",
+        "gh pr create --body =gh": "starts",
+        "'git' push && gh pr create": "starts",
+        # A pipe beside other commands, which may print the URL of a creation that failed, and a word zsh replaces
+        # with a program's path: where none is found, zsh runs no gh and the pipe still exits 0.
+        "cat url.txt; gh pr create --fill | tail -1": "starts",
+        "gh pr create --fill | tail -1 && cat url.txt": "starts",
+        "cd x && gh pr create --fill 2>&1 | tail -1": "starts",
+        "gh pr create --title =SUM --fill 2>&1 | tail -1": "starts",
+        # The three words spelt through a $ quote, split inside each word.
+        "g$'h' pr create": "starts",
+        'gh p$"r" create': "starts",
+        "gh pr cre$''ate": "starts",
         # A compound command, a function, prefixes, another program, and calls with an && before and a ; after.
         "if true; then gh pr create --fill; fi": "starts",
         "{ gh pr create; }": "starts",
@@ -268,7 +279,9 @@ def supported_shell(name: str) -> tuple[str | None, str]:
 # `pr create`; git, cat, tail, env and nohup do what their names do as far as a form needs; bash and sh are the shell.
 STAND_INS = {
     "gh": f"""printf '%s\\n' "$*" >> "$CALLS"
-if [ "$1" = pr ] && [ "$2" = create ]; then echo created >> "$CREATES"; echo {URL}; exit "$CREATE_EXIT"; fi
+if [ "$1" = pr ] && [ "$2" = create ]; then
+  echo created >> "$CREATES"; [ -z "$CREATE_SILENT" ] && echo {URL}; exit "$CREATE_EXIT"
+fi
 if [ "$1" = pr ] && [ "$2" = view ]; then exit "$VIEW_EXIT"; fi
 """,
     "git": 'exit "$GIT_EXIT"\n',
@@ -648,7 +661,12 @@ class TestDraw(unittest.TestCase):
             "A call runs `gh pr create` for certain when it exited 0 and has this form, which shows that the shell "
             "started that command:",
             "The call is at most 64 KiB in UTF-8.",
-            "Every other command is cd, git, cat or tail.",
+            "Every other command is cd, git, cat or tail, its name written plain and unquoted.",
+            "Or the call is that command piped straight to one tail -N or tail -n N, with no redirection of its own, "
+            "and nothing else, as in gh pr create --fill 2>&1 | tail -1",
+            "Each but a tail that reads gh's pipe may, after its name, write its output to a file with > or >>, send "
+            "its errors to its output with 2>&1, and read a here-document",
+            "No word starts with a plain =.",
             "Each of those redirections is a word of its own, with a blank before it and a blank, an operator or the "
             "end of the call after it.",
             "The draw takes for granted that the call ran in bash 5.2 or later, or in zsh 5.9 or later, with its "
@@ -656,32 +674,29 @@ class TestDraw(unittest.TestCase):
             "it runs; that gh names the GitHub CLI and cd, git, cat and tail the commands of those names, wherever the "
             "call runs them; and that the system can start a command whose arguments total 64 KiB.",
             "Any other call whose text holds gh, pr and create, in any order or case, with any text beside each, once "
-            "its quotes, backslashes and backslash-new lines are taken out, may have opened the PR its result names, "
+            "its quotes, backslashes, $ signs and backslash-new lines are taken out, may have opened the PR its result "
+            "names, "
             "if GitHub's time falls in its span.",
             "A call whose text does not hold the three words does not count.",
             "So a command that builds the words when it runs, or a script or program that runs gh pr create, leaves "
             "no evidence.",
             "Before the count per bucket, the draw prints how many PRs of the listed repos the first rule leaves out "
-            "only because a call may have opened a PR: a PR is counted when one session that meets the second and "
-            "third rules, with every log of it read, opened or may have opened it, any other session only may have "
-            "opened it, and that session only may have opened any other PR.",
-            "The other rules are not applied to the PRs it counts."]
+            "only because a call may have opened a PR: a PR is counted when one session that names its model, loaded "
+            "a generation-one skill and could be scanned, with every log of it read, opened or may have opened it, "
+            "any other session only may have opened it, and that session only may have opened any other PR.",
+            "The count is taken before the rules on the PR, its ticket and earlier sets, so it is the most PRs the "
+            "veto can have cost the pool."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
         for sentence in sentences:
             with self.subTest(sentence=sentence):
                 self.assertEqual(help_text.count(sentence), 1)
 
-    def test_the_reader_s_docstrings_and_comments_leave_the_forms_to_the_help(self) -> None:
-        # The help names the other commands from OTHERS; no docstring or comment of the reader lists them again.
+    def test_the_reader_s_docstrings_leave_the_forms_to_the_help(self) -> None:
+        # The help names the other commands from OTHERS; neither docstring of the reader lists them again.
         sys.path.insert(0, str(SCRIPTS))
         self.addCleanup(sys.path.remove, str(SCRIPTS))
         draw = importlib.import_module("draw")
-        source = (SCRIPTS / "draw.py").read_text()
-        with open(SCRIPTS / "draw.py", "rb") as file:
-            comments = [token.string for token in tokenize.tokenize(file.readline) if token.type == tokenize.COMMENT]
-        texts = [*comments, *(function.__doc__ or "" for function in (draw.runs_gh_pr_create, draw.opening_form))]
-        self.assertIn('OTHERS = ("cd", "git", "cat", "tail")', source)
-        for text in texts:
+        for text in (function.__doc__ or "" for function in (draw.runs_gh_pr_create, draw.opening_form)):
             flat = " ".join(text.split())
             for listed in (draw.one_of(list(draw.OTHERS)), draw.one_of(list(draw.OTHERS)).replace(" or ", " and ")):
                 self.assertNotIn(listed, flat)
@@ -692,7 +707,7 @@ class TestDraw(unittest.TestCase):
         # outside the list. Ticket 4's may have opened its PR in a repo outside the list; ticket 5's session, which
         # loaded no generation-one skill, may have opened its PR; ticket 6's was opened by two sessions.
         maybe = "env A=1 gh pr create"
-        for tickets, count in (([Ticket(1, 20)], 0),
+        for tickets, count in (([Ticket(1, 20)], 0), ([Ticket(1, 20), Ticket(2, 20, command=maybe)], 1),
                                ([Ticket(1, 20), Ticket(2, 20, command=maybe),
                                  Ticket(3, 20, unlisted_pr_command=maybe), Ticket(4, 20, repo=BETA, command=maybe),
                                  Ticket(5, 20, skill="tdd", command=maybe), Ticket(6, 20, rival=OPENS)], 2)):
@@ -711,7 +726,7 @@ class TestDraw(unittest.TestCase):
             Ticket(4, 20, criteria="  ## Acceptance\n\n- The report prints the total."),
             Ticket(5, 20, command="cd ../alpha && gh  pr create --fill"),
             Ticket(6, 20, inherited="tdd"), Ticket(7, 20, by_helper=True), Ticket(8, 20, copied=True),
-            Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total.", command="git push 2>&1 | tail -1; gh pr create --fill 2>&1 | tail -1"),
+            Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total.", command="gh pr create --fill 2>&1 | tail -1"),
             Ticket(10, 50, criteria="## Done when\n\n* The report prints the total."),
             Ticket(101, 100, again=OPENS), Ticket(102, 100, also=24),
             *sized(103, 6, 100), Ticket(109, 51), Ticket(110, 300, skill="some-plugin:implement-backlog"),
@@ -835,6 +850,28 @@ class TestDraw(unittest.TestCase):
         # zsh runs some of the other forms otherwise, as it splits no unquoted variable; the reader's "maybe" for them
         # holds whatever the shell does, so only the forms it says open are run here.
         self.each_form("zsh", ("opens",))
+        shell, root = self.shell("zsh")
+        code, started, _ = self.run_form(shell, root, "gh pr create --title =SUM --fill 2>&1 | tail -1", {
+            "GIT_EXIT": "0", "CREATE_EXIT": "0", "VIEW_EXIT": "0", "GH": "gh"})
+        self.assertEqual((code, started), (0, False))
+
+    def test_no_opening_form_prints_the_url_of_a_creation_that_failed_and_exits_0(self) -> None:
+        # gh starts, prints nothing and fails. Then a call with an opening form exits non-zero or prints no URL; the
+        # calls beside them, whose other commands print it, read "maybe".
+        beside = ["cat url.txt; gh pr create --fill | tail -1", "gh pr create --fill | tail -1 && cat url.txt",
+                  "gh pr create --fill || cat url.txt"]
+        shells = [name for name in ("bash", "zsh") if supported_shell(name)[0]]
+        if not shells:
+            self.skipTest("no bash 5.2 or zsh 5.9 or later on this host")
+        for name in shells:
+            shell, root = self.shell(name)
+            arrangements = [{"GIT_EXIT": git, "CREATE_EXIT": "1", "CREATE_SILENT": "1", "VIEW_EXIT": view, "GH": "gh"}
+                            for git in "01" for view in "01"]
+            for command in [*FORMS["opens"], *beside]:
+                with self.subTest(shell=name, command=label(command)):
+                    leaks = [(code, URL in printed) == (0, True) for code, _, printed in
+                             (self.run_form(shell, root, command, arrangement) for arrangement in arrangements)]
+                    self.assertEqual(any(leaks), command in beside)
 
     def test_a_piped_call_too_long_for_the_system_to_start_gh_is_no_opening(self) -> None:
         # Too long for one argument on Linux and for all of them on macOS: the system refuses to start gh, the pipe
@@ -849,10 +886,19 @@ class TestDraw(unittest.TestCase):
                                                                       "VIEW_EXIT": "0", "GH": "gh"})
         self.assertEqual((code, started, URL in printed), (0, False, True))
 
+    def test_a_call_that_cannot_be_written_as_utf_8_gets_an_answer(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        self.assertEqual(draw.runs_gh_pr_create("gh pr create --title \ud800"), "maybe")
+
     def test_no_form_a_shell_runs_can_reach_a_program_outside_its_stand_ins(self) -> None:
         # A form finds a program through PATH, which holds the stand-ins alone, or by a path. So no form a shell runs
         # names an absolute path, climbs out of the fixture with ../, or asks for the system's own path with command -p.
         outside = re.compile(r"(?<![\w.:/])/\w|\.\./|command\s+-p")
+        for command, outcome_there in FORMS["opens"].items():
+            with self.subTest(opens=label(command)):
+                self.assertEqual(outcome_there, "starts")
         for _, command, _ in shell_forms():
             with self.subTest(command=label(command)):
                 self.assertIsNone(outside.search(command))

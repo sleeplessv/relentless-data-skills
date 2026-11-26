@@ -37,8 +37,8 @@ MODEL_NAME = re.compile(r"[A-Za-z][\w.:@/-]*")
 # The commands an opening call may run besides gh pr create. Each is a program, or the builtin cd, that cannot end
 # the shell or skip what follows it.
 OTHERS = ("cd", "git", "cat", "tail")
-# The longest opening call, in bytes of UTF-8. No piece of a call expands to more than its text, so this bounds the
-# arguments of each command in it.
+# The longest opening call, in bytes of UTF-8. No piece of a call expands to more than its text in bash or zsh, as no
+# word starts with a plain =, so this bounds the arguments of each command in it.
 LONGEST = 64 * 1024
 # The pieces an opening call is made of, tried in turn at each point. A call with any other text has no opening form.
 # APART and AFTER hold a redirection to a word of its own.
@@ -104,10 +104,12 @@ The pool is every ticket that meets all of these:
       gh pr create --title "t" --body "b"
   - That command comes after the last ; or new line that ends a command, and
     first in its pipeline. After its three words it may send its errors to
-    its output with 2>&1, and it may feed a pipe that ends in one tail -N or
-    tail -n N, as in
-      cd repo && gh pr create --fill 2>&1 | tail -1
-  - Every other command is {one_of(list(OTHERS))}. After its name it may
+    its output with 2>&1.
+  - Or the call is that command piped straight to one tail -N or tail -n N,
+    with no redirection of its own, and nothing else, as in
+      gh pr create --fill 2>&1 | tail -1
+  - Every other command is {one_of(list(OTHERS))}, its name written plain and
+    unquoted. Each but a tail that reads gh's pipe may, after its name,
     write its output to a file with > or >>, send its errors to its output
     with 2>&1, and read a here-document whose delimiter is letters, digits
     and _ in single quotes, as in
@@ -126,7 +128,8 @@ The pool is every ticket that meets all of these:
       Body text.
       EOF
       )"
-    A backslash that ends a line, after a blank, joins the next line to it.
+    No word starts with a plain =. A backslash that ends a line, after a
+    blank, joins the next line to it.
   The draw takes for granted that the call ran in bash 5.2 or later, or in
   zsh 5.9 or later, with its default options; that no alias, function,
   variable or option set before the call changes what a name in it runs;
@@ -134,7 +137,7 @@ The pool is every ticket that meets all of these:
   of those names, wherever the call runs them; and that the system can
   start a command whose arguments total {LONGEST // 1024} KiB.
   Any other call whose text holds gh, pr and create, in any order or case,
-  with any text beside each, once its quotes, backslashes and
+  with any text beside each, once its quotes, backslashes, $ signs and
   backslash-new lines are taken out, may have opened the PR its result
   names, if GitHub's time falls in its span. A call whose text does not hold
   the three words does not count. So a command that builds the words when it
@@ -221,10 +224,11 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
 Output names projects by label only. Before the count per bucket, the draw
 prints how many PRs of the listed repos the first rule leaves out only
 because a call may have opened a PR: a PR is counted when one session that
-meets the second and third rules, with every log of it read, opened or may
-have opened it, any other session only may have opened it, and that session
-only may have opened any other PR. The other rules are not applied to the
-PRs it counts. A session log and its helpers' logs are
+names its model, loaded a generation-one skill and could be scanned, with
+every log of it read, opened or may have opened it, any other session only
+may have opened it, and that session only may have opened any other PR. The
+count is taken before the rules on the PR, its ticket and earlier sets, so it
+is the most PRs the veto can have cost the pool. A session log and its helpers' logs are
 read as a session only when the text of one of them holds github.com or a \\u
 escape, as one must that holds a PR's URL. A log adds one, once, to the count
 of skipped logs when an error arises while finding or reading its helpers'
@@ -318,9 +322,9 @@ def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
     """Whether a Bash call ran `gh pr create`: "opens" when it exited 0 and has an opening form, "maybe" when its
     text could spell the three words otherwise, None when it cannot. --help gives the forms and what they take for
     granted."""
-    # With every quote, backslash and backslash-newline taken out, text bash may join is joined. A word is matched
+    # With every quote, backslash, $ and backslash-newline taken out, text bash may join is joined. A word is matched
     # with any text on either side, since an expansion or a quote beside it may still leave it whole when bash runs.
-    letters = re.sub(r"\\\n|[\\'\"]", "", command).lower()
+    letters = re.sub(r"\\\n|[\\'\"$]", "", command).lower()
     if not all(word in letters for word in ("gh", "pr", "create")):
         return None
     return "opens" if exited_zero and opening_form(command) else "maybe"
@@ -328,7 +332,7 @@ def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
 
 def opening_form(command: str) -> bool:
     """Whether a call has the form --help gives for one whose exit of 0 shows bash started `gh pr create`."""
-    if len(command.encode()) > LONGEST:
+    if len(command.encode(errors="surrogatepass")) > LONGEST:
         return False
 
     def new(first: bool) -> dict:
@@ -357,7 +361,7 @@ def opening_form(command: str) -> bool:
             return False
         kind, text, at = found.lastgroup, found.group(), found.end()
         if kind in ("plain", "quoted", "body"):
-            if here and "\n" in text or kind == "body" and any(
+            if here and "\n" in text or not word and text.startswith("=") or kind == "body" and any(
                     line.startswith(found["inner"]) for line in found["lines"].splitlines()):
                 return False
             word.append((kind, text))
@@ -399,9 +403,9 @@ def opening_form(command: str) -> bool:
         return False
     number = gh[0]
     opener, piped = commands[number], commands[number + 1:number + 3]
-    if piped and not piped[0]["first"]:  # gh feeds a pipe: to one tail that reads only it and ends the pipeline
+    if piped and not piped[0]["first"]:  # gh feeds a pipe: the call is gh and one tail that reads only it
         reader = piped[0]
-        if (reader["words"][0] != "tail" or reader["redirects"] or len(piped) > 1 and not piped[1]["first"]
+        if (len(commands) != 2 or reader["words"][0] != "tail" or reader["redirects"]
                 or None in reader["words"] or not TAIL.fullmatch(" ".join(reader["words"][1:]))):
             return False
     return (opener["first"] and opener["list"] == commands[-1]["list"]

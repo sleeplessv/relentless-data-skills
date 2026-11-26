@@ -106,7 +106,8 @@ class World:
     def scan(self, name: str, tokens: int | None, minutes: float | None, helpers: Sequence[dict] | None = ()) -> None:
         self.rows.append({"session": name, "input_tokens": None if tokens is None else 1,
                           "output_tokens": None if tokens is None else 1, "cache_write_tokens": None,
-                          "cache_read_tokens": None, "total_tokens": tokens, "active_minutes": minutes,
+                          "cache_read_tokens": None, "total_tokens": tokens,
+                          "copied_tokens": None if tokens is None else 0, "active_minutes": minutes,
                           "auto_compactions": 0, "typed_compactions": 0, "model": "claude-test-model",
                           "skills": [], "helpers": None if helpers is None else list(helpers)})
 

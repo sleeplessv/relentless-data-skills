@@ -320,8 +320,13 @@ class Stopped(BaseException):
     errors catches it."""
 
 
+STOPPED_BY: list[int] = []  # the signal that stopped the draw; a later one does nothing, so the cleanups run whole
+
+
 def stopped(number: int, frame: object) -> None:
-    raise Stopped(number)
+    if not STOPPED_BY:
+        STOPPED_BY.append(number)
+        raise Stopped(number)
 
 
 class GhFailed(DrawError):
@@ -1151,8 +1156,9 @@ def main(argv: list[str]) -> int:
     else:
         print(HELP, file=sys.stderr)
         return 2
-    for number in SIGNALS:
-        signal.signal(number, stopped)
+    for number in SIGNALS:  # a SIGINT the caller ignored stays ignored, as a job started with & expects
+        if signal.getsignal(number) != signal.SIG_IGN:
+            signal.signal(number, stopped)
     try:
         try:
             return Draw(seed).run()

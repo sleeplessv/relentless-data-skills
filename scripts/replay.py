@@ -238,12 +238,13 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
         return []
     copy = store / "replay-clone-index"
     try:
-        shutil.copyfile(index, copy)
+        try:
+            shutil.copyfile(index, copy)
+        except OSError as error:
+            raise ReplayError(f"the clone's index {index} cannot be read ({error.strerror}). Nothing is recorded, and "
+                              "the clone and the version's repo are kept.") from None
         listed = subprocess.run(["git", "-C", str(clone), "ls-files", "-z"], stdin=subprocess.DEVNULL,
                                 capture_output=True, env=trusted(store, clone, "replay-clone-index"))
-    except OSError as error:
-        raise ReplayError(f"the clone's index {index} cannot be read ({error.strerror}). Nothing is recorded, and the "
-                          "clone and the version's repo are kept.") from None
     finally:
         copy.unlink(missing_ok=True)
     paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path] if listed.returncode == 0 else []

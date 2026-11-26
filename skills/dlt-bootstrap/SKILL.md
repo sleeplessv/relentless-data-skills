@@ -16,6 +16,10 @@ house rule applying automatically because it is a rule, not skill-mediated.
 
 ## First: check for the house rule
 
+Set `project_root` to the absolute path of the selected project. Create the
+directory first for a requested new project. Run `cd -- "$project_root" || exit 1`
+before discovery and use that working directory for every project command and rule edit.
+
 Use [rule discovery and placement](references/rule-installation.md) to find
 standalone rules or managed memory sections, including uncommitted setup.
 
@@ -34,7 +38,7 @@ actual task unless they accept.
 Establish by inspection, creating what's missing in the install step:
 
 - `pyproject.toml` / venv: new project or existing environment.
-- `dlt[hub]` already a dependency? `uv run dlthub --version` succeeds?
+- Does the project's own `pyproject.toml` declare `dlt[hub]`?
 - Which agent is in use (Claude Code / Cursor / Codex), usually obvious from
   the session. Use that agent when wiring the harness.
 - Existing `.dlt/.workspace` marker, existing pipelines, git repo state.
@@ -52,21 +56,21 @@ Use choices already supplied by the user or project. Ask only for missing inform
 
 ## Install
 
-State what you will install. Run these steps from the project root, checking the
+State what you will install. Check the
 [upstream installation sources](references/docs-map.md) and installed CLI help
 before changing dependencies. Record the versions used.
 
 1. **Create the workspace.** If `.dlt/.workspace` already exists, keep it and continue
-   to step 2. Otherwise run `uvx dlthub-init@latest` in the project directory (or
-   pass a new directory as its argument). Use `--merge` on this first run to add
+   to step 2. Otherwise run `uvx dlthub-init@latest` in place.
+   Use `--merge` on this first run to add
    missing scaffold ignores to an existing `.gitignore`. A fresh scaffold includes `pyproject.toml`,
    `uv.lock` and the base skills linked for Claude. If the initializer is unavailable,
-   run `uv init` only if the project lacks `pyproject.toml`, then `uv add "dlt[hub]"`
-   and `uv run dlthub init`. Follow any requested `uv sync`.
+   continue with the manual setup in step 2.
 2. **Check what was installed.** The initializer can skip an existing
-   `pyproject.toml` and leave the project without a bundled lock. If
-   `dlt[hub]` is missing, run `uv add "dlt[hub]"`. Check that
-   `uv run dlthub --version` succeeds.
+   `pyproject.toml` and leave the project without a bundled lock. If this directory
+   lacks `pyproject.toml`, run `uv init --no-workspace`. If `dlt[hub]` is missing,
+   run `uv add "dlt[hub]"`. If the workspace marker is still missing, run
+   `uv run dlthub init`. Follow any requested `uv sync` and verify `uv run dlthub --version` succeeds.
 3. **Wire the active agent.** If `.dlt/.toolkits` lacks `init` for the active agent, run
    `uv run dlthub ai init --agent <agent>`, using `claude`, `cursor`, or `codex`.
    Inspect `uv run dlthub ai status`. If it reports missing MCP dependencies

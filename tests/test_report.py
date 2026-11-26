@@ -106,7 +106,8 @@ class World:
 
     def scan(self, name: str, tokens: int | float | None, minutes: float | None,
              helpers: Sequence[dict] | None = (), copied: object = 0) -> None:
-        """A row as scripts/scan.py writes it: copied_tokens is blank beside a blank total_tokens, and absent for OLD."""
+        """A row as scripts/scan.py writes it: copied_tokens is blank beside a blank total_tokens, and absent for
+        OLD."""
         row = {"session": name, "input_tokens": None if tokens is None else 1,
                "output_tokens": None if tokens is None else 1, "cache_write_tokens": None,
                "cache_read_tokens": None, "total_tokens": tokens,
@@ -443,9 +444,10 @@ class TestReport(unittest.TestCase):
             "The two verdicts differ: the spend not sorted decides the sign."])
 
     def test_the_column_changes_no_other_line_and_no_verdict(self) -> None:
-        for at, ticket in enumerate(self.world.draw()):  # copied tokens on both sides, in a helper's or a session's own
-            self.world.run("generation-one", ticket, at % 2 == 0, tokens=2277 + at, minutes=1.5 + at, helpers=EVERY_STEP,
-                           copied=OLD if at == 3 else 300 + at)
+        # Copied tokens on both sides, a row without the column, and helpers of every step.
+        for at, ticket in enumerate(self.world.draw()):
+            self.world.run("generation-one", ticket, at % 2 == 0, tokens=2277 + at, minutes=1.5 + at,
+                           helpers=EVERY_STEP, copied=OLD if at == 3 else 300 + at)
             self.world.run("direct", ticket, at % 3 == 0, tokens=1000 + at, minutes=0.5 + at, copied=40.5 * (at % 4))
         with_column = self.world.report(text=False)
         for row in self.world.rows:
@@ -578,8 +580,8 @@ class TestReport(unittest.TestCase):
                          "Left out of the copied tokens: 1 with a blank copied count.")
 
     def test_the_copied_tokens_line_for_each_shape_of_rows(self) -> None:
-        line = "  Copied tokens: {} of the {} total tokens of the tickets with a copied count{}. Left out of the copied " \
-               "tokens: {} with a blank copied count."
+        line = ("  Copied tokens: {} of the {} total tokens of the tickets with a copied count{}. Left out of the "
+                "copied tokens: {} with a blank copied count.")
         for rows, figures in [
             (((1000, 0), (2000, 0), (3000, 0)), ("0", "6000", ", 0.0%", 0)),  # every row says 0
             (((1000, 1000),), ("1000", "1000", ", 100.0%", 0)),  # every token copied
@@ -604,8 +606,8 @@ class TestReport(unittest.TestCase):
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank."]
 
         def copied(total: int) -> str:
-            return (f"  Copied tokens: 0 of the {total} total tokens of the tickets with a copied count, 0.0%. Left out "
-                    "of the copied tokens: 0 with a blank copied count.")
+            return (f"  Copied tokens: 0 of the {total} total tokens of the tickets with a copied count, 0.0%. Left "
+                    "out of the copied tokens: 0 with a blank copied count.")
         self.assertEqual(self.lines(), [  # the whole report: no line beyond these may name or count a project
             "Replay sets 1 and 2: 60 tickets, of projects A, C and AB.",
             "",
@@ -826,10 +828,11 @@ class TestReport(unittest.TestCase):
              "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
             ("scan-rows.jsonl", field("helpers", [helper(None, None, 60), helper(None, None, 41)]),
              "scan-rows.jsonl:2: its helpers hold more tokens than its total_tokens."),
-            *(("scan-rows.jsonl", field("copied_tokens", value), "scan-rows.jsonl:2: copied_tokens is of the wrong type.")
-              for value in ("5", True, [1], {"a": 1})),
-            *(("scan-rows.jsonl", field("copied_tokens", value), "scan-rows.jsonl:2: copied_tokens is not a count of "
-                                                                  "tokens.") for value in (-1, float("nan"), float("inf"))),
+            *(("scan-rows.jsonl", field("copied_tokens", value),
+               "scan-rows.jsonl:2: copied_tokens is of the wrong type.") for value in ("5", True, [1], {"a": 1})),
+            *(("scan-rows.jsonl", field("copied_tokens", value),
+               "scan-rows.jsonl:2: copied_tokens is not a count of tokens.")
+              for value in (-1, float("nan"), float("inf"))),
             ("scan-rows.jsonl", field("copied_tokens", 100.5),  # the row's total_tokens is 100
              "scan-rows.jsonl:2: copied_tokens is more than its total_tokens or beside a blank one."),
             ("scan-rows.jsonl", lambda lines: lines.__setitem__(1, json.dumps({**json.loads(lines[1]),
@@ -980,7 +983,7 @@ class TestReport(unittest.TestCase):
                 "null, or absent from a row the scan wrote before it had that column, is\n"
                 "blank: its ticket is left out of the copied tokens and counted.\n")
         self.assertIn("\n\n" + rule + "\n", text)
-        # The rule once; beside it only the file list's column and the three errors below.
+        # The rule once; beside it, copied_tokens only in the list of files read and in what stops the report below.
         self.assertEqual(text.count("copied"), rule.count("copied") + 4)
         self.assertIn("  scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes\n"
                       "                        and helpers of each row, and description, brief_head\n"

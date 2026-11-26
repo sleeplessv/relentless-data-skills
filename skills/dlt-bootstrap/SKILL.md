@@ -1,6 +1,6 @@
 ---
 name: dlt-bootstrap
-description: Bootstrap a dlt ingestion project with the dltHub AI Workbench plus Relentless Data house conventions (Snowflake destination, Prefect orchestration, DuckDB dev loop). Use when setting up dlt in a new or existing project, or when adding a new source type or workbench toolkit to a dlt project; also fires proactively when a dlt project lacks the house-conventions rule.
+description: Bootstrap a dlt ingestion project with the dltHub AI Harness plus Relentless Data house conventions (Snowflake destination, Prefect orchestration, DuckDB dev loop). Use when setting up dlt in a new or existing project, or when adding a new source type or harness toolkit to a dlt project; also fires proactively when a dlt project lacks the house-conventions rule.
 metadata:
   dlt: "dlt[hub]"
 ---
@@ -8,10 +8,10 @@ metadata:
 # dlt-bootstrap
 
 Set a project up for dlt pipeline development the house way: install dltHub's
-official **AI Workbench** project-scoped, then layer Relentless Data
-conventions on top as an always-on rule. The workbench's toolkits own pipeline
+official **AI Harness** project-scoped, then layer Relentless Data
+conventions on top as an always-on rule. The harness's toolkits own pipeline
 building. After bootstrap, step aside: day-to-day work runs through the
-workbench's own entry points (`/find-source`, `/explore-data`, ...), with the
+harness's own entry points (`/find-source`, `/explore-data`, ...), with the
 house rule applying automatically because it is a rule, not skill-mediated.
 
 ## First: check for the house rule
@@ -22,7 +22,7 @@ standalone rules or managed memory sections, including uncommitted setup.
 - If present, read `source_types` and `toolkits_installed`. Reconcile that
   record with installed toolkit files, MCP configuration, and the active agent.
   Repair missing setup or add the requested source type without repeating completed work.
-- If absent, bootstrap below. Preserve existing workbench files and project configuration.
+- If absent, bootstrap below. Preserve existing harness files and project configuration.
 
 If invoked proactively (the user was working on something else and the rule is
 merely missing), don't start the bootstrap. Note that the project lacks
@@ -33,11 +33,11 @@ actual task unless they accept.
 
 Establish by inspection, creating what's missing in the install step:
 
-- `pyproject.toml` / venv: greenfield vs existing project (same path either way).
+- `pyproject.toml` / venv: new project or existing environment.
 - `dlt[hub]` already a dependency? `uv run dlthub --version` succeeds?
 - Which agent is in use (Claude Code / Cursor / Codex), usually obvious from
-  the session. Pass it explicitly to `--agent` rather than relying on detection.
-- Existing `.dlt/` directory, existing pipelines, git repo state.
+  the session. Use that agent when wiring the harness.
+- Existing `.dlt/.workspace` marker, existing pipelines, git repo state.
 - Where `dlthub ai init` placed its rules (see "Write the house rule").
 
 ## Resolve project choices
@@ -52,29 +52,35 @@ Use choices already supplied by the user or project. Ask only for missing inform
 
 ## Install
 
-Say what you will install. Run the sequence with the detected agent in place
-of `claude` and the selected toolkit in place of `<toolkit>`.
-Check the current upstream README and installed CLI help before changing dependencies.
-Record the package versions used.
+State what you will install. Run these steps from the project root, checking the
+[upstream installation sources](references/docs-map.md) and installed CLI help
+before changing dependencies. Record the versions used.
 
-```bash
-uv init                          # only if no pyproject.toml
-uv add "dlt[hub]"
-uv add "dlthub[mcp]"             # MCP extra; the install warning may name dlt[workspace] instead, so confirm the extra against installed package metadata
-uv run dlthub init               # workspace init; follow its instructions (uv sync)
-uv run dlthub ai init --agent claude
-uv run dlthub ai toolkit install <toolkit> --agent claude   # per source type
-uv run dlthub ai status          # verify: agent detected, toolkits + entry skills listed
-```
-
-If any command fails or a flag is rejected, suspect upstream drift before
-debugging: consult [references/docs-map.md](references/docs-map.md) (start at
-the workbench README) and re-derive the command. Never invent flags.
+1. **Create the workspace.** If `.dlt/.workspace` already exists, keep it and continue
+   to step 2. Otherwise run `uvx dlthub-init@latest` in the project directory (or
+   pass a new directory as its argument). Use `--merge` on this first run to add
+   missing scaffold ignores to an existing `.gitignore`. A fresh scaffold includes `pyproject.toml`,
+   `uv.lock` and the base skills linked for Claude. If the initializer is unavailable,
+   run `uv init` only if the project lacks `pyproject.toml`, then `uv add "dlt[hub]"`
+   and `uv run dlthub init`. Follow any requested `uv sync`.
+2. **Check what was installed.** The initializer can skip an existing
+   `pyproject.toml` and leave the project without a bundled lock. If
+   `dlt[hub]` is missing, run `uv add "dlt[hub]"`. Check that
+   `uv run dlthub --version` succeeds.
+3. **Wire the active agent.** Check that `.dlt/.toolkits` records `init` for
+   the active agent and its files exist. If either is missing, run
+   `uv run dlthub ai init --agent <agent>`, using `claude`, `cursor`, or `codex`.
+   Inspect `uv run dlthub ai status`. If it reports missing MCP dependencies
+   and the installed `dlthub` package declares the `mcp` extra, run
+   `uv add "dlthub[mcp]"` and check that the warning clears.
+4. **Install each missing source toolkit** with
+   `uv run dlthub ai toolkit install <toolkit> --agent <agent>`. Use the table
+   below for `<toolkit>`. Continue on exit 0 and verify the result at handoff.
 
 ## Toolkit policy
 
 Install `init` (automatic dependency) plus **only** the pipeline toolkits
-matching the interview answer:
+matching the selected source types:
 
 | Source type | Toolkit |
 | --- | --- |
@@ -120,8 +126,8 @@ matching the interview answer:
 ## Guardrails
 
 - This skill **sets up**; it does not build pipelines, and it does not fork or
-  re-teach workbench skill content, since upstream owns that. If asked to build a
-  pipeline before bootstrap, bootstrap first, then route to the workbench's
+  re-teach harness skill content, since upstream owns that. If asked to build a
+  pipeline before bootstrap, bootstrap first, then route to the harness's
   skills. When the bootstrap surfaces adjacent problems, such as missing tests, an
   untidy `pyproject.toml`, or a stale dependency, report them and finish the
   bootstrap; don't fix them on the way through.

@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import draw  # noqa: E402  (a sibling script, not an installed package)
 import judge  # noqa: E402
 import replay  # noqa: E402
+import scan  # noqa: E402
 
 GENERATION_ONE, DIRECT = judge.GENERATION_ONE, replay.VERSION
 RATE_FLOOR = 20  # a count out of fewer tickets than this is never given as a rate
@@ -226,6 +227,27 @@ def json_lines(path: Path) -> list[tuple[str, object]]:
     return lines
 
 
+def row_lines(path: Path) -> tuple[list[tuple[str, dict]], list[str]]:
+    """Each line of scan-rows.jsonl that can be a row, with where it is, and a reason for each other line; none of
+    either for a file that does not exist. The scan keeps a line it cannot read as a JSON object, and the report
+    leaves it out: scan.json_object says which lines those are."""
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:  # any other OSError reaches main()
+        return [], []
+    rows, left_out = [], []
+    for number, line in enumerate(data.split(b"\n"), 1):  # as the scan splits it; a blank line is no line
+        if line.strip():
+            where, row = f"{path}:{number}", scan.json_object(line)
+            if row is None:
+                left_out.append(f"{where}: not a JSON object")
+            elif type(row.get("session")) not in TEXT:
+                left_out.append(f"{where}: session is missing or of the wrong type")
+            else:
+                rows.append((where, row))
+    return rows, left_out
+
+
 def by_key(lines: list[tuple[str, dict]], *key: str) -> dict[tuple, dict]:
     found: dict[tuple, dict] = {}
     for where, line in lines:
@@ -303,10 +325,11 @@ def scan_row(where: str, line: object) -> dict:
     return row
 
 
-def load_rows(state: Path) -> dict[str, dict]:
-    """Each scan row, whole, by session."""
-    return {key[0]: row for key, row in by_key(
-        [(where, scan_row(where, line)) for where, line in json_lines(state / "scan-rows.jsonl")], "session").items()}
+def load_rows(state: Path) -> tuple[dict[str, dict], list[str]]:
+    """Each scan row, whole, by session, and the lines of scan-rows.jsonl left out, each with its reason."""
+    lines, left_out = row_lines(state / "scan-rows.jsonl")
+    return {key[0]: row for key, row in by_key([(where, scan_row(where, line)) for where, line in lines],
+                                               "session").items()}, left_out
 
 
 def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: dict) -> str | dict:
@@ -352,7 +375,7 @@ def figures(results: list[str | dict]) -> str:
             f"median total tokens {median(tokens)}, median active minutes {median(minutes)}.")
 
 
-def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict) -> list[str]:
+def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict, unread: int = 0) -> list[str]:
     names = [GENERATION_ONE, DIRECT, *sorted({key[2] for key in [*versions, *verdicts] if key[:2] in tickets}
                                             - {GENERATION_ONE, DIRECT})]
     results = {name: {key: outcome(ticket, name, versions, verdicts, rows) for key, ticket in tickets.items()}
@@ -363,6 +386,8 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
     outside = sum(key[:2] not in tickets for key in [*versions, *verdicts])
     if outside:
         lines.append(f"Left out: {outside} lines of versions.jsonl and verdicts.jsonl name a ticket in no set.")
+    if unread:
+        lines.append(f"Left out: scan-rows.jsonl lines that are no scan row: {unread}.")
     for name in names:
         found = list(results[name].values())
         judged = [result for result in found if isinstance(result, dict)]
@@ -456,13 +481,17 @@ def main(argv: list[str]) -> int:
         # Verdicts first, so a replay recorded before its verdict was saved has its line in the versions.jsonl read
         # here; read the other way, one recorded and judged between the two reads would count as having no line.
         verdicts = load_verdicts(state)
-        lines = report(sets, tickets, load_versions(state), verdicts, load_rows(state))
+        versions = load_versions(state)
+        rows, left_out = load_rows(state)
+        lines = report(sets, tickets, versions, verdicts, rows, len(left_out))
     except Unreadable as error:
         print(f"report: {error}", file=sys.stderr)
         return 1
     except OSError as error:  # any folder or file the report lists, tests or reads
         print(f"report: {error.filename or state} cannot be read ({type(error).__name__}).", file=sys.stderr)
         return 1
+    for why in left_out:
+        print(f"report: {why}, left out.", file=sys.stderr)
     print("\n".join(lines))
     return 0
 

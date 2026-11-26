@@ -757,6 +757,43 @@ class TestReport(unittest.TestCase):
                     path.write_text(json.dumps(saved))
                 self.error(f"{self.world.state}/{message}")
 
+    def write_rows(self, *lines: bytes) -> None:
+        """The scan-rows.jsonl the other files of this world leave, with these lines of bytes in place of its rows."""
+        self.world.save()
+        (self.world.state / "scan-rows.jsonl").write_bytes(b"".join(line + b"\n" for line in lines))
+
+    def scan_writes(self, session_name: str) -> None:
+        """Run scripts/scan.py's row writer, the code that keeps a line it cannot read, over the rows file."""
+        code = "import json, sys; sys.path.insert(0, sys.argv[1]); import scan; scan.write_row(json.loads(sys.argv[2]))"
+        self.world.scan(session_name, 1, 1.0)
+        env = {**os.environ, "HOME": str(self.world.root / "home"), "DELIVER_STATE_DIR": str(self.world.state)}
+        written = subprocess.run([sys.executable, "-c", code, str(self.world.source), json.dumps(self.world.rows.pop())],
+                                 env=env, text=True, capture_output=True)
+        self.assertEqual(written.returncode, 0, written.stderr)
+
+    def test_a_line_the_scan_keeps_that_is_no_row_is_left_out_named_and_counted(self) -> None:
+        self.world.baseline(20, 15)
+        self.world.save()
+        good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
+        clean = self.lines()
+        damaged = [b"{broken", b"[]", b'{"total_tokens": 5}', b'{"session": 5}', b"\xff\xfe not UTF-8"]
+        # Each damaged line is at its own line number: after good row 1, 2, 3, 4 and 5 (so lines 2, 4, 6, 8 and 10).
+        mixed = [line for pair in zip(good[:5], damaged) for line in pair] + good[5:]
+        self.write_rows(*mixed)
+        self.scan_writes(session(999))  # the writer reads the file, keeps these lines and adds its own row
+        kept = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")
+        self.assertEqual([line for line in kept if line in damaged], damaged)
+        result = self.world.report(save=False)
+        rows = self.world.state / "scan-rows.jsonl"
+        self.assertEqual((result.returncode, result.stdout.splitlines()), (0, [
+            clean[0], "Left out: scan-rows.jsonl lines that are no scan row: 5.", *clean[1:]]))
+        self.assertEqual(result.stderr.splitlines(), [
+            f"report: {rows}:2: not a JSON object, left out.",
+            f"report: {rows}:4: not a JSON object, left out.",
+            f"report: {rows}:6: session is missing or of the wrong type, left out.",
+            f"report: {rows}:8: session is missing or of the wrong type, left out.",
+            f"report: {rows}:10: not a JSON object, left out."])
+
     def test_help_exits_0_and_bad_usage_exits_2(self) -> None:
         self.world.draw()
         for args in (["--help"], ["-h"]):

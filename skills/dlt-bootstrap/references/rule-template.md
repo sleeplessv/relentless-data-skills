@@ -12,7 +12,7 @@ orchestration: prefect
 # dlt house conventions (Relentless Data)
 
 Always-on rules for dlt pipeline work in this project. They apply to every
-session, including work driven by the dltHub AI Workbench's own skills and
+session, including work driven by the dltHub AI Harness's own skills and
 commands (`/find-source`, `/create-rest-api-pipeline`, ...). The frontmatter
 above is bookkeeping owned by the `dlt-bootstrap` skill; update it when
 toolkits or source types change; do not delete it.
@@ -23,7 +23,7 @@ toolkits or source types change; do not delete it.
   on resources until the schema and data look right. The limit counts yielded
   items or batches, not necessarily individual rows.
 - Validate after every change: row counts, primary keys, nested-object
-  handling. Use the workbench's validation skills and the local dashboard.
+  handling. Use the harness's validation skills and the local dashboard.
 
 ## Secrets
 

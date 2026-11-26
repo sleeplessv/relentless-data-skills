@@ -1,10 +1,10 @@
-# dltHub AI Workbench / dlt docs map
+# dltHub AI Harness / dlt docs map
 
 **Official entry points:**
 - OSS dlt docs index => https://dlthub.com/docs/llms.txt
-- dltHub (platform + workbench) docs index => https://dlthub.com/docs/hub/llms.txt
+- dltHub (platform + harness) docs index => https://dlthub.com/docs/hub/llms.txt
 - Any docs page as clean markdown: append `.md` to its URL.
-- Read the workbench README and toolkit reference alongside installed-version
+- Read the harness README and toolkit reference alongside installed-version
   CLI help. Resolve conflicting guidance against actual installed artifacts.
 
 CI checks the URLs below for liveness, not content freshness or command behavior.
@@ -12,13 +12,14 @@ CI checks the URLs below for liveness, not content freshness or command behavior
 CLI command is rejected, re-fetch the relevant index / raw README and
 re-resolve. Do not invent URLs or flags.**
 
-## AI Workbench (setup, toolkits, CLI)
+## AI Harness (setup, toolkits, CLI)
 - Cursor rule format and activation => https://cursor.com/docs/rules
-- workbench README (commands, toolkit table, agent notes) => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/README.md
+- AI Harness installation (workspace, agent setup, verification) => https://dlthub.com/docs/hub/ai-harness/installation
+- harness README (commands, toolkit table, agent notes) => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/README.md
 - toolkit packaging + `dlthub ai` CLI reference => https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/TOOLKITS.md
 - dlt[hub] installation => https://dlthub.com/docs/hub/getting-started/installation.md
 - dlthub CLI full reference => https://dlthub.com/docs/hub/command-line-interface.md
-- REST API source with the workbench (workflow walkthrough) => https://dlthub.com/docs/hub/ingestion/rest-api-source.md
+- REST API source with the harness (workflow walkthrough) => https://dlthub.com/docs/hub/ingestion/rest-api-source.md
 - dltHub context (9,700+ source definitions) => https://dlthub.com/context
 
 ## Building pipelines (OSS dlt)

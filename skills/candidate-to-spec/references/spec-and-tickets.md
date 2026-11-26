@@ -11,8 +11,8 @@ comment body per [Candidate file](workers.md#candidate-file). `DEFERRED` is the 
 loop is on. Every path variable holds an absolute path. Ticket variables are defined under
 [Tickets](#tickets).
 
-The worker runs each block per [Shell](workers.md#briefs); `set -euo pipefail` stops the call at
-the first failing command, and the worker returns that command and its output for the main
+The worker runs each block with the verified `GH_REPO` per [Shell](workers.md#briefs).
+`set -euo pipefail` stops at the first failing command. The worker returns it and its output for the main
 thread to report. After each command exits, the worker records its exit status and result in
 `<run>/<slug>/spec.md` or `tickets.md`, keyed by step, item (ticket or deferred file), and
 command; a step resumed after a failure skips the items recorded as succeeded, so a retry adds
@@ -88,13 +88,13 @@ candidate's file as its own comment. The grep keeps the run directory out of the
 set -euo pipefail
 if grep -qF "$RUN" "$LOG"; then echo "run directory path in $LOG" >&2; exit 1; fi
 if [ -n "${SPEC_N:-}" ]; then
-  gh issue edit "$SPEC_N" --body-file "$BODY" --add-label needs-triage
   SPEC_URL=$(gh issue view "$SPEC_N" --json url --jq .url)
+  issue_number "$SPEC_URL" "$SPEC_N" >/dev/null
+  gh issue edit "$SPEC_N" --body-file "$BODY" --add-label needs-triage
 else
   SPEC_URL=$(gh issue create --title "$TITLE" --label spec --label needs-triage --body-file "$BODY")
-  SPEC_N=${SPEC_URL##*/}
+  SPEC_N=$(issue_number "$SPEC_URL")
 fi
-case $SPEC_N in ''|*[!0-9]*) echo "bad issue url: $SPEC_URL" >&2; exit 1;; esac
 gh issue comment "$SPEC_N" --body-file "$LOG"
 for DEFERRED in "$DEFERRED_DIR"/*.md; do
   [ -e "$DEFERRED" ] || continue
@@ -219,8 +219,7 @@ and that comment.
    set -euo pipefail
    case $EDGES in native|parent|body) ;; *) echo "unknown EDGES: $EDGES" >&2; exit 1 ;; esac
    TICKET_URL=$(gh issue create --title "$TICKET_TITLE" --label "$TICKET_LABEL" --body-file "$TICKET_BODY")
-   TICKET_N=${TICKET_URL##*/}
-   case $TICKET_N in ''|*[!0-9]*) echo "bad issue url: $TICKET_URL" >&2; exit 1;; esac
+   TICKET_N=$(issue_number "$TICKET_URL")
    printf '%s\n' "$TICKET_URL"
    ```
 
@@ -236,8 +235,7 @@ and that comment.
    ```bash
    set -euo pipefail
    if [ "$EDGES" = native ] && [ -n "$BLOCKED_BY" ]; then
-     host=${TICKET_URL#*://}
-     existing=$(gh api graphql --paginate --hostname "${host%%/*}" \
+     existing=$(gh api graphql --paginate --hostname "${GH_REPO%%/*}" \
        -F owner='{owner}' -F name='{repo}' -F n="$TICKET_N" \
        -f 'query=query($owner:String!, $name:String!, $n:Int!, $endCursor:String) {
          repository(owner:$owner, name:$name) { issue(number:$n) {
@@ -246,7 +244,7 @@ and that comment.
        }' --jq '.data.repository.issue.blockedBy.nodes[].url')
      IFS=, read -ra blockers <<< "$BLOCKED_BY"
      for blocker in "${blockers[@]}"; do
-       if ! grep -Fxq -- "${TICKET_URL%/*}/$blocker" <<< "$existing"; then
+       if ! grep -Fxiq -- "https://$GH_REPO/issues/$blocker" <<< "$existing"; then
          gh issue edit "$TICKET_N" --add-blocked-by "$blocker"
        fi
      done

@@ -43,6 +43,29 @@ ZSH = shutil.which("zsh")
 # non-empty file.
 GH_SHIM = r"""#!/bin/bash
 { printf '%q ' "$@"; printf '\n'; } >> "$GH_LOG"
+default_host=${GH_HOST:-github.com}
+repo=${GH_REPO:-Acme/Work}
+case "$repo" in */*/*) ;; *) repo="$default_host/$repo" ;; esac
+if [[ "$1 $2" == "repo view" && -z "${GH_REPO:-}" ]]; then repo="$GH_CHECKOUT_REPO"; fi
+if [[ "$1 $2" == "api graphql" ]]; then
+  host=$default_host
+  name_with_owner=${repo#*/}
+  owner="" name=""
+  for arg in "$@"; do
+    if [[ "${prev:-}" == "--hostname" ]]; then host=$arg; fi
+    case "$arg" in
+      'owner={owner}') owner=${name_with_owner%/*} ;;
+      'name={repo}') name=${name_with_owner#*/} ;;
+      owner=*) owner=${arg#owner=} ;;
+      name=*) name=${arg#name=} ;;
+    esac
+    prev=$arg
+  done
+  repo="$host/$owner/$name"
+fi
+echo "$repo" >> "$GH_LOG.targets"
+counter="$GH_TRACKERS/$repo/counter"
+[[ -f "$counter" ]] || { echo "unknown tracker: $repo" >&2; exit 1; }
 if [ -n "${GH_FAIL:-}" ] && [ "$1 $2" = "$GH_FAIL" ]; then
   echo "gh: $GH_FAIL failed on request" >&2
   exit 1
@@ -64,19 +87,22 @@ for a in "$@"; do
   prev="$a"
 done
 case "$1 $2" in
+  "repo view")
+    [[ "$3 $4 $5 $6" == '--json url,nameWithOwner --jq [.url, .nameWithOwner] | @tsv' ]] || exit 1
+    printf 'https://%s\t%s\n' "$repo" "${repo#*/}" ;;
   "api graphql")
     if [[ ",${GH_MISSING_FIELDS:-}," == *,blockedBy,* ]]; then
       echo "GraphQL: Field 'blockedBy' doesn't exist on type 'Issue'" >&2; exit 1
     fi
     for arg in "$@"; do
       if [[ "$arg" == n=* ]]; then
-        edges="$GH_COUNTER.${arg#n=}.blockers"
+        edges="$counter.${arg#n=}.blockers"
         if [ -f "$edges" ]; then cat "$edges"; fi
       fi
     done ;;
   "issue create")
-    n=$(cat "$GH_COUNTER"); n=$((n + 1)); echo "$n" > "$GH_COUNTER"
-    echo "${GH_CREATE_URL-https://github.com/o/r/issues/$n}" ;;
+    n=$(cat "$counter"); n=$((n + 1)); echo "$n" > "$counter"
+    echo "${GH_CREATE_URL-https://$repo/issues/$n}" ;;
   "issue comment"|"issue edit"|"issue view"|"issue close")
     [[ "$3" =~ ^[0-9]+$ ]] || { echo "invalid issue: '$3'" >&2; exit 1; }
     case "$*" in
@@ -87,19 +113,23 @@ case "$1 $2" in
           if [ "$n" = "${GH_FAIL_BLOCKER:-}" ]; then
             echo "gh: addBlockedBy failed for #$n" >&2; rc=1
           else
-            echo "https://github.com/o/r/issues/$n" >> "$GH_COUNTER.$3.blockers"
+            echo "https://$repo/issues/$n" >> "$counter.$3.blockers"
+            if [ "$n" = "${GH_LOST_REPLY:-}" ]; then exit 1; fi
           fi
         done
         exit "$rc" ;;
-      *"--json url"*) echo "https://github.com/o/r/issues/$3" ;;
+      *"--parent "*) echo "$5" > "$counter.$3.parent" ;;
+      *"--json url"*) echo "${GH_VIEW_URL-https://$repo/issues/$3}" ;;
       *"--json labels,parent,blockedBy"*)
-        python3 - "$GH_COUNTER.$3.blockers" <<'PY'
+        python3 - "$counter.$3.blockers" "$counter.$3.parent" <<'PY'
 import json, sys
 from pathlib import Path
 path = Path(sys.argv[1])
 nodes = [{"number": int(url.rsplit("/", 1)[1]), "url": url}
          for url in (path.read_text().splitlines() if path.exists() else [])]
-print(json.dumps({"labels": [{"name": "ready-for-agent"}], "parent": {"number": 17},
+parent = Path(sys.argv[2])
+print(json.dumps({"labels": [{"name": "ready-for-agent"}],
+                  "parent": {"number": int(parent.read_text())} if parent.exists() else None,
                   "blockedBy": {"nodes": nodes, "totalCount": len(nodes)}}))
 PY
         ;;
@@ -187,8 +217,15 @@ class GhSequenceTests(unittest.TestCase):
         shim.write_text(GH_SHIM, encoding="utf-8")
         shim.chmod(0o755)
         self.log = self.sb.root / "gh.log"
-        self.counter = self.sb.root / "counter"
-        self.counter.write_text("41\n", encoding="utf-8")
+        self.repo = "git.example.test/Acme/Work"
+        self.default_repo = "github.com/Acme/Work"
+        self.issue_prefix = f"https://{self.repo}/issues"
+        trackers = self.sb.root / "trackers"
+        for repo in (self.repo, self.default_repo):
+            directory = trackers / repo
+            directory.mkdir(parents=True)
+            (directory / "counter").write_text("41\n", encoding="utf-8")
+        self.counter = trackers / self.repo / "counter"
         self.run_dir = self.sb.root / "run"
         self.work = self.run_dir / "order-intake"
         self.deferred_dir = self.work / "deferred"
@@ -201,7 +238,9 @@ class GhSequenceTests(unittest.TestCase):
         self.env = {
             "PATH": f"{shim_dir}{os.pathsep}{self.sb.env['PATH']}",
             "GH_LOG": str(self.log),
-            "GH_COUNTER": str(self.counter),
+            "GH_HOST": "github.com",
+            "GH_TRACKERS": str(trackers),
+            "GH_CHECKOUT_REPO": self.repo,
             "RUN": str(self.run_dir),
             "DEFERRED_DIR": str(self.deferred_dir),
             "TITLE": "Deepen X: y",
@@ -217,17 +256,30 @@ class GhSequenceTests(unittest.TestCase):
         path.write_text(f"## Deferred candidate: {slug}\n\nbody\n", encoding="utf-8")
         return str(path)
 
+    def worker_script(self, block, variables, repo):
+        template, = (b for b in fenced_blocks(WORKERS.read_text(), langs=("text",))
+                     if b.startswith("bash <<'EOF'"))
+        return (template.replace("<repository root>", str(self.work))
+                .replace("<host/owner/repo>", repo)
+                .replace("<candidate-to-spec root>", str(SKILL_DIR))
+                .replace("<variable assignments>", "\n".join(
+                    f"{name}={shlex.quote(value)}" for name, value in variables.items()))
+                .replace("<the block>", block))
+
     def run_script(self, block: str, extra: Optional[Dict[str, str]] = None,
-                   unset: Optional[List[str]] = None) -> ScriptRun:
-        """Run `block` whole, as one bash call with the variables in the environment."""
+                   unset: Optional[List[str]] = None, *, shell=BASH, variables=None,
+                   repo=None, setup=False, args=()) -> ScriptRun:
+        """Execute the actual setup block or worker heredoc with an isolated CLI."""
         script = self.sb.root / "block.sh"
+        if not setup:
+            block = self.worker_script(block, variables or {}, self.repo if repo is None else repo)
         script.write_text(block + "\n", encoding="utf-8")
         env = dict(self.sb.env)
         env.update(self.env)
         env.update(extra or {})
         for name in unset or []:
             env.pop(name, None)
-        proc = subprocess.run([BASH, "--noprofile", "--norc", str(script)], cwd=str(self.work),
+        proc = subprocess.run([shell, str(script), *args], cwd=str(self.work),
                               env=env, capture_output=True, text=True)
         calls = []
         if self.log.exists():
@@ -240,22 +292,61 @@ class GhSequenceTests(unittest.TestCase):
         return self.run_script(doc_block(SPEC_TICKETS, heading, marker), extra, unset)
 
     def run_from_zsh(self, block: str, variables: Dict[str, str]) -> ScriptRun:
-        """Run `block` as workers.md's Shell rule says: a quoted heredoc to bash, typed into zsh.
+        return self.run_script(block, shell=ZSH, unset=list(variables), variables=variables)
 
-        The block's variables are assigned inside the heredoc and are absent from the environment.
-        """
-        assigns = "\n".join(f"{name}={shlex.quote(value)}" for name, value in variables.items())
-        script = (f"bash <<'EOF'\ncd {shlex.quote(str(self.work))} || exit 1\n"
-                  f"export GH_REPO=o/r\n{assigns}\n{block}\nEOF\n")
-        env = dict(self.sb.env)
-        env.update({k: self.env[k] for k in ("PATH", "GH_LOG", "GH_COUNTER")})
-        proc = subprocess.run([ZSH, "-f", "-c", script], cwd=str(self.sb.root), env=env,
-                              capture_output=True, text=True)
-        calls = []
-        if self.log.exists():
-            calls = [shlex.split(line) for line in
-                     self.log.read_text(encoding="utf-8").splitlines() if line.strip()]
-        return ScriptRun(proc.returncode, proc.stdout, proc.stderr, calls)
+    def setup_tracker(self, saved="", *records, override=None):
+        context = {"GH_REPO": override} if override else {}
+        return self.run_script(doc_block(WORKERS, "Tracker setup", "resolve_tracker"),
+                               {**context, "SAVED_REPO": saved,
+                                "TRACKER_SH": str(SKILL_DIR / "scripts" / "tracker.sh")},
+                               setup=True, args=records)
+
+    def targets(self):
+        return self.log.with_suffix(".log.targets").read_text().splitlines()
+
+    def test_setup_and_legacy_resume_select_the_checkout_tracker(self):
+        for saved, records in [("", ()), ("acme/work", (f"{self.issue_prefix}/17", "17",
+                                                       f"{self.issue_prefix}/42", "42"))]:
+            with self.subTest(saved=saved):
+                run = self.setup_tracker(saved, *records)
+                self.assertEqual(run.rc, 0, run)
+                self.assertEqual(run.out.strip(), self.repo)
+        self.assertEqual(self.targets(), [self.repo, self.repo])
+
+    def test_setup_honors_the_callers_explicit_tracker(self):
+        for saved in ("", "Acme/Work"):
+            records = (f"https://{self.default_repo}/issues/17", "17") if saved else ()
+            setup = self.setup_tracker(saved, *records, override=self.default_repo)
+            self.assertEqual(setup.rc, 0, setup)
+            self.assertEqual(setup.out.strip(), self.default_repo)
+            run = self.run_script(self.ticket_blocks(), {"SPEC_N": "17"}, repo=setup.out.strip())
+            self.assertEqual(run.rc, 0, run)
+        self.assertEqual(set(self.targets()), {self.default_repo})
+
+    def test_legacy_resume_stops_on_conflicting_or_incomplete_evidence(self):
+        spec = (f"{self.issue_prefix}/17", "17")
+        for saved, records in [
+            ("Acme/Other", spec),
+            ("Acme/Work", (*spec, f"https://{self.default_repo}/issues/42", "42")),
+            ("Acme/Work", (*spec, f"{self.issue_prefix}/42", "41")),
+            ("Acme/Work", (*spec, f"{self.issue_prefix}/42")),
+        ]:
+            with self.subTest(saved=saved, records=records):
+                run = self.setup_tracker(saved, *records)
+                self.assertNotEqual(run.rc, 0, run)
+                self.assertEqual(run.out, "")
+                self.assertEqual(set(run.subcommands()), {"repo view"})
+
+    def test_spec_decision_checks_saved_target_before_edit(self):
+        run = self.run_block("User decision", "ready-for-agent", {
+            "SPEC_URL": f"https://{self.default_repo}/issues/17", "SPEC_N": "17"})
+        self.assertNotEqual(run.rc, 0, run)
+        self.assertEqual(run.calls, [])
+
+    def test_hostless_worker_stops_before_create(self):
+        run = self.run_script(self.ticket_blocks(), {"SPEC_N": "17"}, repo="Acme/Work")
+        self.assertNotEqual(run.rc, 0, run)
+        self.assertEqual(run.calls, [])
 
     # Spec publish
 
@@ -283,11 +374,18 @@ class GhSequenceTests(unittest.TestCase):
         run = self.run_block("Spec", "gh issue create", {"SPEC_N": "17"})
         self.assertEqual(run.rc, 0, run)
         self.assertNotIn("issue create", run.subcommands())
-        self.assertEqual(run.calls[0], ["issue", "edit", "17", "--body-file", self.files["BODY"],
+        self.assertEqual(run.calls[1], ["issue", "edit", "17", "--body-file", self.files["BODY"],
                                         "--add-label", "needs-triage"])
-        self.assertEqual(run.calls[1], ["issue", "view", "17", "--json", "url", "--jq", ".url"])
+        self.assertEqual(run.calls[0], ["issue", "view", "17", "--json", "url", "--jq", ".url"])
         self.assertEqual(run.calls[2][:3], ["issue", "comment", "17"])
         self.assertEqual(len(run.calls), 4)
+
+    def test_reopened_spec_rejects_foreign_view_result_before_edit(self):
+        run = self.run_block("Spec", "gh issue create", {
+            "SPEC_N": "17", "SPEC_URL": f"{self.issue_prefix}/17",
+            "GH_VIEW_URL": f"https://{self.default_repo}/issues/17"})
+        self.assertNotEqual(run.rc, 0, run)
+        self.assertEqual(run.subcommands(), ["issue view"])
 
     def test_spec_publish_stops_when_create_fails(self):
         self.deferred_file("a-billing")
@@ -297,8 +395,8 @@ class GhSequenceTests(unittest.TestCase):
                          "no comment is posted to an empty issue number")
 
     def test_spec_publish_rejects_a_create_url_without_a_number(self):
-        for bad in ("https://github.com/o/r/issues/42?foo=1", "https://github.com/o/r/issues/",
-                    "", "https://github.com/o/r/issues/42#issue-1"):
+        for bad in (f"{self.issue_prefix}/42?foo=1", f"{self.issue_prefix}/",
+                    "", f"{self.issue_prefix}/42#issue-1", f"https://{self.default_repo}/issues/42"):
             with self.subTest(url=bad):
                 self.log.unlink(missing_ok=True)
                 run = self.run_block("Spec", "gh issue create", {"GH_CREATE_URL": bad})
@@ -464,10 +562,11 @@ class GhSequenceTests(unittest.TestCase):
         run = self.publish_ticket({"SPEC_N": "17", **missing})
         self.assertNotEqual(run.rc, 0)
         self.assertIn("Field 'blockedBy'", run.err)
-        self.assertIn("https://github.com/o/r/issues/42", run.out)
+        self.assertIn(f"{self.issue_prefix}/42", run.out)
         prior_calls = run.calls
         resumed = self.run_block("Tickets", 'gh issue view "$TICKET_N"',
-                                 {"TICKET_N": "42", "EDGES": "parent", **missing})
+                                 {"TICKET_N": "42", "TICKET_URL": run.out.strip(),
+                                  "EDGES": "parent", **missing})
         self.assertEqual(resumed.rc, 0, resumed)
         self.assertEqual(resumed.calls, prior_calls + [
             ["issue", "view", "42", "--json", "labels,parent,body"]])
@@ -477,7 +576,7 @@ class GhSequenceTests(unittest.TestCase):
                                    "GH_MISSING_FIELDS": "blockedBy"})
         self.assertNotEqual(run.rc, 0)
         self.assertIn("Field 'blockedBy'", run.err)
-        self.assertEqual(run.out.strip(), "https://github.com/o/r/issues/42")
+        self.assertEqual(run.out.strip(), f"{self.issue_prefix}/42")
         self.assertEqual(run.subcommands(), ["issue create", "issue edit", "api graphql"])
 
     def test_ticket_publish_rejects_an_unknown_edges_value_before_creating(self):
@@ -495,7 +594,7 @@ class GhSequenceTests(unittest.TestCase):
         self.assertNotEqual(run.rc, 0, run)
         self.assertEqual(run.subcommands(), ["issue create", "issue edit"])
         self.assertEqual(self.counter.read_text().strip(), "42", "exactly one ticket exists")
-        self.assertIn("https://github.com/o/r/issues/42", run.out)
+        self.assertIn(f"{self.issue_prefix}/42", run.out)
         self.assertIn("gh: issue edit failed on request", run.err)
 
     def test_partial_blocker_edit_retries_only_the_missing_edge_on_the_created_ticket(self):
@@ -505,15 +604,62 @@ class GhSequenceTests(unittest.TestCase):
         self.assertNotEqual(failed.rc, 0)
         self.assertIn("addBlockedBy failed for #41", failed.err)
         ticket = failed.out.strip()
-        self.assertEqual(ticket, "https://github.com/o/r/issues/42")
-        applied = self.sb.root / "counter.42.blockers"
-        self.assertEqual(applied.read_text().splitlines(), ["https://github.com/o/r/issues/40"])
+        self.assertEqual(ticket, f"{self.issue_prefix}/42")
+        applied = self.counter.with_suffix(".42.blockers")
+        self.assertEqual(applied.read_text().splitlines(), [f"{self.issue_prefix}/40"])
         resumed = self.run_script(block, {**env, "TICKET_N": "42", "TICKET_URL": ticket})
         self.assertEqual(resumed.rc, 0, resumed)
         self.assertEqual(resumed.calls[len(failed.calls):], [
             failed.calls[2], ["issue", "edit", "42", "--add-blocked-by", "41"]])
         self.assertEqual(applied.read_text().splitlines(),
-                         ["https://github.com/o/r/issues/40", "https://github.com/o/r/issues/41"])
+                         [f"{self.issue_prefix}/40", f"{self.issue_prefix}/41"])
+
+    def test_lost_blocker_reply_replays_on_setup_host_and_verifies_once_complete(self):
+        other = Path(self.env["GH_TRACKERS"]) / self.default_repo
+        (other / "counter").write_text("42\n")
+        (other / "counter.42.parent").write_text("99\n")
+        (other / "counter.42.blockers").write_text(f"https://{self.default_repo}/issues/41\n")
+        setup = self.setup_tracker("Acme/Work", f"{self.issue_prefix}/17", "17")
+        self.assertEqual(setup.rc, 0, setup)
+        repo = setup.out.strip()
+        env = {"SPEC_N": "17", "SPEC_URL": f"{self.issue_prefix}/17", "BLOCKED_BY": "40,41"}
+        lost = self.run_script(self.ticket_blocks(), {**env, "GH_LOST_REPLY": "40"}, repo=repo)
+        self.assertNotEqual(lost.rc, 0, lost)
+        self.assertEqual(lost.out.strip(), f"{self.issue_prefix}/42")
+        recorded = {**env, "TICKET_URL": lost.out.strip(), "TICKET_N": "42"}
+        blockers = doc_block(SPEC_TICKETS, "Tickets", "--add-blocked-by")
+        verify = doc_block(SPEC_TICKETS, "Tickets", 'gh issue view "$TICKET_N"')
+        run = self.run_script(blockers + "\n" + verify, recorded, repo=repo)
+        self.assertEqual(run.rc, 0, run)
+        self.assertEqual(run.calls[len(lost.calls):], [
+            lost.calls[-2], ["issue", "edit", "42", "--add-blocked-by", "41"],
+            ["issue", "view", "42", "--json", "labels,parent,blockedBy"]])
+        observed = json.loads(run.out)
+        self.assertEqual(observed["parent"], {"number": 17})
+        nodes = observed["blockedBy"]["nodes"]
+        self.assertEqual([node["url"] for node in nodes],
+                         [f"{self.issue_prefix}/40", f"{self.issue_prefix}/41"])
+        self.assertEqual(self.targets(), [self.repo] * len(run.calls))
+        self.assertEqual(self.counter.read_text(), "42\n")
+        self.assertEqual((other / "counter").read_text(), "42\n")
+        self.assertEqual((other / "counter.42.parent").read_text(), "99\n")
+        self.assertEqual((other / "counter.42.blockers").read_text(),
+                         f"https://{self.default_repo}/issues/41\n")
+
+    def test_ticket_rejects_foreign_create_result_before_parent_edit(self):
+        run = self.publish_ticket({"SPEC_N": "17", "GH_CREATE_URL": f"https://{self.default_repo}/issues/42"})
+        self.assertNotEqual(run.rc, 0, run)
+        self.assertEqual(run.subcommands(), ["issue create"])
+
+    def test_resumed_ticket_checks_saved_issue_before_each_operation(self):
+        for marker in ("--parent", "--add-blocked-by", 'gh issue view "$TICKET_N"'):
+            for url in (f"https://{self.default_repo}/issues/42",
+                        "https://git.example.test/Acme/Other/issues/42", f"{self.issue_prefix}/41"):
+                with self.subTest(marker=marker, url=url):
+                    run = self.run_block("Tickets", marker, {
+                        "TICKET_URL": url, "TICKET_N": "42", "SPEC_N": "17", "BLOCKED_BY": "40"})
+                    self.assertNotEqual(run.rc, 0, run)
+                    self.assertEqual(run.calls, [])
 
     def test_breakdown_comment_lands_on_the_spec(self):
         run = self.run_block("Tickets", "BREAKDOWN", {"SPEC_N": "42"})

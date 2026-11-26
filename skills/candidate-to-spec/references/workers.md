@@ -1,5 +1,23 @@
 # Worker contracts
 
+## Tracker setup
+
+From the recorded repository root, keep any tracker override the caller supplied in `GH_REPO`.
+Otherwise use the checkout's tracker. Set `TRACKER_SH` to this skill's absolute
+`scripts/tracker.sh` path. `SAVED_REPO` is empty for a new run. To resume a run whose setup has only
+`owner/repo`, use that saved value and pass every recorded spec and ticket as alternating URL
+and issue-number arguments to Bash (`bash -s -- <url> <number> …` with a quoted heredoc).
+Pass the legacy identifier as `SAVED_REPO` only, clearing any old worker export to restore
+the caller's tracker context. Stop before any write if that context is unknown or a recorded
+issue lacks its URL or number. The helper reads the selected repository's URL and canonical
+`nameWithOwner` together. Only on exit 0 record its output in `<run>/setup.md` and continue.
+
+```bash
+set -euo pipefail
+source "$TRACKER_SH"
+resolve_tracker "$SAVED_REPO" "$@"
+```
+
 ## Briefs
 
 Every brief follows `orchestrator-mode`'s handoff rules: task with done-when, owned paths, and
@@ -12,19 +30,25 @@ project's tracker and triage-label docs, and the user's instruction quoted word 
 the arguments held one. When `technical-writing` or `unslop` is `absent`, the brief says "write
 plainly" in place of the path, and the run report names the gap.
 
-**Shell.** A brief that runs `gh` gives the repository root and `owner/repo` from
-`<run>/setup.md`. The worker runs every shell block in these references as a quoted heredoc to
-bash: the repository root, `GH_REPO`, and one assignment per variable the block names, then
-the block, copied unchanged apart from a label name the triage-label doc maps to another
-string. Each value is single-quoted (a `'` inside it written `'\''`), and each path is
-absolute, since the block runs from the repository root.
+**Shell.** After tracker setup, every brief that runs `gh` gives the repository root and
+host-qualified `GH_REPO` from `<run>/setup.md`. Run each block, including human retries, with
+this Bash preamble. Assign the block's variables and include each recorded `SPEC_URL` and
+`SPEC_N`, or `TICKET_URL` and `TICKET_N`, for the issues it uses. For other issue URLs
+(including blockers from a breakdown), use `issue_number` to verify each URL before taking its
+number. A mismatch stops the worker. Copy the block unchanged apart from a label name the
+triage-label doc maps to another string. Single-quote each value (write an embedded `'` as
+`'\''`) and use absolute paths.
 
 ```text
 bash <<'EOF'
+set -euo pipefail
 cd '<repository root>' || exit 1
-export GH_REPO='<owner/repo>'
-SPEC_N='<n>'
-BODY='<run>/<slug>/spec-body.md'
+export GH_REPO='<host/owner/repo>'
+source '<candidate-to-spec root>/scripts/tracker.sh'
+<variable assignments>
+require_tracker
+if [[ ${SPEC_URL+x} ]]; then issue_number "$SPEC_URL" "$SPEC_N" >/dev/null; fi
+if [[ ${TICKET_N+x} || ${TICKET_URL+x} ]]; then issue_number "$TICKET_URL" "$TICKET_N" >/dev/null; fi
 <the block>
 EOF
 ```

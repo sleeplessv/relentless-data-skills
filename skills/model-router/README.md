@@ -27,11 +27,9 @@ Or combine it with [`orchestrator-mode`](../orchestrator-mode/) and
 | `standard` | Gemini 4 Hydrogen | GPT-6.1 Terra | Claude Sonnet 5.5 | 1.00 to 2.00 | 5.00 to 10.00 |
 | `light` | Gemini 3.5 Flash-Lite | GPT-6 Luna | Claude Haiku 5.5 | 0.10 to 0.30 | 0.50 to 2.50 |
 
-Full capability notes, prompt-cache discounts, promotional windows, and
-companion endpoints (`Claude Mythos 5.2`, `Gemini 3.8 Flash`, `GPT-Live-1`,
-`GPT-Image-2.6`, `gpt-oss`) live in
-[`references/catalog.md`](references/catalog.md). Harness parameter mappings and
-Herdr cross-vendor launch commands live in
+Full capability notes, prompt-cache discounts, and multi-model pairing stacks
+live in [`references/catalog.md`](references/catalog.md). Harness parameter
+mappings and Herdr cross-vendor launch commands live in
 [`references/dispatch.md`](references/dispatch.md).
 
 ## Install

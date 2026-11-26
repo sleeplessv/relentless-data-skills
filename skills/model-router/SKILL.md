@@ -39,7 +39,7 @@ searches, and transforms to `standard` or `light` helpers. Take the first row
 in the table below that fits each task. Prices are standard uncached USD per 1M
 tokens (`input, output`). Read [references/catalog.md](references/catalog.md)
 when two models tie, when budget caps bind, or when you need context limits,
-cache rates, promotional windows, or specialized models.
+cache rates, or multi-model pairing stacks.
 
 | Task shape | Class | First pick (in, out USD) | Same-class alternatives | Why it wins |
 | --- | --- | --- | --- | --- |
@@ -51,7 +51,7 @@ cache rates, promotional windows, or specialized models.
 | Independent defect or requirements review of a change | `strong` or `apex` | Cross-vendor `strong` or `apex` | Fresh same-vendor `strong` helper | A second model family catches defects same-model review misses. Keep weaker models read-only. |
 | Invoices, forms, CAD drawings, screenshots, GUI automation | `standard` | `GPT-6.1 Terra` (1.00, 5.00) | `Claude Opus 5.5` (4.00, 20.00), `Gemini 4 Neon` (3.00, 15.00) | Matches `Astra` on visual agentic exams at 1.00 input and 5.00 output USD; pick `Opus 5.5` for novel desktop recovery. |
 | Native video, audio, or mixed PDF and media repositories | `standard` or `strong` | `Gemini 4 Hydrogen` (1.50, 7.50) or `Gemini 4 Neon` (3.00, 15.00) | `Gemini 3.5 Flash-Lite` (0.30, 2.50) for bulk media triage | Native audio and video across a unified 1M window with 95 percent cache discounts. |
-| Fast routine code edits, CI helpers, wide worker fan-outs | `standard` | `Gemini 4 Hydrogen` (1.50, 7.50) | `Claude Sonnet 5.5` (2.00, 10.00), `GPT-6.1 Terra` (1.00, 5.00) | Runs routine handoffs 2.5 times faster than Gemini 3.8 Flash with 0.075 USD cached reads. |
+| Fast routine code edits, CI helpers, wide worker fan-outs | `standard` | `Gemini 4 Hydrogen` (1.50, 7.50) | `Claude Sonnet 5.5` (2.00, 10.00), `GPT-6.1 Terra` (1.00, 5.00) | High-speed Gemini 4 execution for worker handoffs, with 0.075 USD cached reads. |
 | File location, log triage, classification, JSON extraction | `light` | `GPT-6 Luna` (0.10, 0.50) or `Claude Haiku 5.5` (0.10, 0.50) | `Gemini 3.5 Flash-Lite` (0.30, 2.50) | Costs 0.10 input and 0.50 output USD; `Luna` fits bulk ETL, `Haiku 5.5` fits live routing and sub-agent skims. |
 
 Done when every task in the plan records one target model, its model class, its dispatch channel, and its fallback model.

@@ -38,7 +38,7 @@ Read the printed `=yes` and `=no` lines:
 
 ### Resolve the newest Codex slug for an OpenAI family
 
-Codex updates point versions (`gpt-6.1-sol` to `gpt-6.2-sol`). Before passing a hardcoded OpenAI slug to `spawn_agent` or `codex -m`, resolve the newest visible slug for `FAMILY` (`astra`, `sol`, `terra`, or `luna`):
+Codex updates point versions within each family. Before passing an OpenAI slug to `spawn_agent` or `codex -m`, resolve the newest visible slug for `FAMILY` (`astra`, `sol`, `terra`, or `luna`):
 
 ```sh
 FAMILY="${FAMILY:-sol}"
@@ -65,4 +65,4 @@ When `DELEGATE` is present, substitute the model-specific program into step 3 of
 
 - **OpenAI via Codex (`Astra`, `Sol`, `Terra`, `Luna`).** Resolve `MODEL` with the catalog block above, then launch `codex --no-daemon -m "$MODEL" -c model_reasoning_effort="$EFFORT" "$BRIEF"` (omit `-c model_reasoning_effort=...` when effort is unset; add `--approve-for-me --add-dir "$(dirname "$RESULT")"` when the helper writes `RESULT` autonomously).
 - **Anthropic via Claude Code (`fable`, `opus`, `sonnet`, `haiku`).** Launch `claude --model "$ALIAS" "$BRIEF" --allowedTools "Bash(hc send $HC_TERMINAL_ID *)" "Edit(/$RESULT)"` (drop `Bash(hc send ...)` and add `--no-notify` on `hc run` when the caller is itself a subagent).
-- **Google via Antigravity (`gemini-4-carbon`, `gemini-4-neon`, `gemini-4-hydrogen`, `gemini-3.5-flash-lite`).** Check `agy --help` for the installed build's model flag; when `--model` is supported, pass `--model "$MODEL"`, otherwise launch `agy --dangerously-skip-permissions --add-dir "$(dirname "$RESULT")" -i "$BRIEF"` to run on its configured Gemini default.
+- **Google via Antigravity (`gemini-4-carbon`, `gemini-4-neon`, `gemini-4-hydrogen`, `gemini-3.5-flash-lite`).** Check `agy models` when unsure which slugs the signed-in account exposes, then launch `agy --model "$MODEL" --effort "$EFFORT" --dangerously-skip-permissions --add-dir "$(dirname "$RESULT")" -i "$BRIEF"` (omit `--effort "$EFFORT"` when effort is unset).

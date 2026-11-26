@@ -217,6 +217,27 @@ class ModelRouterCatalogTests(unittest.TestCase):
             with self.subTest(path=path.name):
                 self.assertNotIn("model tier", path.read_text(encoding="utf-8").lower())
 
+    def test_no_legacy_or_non_callable_models_mentioned(self) -> None:
+        banned_patterns = (
+            r"\bo1\b",
+            r"\bo3\b",
+            r"\bo4\b",
+            r"\bgpt-4",
+            r"\bgpt-5",
+            r"gpt-6\.1-sol",
+            r"3\.8[\s-]flash",
+            r"\bmythos\b",
+            r"prior sonnet",
+            r"earlier sonnet",
+            r"prior haiku",
+            r"older flash",
+        )
+        for path in (SKILL_MD, CATALOG_MD, DISPATCH_MD, SKILL_DIR / "README.md"):
+            content = path.read_text(encoding="utf-8").lower()
+            for pattern in banned_patterns:
+                with self.subTest(path=path.name, pattern=pattern):
+                    self.assertIsNone(re.search(pattern, content))
+
 
 if __name__ == "__main__":
     unittest.main()

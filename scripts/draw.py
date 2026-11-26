@@ -155,7 +155,7 @@ The pool is every ticket that meets all of these:
   three words, plain, unquoted and in that order, start one of its commands
   after nothing but NAME=value words. Text in a here-document's body or in
   quotes names nothing. The draw reads the text before the three words only
-  as blanks; the operators &&, ||, |, |&, ;, & and new line, each after a
+  as blanks; new lines; the operators &&, ||, |, |&, ; and &, each after a
   command; redirections; here-documents whose delimiter is letters, digits
   and _, plain or in quotes, each body skipped to its delimiter line; and
   words made of letters, digits and _ . / , : = @ % + -, of text in single

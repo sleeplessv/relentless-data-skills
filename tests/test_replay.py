@@ -131,8 +131,8 @@ class World:
         for name, text in (("gh", GH), ("claude", CLAUDE)):
             (self.bin / name).write_text(text)
             (self.bin / name).chmod(0o755)
-        # Every git the tests start reads this file as its global settings, and no system settings; the
-        # replay's own git steps read neither. Its default branch name differs from the repo's, as a user's can.
+        # Every git the tests start with git_env() reads this file as its global settings, and no system settings.
+        # The environments of the replay's own git steps and of the session point git at neither. Its default branch name differs from the repo's, as a user's can.
         self.gitconfig = root / "gitconfig"
         self.gitconfig.write_text("[init]\n\tdefaultBranch = trunk\n[user]\n\tname = t\n\temail = t@example.com\n")
         work = root / "work"
@@ -177,9 +177,11 @@ class World:
                    STANDIN_STARTS=str(self.starts), TMPDIR=str(self.root), **PARENT)
         return {**env, **extra}
 
-    def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+    def replay(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
+        """Run the replay in env(**extra), less the variables unset names."""
+        env = {key: value for key, value in self.env(**extra).items() if key not in unset}
         return subprocess.run([sys.executable, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
-                              env=self.env(**extra), text=True, capture_output=True, timeout=120)
+                              env=env, text=True, capture_output=True, timeout=120)
 
     @property
     def clone(self) -> Path:
@@ -209,9 +211,9 @@ class ReplayTest(unittest.TestCase):
         self.world = World(Path(temp.name).resolve())
         self.git = self.world.git
 
-    def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+    def replay(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
         """Run the replay, then hold every session it started to the whole confinement."""
-        result = self.world.replay(*args, **extra)
+        result = self.world.replay(*args, unset=unset, **extra)
         for start in self.world.starts_made():
             self.assert_confined(start)
         return result
@@ -417,6 +419,42 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, "replay: project A is not in both project-labels.json and repos.json.\n")
 
+    def test_the_session_s_git_skips_the_caller_s_default_git_files_and_commits_in_the_clone(self) -> None:
+        # Settings, an ignore rule and an attribute held only in the files git looks up by default under HOME and
+        # XDG_CONFIG_HOME, and in the file the caller's GIT_CONFIG_GLOBAL names. The sandbox hides the home folder,
+        # so a session's git must not look them up, whether the caller sets GIT_CONFIG_GLOBAL or not.
+        home = self.world.home
+        xdg = home / ".config"
+        (xdg / "git").mkdir(parents=True)
+        (xdg / "git" / "ignore").write_text("notes.txt\n")
+        (xdg / "git" / "attributes").write_text("* caller-attribute\n")
+        (xdg / "git" / "config").write_text("[replay]\n\txdg = caller\n")
+        (home / ".gitconfig").write_text("[replay]\n\thome = caller\n")
+        with open(self.world.gitconfig, "a") as config:
+            config.write("[replay]\n\tglobal = caller\n")
+        for unset in (("GIT_CONFIG_GLOBAL",), ()):
+            shutil.rmtree(self.world.clone, ignore_errors=True)
+            shutil.rmtree(self.world.store, ignore_errors=True)
+            result = self.replay("A", "7", XDG_CONFIG_HOME=str(xdg), unset=unset)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            env = self.world.starts_made()[-1]["env"]
+
+            def session_git(*args: str) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(["git", *args], cwd=self.world.clone, env=env, text=True, capture_output=True)
+            for key in ("replay.home", "replay.xdg", "replay.global"):
+                with self.subTest(unset=unset, key=key):
+                    self.assertEqual(session_git("config", "--get", key).returncode, 1)
+            (self.world.clone / "notes.txt").write_text("a note\n")
+            with self.subTest(unset=unset, check="ignore and attributes"):
+                self.assertEqual(session_git("status", "--porcelain", "--", "notes.txt").stdout, "?? notes.txt\n")
+                self.assertEqual(session_git("check-attr", "caller-attribute", "notes.txt").stdout,
+                                 "notes.txt: caller-attribute: unspecified\n")
+            for args in (("status",), ("add", "notes.txt"), ("commit", "-q", "-m", "a note"),
+                         ("fetch", "-q", "origin")):
+                with self.subTest(unset=unset, args=args):
+                    done = session_git(*args)
+                    self.assertEqual((done.returncode, done.stderr), (0, ""))
+
     def test_the_session_is_scanned_into_a_row(self) -> None:
         result = self.replay("A", "7")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -501,6 +539,12 @@ class ReplayTest(unittest.TestCase):
         result = self.replay("--help")
         self.assertEqual(result.returncode, 0)
         self.assertIn("Usage: python3 scripts/replay.py LABEL TICKET", result.stdout)
+        self.assertIn(f"For git, its environment sets GIT_CONFIG_GLOBAL to {os.devnull} and GIT_CONFIG_NOSYSTEM to 1, "
+                      f"sets core.excludesFile and core.attributesFile to {os.devnull} through GIT_CONFIG_COUNT, and "
+                      "carries no other GIT_* variable of the caller's. These settings replace git's default lookups of "
+                      "the system config file, of ~/.gitconfig, and of the config, ignore and attributes files under "
+                      "$XDG_CONFIG_HOME/git/ (~/.config/git/ when XDG_CONFIG_HOME is unset).",
+                      " ".join(result.stdout.split()))
         self.assertFalse(self.world.starts.exists())
 
 

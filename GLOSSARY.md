@@ -74,7 +74,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Multi-ticket run**: in generation two, one run that takes two or more tickets from request to their PRs under a coordinator. _Avoid_: orchestrated run.
 - **Feature run**: a multi-ticket run whose work-set comes from one spec. Its ticket PRs land on an integration branch, and it ends in a feature PR.
 - **Backlog run**: a multi-ticket run over tickets that share no spec. Each ticket PR targets the default branch, and no feature PR follows.
-- **Coordinator**: in generation two, the session that runs a multi-ticket run. It starts an author for each ticket, merges ready ticket PRs into the branch they target and keeps the run record. It changes no tracked file. _Avoid_: orchestrator, chief of staff, ticket owner.
+- **Coordinator**: in generation two, the session that runs a multi-ticket run. It is a **delegator**, and the authors it starts are **executors**. It starts an author for each ticket, merges ready ticket PRs into the branch they target and keeps the run record. It changes no tracked file. _Avoid_: orchestrator, chief of staff, ticket owner.
 - **Ticket PR**: in generation two, the pull request one author opens for one ticket. In a feature run it targets the integration branch; in a backlog run, the default branch.
 - **Run record**: the durable record of one multi-ticket run: its work-set, the state of each ticket, and the decisions that cross tickets, each with its reason and who made it. _Avoid_: decision list (generation one's record, which holds decisions only), handoff file.
 - **Claim**: in generation two, the assignment of a ticket made before an author starts on it. A claimed ticket is off the frontier. _Avoid_: start comment.
@@ -84,7 +84,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Helper**: an agent a **delegator** or an **executor** starts for a small piece of its own task, to keep that work's bulk out of its starter's context. Its result returns to its starter and is not checked on its own, and it starts no other agent.
 - **Fan-out**: handing the independent parts of one non-ticket task to helpers, one part each. The session that fans out has no role name. _Avoid_: orchestrator mode, coordinator (the session that runs a multi-ticket run), delegation (handing a whole task to an **executor** or to a person).
 - **Part**: one piece of a fan-out, which depends on no other piece.
-- **Brief**: in generation two, the text a helper is given when it starts. A script writes it in a fixed form, and no agent adds to it. _Avoid_: handoff, prompt; local brief (a repo's own rules are run rules).
+- **Brief**: in generation two, the text an **executor** or a **helper** is given when it starts. A script writes it in a fixed form, and no agent adds to it. _Avoid_: handoff, prompt; local brief (a repo's own rules are run rules).
 - **Author's report**: the fixed final message of an author a coordinator started: its PR, its final commit, its state, and each decision that affects another ticket. _Avoid_: handoff, summary.
 - **Upstream dependency**: a skill this repo does not own or version that a generation-two path reads during a run, or whose output it works from. _Avoid_: fixed neighbour, companion skill.
 - **Upstream contract**: the record of what generation two takes from each upstream dependency, and of what it supplies where that skill expects a person to answer. _Avoid_: pin, lock file.

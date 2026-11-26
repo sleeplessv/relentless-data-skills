@@ -118,7 +118,13 @@ is **Fix**, unless one of two exceptions applies. Take the first that does:
 | **Decline** | It does not hold, or its fix costs more than the problem it removes. Give the reason in one line |
 | **Ask** | The fix is the user's call: it changes behaviour they chose, or reaches outside the reviewed change |
 
-Done when every numbered finding in `RESULT` has one disposition.
+Then close the helper as `herdr-delegate`'s clean-up step says, before
+step 5: you are done with the review, and a re-check is a fresh launch. Keep
+it only when an **Ask** may send a question back to Astra. A caller that takes
+only the review closes here too.
+
+Done when every numbered finding in `RESULT` has one disposition and the
+helper is closed, or kept for an **Ask**.
 
 ## 5. Fix and prove
 
@@ -138,5 +144,5 @@ Tell the user, in this order:
 3. Each **Ask** as a question the user can answer in a word.
 4. The checks you ran and how they ended.
 
-Then close the helper as `herdr-delegate`'s clean-up step says. Keep it
-open when an **Ask** may send a question back to Astra.
+A helper kept for an **Ask** closes once the Ask is answered or dropped, as
+`herdr-delegate`'s clean-up step says.

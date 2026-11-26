@@ -16,6 +16,28 @@ by the session id of the last line that carries one, since a log's own lines
 come after the lines it copied. A log with no session id at all is keyed by the
 file's name.
 
+The row's skills list each skill the logs show loaded once, never with a
+plugin prefix. A skill that a successful Skill call loaded takes the name the
+call gives, less everything up to its last colon. The line that gives that
+load's folder names the call in sourceToolUseID, takes the call's name and adds
+no second entry. Any other load of that folder, as a typed one, takes the name
+of the call the first such line names. A skill that no such call loaded takes
+its folder's last name. A call that failed, has no result or gives no name adds
+no entry. So two skills of one name from two plugins are one entry: a typed
+skill leaves no prefix to recover.
+
+The skills are in the order of first load by time, across the session's log
+and its helpers' logs. A time with no zone is read as UTC. A line with no
+timestamp, or a null one, takes the time of the line before it, or comes first
+when there is none, and loads at one time keep the order of the lines.
+
+A line whose sessionId is text other than the row's session is a copied line,
+as the lines a resumed session copied from an earlier one are. Copied lines, in
+the session's log or a helper's, count in every other column like the session's
+own. copied_tokens is the part of total_tokens from the responses that only
+copied lines carry: 0 when there are none, blank when total_tokens is blank. A
+line carries a response when it holds part of it, with or without token counts.
+
 The row replaces any earlier row for the same session in scan-rows.jsonl in the
 machine directory: $DELIVER_STATE_DIR, default ~/.local/state/deliver. The scan
 makes that directory 0700, and scan-rows.jsonl and scan-rows.lock 0600. A line
@@ -41,7 +63,7 @@ import os
 import stat
 import sys
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 KINDS = {  # row column: usage field in the log
@@ -160,23 +182,46 @@ def tool_calls(lines: list[dict]) -> dict[str, dict]:
             if isinstance(part, dict) and part.get("type") == "tool_use"}
 
 
+def when(line: dict, before: float) -> float:
+    """The line's time in seconds, to order loads by; `before` when it has no time that reads."""
+    try:
+        moment = datetime.fromisoformat(line.get("timestamp").replace("Z", "+00:00"))
+    except (AttributeError, TypeError, ValueError):
+        return before
+    return (moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)).timestamp()
+
+
 def skills(lines: list[dict]) -> list[str]:
-    """The skills the lines show loaded, in the order they were first loaded."""
+    """The skills the lines show loaded, named and ordered as the module's docstring says."""
     calls = tool_calls(lines)
-    found: list[str] = []
+    loads: list[tuple[float, Path | None, str | None]] = []  # (time, None, call id), or (time, folder, its call's id)
+    moment = float("-inf")
     for line in lines:
+        moment = when(line, moment)
         if line.get("type") != "user":
             continue
-        names = [Path(text[len(SKILL_LINE):].splitlines()[0].strip()).name
-                 for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
-        # A bundled skill has no folder, so no such line: its successful Skill call names it.
         content = (line.get("message") or {}).get("content")
         for part in content if isinstance(content, list) else []:
             call = calls.get(part.get("tool_use_id")) if isinstance(part, dict) else None
             if call and call.get("name") == "Skill" and part.get("type") == "tool_result" and not part.get("is_error"):
-                names.append(str((call.get("input") or {}).get("skill", "")).split(":")[-1])
-        found.extend(name for name in dict.fromkeys(names) if name and name not in found)
-    return found
+                loads.append((moment, None, part["tool_use_id"]))
+        source = line.get("sourceToolUseID") if isinstance(line.get("sourceToolUseID"), str) else None
+        loads += [(moment, Path(text[len(SKILL_LINE):].splitlines()[0].strip()), source)
+                  for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
+
+    def call_name(call_id: str | None) -> str:
+        given = (calls.get(call_id) or {}).get("input")
+        skill = given.get("skill") if isinstance(given, dict) else None
+        return skill.split(":")[-1] if isinstance(skill, str) else ""
+    loads.sort(key=lambda load: load[0])  # stable; the module's docstring gives the order
+    call_names = {call_id: call_name(call_id) for _, folder, call_id in loads if folder is None}
+    first_call_names: dict[Path, str] = {}
+    for _, folder, call_id in loads:
+        if folder is not None and call_names.get(call_id):
+            first_call_names.setdefault(folder, call_names[call_id])
+    names = [call_names.get(call_id) or ("" if folder is None else first_call_names.get(folder, folder.name))
+             for _, folder, call_id in loads]
+    return list(dict.fromkeys(name for name in names if name))
 
 
 def helper_logs(log: Path) -> list[Path]:
@@ -221,7 +266,7 @@ def read_meta(log: Path) -> dict:
 
 def scan(session: str, log: Path) -> dict:
     row: dict = {"session": session}
-    blank = {**blank_tokens(), "active_minutes": None, "auto_compactions": None,
+    blank = {**blank_tokens(), "copied_tokens": None, "active_minutes": None, "auto_compactions": None,
              "typed_compactions": None, "model": None, "skills": None, "helpers": None}
     if not log.is_file():
         return {**row, **blank}
@@ -265,7 +310,14 @@ def scan(session: str, log: Path) -> dict:
 
     compactions = {line.get("uuid"): (line.get("compactMetadata") or {}).get("trigger")
                    for line in every if line.get("subtype") == "compact_boundary"}
-    return {**row, **total, "active_minutes": active_minutes(times),
+    copied = [isinstance(line.get("sessionId"), str) and line["sessionId"] != row["session"] for line in every]
+    # The module's docstring says which lines carry a response. A key that is a list or an object names none.
+    carried = {key for line, mark in zip(every, copied) if not mark and line.get("type") == "assistant"
+               for key in [(line.get("message") or {}).get("id") or line.get("uuid")]
+               if not isinstance(key, (list, dict))}
+    only_copied = usages([line for line, mark in zip(every, copied) if mark]).keys() - carried
+    return {**row, **total, "copied_tokens": sum(sum(final[key].values()) for key in only_copied),
+            "active_minutes": active_minutes(times),
             "auto_compactions": sum(t == "auto" for t in compactions.values()),
             "typed_compactions": sum(t == "manual" for t in compactions.values()),
             "model": model(main), "skills": skills(every), "helpers": listed}

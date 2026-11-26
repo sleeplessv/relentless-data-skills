@@ -549,8 +549,8 @@ class World:
     def start(self, *args: str) -> subprocess.Popen[str]:
         """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited.
 
-        A job a script starts with `&` has SIGINT ignored, and a caller may block it; either way the draw would
-        not stop on the interrupt a test sends it."""
+        A job a script starts with `&` with job control off has SIGINT ignored, and a caller may block it;
+        either way the draw would not stop on the interrupt a test sends it."""
         program, env = self.command(args, None, "")
         return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
                                 stderr=subprocess.PIPE, preexec_fn=self.default_sigint)
@@ -1483,7 +1483,8 @@ class TestDraw(unittest.TestCase):
     def draw_signalled_in_a_check(self, number: signal.Signals) -> World:
         """Signal a draw whose check blocks until its private folder is removed, so only the signal ends it, and
         assert the check is gone once the draw has ended. The folder's removal at cleanup releases a check the
-        draw left running. Every wait is a poll with a bound that only a hung run reaches."""
+        draw left running. The waits: a poll for the check's pid, `communicate(timeout=60)` for the draw's exit, then a
+        poll for the check's exit, each ending after 60 seconds; the cleanup's `communicate` follows the kill."""
         marks = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, marks)
         folder = shlex.quote(str(marks))
@@ -1511,7 +1512,7 @@ class TestDraw(unittest.TestCase):
         return True
 
     def wait_for(self, ready: Callable[[], bool]) -> bool:
-        """Poll `ready` until it holds; False after a minute, which only a hung run reaches."""
+        """Poll `ready` until it holds; False once a minute has passed."""
         deadline = time.monotonic() + 60
         while not ready():
             if time.monotonic() > deadline:

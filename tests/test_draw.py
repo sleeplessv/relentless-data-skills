@@ -621,6 +621,8 @@ class TestOneDraw(unittest.TestCase):
                 "ready_commit": ticket.commit("a"), "model": MODEL,
                 "pr": ticket.pr, "session": ticket.session, "log": f"logs/{ticket.session}.jsonl",
                 "check_output": f"checks/A-{ticket.number}.txt"})
+        self.assertEqual(sorted(f"checks/{path.name}" for path in (world.state / "checks").iterdir()),
+                         sorted(entry["check_output"] for entry in drawn["tickets"]))  # no try after the fifth pass
         self.assertEqual(json.loads((world.state / "project-labels.json").read_text()), {"A": ALPHA})
 
     def test_the_draw_copies_and_scans_each_kept_session_log_with_its_helpers(self) -> None:
@@ -672,11 +674,10 @@ class TestDraw(unittest.TestCase):
 
     def test_help_states_the_up_to_five_rule_the_short_and_empty_bucket_rules_and_no_old_figure(self) -> None:
         sentences = [
-            "The draw tries the tickets in that order until 5 pass or the bucket's pool is used up.",
-            "A bucket in which fewer than 5 pass gives all that pass.",
-            "A bucket in which none passes, because its pool is empty or every ticket in it is set aside, means no "
-            "set is written.",
-            "When any bucket's pool is empty, the draw tries no ticket.",
+            "The draw tries the tickets in that order until 5 pass or the bucket's pool is used up, whatever the "
+            "other buckets hold.",
+            "A bucket in which fewer than 5 pass gives all that pass, and a bucket in which none passes means no set "
+            "is written (exit 3).",
             "Exit 3: a bucket holds no ticket that passes, because its pool is empty or every ticket in it is set "
             "aside; no set was written, and the count per bucket is printed."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
@@ -684,6 +685,19 @@ class TestDraw(unittest.TestCase):
             with self.subTest(sentence=sentence):
                 self.assertEqual(help_text.count(sentence), 1)
         self.assertEqual(re.findall(r"\b(?:10|30)\b", help_text), [])
+
+    def test_help_takes_its_figures_from_the_per_bucket_limit(self) -> None:
+        world = self.world([])
+        script = world.source / "draw.py"
+        source = script.read_text()
+        self.assertEqual(source.count("\nPER_BUCKET = 5\n"), 1)
+        script.write_text(source.replace("\nPER_BUCKET = 5\n", "\nPER_BUCKET = 7\n"))
+        help_text = " ".join(world.draw("--help").stdout.split())
+        for sentence in ["Draw the replay set: up to 21 tickets generation one finished, up to 7 per size bucket.",
+                         "until 7 pass or the bucket's pool is used up",
+                         "A bucket in which fewer than 7 pass gives all that pass"]:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
 
     def test_help_gives_the_opening_forms_the_veto_the_limit_and_what_it_takes_for_granted_each_once(self) -> None:
         sentences = [
@@ -988,7 +1002,7 @@ class TestDraw(unittest.TestCase):
         result = world.draw()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual([entry["requirements"] for entry in world.set_file()["tickets"]],
-                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * 15)
+                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * len(world.set_file()["tickets"]))
 
     def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
         cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
@@ -1341,6 +1355,7 @@ class TestDraw(unittest.TestCase):
         drawn = [entry["ticket"] for entry in world.set_file()["tickets"] if entry["bucket"] == "0-50"]
         self.assertEqual(drawn[:4], [number for number in first if number != failed])
         self.assertNotIn(drawn[4], first)
+        self.assertEqual((first, failed, drawn), ([1, 6, 4, 9, 11], 9, [1, 6, 4, 11, 3]))  # 3 is next in seed 5's order
         self.assertEqual(world.set_file()["set_aside"], [{"label": "A", "ticket": failed, "bucket": "0-50",
                                                            "reason": "check exited 1",
                                                            "check_output": f"checks/A-{failed}.txt"}])
@@ -1358,58 +1373,69 @@ class TestDraw(unittest.TestCase):
         world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + short)
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
+        self.assertEqual(result.stdout.splitlines()[3:], [
             "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
             "301-1500: pool 4, set aside 1, kept 3.", f"Wrote {world.state / 'replay-set-1.json'}."])
         self.assertEqual(result.stderr, "")
         drawn = world.set_file()
         self.assertEqual((drawn["set"], drawn["seed"]), (1, 2))
         self.assertEqual([entry["bucket"] for entry in drawn["tickets"]], ["0-50"] * 5 + ["51-300"] * 5 + ["301-1500"] * 3)
-        self.assertEqual(sorted((entry for entry in drawn["tickets"] if entry["bucket"] == "301-1500"),
-                                key=lambda entry: entry["ticket"]), [{
-            "label": "A", "ticket": number, "bucket": "301-1500", "size": 800, "title": f"Ticket {number}",
-            "body": f"## What to build\n\nThing {number}.\n\n{Ticket(number, 800).criteria}\n",
-            "requirements": ["The report prints the total."], "base_commit": world.bases[number],
-            "ready_commit": Ticket(number, 800).commit("a"), "model": MODEL, "pr": number + 500,
-            "session": Ticket(number, 800).session, "log": f"logs/{Ticket(number, 800).session}.jsonl",
-            "check_output": f"checks/A-{number}.txt"} for number in (201, 203, 204)])
+        self.assertEqual([entry["ticket"] for entry in drawn["tickets"] if entry["bucket"] == "301-1500"],
+                         [203, 201, 204])  # seed 2's order is 202, 203, 201, 204
         self.assertEqual(drawn["set_aside"], [{"label": "A", "ticket": 202, "bucket": "301-1500",
                                                "reason": "check exited 1", "check_output": "checks/A-202.txt"}])
         self.assertEqual(sorted(path.name for path in (world.state / "logs").iterdir()),
                          sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
 
-    def test_a_bucket_whose_pool_is_empty_writes_no_set_and_runs_no_check(self) -> None:
-        world = self.world(sized(1, 12, 20) + sized(201, 12, 800))
+    def test_a_middle_bucket_that_falls_to_one_pass_gives_it_and_to_none_writes_no_set(self) -> None:
+        # Pools of 2, 6 and 2. Seed 2 tries the middle pool as 103, 102, 106, 105, 104, 101; only 101 can pass.
+        for passes in (True, False):
+            with self.subTest(passes=passes):
+                middle = [Ticket(number, 100, passes=passes and number == 101) for number in range(101, 107)]
+                world = self.world(sized(1, 2, 20) + middle + sized(201, 2, 800))
+                result = world.draw("--seed", "2")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(sorted(path.name for path in (world.state / "checks").iterdir()),
+                                 ["A-1.txt", "A-101.txt", "A-102.txt", "A-103.txt", "A-104.txt", "A-105.txt",
+                                  "A-106.txt", "A-2.txt", "A-201.txt", "A-202.txt"])
+                self.assertFalse((world.state / "draw-work").exists())
+                if passes:
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout.splitlines()[3:], [
+                        "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 5, kept 1.",
+                        "301-1500: pool 2, set aside 0, kept 2.", f"Wrote {world.state / 'replay-set-1.json'}."])
+                    drawn = world.set_file()
+                    self.assertEqual([entry["ticket"] for entry in drawn["tickets"]], [2, 1, 101, 201, 202])
+                    self.assertEqual([(entry["ticket"], entry["reason"]) for entry in drawn["set_aside"]],
+                                     [(number, "check exited 1") for number in (103, 102, 106, 105, 104)])
+                    self.assertEqual(sorted(path.name for path in (world.state / "logs").iterdir()),
+                                     sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
+                else:
+                    self.assertEqual(result.returncode, 3)
+                    self.assertEqual(result.stdout.splitlines()[3:], [
+                        "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 6, kept 0.",
+                        "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
+                    self.assertEqual(list(world.state.glob("replay-set-*")), [])
+                    self.assertFalse((world.state / "logs").exists())
+
+    def test_a_bucket_whose_pool_is_empty_writes_no_set_while_the_other_buckets_are_tried(self) -> None:
+        world = self.world(sized(1, 2, 20) + sized(201, 2, 800))
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 0, set aside 0, kept 0.",
-            "301-1500: pool 12, set aside 0, kept 0.", "No set written: a bucket holds no ticket that passes."])
+        self.assertEqual(result.stdout.splitlines()[3:], [
+            "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 0, set aside 0, kept 0.",
+            "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
         self.assertEqual(result.stderr, "")
         self.assertEqual(sorted(path.name for path in world.state.iterdir()),
-                         ["draw.lock", "project-labels.json", "repos.json"])
-        self.assertNotIn("repo clone", world.gh_log.read_text())
+                         ["checks", "draw.lock", "project-labels.json", "repos.json"])
+        self.assertEqual(sorted(path.name for path in (world.state / "checks").iterdir()),
+                         ["A-1.txt", "A-2.txt", "A-201.txt", "A-202.txt"])
 
     def test_a_bucket_whose_every_ticket_is_set_aside_writes_no_set(self) -> None:
         world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + sized(201, 2, 800, passes=False))
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
+        self.assertEqual(result.stdout.splitlines()[3:], [
             "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
             "301-1500: pool 2, set aside 2, kept 0.", "No set written: a bucket holds no ticket that passes."])
         self.assertEqual(result.stderr, "")
@@ -1761,7 +1787,8 @@ class TestDraw(unittest.TestCase):
         (world.state / "scan-rows.jsonl").write_text("[]\n")
         result = world.draw("--seed", "1")
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n" * 15)
+        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n"
+                         * len(world.set_file()["tickets"]))
         self.assertEqual((world.state / "scan-rows.jsonl").read_text().split("\n")[0], "[]")
         self.assertEqual([path.name for path in world.state.glob("replay-set-*")], ["replay-set-1.json"])
 

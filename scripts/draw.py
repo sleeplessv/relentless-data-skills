@@ -212,10 +212,9 @@ A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
 Each bucket's pool is sorted by repo and ticket number, then shuffled by
 random.Random seeded with "<seed>:<bucket>". The draw tries the tickets in that
-order until {PER_BUCKET} pass or the bucket's pool is used up. A bucket in which
-fewer than {PER_BUCKET} pass gives all that pass. A bucket in which none passes,
-because its pool is empty or every ticket in it is set aside, means no set is
-written. When any bucket's pool is empty, the draw tries no ticket. A try runs
+order until {PER_BUCKET} pass or the bucket's pool is used up, whatever the other
+buckets hold. A bucket in which fewer than {PER_BUCKET} pass gives all that pass, and
+a bucket in which none passes means no set is written (exit {EXIT_SHORT}). A try runs
 the repo's setup command, where it has one, and then its check command, each
 with sh, in a clean checkout of the commit before the merged PR: the first
 parent of the PR's merge commit. A step that
@@ -1086,23 +1085,22 @@ class Draw:
             buckets = self.pool(repos, self.labels(repos))
             kept: list[dict] = []
             aside: list[dict] = []
-            if all(buckets.values()):  # an empty pool means no set, so no ticket is tried
+            shutil.rmtree(self.work, ignore_errors=True)
+            self.work.mkdir()
+            try:
+                for name, found in buckets.items():
+                    order = list(found)
+                    random.Random(f"{self.seed}:{name}").shuffle(order)
+                    for candidate in order:
+                        if sum(entry["bucket"] == name for entry in kept) == PER_BUCKET:
+                            break
+                        reason = self.try_ticket(candidate)
+                        if reason:
+                            aside.append({**candidate, "reason": reason})
+                        else:
+                            kept.append(candidate)
+            finally:
                 shutil.rmtree(self.work, ignore_errors=True)
-                self.work.mkdir()
-                try:
-                    for name, found in buckets.items():
-                        order = list(found)
-                        random.Random(f"{self.seed}:{name}").shuffle(order)
-                        for candidate in order:
-                            if sum(entry["bucket"] == name for entry in kept) == PER_BUCKET:
-                                break
-                            reason = self.try_ticket(candidate)
-                            if reason:
-                                aside.append({**candidate, "reason": reason})
-                            else:
-                                kept.append(candidate)
-                finally:
-                    shutil.rmtree(self.work, ignore_errors=True)
             for name, found in buckets.items():
                 print(f"{name}: pool {len(found)}, set aside {sum(entry['bucket'] == name for entry in aside)}, "
                       f"kept {sum(entry['bucket'] == name for entry in kept)}.")

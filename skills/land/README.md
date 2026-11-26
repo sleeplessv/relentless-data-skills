@@ -9,8 +9,8 @@ The skill sets `disable-model-invocation: true`, so it never starts from
 conversation. Run it as `/land`: it merges and cleans up without asking
 once CI is green. Add "don't merge" or "ask first" to stop or ask before the
 merge. On a clean tree it resumes from where the branch stands: an open
-PR goes to the CI wait and merge, commits that are not pushed yet go to the push
-and PR. On the default branch with unpushed commits it stops and names them.
+PR at local HEAD goes to the CI wait and merge. A different head or an open
+PR targeting another base stops the run. Without a PR, local commits go to the push and PR. On the default branch with unpushed commits it stops and names them.
 
 ## What it does
 
@@ -44,13 +44,13 @@ The skill runs these steps in order:
    workflows, it reads the checks up to five more times, then asks you before
    it merges. It merges without checks only when the repo has no PR CI, and the
    final report says so.
-6. **Merges.** It runs `gh pr merge <number> --squash --delete-branch`. It does not
+6. **Merges.** It requests a squash merge pinned to the checked commit. It does not
    ask first unless you said "don't merge" or "ask first". If you decline, it
    leaves the PR open and deletes nothing.
 7. **Confirms the outcome.** It reads the PR state from GitHub and ignores the
    exit code of `gh`. For a merged PR, it checks out and pulls the default branch, then
-   confirms that the squash commit is on the local default branch and that both branches
-   are gone. If branch policy or required checks refuse the merge, it retries
+   confirms that the squash commit is on the local default branch. It deletes matching
+   branch tips only when the source branch is free across worktrees. If branch policy or required checks refuse the merge, it retries
    with `--auto`. If the repo uses a merge queue, it reports the PR as queued.
 
 The final report starts with the outcome: merged, merged with incomplete

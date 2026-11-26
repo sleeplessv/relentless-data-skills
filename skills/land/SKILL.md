@@ -22,7 +22,7 @@ git log --oneline "origin/$default_branch..HEAD"
 if [ "$(git branch --show-current)" = "$default_branch" ]; then git merge-base --is-ancestor HEAD "origin/$default_branch"; fi
 ```
 
-Stop on any failure. Ancestry exit 1 on the default branch means it has local-only commits. Report the commits listed above and leave the branch and working tree intact. On a clean feature branch, resume at Step 5 for an open PR found by Step 2, or at the Step 3 push for commits ahead with no PR. A clean tree with neither has nothing to ship.
+Stop on any failure. Ancestry exit 1 on the default branch means it has local-only commits. Report the commits listed above and leave the branch and working tree intact. On a clean feature branch, run the Step 2 lookup first. Resume an exact open PR at Step 5 only if its SHA equals local HEAD. If they differ, report both tips and stop before pushing, merging or deleting. With commits ahead and no PR, resume at the Step 3 push. A clean tree with neither has nothing to ship.
 
 **Run all `gh` and `git fetch`/`pull`/`push`/`ls-remote` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
 
@@ -36,14 +36,14 @@ Form the commit groups **before** any branching (the `smart-git-commit` grouping
 
 ## Step 2: Pick the branch
 
-On the default branch, create a fresh branch. On a feature branch, set `branch` to the nonempty output of `git branch --show-current`. Check ancestry and PRs against the fetched default:
+On the default branch, create a fresh branch. On a feature branch, set `branch` to the nonempty output of `git branch --show-current`. Set `land_dir` to the directory containing this SKILL.md. Check ancestry and look up PRs across all bases:
 
 ```bash
 git merge-base --is-ancestor HEAD "origin/$default_branch" && echo ancestor-merged
-gh api --hostname "$host" -X GET "repos/$repo/pulls" --paginate -f state=all -f head="${repo%/*}:$branch" -f base="$default_branch" --jq 'map({number, source: .head.repo.full_name, head: .head.ref, base: .base.ref, state, merged_at})'
+bash "$land_dir/scripts/lookup-pr.sh" "$host" "$repo" "$branch" "$default_branch"
 ```
 
-Ancestry exit 0 means merged, 1 means check PR history, and any other exit stops. Require a successful, complete API read of every page. Use only rows matching `repo`, `branch`, and `default_branch` exactly. An open row supplies the PR number and takes precedence. A `merged_at` timestamp records a merge. Stop if a lookup fails or its result is ambiguous.
+Ancestry exit 0 means merged, 1 means check PR history, and any other exit stops. The lookup prints `open <number> <sha>`, `merged`, or `none`. Stop on nonzero exit, including an open PR from this source targeting another base. For clean resumption, pin `number` and `sha` from the open row before checking CI.
 
 | Current state | Action |
 |---|---|
@@ -68,7 +68,9 @@ Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), st
 
 ## Step 4: Open the PR
 
-Reuse the matching open PR from Step 2 if its head is still the current branch. Otherwise write the body to a file and run `gh pr create --base "$default_branch" --head <current-branch> --title "<conventional subject>" --body-file <body-file>`.
+After a push, repeat the Step 2 lookup for the pushed branch. Reuse the exact open PR. Otherwise write the body to a file and run `gh pr create --base "$default_branch" --head <current-branch> --title "<conventional subject>" --body-file <body-file>`.
+
+After creation or reuse, require the lookup to return the intended open PR and the SHA from `git rev-parse HEAD`. Pin its `number`, `branch`, and `sha` for Step 5. Stop if they differ.
 
 - The title is the conventional-commit subject of the dominant change (e.g. `feat: add land skill`). Squash merge makes the title the commit on the default branch, so it must itself be a valid conventional commit.
 - Load the **`pr`** skill with the Skill tool (`Skill: pr`) and write the body to its template: Summary, Evidence, Merge Danger. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.
@@ -96,7 +98,6 @@ Route by the JSON (or the "no checks reported" message), never by either command
 - No checks reported → CI may not have registered yet. Check whether the PR's head tree defines PR-triggered GitHub Actions workflows:
 
   ```bash
-  sha=$(gh pr view <number> --json headRefOid -q .headRefOid)
   git grep -lwE 'pull_request(_target)?' "$sha" -- .github/workflows   # any hit = PR-triggered CI exists
   gh run list --commit "$sha" --json name,status                      # runs queued or started for that commit
   ```
@@ -109,39 +110,36 @@ Then, with the gate green:
 - Merge without asking; the checks line goes in the close-out.
 - Only when the user said "don't merge" or "ask first": stop, or ask "Merge and clean up (squash-merge the PR, delete the local and remote branch)?" with the checks line. On no, leave the PR open, print its URL, and stop. Delete nothing.
 
-Merge, then, once the merge has returned, read the PR's end state whatever the merge's exit code. The state routes this step: a merge that landed exits 1 when local branch deletion fails, and a merge-queue enqueue exits 0 with the PR still open.
+Run the guarded merge below. Stop on a local or remote head mismatch. After a merge attempt, read the PR state even if GitHub refused the merge.
 
 ```bash
-gh pr merge <number> --squash --delete-branch
-gh pr view <number> --json state,mergeCommit,autoMergeRequest,headRefName
+bash "$land_dir/scripts/merge-head.sh" "$host" "$repo" "$number" "$branch" "$default_branch" "$sha"
+gh pr view <number> --json state,mergeCommit,autoMergeRequest,headRefName,headRefOid,baseRefName
 ```
 
 | End state | Action |
 |---|---|
 | `MERGED` | Finish on the default branch (below) |
 | `OPEN`, `autoMergeRequest` set | Auto-merge armed; it lands once the PR's requirements are met. Stop |
-| `OPEN`, the plain merge refused as not mergeable (branch policy or required checks; `gh`'s error suggests `--auto`) | Retry with `gh pr merge <number> --squash --delete-branch --auto`, re-read the state, and route it again. A refused `--auto` falls to the last row |
+| `OPEN`, the plain merge refused as not mergeable (branch policy or required checks; `gh`'s error suggests `--auto`) | Repeat the guarded merge command above with `--auto` appended, then re-read the state and route it again. A refused `--auto` falls to the last row |
 | `OPEN`, no `autoMergeRequest`, the merge command exited 0 | Queued (a merge queue). Stop; run no pull |
 | Anything else | Report the actual state and `gh`'s message. Stop |
 
-On every row that stops, nothing has been deleted: both branches still exist and the session stays on the PR's head branch (`headRefName`).
-
-**Finish on the default branch** (`MERGED` only). `gh` may leave you on another branch (it does when local cleanup fails), so check out the default branch and pull either way; this is part of the flow, not recovery. Then confirm, with `<branch>` from `headRefName`:
+**Finish on the default branch** (`MERGED` only). Require the returned head name, head OID and base to match `branch`, `sha` and `default_branch`. Set `merge_commit` from `mergeCommit.oid`. Run in order and stop on failure:
 
 ```bash
 git checkout "$default_branch" && git pull --ff-only origin "$default_branch"
-git merge-base --is-ancestor <mergeCommit.oid> "$default_branch"   # exit 0 = merge commit on the local default branch
-git ls-remote --exit-code --heads origin <branch>      # exit 2 = remote branch gone
-git rev-parse --verify --quiet refs/heads/<branch>     # non-zero = local branch gone
+bash "$land_dir/scripts/cleanup.sh" "$branch" "$sha" "$merge_commit" "$default_branch"
+git ls-remote --exit-code --heads origin "refs/heads/$branch"   # exit 2 = remote branch gone
+git rev-parse --verify --quiet "refs/heads/$branch"             # exit 1 = local branch gone
 ```
 
-All three confirm → **merged**. Any miss → **merged, but cleanup incomplete**; say which check missed.
+Cleanup requires the squash commit on the default branch, the expected tips and a free source branch across worktrees. A moved or occupied branch, failed guard or missing confirmation means **merged, but cleanup incomplete**. Report which check stopped cleanup.
 
 **Close-out:** lead with the confirmed outcome in one sentence (merged; merged, but cleanup incomplete; auto-merge armed; queued; stopped on failing checks; PR left open; or the actual state) with the PR URL and checks line. Name every branch that outlives the run. Anything worth flagging goes after it.
 
 ## Safety rules
 
 - The smart-git-commit rules apply: no force-push, no skipped hooks (`--no-verify`), no likely secrets (`.env`, credentials, tokens) in a commit.
-- Delete branches only through `--delete-branch` in the Step 5 merge, which acts only once the PR has merged; an unmerged branch may hold the only copy of the work.
 - Merge only once the Step 5 CI gate is green; running land is the user's go-ahead for the squash-merge, the one irreversible step, unless they said "don't merge" or "ask first".
 - If a step fails mid-flow (rejected push, conflict on `git checkout` or `git pull`), stop and report rather than improvising recovery; a half-recovered state is harder to fix than a stopped one. A non-zero exit from `gh pr checks` or `gh pr merge` is not such a failure: Step 5 routes by the state it reads, and a failing check stops the flow through the CI gate.

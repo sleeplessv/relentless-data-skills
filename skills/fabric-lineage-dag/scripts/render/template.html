@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; base-uri 'none'">
+  <title>/*__TITLE__*/</title>
+  <style>/*__CSS__*/</style>
+</head>
+<body>
+  <div id="app">
+    <header class="topbar">
+      <h1>/*__TITLE__*/ <small>/*__SUBTITLE__*/</small></h1>
+      <label for="search">Search</label>
+      <div class="search">
+        <input type="search" id="search" placeholder="Name, ID or path" autocomplete="off" aria-controls="searchResults">
+        <div id="searchResults" class="search-results" role="listbox" aria-label="Matching nodes"></div>
+      </div>
+      <nav id="crumbs" class="crumbs" aria-label="Graph view"></nav>
+      <span class="spacer"></span>
+      <button id="detailsToggle" class="btn" aria-controls="details" aria-expanded="true">Hide details</button>
+      <button id="themeBtn" class="btn">Switch theme</button>
+    </header>
+
+    <div class="filters" role="group" aria-label="Graph filters">
+      <div id="filterLayers" class="group"><span class="label">Layers</span></div>
+      <div id="filterCountries" class="group"><span class="label">Countries</span></div>
+      <div id="partnerWrap" class="multi">
+        <button id="partnerBtn" class="btn small" aria-expanded="false" aria-controls="partnerMenu">Partners</button>
+        <div id="partnerMenu" class="menu">
+          <button id="partnerAll" class="btn small">Select all</button>
+          <button id="partnerNone" class="btn small">Clear all</button>
+        </div>
+      </div>
+      <div class="group">
+        <input type="checkbox" id="tForks"><label for="tForks">Show forks</label>
+        <input type="checkbox" id="tNonLive"><label for="tNonLive">Show non-live</label>
+        <input type="checkbox" id="tOrch"><label for="tOrch">Show notebooks and pipelines</label>
+      </div>
+      <div id="filterKinds" class="group"><span class="label">Edge kinds</span></div>
+    </div>
+
+    <!--__EXPLAINER__-->
+    <details id="coverage" class="panel">
+      <summary>Coverage and gaps</summary>
+      <div class="body">
+        <div id="covStats"></div>
+        <div class="cov">
+          <div><h3>Parsed</h3><ul id="covParsed"></ul></div>
+          <div><h3>Gaps</h3><ul id="covGaps"></ul></div>
+        </div>
+      </div>
+    </details>
+
+    <main class="main">
+      <div id="canvas" class="canvas">
+        <svg id="graph" class="graph" aria-label="Lineage graph">
+          <defs>
+            <marker id="arrow" viewBox="0 0 8 8" refX="8" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+              <path d="M0 0 L8 4 L0 8 Z" fill="var(--edge)"/>
+            </marker>
+            <pattern id="hatch" width="5" height="5" patternUnits="userSpaceOnUse">
+              <rect width="5" height="5" fill="var(--c-other)"/>
+              <path d="M0 5 L5 0" stroke="var(--node-bg)"/>
+            </pattern>
+          </defs>
+          <g class="root"><g class="edges"></g><g class="nodes"></g></g>
+        </svg>
+        <div class="toolbar">
+          <button id="fitBtn" class="btn">Fit graph</button>
+          <button id="zoomSel" class="btn">Zoom to selection</button>
+          <button id="collapseAll" class="btn">Collapse groups</button>
+          <span id="depthWrap">
+            <label for="depth">Depth</label>
+            <select id="depth">
+              <option>1</option><option>2</option><option>3</option><option>5</option>
+              <option value="inf" selected>All</option>
+            </select>
+          </span>
+          <span id="stats" class="stats"></span>
+        </div>
+        <div class="legend">
+          <span><i></i>Copy or transform</span>
+          <span><i class="dash"></i>Read, write or bind</span>
+          <span><i class="dot"></i>Orchestration or model link</span>
+          <span><i class="up"></i>Upstream</span>
+          <span><i class="down"></i>Downstream</span>
+        </div>
+        <div id="notice" class="notice" role="status"></div>
+        <div id="tooltip" class="tooltip" role="tooltip"></div>
+      </div>
+      <aside id="details" class="details" aria-labelledby="detailsTitle">
+        <div class="hdr"><h2 id="detailsTitle">Details</h2></div>
+        <div id="detailsBody" class="body"></div>
+      </aside>
+    </main>
+  </div>
+  <script>/*__DAGRE__*/</script>
+  <script>/*__D3__*/</script>
+  <script>window.__LINEAGE__ = /*__DATA__*/;</script>
+  <script>/*__APP__*/</script>
+</body>
+</html>

@@ -612,7 +612,7 @@ class ShipTests(unittest.TestCase):
         return m.group(1)
 
     def test_merged_detection(self):
-        cmds = land_block("Step 2: Pick the branch", "ancestor-merged")
+        cmds = [doc_block(LAND_SKILL, "Step 2: Pick the branch", "ancestor-merged").splitlines()[0]]
         self.assertEqual(len(cmds), 1, cmds)
         self.sb.git(self.work, "checkout", "-q", "-b", "feat/old")
         merged = self.sb.run(self.work, cmds, self.variables)
@@ -697,38 +697,104 @@ class ShipTests(unittest.TestCase):
         step = self.ci_detect(sha).steps[0]
         self.assertEqual((step.rc, step.out), (1, ""), step)
 
-    def test_finish_on_default_branch_confirms_merged_and_flags_leftover_branch(self):
+    def test_lookup_distinguishes_wrong_base_from_a_matching_open_pr(self):
+        branch = "feat/shared"
+        sha = self.sb.git(self.work, "rev-parse", "HEAD")
+        variables = self.land_variables(branch, sha)
+        lookup = doc_block(LAND_SKILL, "Step 2: Pick the branch", "lookup-pr.sh").splitlines()[-1]
+        match = f"acme/repo\t{branch}\t{self.default_branch}\topen\t7\t{sha}\tfalse"
+        fork = match.replace("acme/repo", "acme/fork").replace(self.default_branch, "other")
+        wrong = match.replace(self.default_branch, "other")
+        for rows, expected in [([match, fork], f"open 7 {sha}"), ([fork], "none"),
+                               ([wrong], None), ([match, wrong], None)]:
+            with self.subTest(rows=rows):
+                self.rows.write_text("\n".join(rows) + "\n")
+                run = self.sb.run(self.work, [lookup], variables)
+                self.assertEqual(run.completed, expected is not None, run)
+                if expected:
+                    self.assertEqual(run.steps[0].out.strip(), expected)
+                else:
+                    self.assertIn("targets other", run.steps[0].err)
+
+    def land_variables(self, branch, sha):
+        gh = self.sb.root / "gh"
+        self.rows = self.sb.root / "rows"
+        self.calls = self.sb.root / "merge.log"
+        gh.write_text("""#!/bin/sh
+case "$1 $2" in
+  'api --hostname')
+    case "$*" in *' base='*) exit 2 ;; esac
+    cat "$rows" ;;
+  'pr merge') printf '%s\\n' "$*" >> "$calls" ;;
+  *) exit 2 ;;
+esac
+""")
+        gh.chmod(0o755)
+        return dict(self.variables, host="example.test", repo="acme/repo", number="7",
+                    branch=branch, sha=sha, land_dir=str(LAND_SKILL.parent),
+                    PATH=str(self.sb.root) + os.pathsep + self.sb.env["PATH"],
+                    calls=str(self.calls), rows=str(self.rows))
+
+    def test_plain_and_auto_merge_require_local_pinned_and_fresh_heads(self):
+        branch = "feat/shared"
+        self.sb.git(self.work, "checkout", "-qb", branch)
+        sha = self.sb.git(self.work, "rev-parse", "HEAD")
+        variables = self.land_variables(branch, sha)
+        merge = doc_block(LAND_SKILL, "Step 5: Merge and clean up", "merge-head.sh").splitlines()[0]
+        fresh = f"open\tacme/repo\t{branch}\t{self.default_branch}\t"
+        for option in ("", " --auto"):
+            command = merge + option
+            self.rows.write_text(fresh + sha)
+            run = self.sb.run(self.work, [command], variables)
+            self.assertTrue(run.completed, run)
+            self.assertEqual(self.calls.read_text().strip(),
+                             f"pr merge 7 --repo example.test/acme/repo --squash --match-head-commit {sha}{option}")
+            self.calls.unlink()
+            self.rows.write_text(fresh + "1" * 40)
+            self.assertFalse(self.sb.run(self.work, [command], variables).completed)
+            self.assertFalse(self.calls.exists())
+        self.rows.write_text(fresh + sha)
+        ahead = self.sb.commit_file(self.work, "local", "keep", "local only")
+        for option in ("", " --auto"):
+            run = self.sb.run(self.work, [merge + option], variables)
+            self.assertFalse(run.completed)
+            self.assertIn(ahead, run.steps[0].err)
+            self.assertFalse(self.calls.exists())
+        self.assertEqual(self.sb.git(self.work, "rev-parse", branch), ahead)
+
+    def test_cleanup_preserves_occupied_or_moved_branch_and_removes_matching_tips(self):
         branch = "feat/done"
-        self.sb.git(self.work, "checkout", "-q", "-b", branch)
-        self.sb.commit_file(self.work, "done.txt", "done\n", "feat: done")
-        self.sb.git(self.work, "push", "-q", "-u", "origin", "HEAD")
-        # Simulate GitHub's squash merge on the server side.
+        self.sb.git(self.work, "checkout", "-qb", branch)
+        sha = self.sb.commit_file(self.work, "done.txt", "done\n", "feat: done")
+        self.sb.git(self.work, "push", "-qu", "origin", "HEAD")
         server = self.sb.clone(self.origin, "server")
         self.sb.git(server, "merge", "-q", "--squash", f"origin/{branch}")
-        self.sb.git(server, "commit", "-q", "-m", "feat: done (#1)")
-        merge_oid = self.sb.git(server, "rev-parse", "HEAD")
-        self.sb.git(server, "push", "-q", "origin", f"HEAD:{self.default_branch}")
-
-        cmds = land_block("Step 5: Merge and clean up", 'git checkout "$default_branch" && git pull',
-                          {"<mergeCommit.oid>": merge_oid, "<branch>": branch})
-        self.assertEqual(len(cmds), 4, cmds)
-        allow = {"ls-remote": {0, 2}, "rev-parse --verify": {0, 1}}
-
-        # Cleanup incomplete: remote and local branch still exist.
-        partial = self.sb.run(self.work, cmds, self.variables, allow=allow)
-        self.assertTrue(partial.completed, partial)
-        self.assertEqual(self.sb.git(self.work, "branch", "--show-current"), self.default_branch)
-        self.assertEqual(partial.step("ls-remote").rc, 0)
-        self.assertEqual(partial.step("rev-parse --verify").rc, 0)
-
-        # gh's --delete-branch removes both; all three confirmations now pass.
-        self.sb.git(server, "push", "-q", "origin", "--delete", branch)
-        self.sb.git(self.work, "branch", "-q", "-D", branch)
-        done = self.sb.run(self.work, cmds, self.variables, allow=allow)
-        self.assertTrue(done.completed, done)
-        self.assertEqual(done.step("merge-base").rc, 0)
-        self.assertEqual(done.step("ls-remote").rc, 2)
-        self.assertNotEqual(done.step("rev-parse --verify").rc, 0)
+        self.sb.git(server, "commit", "-qm", "feat: done (#1)")
+        merge_commit = self.sb.git(server, "rev-parse", "HEAD")
+        self.sb.git(server, "push", "-q", "origin", "HEAD")
+        variables = dict(self.variables, branch=branch, sha=sha, merge_commit=merge_commit,
+                         land_dir=str(LAND_SKILL.parent))
+        commands = land_block("Step 5: Merge and clean up", "cleanup.sh")
+        self.assertTrue(self.sb.run(self.work, commands[:1], variables).completed)
+        occupied = self.sb.root / "occupied"
+        self.sb.git(self.work, "worktree", "add", str(occupied), branch)
+        run = self.sb.run(self.work, commands[1:], variables)
+        self.assertFalse(run.completed)
+        self.assertIn("checked out", run.steps[0].err)
+        self.assertEqual(self.sb.remote_sha(self.origin, f"refs/heads/{branch}"), sha)
+        self.sb.git(occupied, "switch", "--detach")
+        self.sb.git(self.work, "branch", "-f", branch, merge_commit)
+        self.assertFalse(self.sb.run(self.work, commands[1:], variables).completed)
+        self.assertEqual(self.sb.git(self.work, "rev-parse", branch), merge_commit)
+        self.sb.git(self.work, "branch", "-f", branch, sha)
+        self.sb.git(server, "push", "origin", f"HEAD:refs/heads/{branch}", "--force")
+        self.assertFalse(self.sb.run(self.work, commands[1:], variables).completed)
+        self.assertEqual(self.sb.remote_sha(self.origin, f"refs/heads/{branch}"), merge_commit)
+        self.sb.git(server, "push", "origin", f"{sha}:refs/heads/{branch}", "--force")
+        run = self.sb.run(self.work, commands, variables, allow={"ls-remote": {2}, "rev-parse": {1}})
+        self.assertTrue(run.completed, run)
+        self.assertIsNone(self.sb.remote_sha(self.origin, f"refs/heads/{branch}"))
+        self.assertIsNone(self.sb.remote_sha(self.work, f"refs/heads/{branch}"))
 
 
 class ShipOnTrunkTests(ShipTests):

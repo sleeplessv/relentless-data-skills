@@ -11,11 +11,14 @@ never run here. Every run uses a lock file of its own: CHECK_LOCK_FILE in the
 test's temporary folder, or the throwaway repository's own git directory.
 
 Tests wait on a file or on a process's exit, never on a sleep of fixed length.
-Where how long a run waited is what a test checks, the test waits for the clock
-to pass a bound it then asserts against.
+Where a test checks how long a run waited, it reads the bound from the times the
+run's output files were written, or from another run's timed-out exit, so a
+process that starts or is scheduled late cannot shorten what is measured.
+Every run sets TZ=UTC, so timestamps order the same in any zone.
 """
 from __future__ import annotations
 
+import math
 import os
 import re
 import shutil
@@ -32,7 +35,37 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BASH = shutil.which("bash")
 GIT = shutil.which("git")
 DEADLINE = 120  # seconds; a bound on waiting for a file or a process, not a sleep
-TIME = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file and the waiting line give it
+START_TIME_PATTERN = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file gives it
+
+# What `--help` must state, each a whole sentence or clause of the help with its
+# line wrapping removed (the ticket's "Where it is written down").
+HELP_STATES = (
+    "a run without --fast takes a lock before its first check and holds it until it exits,",
+    "A run with --fast, --help or a usage error takes no lock and never waits.",
+    "The lock is fcntl.flock on one file, taken through python3 by scripts/check_lock.py.",
+    "The file is check.sh.lock in the clone's shared git directory (git rev-parse --git-common-dir),"
+    " so every worktree of the clone uses the same lock.",
+    "Only the system says whether the lock is held.",
+    "The file's presence and content decide nothing, so a killed run, even one killed with SIGKILL, blocks no later run.",
+    "A run that has to wait prints one line at once.",
+    "The line names the holder's process id and start time where the file gives them, and the longest the run will wait.",
+    "When its turn comes the run prints how long it waited.",
+    "CHECK_LOCK_WAIT sets that bound in whole seconds from 0 to 100000000 (default 1800).",
+    "At the bound the run prints one line on standard error, saying how long it waited and that no check was run,"
+    " and exits 75.",
+    "A run that cannot open or lock the file for any reason other than another holder prints one line and runs"
+    " without the lock.",
+    "CHECK_LOCK_FILE names another lock file, for the tests or for one deliberate run beside another.",
+    "No switch skips the lock.",
+    "Limits: a second clone on this machine has its own lock.",
+    "A run killed with SIGKILL frees the lock while processes it started may still be finishing.",
+)
+
+# The standard output of a full run in which every stand-in check passed.
+EVERY_CHECK = [
+    line for name in ("skill lint", "registry check", "skill versions (base main)", "unit tests", "claude plugin validate")
+    for line in (f"==> {name}", f"PASS: {name}")
+] + ["All checks passed."]
 
 README_SENTENCE = (
     "A run without `--fast` waits its turn behind any other such run of this clone"
@@ -111,7 +144,8 @@ FAKE_UV = textwrap.dedent('''\
 
 
 def now() -> str:
-    return time.strftime("%Y-%m-%d %H:%M:%S")
+    """The time now as the script writes it: every run has TZ=UTC."""
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime())
 
 
 def wait_until(predicate, what: str) -> None:
@@ -195,6 +229,7 @@ class CheckLockTest(unittest.TestCase):
             CHECK_LOCK_FILE=str(self.lock),
             STANDIN_DIR=str(self.state),
             PYTHONDONTWRITEBYTECODE="1",
+            TZ="UTC",  # a local clock repeats an hour once a year; UTC never does
             GIT_CONFIG_GLOBAL=os.devnull,
             GIT_CONFIG_NOSYSTEM="1",
             GIT_AUTHOR_NAME="t", GIT_AUTHOR_EMAIL="t@example.com",
@@ -262,17 +297,33 @@ class CheckLockTest(unittest.TestCase):
 
     def written_start(self, proc: subprocess.Popen) -> str:
         """The start time the lock file gives for `proc`, which must be its only content."""
-        found = re.fullmatch(rf"{proc.pid} ({TIME})\n", self.lock.read_text())
+        found = re.fullmatch(rf"{proc.pid} ({START_TIME_PATTERN})\n", self.lock.read_text())
         self.assertIsNotNone(found, self.lock.read_text())
         return found[1]
+
+    def gave_up_after(self, proc: subprocess.Popen) -> float:
+        """Seconds from the run's waiting line to its give-up line, by the times their files were written.
+
+        The waiting line is the only write to standard output and the give-up line the only write to
+        standard error, so neither start-up nor a late poll by the test moves either end.
+        """
+        return (self.state / f"{proc.tag}.err").stat().st_mtime - (self.state / f"{proc.tag}.out").stat().st_mtime
+
+    def waited(self, proc: subprocess.Popen) -> int:
+        """The seconds the run's turn line reports."""
+        found = re.fullmatch(r"check\.sh: waited ([0-9]+) s for the lock\.", self.out(proc).splitlines()[1])
+        self.assertIsNotNone(found, self.out(proc))
+        return int(found[1])
 
     # -- tests ------------------------------------------------------------
 
     def test_a_full_run_waits_then_gives_up_with_75_and_runs_no_check(self) -> None:
         self.hold()
-        asked = time.monotonic()
-        rc, out, err = self.run_check(name="late", CHECK_LOCK_WAIT="1")
-        self.assertGreaterEqual(time.monotonic() - asked, 1)
+        proc = self.start(name="late", CHECK_LOCK_WAIT="1")
+        rc = proc.wait(timeout=DEADLINE)
+        out, err = self.out(proc), self.err(proc)
+        # 0.1 s below the bound for the file systems' time stamps; 30 s above it for a loaded machine.
+        self.assertTrue(0.9 <= self.gave_up_after(proc) <= 31, self.gave_up_after(proc))
         self.assertEqual(out.splitlines(), ["check.sh: waiting up to 1 s for another run of scripts/check.sh."])
         self.assertEqual(
             err.splitlines(),
@@ -283,8 +334,11 @@ class CheckLockTest(unittest.TestCase):
 
     def test_a_run_started_with_sigalrm_blocked_still_gives_up_at_its_bound(self) -> None:
         self.hold()
-        proc = self.start(CHECK_LOCK_WAIT="1", preexec=lambda: signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM}))
+        proc = self.start(name="blocked", CHECK_LOCK_WAIT="1",
+                          preexec=lambda: signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM}))
         self.assertEqual(proc.wait(timeout=DEADLINE), 75)
+        # The same slack as the test above: time stamps below, a loaded machine above.
+        self.assertTrue(0.9 <= self.gave_up_after(proc) <= 31, self.gave_up_after(proc))
         self.assertEqual(self.log(), [])
 
     def test_a_fast_run_starts_its_checks_at_once_while_the_lock_is_held(self) -> None:
@@ -299,12 +353,16 @@ class CheckLockTest(unittest.TestCase):
 
     def test_help_prints_the_whole_header_and_help_and_a_usage_error_never_wait(self) -> None:
         self.hold()
-        rc, out, err = self.run_check("--help", CHECK_LOCK_WAIT="0")
+        rc, out, err = self.run_check("--help", name="help", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, err), (0, ""))
         lines = (self.repo / "scripts" / "check.sh").read_text().splitlines()
         header = [re.sub(r"\A# ?", "", line) for line in lines[1:lines.index("set -euo pipefail")]]
         self.assertEqual(out.splitlines(), header)
-        rc, out, err = self.run_check("--bogus", CHECK_LOCK_WAIT="0")
+        text = " ".join(out.split())
+        for statement in HELP_STATES:
+            with self.subTest(states=statement[:40]):
+                self.assertRegex(text, rf"(?:\A|[.:] ){re.escape(statement)}(?: |\Z)")
+        rc, out, err = self.run_check("--bogus", name="bogus", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, out, err), (2, "", "check.sh: unknown argument: --bogus\n"))
         self.assertEqual(self.log(), [])
 
@@ -316,10 +374,10 @@ class CheckLockTest(unittest.TestCase):
             "4242\n": "",
             "4242 2026-11-26 14:40:01\nmore\n": "",
         }
-        for content, named in shapes.items():
+        for number, (content, named) in enumerate(shapes.items()):
             with self.subTest(content=content):
                 holder = self.hold(content)
-                rc, out, err = self.run_check(CHECK_LOCK_WAIT="0")
+                rc, out, err = self.run_check(name=f"shape{number}", CHECK_LOCK_WAIT="0")
                 holder.release()
                 self.assertEqual(out, f"check.sh: waiting up to 0 s for another run of scripts/check.sh{named}.\n")
                 self.assertEqual(
@@ -340,18 +398,22 @@ class CheckLockTest(unittest.TestCase):
 
     def test_a_run_that_waited_writes_when_it_started_and_says_how_long_it_waited(self) -> None:
         holder = self.hold()
-        before = now()
+        before, started = now(), time.monotonic()
         proc = self.start(name="queued", STANDIN_HOLD="1")
         wait_until(lambda: self.out(proc).startswith("check.sh: waiting"), "the run to wait")
-        waiting, seen = now(), time.monotonic()
-        wait_until(lambda: time.monotonic() >= seen + 2, "two seconds of waiting")
+        waiting = now()
+        # A second run with a 2 s bound waits behind the same holder. Its timed-out exit
+        # comes at least 2 s after the queued run began to wait.
+        other = self.start(name="other", CHECK_LOCK_WAIT="2")
+        self.assertEqual(other.wait(timeout=DEADLINE), 75)
         holder.release()
         wait_until(lambda: "start queued" in self.log(), "the body to start")
+        seen = time.monotonic()
         written = self.written_start(proc)
         self.assertTrue(before <= written <= waiting, f"{written} is not between {before} and {waiting}")
-        waited = re.fullmatch(r"check\.sh: waited ([0-9]+) s for the lock\.", self.out(proc).splitlines()[1])
-        self.assertIsNotNone(waited, self.out(proc))
-        self.assertGreaterEqual(int(waited[1]), 2)
+        # The run waited within [started, seen], which already holds any late start-up or
+        # scheduling; the +1 is room for the line's rounding.
+        self.assertTrue(2 <= self.waited(proc) <= math.ceil(seen - started) + 1, (self.waited(proc), seen - started))
         (self.state / "queued.go").touch()
         self.assertEqual(proc.wait(timeout=DEADLINE), 0)
 
@@ -368,7 +430,9 @@ class CheckLockTest(unittest.TestCase):
     def test_three_waiters_each_get_a_turn_and_no_two_bodies_run_at_once(self) -> None:
         holder = self.hold()
         names = ("a", "b", "c")
+        started = time.monotonic()
         procs = {name: self.start(name=name, STANDIN_HOLD="1") for name in names}
+        seen = {}
         for name, proc in procs.items():
             wait_until(lambda: self.out(proc).startswith("check.sh: waiting up to 1800 s"), f"{name} to wait")
         self.assertEqual(self.log(), [])
@@ -377,6 +441,7 @@ class CheckLockTest(unittest.TestCase):
         for turn in range(3):
             wait_until(lambda: len(self.log()) == 2 * turn + 1, f"turn {turn + 1} to start")
             current = self.log()[-1].removeprefix("start ")
+            seen[current] = time.monotonic()
             self.assertIn(current, names)
             order.append(current)
             (self.state / f"{current}.go").touch()
@@ -385,7 +450,8 @@ class CheckLockTest(unittest.TestCase):
         self.assertEqual(self.log(), [line for name in order for line in (f"start {name}", f"end {name}")])
         for name, proc in procs.items():
             lines = self.out(proc).splitlines()
-            self.assertRegex(lines[1], r"\Acheck\.sh: waited [0-9]+ s for the lock\.\Z")
+            # Each waited within [started, seen[name]]; the +1 is room for the line's rounding.
+            self.assertLessEqual(self.waited(proc), math.ceil(seen[name] - started) + 1)
             self.assertEqual(lines[2], "==> skill lint")
             self.assertEqual(lines[-1], "All checks passed.")
 
@@ -437,11 +503,12 @@ class CheckLockTest(unittest.TestCase):
         shapes = {"a missing folder": self.tmp / "missing" / "check.lock", "a folder": self.tmp}
         if os.geteuid() != 0:  # root writes to a read-only file
             shapes["a file without write access"] = read_only
-        for shape, path in shapes.items():
+        for number, (shape, path) in enumerate(shapes.items()):
             with self.subTest(shape=shape):
-                rc, out, err = self.run_check(CHECK_LOCK_FILE=str(path))
+                rc, out, err = self.run_check(name=f"open{number}", CHECK_LOCK_FILE=str(path))
                 self.assertEqual(self.notices(err), [f"check.sh: cannot open {path}; running without the lock."])
-                self.assertEqual((rc, out.splitlines()[0], out.splitlines()[-1]), (0, "==> skill lint", "All checks passed."))
+                self.assertEqual((rc, out.splitlines()), (0, EVERY_CHECK))
+                self.assertEqual(self.log()[-2:], [f"start open{number}", f"end open{number}"])
 
     def test_a_lock_the_system_refuses_runs_without_the_lock(self) -> None:
         # fd 9 is not open in the helper, so flock fails with EBADF: a refusal other than another holder.
@@ -453,14 +520,14 @@ class CheckLockTest(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (3, "", line + "\n"))
         # Given that status from the helper, the script runs every check.
         (self.repo / "scripts" / "check_lock.py").write_text(f"import sys\nprint({line!r}, file=sys.stderr)\nsys.exit(3)\n")
-        rc, out, err = self.run_check()
-        self.assertEqual((rc, out.splitlines()[0], out.splitlines()[-1]), (0, "==> skill lint", "All checks passed."))
-        self.assertEqual(self.notices(err), [line])
+        rc, out, err = self.run_check(name="unlocked")
+        self.assertEqual((rc, out.splitlines(), self.notices(err)), (0, EVERY_CHECK, [line]))
+        self.assertEqual(self.log(), ["start unlocked", "end unlocked"])
 
     def test_a_bad_check_lock_wait_is_a_usage_error(self) -> None:
-        for value in ("abc", "-5", "1.5", " 5", "100000001", "9" * 5000):
+        for number, value in enumerate(("abc", "-5", "1.5", " 5", "100000001", "9" * 5000)):
             with self.subTest(CHECK_LOCK_WAIT=value[:12]):
-                rc, out, err = self.run_check(CHECK_LOCK_WAIT=value)
+                rc, out, err = self.run_check(name=f"bad{number}", CHECK_LOCK_WAIT=value)
                 self.assertEqual((rc, out), (2, ""))
                 self.assertEqual(
                     err, f"check.sh: CHECK_LOCK_WAIT must be a whole number of seconds from 0 to 100000000, not {value!r}.\n"
@@ -482,7 +549,7 @@ class CheckLockTest(unittest.TestCase):
         for value in (None, ""):
             with self.subTest(CHECK_LOCK_WAIT=value):
                 env = {} if value is None else {"CHECK_LOCK_WAIT": value}
-                proc = self.start(preexec=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL), **env)
+                proc = self.start(name=f"int{len(env)}", preexec=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL), **env)
                 line = "check.sh: waiting up to 1800 s for another run of scripts/check.sh.\n"
                 wait_until(lambda: self.out(proc) == line, "the waiting line")
                 os.killpg(proc.pid, signal.SIGINT)

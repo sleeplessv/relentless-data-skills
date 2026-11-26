@@ -10,7 +10,7 @@
       "name": "astra-review",
       "source": "./skills/astra-review",
       "description": "Get a ponytail review of a change from Astra, the Codex CLI on an Astra model, in a Herdr tab, then fix the findings that hold up.",
-      "version": "0.1.4",
+      "version": "0.1.5",
       "author": {
         "name": "sleeplessv"
       },

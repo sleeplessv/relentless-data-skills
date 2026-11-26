@@ -181,10 +181,25 @@ FORMS: dict[str, dict[str, str]] = {
         "gh pr create --fill | tail -1 && cat url.txt": "starts",
         "cd x && gh pr create --fill 2>&1 | tail -1": "starts",
         "gh pr create --title =SUM --fill 2>&1 | tail -1": "starts",
+        # A plain = after another piece of its word, which zsh replaces as at the word's start when the piece is
+        # an empty quote.
+        "gh pr create --title ''=SUM 2>&1 | tail -1": "starts",
+        f"gh pr create --title \"\"={URL} 2>&1 | tail -1": "starts",
+        "git log ''=x; gh pr create": "starts",
+        "gh pr create --title 't'=SUM": "starts",
         # The three words spelt through a $ quote, split inside each word.
         "g$'h' pr create": "starts",
         'gh p$"r" create': "starts",
         "gh pr cre$''ate": "starts",
+        # Letters spelt through the escapes of a $'...' quote, as bash and zsh read them, or as only one does.
+        "g$'\\150' pr create": "starts",
+        "gh p$'\\x72' create": "starts",
+        "gh pr cre$'\\141'te": "starts",
+        "gh pr $'cre\\x61te'": "starts",
+        "gh pr $'\\u0063'reate": "starts",
+        "$'\\U00000067'h pr create": "starts",
+        "g$'\\550' pr create": "starts",
+        "gh pr $'\\c\\x72'eate": "none",
         # A compound command, a function, prefixes, another program, and calls with an && before and a ; after.
         "if true; then gh pr create --fill; fi": "starts",
         "{ gh pr create; }": "starts",
@@ -229,12 +244,19 @@ FORMS: dict[str, dict[str, str]] = {
         "command -v gh pr create": "none"},
     # The known limit: a call that builds the words when it runs, or a script that runs gh pr create.
     "neither": {
-        "gh pr view --json url --jq .url": "none", "echo done": "none",
-        "gh pr $'cre\\x61te'": "starts", "sh ./open-pr.sh": "starts"}}
+        "gh pr view --json url --jq .url": "none", "echo done": "none", "sh ./open-pr.sh": "starts"}}
 # The shells --help takes for granted: the version each must reach, what prints it, and the flags that start one
 # without its startup files.
 SHELLS = {"bash": ((5, 2), "BASH_VERSINFO[0]} ${BASH_VERSINFO[1]", []),
           "zsh": ((5, 9), "ZSH_VERSION%%.*} ${${ZSH_VERSION#*.}%%.*", ["-f"])}
+# What zsh, with its default options, does with the "maybe" rows of a plain = after another piece and of a $'...'
+# escape, in the words FORMS uses.
+IN_ZSH = {
+    "gh pr create --title ''=SUM 2>&1 | tail -1": "none", f"gh pr create --title \"\"={URL} 2>&1 | tail -1": "none",
+    "git log ''=x; gh pr create": "none", "gh pr create --title 't'=SUM": "starts",
+    **dict.fromkeys(["g$'\\150' pr create", "gh p$'\\x72' create", "gh pr cre$'\\141'te", "gh pr $'cre\\x61te'",
+                     "gh pr $'\\u0063'reate", "$'\\U00000067'h pr create", "g$'\\550' pr create",
+                     "gh pr $'\\c\\x72'eate"], "starts")}
 
 
 def shell_forms(does: tuple[str, ...] = ("opens", "maybe", "neither")) -> list[tuple[str, str, str]]:
@@ -836,16 +858,20 @@ class TestDraw(unittest.TestCase):
             time.sleep(0.05)
         return result.returncode, creates.read_text() != "", result.stdout
 
-    def each_form(self, name: str, does: tuple[str, ...]) -> None:
+    def each_form(self, name: str, does: tuple[str, ...], outcomes: dict[str, str] | None = None) -> None:
         """Run each form of the kinds in `does` under the shell `name` in every arrangement of the stand-ins, and
-        check what the shell did against the table."""
+        check what the shell did against the table, or, given `outcomes`, run only its forms and check against it."""
         sys.path.insert(0, str(SCRIPTS))
         self.addCleanup(sys.path.remove, str(SCRIPTS))
         draw = importlib.import_module("draw")
         shell, root = self.shell(name)
         arrangements = [{"GIT_EXIT": git, "CREATE_EXIT": create, "VIEW_EXIT": view, "GH": gh}
                         for git in "01" for create in "01" for view in "01" for gh in ("gh", "true")]
-        for kind, command, expected in shell_forms(does):
+        forms = shell_forms(does)
+        if outcomes is not None:
+            self.assertLessEqual(set(outcomes), {command for _, command, _ in forms})
+            forms = [(kind, command, outcomes[command]) for kind, command, _ in forms if command in outcomes]
+        for kind, command, expected in forms:
             with self.subTest(command=label(command)):
                 self.assertEqual(draw.runs_gh_pr_create(command), {"opens": "opens", "maybe": "maybe"}.get(kind))
                 runs = [self.run_form(shell, root, command, arrangement)[:2] for arrangement in arrangements]
@@ -862,9 +888,10 @@ class TestDraw(unittest.TestCase):
 
     def test_each_opening_form_starts_gh_pr_create_in_zsh_too(self) -> None:
         # zsh runs some of the other forms otherwise, as it splits no unquoted variable; the reader's "maybe" for them
-        # holds whatever the shell does, so the table loop runs only the forms it says open. One "maybe" row follows:
-        # zsh skips gh for it and the pipe still exits 0.
+        # holds whatever the shell does, so the table loop runs only the forms it says open, and then the rows IN_ZSH
+        # gives. One "maybe" row follows: zsh skips gh for it and the pipe still exits 0.
         self.each_form("zsh", ("opens",))
+        self.each_form("zsh", ("maybe",), IN_ZSH)
         shell, root = self.shell("zsh")
         code, started, _ = self.run_form(shell, root, "gh pr create --title =SUM --fill 2>&1 | tail -1", {
             "GIT_EXIT": "0", "CREATE_EXIT": "0", "VIEW_EXIT": "0", "GH": "gh"})

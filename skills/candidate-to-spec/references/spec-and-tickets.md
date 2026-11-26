@@ -11,8 +11,8 @@ comment body per [Candidate file](workers.md#candidate-file). `DEFERRED` is the 
 loop is on. Every path variable holds an absolute path. Ticket variables are defined under
 [Tickets](#tickets).
 
-The worker runs each block per [Shell](workers.md#briefs); `set -euo pipefail` stops the call at
-the first failing command, and the worker returns that command and its output for the main
+The worker runs each block with the verified `GH_REPO` per [Shell](workers.md#briefs).
+`set -euo pipefail` stops at the first failing command. The worker returns it and its output for the main
 thread to report. After each command exits, the worker records its exit status and result in
 `<run>/<slug>/spec.md` or `tickets.md`, keyed by step, item (ticket or deferred file), and
 command; a step resumed after a failure skips the items recorded as succeeded, so a retry adds
@@ -88,13 +88,13 @@ candidate's file as its own comment. The grep keeps the run directory out of the
 set -euo pipefail
 if grep -qF "$RUN" "$LOG"; then echo "run directory path in $LOG" >&2; exit 1; fi
 if [ -n "${SPEC_N:-}" ]; then
-  gh issue edit "$SPEC_N" --body-file "$BODY" --add-label needs-triage
   SPEC_URL=$(gh issue view "$SPEC_N" --json url --jq .url)
+  issue_number "$SPEC_URL" "$SPEC_N" >/dev/null
+  gh issue edit "$SPEC_N" --body-file "$BODY" --add-label needs-triage
 else
   SPEC_URL=$(gh issue create --title "$TITLE" --label spec --label needs-triage --body-file "$BODY")
-  SPEC_N=${SPEC_URL##*/}
+  SPEC_N=$(issue_number "$SPEC_URL")
 fi
-case $SPEC_N in ''|*[!0-9]*) echo "bad issue url: $SPEC_URL" >&2; exit 1;; esac
 gh issue comment "$SPEC_N" --body-file "$LOG"
 for DEFERRED in "$DEFERRED_DIR"/*.md; do
   [ -e "$DEFERRED" ] || continue
@@ -208,37 +208,84 @@ and that comment.
    and `TICKET_N` are the created ticket's URL
    and number, recorded in `tickets.md`; `BLOCKED_BY` is the comma-separated numbers of the
    tickets that block this one, cross-spec blockers included, empty for a ticket with none;
-   `EDGES` is `native` (the default)
-   or `body`. The ticket is created first and its edges added by edit, so a failed edge leaves
-   one ticket to fix rather than a retry to duplicate:
+   `EDGES` is `native` by default, `parent` when only sub-issues are supported, or `body`
+   when the server lacks sub-issues. Every `TICKET_BODY` includes the template's `## Parent`
+   (naming the spec) and `## Blocked by` (one `#<n>` per blocker).
+
+   Create the ticket once. Record the printed URL and its number in `tickets.md` before
+   editing any relationships. Resume a recorded ticket at its first unfinished operation.
 
    ```bash
    set -euo pipefail
-   case $EDGES in native|body) ;; *) echo "EDGES is native or body: $EDGES" >&2; exit 1 ;; esac
+   case $EDGES in native|parent|body) ;; *) echo "unknown EDGES: $EDGES" >&2; exit 1 ;; esac
    TICKET_URL=$(gh issue create --title "$TICKET_TITLE" --label "$TICKET_LABEL" --body-file "$TICKET_BODY")
-   TICKET_N=${TICKET_URL##*/}
-   case $TICKET_N in ''|*[!0-9]*) echo "bad issue url: $TICKET_URL" >&2; exit 1;; esac
-   if [ "$EDGES" = native ] && [ -n "$BLOCKED_BY" ]; then
-     gh issue edit "$TICKET_N" --parent "$SPEC_N" --add-blocked-by "$BLOCKED_BY"
-   elif [ "$EDGES" = native ]; then
-     gh issue edit "$TICKET_N" --parent "$SPEC_N"
-   fi
-   gh issue view "$TICKET_N" --json labels,parent,blockedBy
+   TICKET_N=$(issue_number "$TICKET_URL")
+   printf '%s\n' "$TICKET_URL"
    ```
 
-   `TICKET_BODY` keeps `to-tickets`' template sections `## Parent` (naming the spec) and
-   `## Blocked by` (one `#<n>` per blocker): they are the edges `implement-feature` reads when
-   the native ones are missing. When the edge edit fails, the worker runs
-   `gh issue edit "$TICKET_N" --parent "$SPEC_N"` once on its own, then the view line: a
-   repository without issue dependencies keeps the parent and the body carries the blockers.
-   When that edit fails too, the repository has no sub-issues either (older GitHub Enterprise):
-   the worker records `edges: body` in `tickets.md`, runs the view line for the ticket it just
-   created, and runs the block with `EDGES` as `body` for every later ticket. Then it posts the
-   final breakdown (title, blocked by, what it delivers, URL) on the spec:
+   With the recorded `TICKET_N`, set the parent and record its success before adding blockers.
+
+   ```bash
+   set -euo pipefail
+   if [ "$EDGES" != body ]; then
+     gh issue edit "$TICKET_N" --parent "$SPEC_N"
+   fi
+   ```
+
+   ```bash
+   set -euo pipefail
+   if [ "$EDGES" = native ] && [ -n "$BLOCKED_BY" ]; then
+     existing=$(gh api graphql --paginate --hostname "${GH_REPO%%/*}" \
+       -F owner='{owner}' -F name='{repo}' -F n="$TICKET_N" \
+       -f 'query=query($owner:String!, $name:String!, $n:Int!, $endCursor:String) {
+         repository(owner:$owner, name:$name) { issue(number:$n) {
+           blockedBy(first:100, after:$endCursor) { nodes { url } pageInfo { hasNextPage endCursor } }
+         } }
+       }' --jq '.data.repository.issue.blockedBy.nodes[].url')
+     IFS=, read -ra blockers <<< "$BLOCKED_BY"
+     for blocker in "${blockers[@]}"; do
+       if ! grep -Fxiq -- "https://$GH_REPO/issues/$blocker" <<< "$existing"; then
+         gh issue edit "$TICKET_N" --add-blocked-by "$blocker"
+       fi
+     done
+   fi
+   ```
+
+   Resume an interrupted or failed blocker edit by rerunning this entire block against the
+   recorded ticket, including when a human runs it. It reads every page before writing and
+   adds only missing blockers. A failed read stops the block before any edit.
+
+   An error explicitly identifying issue dependencies as unsupported switches `EDGES` to
+   `parent`. One identifying sub-issues as unsupported switches it to `body`. This also applies
+   when the read below reports that `blockedBy` or `parent` is missing. If both are missing,
+   use `body`. Record the mode for subsequent tickets
+   and run the read for the ticket already created. For any other error, return the failed
+   command, its output and the recorded URL. Follow [Blocked writes](workers.md#blocked-writes)
+   for a blocked edit.
+
+   The read selects `fields` for the recorded mode.
+
+   ```bash
+   set -euo pipefail
+   case $EDGES in
+     native) fields=labels,parent,blockedBy ;;
+     parent) fields=labels,parent,body ;;
+     body)   fields=labels,body ;;
+     *) echo "unknown EDGES: $EDGES" >&2; exit 1 ;;
+   esac
+   gh issue view "$TICKET_N" --json "$fields"
+   ```
+
+   Check the returned label against `TICKET_LABEL`, parent against `SPEC_N`, and blocker
+   URLs in `blockedBy.nodes` against the same-repository issues in `BLOCKED_BY`. If the
+   node count is below `blockedBy.totalCount`, use the paginated `gh api` read above to
+   verify the full list. Use the returned body's corresponding section for each
+   relationship the server lacks. Report a mismatch with the ticket URL. When all tickets
+   match, post the final breakdown (title, blocked by, what it delivers, URL) on the spec:
 
    ```bash
    gh issue comment "$SPEC_N" --body-file "$BREAKDOWN"
    ```
 
-Return `status`, `tickets` (URL, parent, blockers, and label each), `edges` (`native` or
-`body`), `tickets_path`.
+Return `status`, `tickets` (URL, parent, blockers, and label each), `edges` (`native`,
+`parent` or `body`), `tickets_path`.

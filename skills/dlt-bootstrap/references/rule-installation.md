@@ -12,7 +12,7 @@ Check `dlt-house-conventions.md`, `dlt-house-conventions.mdc`, `AGENTS.md`,
 and `CLAUDE.md`. A managed section has the same bookkeeping as a standalone file.
 
 Read its source types and installed toolkit record. Compare these with the
-active agent, the workbench's `.dlt/.toolkits` record, installed files, and MCP
+active agent, the harness's `.dlt/.toolkits` record, installed files, and MCP
 configuration. Missing files require repair even when recorded as installed.
 Use current CLI help for repair options. Preserve existing project configuration.
 
@@ -59,6 +59,6 @@ verifying the replacement. If the intended output is unchanged, leave it unchang
 - Inspect the diff for lost project instructions or unintended file changes.
 
 The [Cursor rule contract](https://cursor.com/docs/rules) describes `.mdc` and
-`alwaysApply`. The [workbench toolkit reference](https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/TOOLKITS.md)
+`alwaysApply`. The [harness toolkit reference](https://raw.githubusercontent.com/dlt-hub/dlthub-ai-harness/master/TOOLKITS.md)
 describes upstream transforms and installation tracking. Keep the house rule's
 active representation independent of upstream's generated skill layout.

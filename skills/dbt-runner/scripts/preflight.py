@@ -197,36 +197,80 @@ def check_private_key(context: dict) -> tuple:
     return OK, f"private key file exists and is readable ({key_path})"
 
 
+def top_level_setting(path: Path, key: str) -> str:
+    """Read a literal block-mapping setting. Flag unsupported root syntax."""
+    if not path.is_file():
+        return ""
+    root_indent = None
+    parts = None
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.split(" #", 1)[0] in ("---", "..."):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if root_indent is None:
+            root_indent = indent
+        if indent > root_indent or line.startswith("- "):
+            if parts is not None:
+                parts.append(line)
+            continue
+        if parts is not None:
+            break
+        name, colon, value = line.partition(":")
+        if not colon or not re.fullmatch(r"""([\w-]+|'[\w-]+'|"[\w-]+")""", name.rstrip()):
+            raise ValueError(f"cannot read {key} from {path.name} as a literal YAML setting")
+        if name.rstrip().strip("'\"") == key:
+            parts = [value] if value.strip() and not value.lstrip().startswith("#") else []
+    return " ".join(strip_inline_comment(part) for part in parts or []).strip()
+
+
 def check_packages(project_root: Path, runner: str = "") -> tuple:
-    has_manifest = (project_root / "packages.yml").is_file() or (
-        project_root / "package-lock.yml"
-    ).is_file()
-    if not has_manifest:
-        return SKIP, "project declares no dbt packages"
-    if not (project_root / "dbt_packages").is_dir():
+    lockfile = project_root / "package-lock.yml"
+    lock_note = ""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--", "package-lock.yml"],
+            cwd=str(project_root), capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result is not None and result.returncode == 0 and result.stdout.strip():
         return FAIL, (
-            "dbt_packages/ is missing but the project declares packages."
+            "package-lock.yml has uncommitted changes."
+            " Review its staged and unstaged state with `git status --short -- package-lock.yml`."
+        )
+    if lockfile.is_file():
+        if result is None or result.returncode != 0:
+            lock_note = " (lockfile git state not checkable)"
+        else:
+            lock_note = " and package-lock.yml clean"
+
+    declares_packages = False
+    manual_check = ""
+    for manifest in (project_root / "packages.yml", project_root / "dependencies.yml", lockfile):
+        try:
+            if top_level_setting(manifest, "packages").strip("[] \t"):
+                declares_packages = True
+        except ValueError as error:
+            manual_check = f"{error}. Verify package declarations and the install directory before running dbt."
+    if not declares_packages:
+        return SKIP, manual_check or "project declares no dbt packages"
+    try:
+        install_path = top_level_setting(project_root / "dbt_project.yml", "packages-install-path")
+    except ValueError as error:
+        return SKIP, f"{error}. Verify the resolved install directory before running dbt."
+    install_path = install_path or "dbt_packages"
+    if "{{" in install_path or "{%" in install_path:
+        return SKIP, "templated packages-install-path; verify the resolved directory before running dbt"
+    if not (project_root / install_path).is_dir():
+        return FAIL, (
+            f"{install_path}/ is missing but the project declares packages."
             f" Remedy: run `{runner or '<runner>'} deps` (every dbt_utils.*"
             " call fails until then)."
         )
-    if (project_root / "package-lock.yml").is_file():
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain", "--", "package-lock.yml"],
-                cwd=str(project_root),
-                capture_output=True,
-                timeout=30,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            return OK, "dbt_packages/ present (git state not checkable)"
-        if result.returncode == 0 and result.stdout.strip():
-            return FAIL, (
-                "package-lock.yml has uncommitted changes — something"
-                " (often a subagent running `dbt deps`) dirtied it."
-                " Remedy: inspect with `git diff package-lock.yml`;"
-                " revert unless the change was intentional."
-            )
-    return OK, "dbt_packages/ present and package-lock.yml clean"
+    if manual_check:
+        return SKIP, manual_check
+    return OK, f"{install_path}/ present{lock_note}"
 
 
 def first_level_keys(lines: list, start: int, parent_indent: int) -> tuple:
@@ -259,10 +303,11 @@ def resolve_profiles_path(context: dict, project_root=None) -> Path:
     """The profiles.yml dbt will read, in dbt's order (references/install.md
     Step 1.2): the context file's `profiles_path`, else `$DBT_PROFILES_DIR`,
     else a project-local `profiles.yml`, else `~/.dbt/profiles.yml`."""
+    root = Path(project_root or ".")
     if context.get("profiles_path"):
-        return Path(os.path.expanduser(context["profiles_path"]))
+        return root / Path(context["profiles_path"]).expanduser()
     if os.environ.get("DBT_PROFILES_DIR"):
-        return Path(os.path.expanduser(os.environ["DBT_PROFILES_DIR"])) / "profiles.yml"
+        return root / Path(os.environ["DBT_PROFILES_DIR"]).expanduser() / "profiles.yml"
     if project_root is not None and (Path(project_root) / "profiles.yml").is_file():
         return Path(project_root) / "profiles.yml"
     return Path(os.path.expanduser("~/.dbt/profiles.yml"))
@@ -431,6 +476,11 @@ def run_connect(context: dict, project_root: Path) -> int:
     cmd = runner + ["debug"]
     if target:
         cmd += ["--target", target]
+    if context.get("profile"):
+        cmd += ["--profile", context["profile"]]
+    if context.get("profiles_path"):
+        directory = resolve_profiles_path(context, project_root).parent.resolve()
+        cmd += ["--profiles-dir", str(directory)]
     shown = shlex.join(cmd)
     print(f"connect: running `{shown}` ({note}; needs network — if this"
           " fails with a DNS/connection error, suspect a sandboxed shell"
@@ -497,7 +547,7 @@ def main(argv=None) -> int:
             print("PREFLIGHT FAILED (connect)")
             return 1
 
-    print("PREFLIGHT OK — safe to run dbt.")
+    print("PREFLIGHT OK — complete any manual checks above before running dbt.")
     return 0
 
 

@@ -275,8 +275,9 @@ def supported_shell(name: str) -> tuple[str | None, str]:
                   + (f": {'; '.join(found)}" if found else ""))
 
 
-# The stand-ins a form runs among, each run by the shell under test. gh records each call and prints the PR's URL for
-# `pr create`; git, cat, tail, env and nohup do what their names do as far as a form needs; bash and sh are the shell.
+# The stand-ins a form runs among, each run by the shell under test. gh records each call and, for `pr create`, prints
+# the PR's URL unless CREATE_SILENT is set; git, cat, tail, env and nohup do what their names do as far as a form
+# needs; bash and sh are the shell.
 STAND_INS = {
     "gh": f"""printf '%s\\n' "$*" >> "$CALLS"
 if [ "$1" = pr ] && [ "$2" = create ]; then
@@ -848,14 +849,15 @@ class TestDraw(unittest.TestCase):
 
     def test_each_opening_form_starts_gh_pr_create_in_zsh_too(self) -> None:
         # zsh runs some of the other forms otherwise, as it splits no unquoted variable; the reader's "maybe" for them
-        # holds whatever the shell does, so only the forms it says open are run here.
+        # holds whatever the shell does, so the table loop runs only the forms it says open. One "maybe" row follows:
+        # zsh skips gh for it and the pipe still exits 0.
         self.each_form("zsh", ("opens",))
         shell, root = self.shell("zsh")
         code, started, _ = self.run_form(shell, root, "gh pr create --title =SUM --fill 2>&1 | tail -1", {
             "GIT_EXIT": "0", "CREATE_EXIT": "0", "VIEW_EXIT": "0", "GH": "gh"})
         self.assertEqual((code, started), (0, False))
 
-    def test_no_opening_form_prints_the_url_of_a_creation_that_failed_and_exits_0(self) -> None:
+    def test_no_opening_form_prints_the_url_of_a_creation_that_failed_silently_and_exits_0(self) -> None:
         # gh starts, prints nothing and fails. Then a call with an opening form exits non-zero or prints no URL; the
         # calls beside them, whose other commands print it, read "maybe".
         beside = ["cat url.txt; gh pr create --fill | tail -1", "gh pr create --fill | tail -1 && cat url.txt",

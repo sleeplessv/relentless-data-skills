@@ -1,6 +1,6 @@
 # Render: UX spec, performance rules, design tokens, verification
 
-One dispatch after validation passes. The agent works in `<scratch>/scripts/render/` (see its README for the commands), builds `lineage.html`, runs `test.js`, and returns the test JSON plus screenshot paths. Load the `dataviz` skill before touching colours and `artifact-design` before publishing.
+One dispatch after validation passes. The agent works in `<scratch>/scripts/render/` (see its README for the commands), builds `lineage.html`, runs `test.js`, and returns the test JSON plus screenshot paths.
 
 ## Performance rules
 
@@ -22,7 +22,7 @@ Never lay out the whole graph. Two views, both laid out with dagre (`rankdir: LR
 
 ## Design tokens
 
-Light palette on bare `:root`; dark redefined under `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }` and again under `:root[data-theme="dark"]` so the toggle wins both ways; `body` paints `var(--bg)` explicitly. Layer colours in fixed order (`--c-source --c-bronze --c-silver --c-gold --c-semantic --c-report --c-notebook --c-pipeline --c-other`), the gold tag uses dark text for contrast, `other` is hatched. Validate the palette with the `dataviz` validator before changing it. Fonts: Bricolage Grotesque (display), Source Sans 3 (body), JetBrains Mono (ids), each with a real fallback stack; Google Fonts is the only external host allowed under the artifact CSP. Reduced motion disables the zoom transitions.
+Light palette on bare `:root`; dark redefined under `@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) }` and again under `:root[data-theme="dark"]` so the toggle wins both ways; `body` paints `var(--bg)` explicitly. Layer colours in fixed order (`--c-source --c-bronze --c-silver --c-gold --c-semantic --c-report --c-notebook --c-pipeline --c-other`), the gold tag uses dark text for contrast, `other` is hatched. Keep the supplied palette unless the `dataviz` validator is available to check a replacement. Fonts: Bricolage Grotesque (display), Source Sans 3 (body), JetBrains Mono (ids), each with a real fallback stack; Google Fonts is the only external host allowed under the artifact CSP. Reduced motion disables the zoom transitions.
 
 ## Data contract for the page
 
@@ -42,4 +42,4 @@ Light palette on bare `:root`; dark redefined under `@media (prefers-color-schem
 
 Screenshots: `lineage-overview.png`, `lineage-focus.png`, `lineage-dark.png`, `lineage-panels.png`. Read them before declaring done.
 
-The page is wrapped in a document skeleton at publish time, so the template starts at `<title>`.
+The template is a complete HTML document that opens directly from disk. If the publisher supplies a document skeleton, put the template's head and body contents in the corresponding sections.

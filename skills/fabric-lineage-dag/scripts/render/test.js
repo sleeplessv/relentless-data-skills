@@ -1,15 +1,11 @@
 // Headless verification of the built page. Prints JSON; exits 1 on console errors or a failed check.
 // Usage: node test.js <lineage.html> <focus-node-id> [search-term] [screenshot-dir]
 const { chromium } = require('playwright');
-const fs = require('fs');
 const path = require('path');
+const { pathToFileURL } = require('node:url');
 const [html, focusId, term = '', shotDir = ''] = process.argv.slice(2);
 if (!html || !focusId) { console.error('usage: node test.js <lineage.html> <focus-node-id> [search-term] [screenshot-dir]'); process.exit(1); }
 (async () => {
-  const body = fs.readFileSync(html, 'utf8');
-  const doc = '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width"></head><body>' + body + '</body></html>';
-  const tmp = path.join(path.dirname(path.resolve(html)), '_test.html');
-  fs.writeFileSync(tmp, doc);
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1500, height: 950 } });
   const errors = [], external = new Set();
@@ -17,7 +13,7 @@ if (!html || !focusId) { console.error('usage: node test.js <lineage.html> <focu
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
   page.on('request', r => { const u = r.url(); if (/^https?:/.test(u) && !/fonts\.(googleapis|gstatic)\.com/.test(u)) external.add(u); });
   const t0 = Date.now();
-  await page.goto('file://' + tmp);
+  await page.goto(pathToFileURL(path.resolve(html)).href);
   await page.waitForFunction(() => window.__lineageTimings && window.__lineageTimings.length);
   await page.waitForTimeout(500);
   const shot = async name => { if (shotDir) await page.screenshot({ path: path.join(shotDir, name) }); };

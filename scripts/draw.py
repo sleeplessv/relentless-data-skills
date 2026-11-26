@@ -1020,7 +1020,9 @@ class Draw:
         Each transcript, the log's and each helper's, is copied as the bytes the draw read when the session
         qualified, checked by their digest; a helper transcript that appeared later is left out. The copy is
         made in logs/.new-<session>; an earlier copy of the session moves to logs/.old-<session> only once
-        the new one is whole and scanned, and is removed once the new one is in place."""
+        the new one is whole and scanned, and is removed once the new one is in place. A signal holds off from that
+        move until the scan row is written; before it, the earlier copy stays as it was and no .new- folder is
+        left."""
         source = candidate["source"]
         logs = self.state / "logs"
         staged, old = logs / f".new-{source.stem}", logs / f".old-{source.stem}"
@@ -1050,17 +1052,25 @@ class Draw:
                 if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
                     raise OSError(f"{target.name} changed after the draw read it")
             row = scan.scan(source.stem, staged / source.name)
-            old.mkdir()
-            for name in names:
-                if (logs / name).exists():
-                    os.replace(logs / name, old / name)
-            for name in names:
-                if (staged / name).exists():
-                    os.replace(staged / name, logs / name)
-            shutil.rmtree(old)
-            shutil.rmtree(staged)
-            scan.write_row(row)
-        except (Exception, SystemExit) as error:  # its message can name the project's folder
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+            try:
+                old.mkdir()
+                for name in names:
+                    if (logs / name).exists():
+                        os.replace(logs / name, old / name)
+                for name in names:
+                    if (staged / name).exists():
+                        os.replace(staged / name, logs / name)
+                shutil.rmtree(old)
+                shutil.rmtree(staged)
+                scan.write_row(row)
+            finally:  # a signal held off is raised here
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        except (Exception, SystemExit, Stopped) as error:  # its message can name the project's folder
+            try:
+                mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+            except Stopped as late:  # a signal that came just before; the signals are held all the same
+                error, mask = late, None
             for name in names if old.exists() else ():  # put back the earlier copy where it was moved
                 if (old / name).exists():
                     if (logs / name).is_dir():
@@ -1070,6 +1080,10 @@ class Draw:
                     os.replace(old / name, logs / name)
             shutil.rmtree(old, ignore_errors=True)
             shutil.rmtree(staged, ignore_errors=True)
+            if mask is not None:
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+            if isinstance(error, Stopped):
+                raise error
             raise DrawError(f"could not save the session log of project {candidate['label']} ticket "
                             f"{candidate['ticket']} ({type(error).__name__}).")
         return str((logs / source.name).relative_to(self.state))

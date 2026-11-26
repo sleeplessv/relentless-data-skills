@@ -80,6 +80,7 @@ class Ticket:
     issue: int = 0  # the issue the PR closes, when not `number`
     command: str = OPENS  # the Bash command whose result prints the PR's URL
     again: str = ""  # a later Bash command, at 10:40, whose result prints the PR's URL again
+    later: str = ""  # a later Bash command, at 10:20, whose result prints the URL of a PR in an unlisted repo
     also: int = 0  # another ticket whose PR's URL the opening command's result prints too
     model: object = MODEL  # the model the session's responses name; "" for none
     created: str = CREATED  # when GitHub says the PR was opened
@@ -107,77 +108,101 @@ class Ticket:
         return f"{self.number:08d}" + letter * 32
 
 URL = f"https://github.com/{ALPHA}/pull/501"
-# What a Bash command that exited 0 does to its session: it opens the PR when the shell surely started
-# `gh pr create`, it may have (and only vetoes) when the shell may not have, or it does neither. Each "may"
-# form without a reason exits 0 without the call in some arrangement of the test's stand-ins; a reason says
-# why the reader cannot tell for a form whose every arrangement makes the call.
+UNLISTED = "https://github.com/example-org/gamma/pull/9"
+HERE_BODY = "gh pr create --title \"t\" --body \"$(cat <<'EOF'\nRun exit 0; then gh pr create || true.\nEOF\n)\""
+# What the reader says of a Bash call that exited 0, and what bash does with it in the shell test's arrangements of
+# its stand-ins. The reader says "opens" when the call has a form that --help lists, "maybe" when its text holds the
+# words gh, pr and create otherwise, and None when it does not. The shell, across the arrangements, "starts"
+# `gh pr create` in every run that exits 0, and some run exits 0; "skips" it in some run that exits 0, though some
+# run starts it; "fails": no run exits 0, though some run starts it; or starts it in "none" of the runs.
 FORMS: dict[str, dict[str, str]] = {
     "opens": dict.fromkeys([
-        "gh pr create", "cd x && GH=1 gh  pr create", "gh pr 'cre'ate", "command -- gh pr create",
-        "envflag='two words' gh pr create", '"gh" pr create', "./tools/gh pr create", "time gh pr create",
-        "exec gh pr create", "! gh pr create", "nohup gh pr create", "env A=1 gh pr create", "command gh pr create",
-        "cd .\ngh pr create", "gh pr create  # open it", "gh pr create \\\n  --fill", "gh pr create 2>&1",
-        "gh pr create --body \"$(cat <<'EOF'\nBody text.\nEOF\n)\"",
-        "gh pr create --fill || gh pr view --json url --jq .url",
-        "git push -u origin HEAD && gh pr create --fill", "true && gh pr create",
-        "gh pr create --fill 2>&1 | tail -3", "gh pr create | cat", "gh pr create &",
-        "gh pr create --fill && gh pr view --web", "gh pr create --fill; echo done",
-        'url=$(gh pr create) && echo "$url"', "echo `gh pr create`",
-        "if true; then :; fi; gh pr create", "f() { echo hi; }; f; gh pr create",
+        # The five forms real sessions use.
+        'gh pr create --title "t" --body "b"', "git push -u origin b && gh pr create --fill",
+        "cd x && gh pr create --fill", "gh pr create --fill 2>&1 | tail -1", HERE_BODY,
         # The shape of the call that opened this repo's own PR for #281.
         "cat > body.md <<'EOF'\nBody text.\nEOF\ncd x && git push -q -u origin HEAD 2>&1 | tail -2; "
         "cd .. && gh pr create --draft --base main --head ticket-1 --title \"Ticket 1\" --body-file body.md",
-        "git push &&\ngh pr create", "gh pr create --fill |\n  tail -3"], ""),
-    "may": {
-        f"if false; then gh pr create; fi; printf '%s\\n' {URL}": "",
-        "git push && gh pr create --fill; echo done": "",
-        "gh pr view --json url || gh pr create --fill": "",
-        "$GH pr create": "",
-        "git push && gh pr create &": "",
-        "exit 0; gh pr create": "",
-        "exec true; gh pr create": "",
-        "f() { exit 0; }; f; gh pr create": "",
-        "trap 'exit 0' ERR; git push; gh pr create": "",
-        "set -e; trap 'exit 0' EXIT; git push; gh pr create": "",
-        f"false &&\ncommand -- gh pr create; printf '%s\\n' {URL}": "",
-        f"if false; then time {{ :; }}; command -- gh pr create; fi; printf '%s\\n' {URL}": "",
-        f"env -? gh pr create 2>/dev/null; printf '%s\\n' {URL}": "",
-        f"gh pr $'creat\\e'; printf '%s\\n' {URL}": "",
-        "git push ||\ngh pr create": "",
-        "gh() { :; }; gh pr create": "",
-        f"gh pr create < missing-file; printf '%s\\n' {URL}": "",
-        f"echo ${{x!}}; gh pr create\nprintf '%s\\n' {URL}": "",
-        f"echo $((1/0)); gh pr create\nprintf '%s\\n' {URL}": "",
-        f"gh pr create > missing-folder/out; printf '%s\\n' {URL}": "",
-        "case x in x) gh pr create;; esac": "the reader does not model case",
-        "function f { :; }; gh pr create": "the reader does not model the function keyword",
-        "command -p gh pr create": "the reader does not model command -p, whose own search path need not find gh",
-        "[[ -n x ]] && gh pr create": "the reader does not model [[ ]]",
-        "flags='pr create'; gh $flags": "the reader does not follow a variable's value",
-        "gh pr $'cre\\x61te'": "the reader does not decode ANSI-C escapes",
-        "printf '%s\\n' '<<\"EOF\"'\ngh pr create": "the reader does not tell a quoted << from a here-document's",
-        "if true; then gh pr create --fill; fi": "the reader does not evaluate a condition",
-        "false || gh pr create": "the reader does not evaluate a command before ||",
-        "{ gh pr create; }": "the reader does not read inside a group",
-        "(gh pr create)": "the reader does not read inside a subshell",
-        "for i in 1; do gh pr create; done": "the reader does not read a loop's words, which may be none",
-        "cat <<EOF\n$(gh pr create)\nEOF": "the reader leaves a here-document's substitutions at may",
-        "gh pr create --title 'unclosed": "the shell cannot parse it either, so it never exits 0"},
-    "neither": dict.fromkeys([
-        f"printf '%s\\n' 'ok' ';' gh pr create {URL}", "echo 'gh pr create'", "echo gh pr create",
-        "command -v gh pr create", "cat <<'EOF'\n$(gh pr create)\nEOF", "# gh pr create",
-        "gh pr view --json url --jq .url", "gh 'pr create'", "gh pr create-preview"], "")}
-# A command another program runs is not counted, by the owner's choice, though the shell would start it.
-WRAPPED = ["bash -c 'gh pr create'", "eval gh pr create", "sh ./open-pr.sh"]
+        "git push &&\ngh pr create", "gh pr create --fill |\n  tail -3", "gh pr create \\\n  --fill",
+        "cd .\ngh pr create\n", "git log > log.txt; gh pr create && git push",
+        "gh pr create --title 'it'\\''s \"quoted\"' --body \"costs \\$5, \\`kept\\`\""], "starts"),
+    "maybe": {
+        # The 13 commands the reader at 97b879d read wrongly.
+        'time { :; } >"$((1 / 0))"; gh pr create': "none",
+        "time { :; }; command X=1 gh pr create": "none",
+        "time { PATH=/absent; }; gh pr create": "none",
+        "time '-p' gh pr create": "none",
+        "env A=1 -u A gh pr create": "none",
+        "/no/such/gh pr create": "none",
+        "gh pr create --fill || gh pr view --json url --jq .url": "starts",
+        'cli=gh; command "$cli" pr create': "starts",
+        "env -C . gh pr create": "starts",
+        '{ :; } >"$(gh pr create)"': "fails",
+        "echo $[ $(gh pr create) + 1 ]": "fails",
+        'set -- pr create; gh "$@"': "starts",
+        "x='pr create'; gh ''$x": "starts",
+        # A compound command, a function, prefixes, another program, and calls with an && before and a ; after.
+        "if true; then gh pr create --fill; fi": "starts",
+        "{ gh pr create; }": "starts",
+        "(gh pr create)": "starts",
+        "f() { gh pr create; }; f": "starts",
+        "env A=1 gh pr create": "starts",
+        "command gh pr create": "starts",
+        "time gh pr create": "starts",
+        "nohup gh pr create": "starts",
+        "bash -c 'gh pr create'": "starts",
+        "eval gh pr create": "starts",
+        "git push && gh pr create --fill; cd .": "skips",
+        f"false && gh pr create --fill; printf '%s\\n' {URL}": "none",
+        # Calls that end or replace the shell, change what gh names, or abandon the line before gh.
+        "exit 0; gh pr create": "none",
+        "exec true; gh pr create": "none",
+        "gh() { :; }; gh pr create": "none",
+        "PATH=/absent; gh pr create": "none",
+        f"echo $((1/0)); gh pr create\nprintf '%s\\n' {URL}": "none",
+        f"gh pr create > missing-folder/out; printf '%s\\n' {URL}": "none",
+        f"gh pr create < missing-file; printf '%s\\n' {URL}": "none",
+        "$GH pr create": "skips",
+        "gh pr view --json url || gh pr create --fill": "skips",
+        "git push ||\ngh pr create": "skips",
+        "git push && gh pr create &": "skips",
+        # Forms near the list that it leaves off.
+        "gh pr create  # open it": "starts",
+        "GH=1 gh pr create": "starts",
+        "gh pr 'cre'ate": "starts",
+        "./tools/gh pr create": "starts",
+        "gh pr create --body \"$(cat <<'EOF'\nEOF)\nEOF\n)\"": "starts",
+        "cat <<EOF\n$(gh pr create)\nEOF": "starts",
+        # Text that names the words and runs no gh pr create.
+        "echo 'gh pr create'": "none",
+        "gh pr view --json url --jq .url; echo create": "none",
+        "cat <<'EOF'\n$(gh pr create)\nEOF": "none",
+        "# gh pr create": "none",
+        "gh pr create-preview": "none",
+        "command -v gh pr create": "none"},
+    # The known limit: a call that builds the words when it runs, or a script that runs gh pr create.
+    "neither": {
+        "gh pr view --json url --jq .url": "none", "echo done": "none",
+        "gh pr $'cre\\x61te'": "starts", "sh ./open-pr.sh": "starts"}}
 # Forms whose reading is asserted but which no test hands to a shell: each can find a program past the
 # stand-ins, so it could start the real gh.
 PAST_THE_STAND_IN = {"command -p gh pr create": "command -p searches the system's default path, not PATH"}
 
 
 def shell_forms() -> list[tuple[str, str, str]]:
-    """Each form the shell test hands to bash: (what the reader should say, the form, the reason)."""
-    return [(does, command, reason) for does, commands in FORMS.items() for command, reason in commands.items()
-            if command not in PAST_THE_STAND_IN]
+    """Each form the shell test hands to bash: (what the reader should say, the form, what bash does with it)."""
+    return [(does, command, outcome) for does, commands in FORMS.items() for command, outcome in commands.items()]
+
+
+def outcome(runs: list[tuple[int, bool]]) -> str:
+    """What bash did with a form across the arrangements, from each run's exit and whether it started the stand-in
+    gh with `pr create`, in the words FORMS uses."""
+    passed = [called for code, called in runs if code == 0]
+    if not any(called for _, called in runs):
+        return "none"
+    if not passed:
+        return "fails"
+    return "starts" if all(passed) else "skips"
 
 
 def shell_path(root: Path, stand_ins: set[str]) -> str:
@@ -245,6 +270,12 @@ def retime(path: Path, moment: str | None, kind: str = "") -> None:
     write_lines(path, [entry if kind and entry["type"] != kind else
                        {key: value for key, value in entry.items() if key != "timestamp"}
                        | ({"timestamp": moment} if moment else {}) for entry in read_lines(path)])
+
+
+def vetoed(result: subprocess.CompletedProcess[str]) -> int:
+    """How many PRs of the listed repos a draw printed that a call may have opened."""
+    found = [line for line in result.stdout.splitlines() if line.startswith("Vetoed ")]
+    return int(found[0].split()[1])
 
 
 def counts(result: subprocess.CompletedProcess[str]) -> tuple[int, int, int]:
@@ -390,6 +421,8 @@ class World:
                   for entry in opening(session, minute * 2, url, ticket.command, ticket.model)]
         if ticket.again:
             opened += opening(session, 40, urls[0], ticket.again, ticket.model)
+        if ticket.later:
+            opened += opening(session, 20, UNLISTED, ticket.later, ticket.model)
         if ticket.by_helper:  # a forked helper's log starts with the lines its parent's log copied
             helper = self.log_path(ticket).with_suffix("") / "subagents" / "agent-a1.jsonl"
             write_lines(helper, copied + [{**entry, "agentId": "a1", "isSidechain": True} for entry in opened])
@@ -507,7 +540,9 @@ class TestOneDraw(unittest.TestCase):
             "checks", "draw.lock", "logs", "project-labels.json", "replay-set-1.json", "repos.json",
             "scan-rows.jsonl", "scan-rows.lock"])
         self.assertEqual(self.result.stdout.splitlines(), [
-            "Seed 7.", "Skipped 1 session logs that could not be read.", "0-50: pool 12, set aside 0, kept 10.",
+            "Seed 7.", "Skipped 1 session logs that could not be read.",
+            "Vetoed 0 PRs of the listed repos: a call may have opened each, so none is in the pool.",
+            "0-50: pool 12, set aside 0, kept 10.",
             "51-300: pool 12, set aside 0, kept 10.", "301-1500: pool 12, set aside 0, kept 10.",
             f"Wrote {state / 'replay-set-1.json'}."])
         self.assertEqual(self.result.stderr, "")
@@ -527,16 +562,54 @@ class TestDraw(unittest.TestCase):
             "Draw the replay set: 30 tickets generation one finished, 10 per size bucket.", "",
             "Usage: python3 scripts/draw.py [--seed N]"])
 
+    def test_help_gives_the_opening_forms_the_veto_the_limit_and_what_it_takes_for_granted_each_once(self) -> None:
+        sentences = [
+            "A call runs `gh pr create` for certain when it exited 0 and has this form, which shows that bash "
+            "started that command:",
+            "Every other command is cd, git, cat or tail.",
+            "The draw takes for granted that the call ran in bash 5.2 or later, with its default options; that no "
+            "alias, function, variable or option set before the call changes what a name in it runs; and that gh "
+            "names the GitHub CLI and cd, git, cat and tail the commands of those names, wherever the call runs them.",
+            "Any other call whose text holds the words gh, pr and create, in any order, case or quoting, may have "
+            "opened the PR its result names, if GitHub's time falls in its span.",
+            "A call whose text does not hold the three words does not count.",
+            "So a command that builds the words when it runs, or a script or program that runs gh pr create, leaves "
+            "no evidence.",
+            "Before the count per bucket, the draw prints how many PRs of the listed repos a call may have opened."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        source = " ".join((SCRIPTS / "draw.py").read_text().split())
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+                self.assertEqual(source.count(sentence), 1)  # the help is the one place that says it
+        for function in (draw.runs_gh_pr_create, draw.opening_form):
+            self.assertNotIn("takes for granted", function.__doc__)
+            self.assertNotIn("cd, git, cat or tail", function.__doc__)
+
+    def test_the_draw_prints_how_many_prs_of_the_listed_repos_a_call_may_have_opened(self) -> None:
+        # Ticket 2's session may have opened its PR; ticket 3's may have too, in a repo outside the list.
+        for tickets, count in (([Ticket(1, 20)], 0),
+                               ([Ticket(1, 20), Ticket(2, 20, command="env A=1 gh pr create"),
+                                 Ticket(3, 20, repo=BETA, command="env A=1 gh pr create")], 1)):
+            with self.subTest(count=count):
+                result = self.world(tickets).draw()
+                self.assertEqual(result.returncode, 3, result.stderr)
+                self.assertEqual(result.stdout.splitlines()[1], f"Vetoed {count} PRs of the listed repos: a call "
+                                                                f"may have opened each, so none is in the pool.")
+
     def test_pool_holds_only_tickets_that_meet_readings_2_and_3_in_listed_repos(self) -> None:
         kept = [
-            Ticket(1, 20, command="cd .\ngh pr create --fill"), Ticket(2, 20, command="gh\tpr 'cre'ate --fill"),
+            Ticket(1, 20, command="cd .\ngh pr create --fill"), Ticket(2, 20, command="gh\tpr\tcreate --title 'Ticket 2' --fill"),
             Ticket(3, 20, criteria="```html\n<!-- a literal comment opener\n```\n\n## Acceptance\n\n- yes"),
             Ticket(4, 20, criteria="  ## Acceptance\n\n- The report prints the total."),
-            Ticket(5, 20, command="cd ../alpha && GH_PROMPT_DISABLED=1 gh  pr create --fill"),
+            Ticket(5, 20, command="cd ../alpha && gh  pr create --fill"),
             Ticket(6, 20, inherited="tdd"), Ticket(7, 20, by_helper=True), Ticket(8, 20, copied=True),
-            Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total.", command="command gh pr create"),
+            Ticket(9, 20, criteria="## Acceptance\n\n1. The report prints the total.", command="git push 2>&1 | tail -1; gh pr create --fill 2>&1 | tail -1"),
             Ticket(10, 50, criteria="## Done when\n\n* The report prints the total."),
-            Ticket(101, 100, again="gh pr create --fill || gh pr view --json url --jq .url"), Ticket(102, 100, also=24),
+            Ticket(101, 100, again=OPENS), Ticket(102, 100, also=24),
             *sized(103, 6, 100), Ticket(109, 51), Ticket(110, 300, skill="some-plugin:implement-backlog"),
             *sized(201, 8, 800, draft=True), Ticket(209, 301, draft=True), Ticket(210, 1500)]
         left_out = [
@@ -586,11 +659,14 @@ class TestDraw(unittest.TestCase):
         for does, commands in FORMS.items():
             for command in commands:
                 with self.subTest(command=command):
-                    # Ticket 1's session runs the command; ticket 101's opens its PR and a second session runs it.
-                    world = self.world([Ticket(1, 20, command=command), Ticket(101, 100, rival=command)])
+                    # Ticket 1's session runs the command. Ticket 101's opens its PR and a second session runs it.
+                    # Ticket 102's opens its PR and later runs it, printing the URL of a PR in an unlisted repo.
+                    world = self.world([Ticket(1, 20, command=command), Ticket(101, 100, rival=command),
+                                        Ticket(102, 100, later=command)])
                     result = world.draw()
                     self.assertEqual(result.returncode, 3, result.stderr)
-                    self.assertEqual(counts(result), (does == "opens", does == "neither", 0))
+                    self.assertEqual(counts(result), (does == "opens", 2 * (does == "neither"), 0))
+                    self.assertEqual(vetoed(result), 2 * (does == "maybe"))
 
     def test_each_form_s_reading_holds_for_what_a_shell_does_with_it(self) -> None:
         sys.path.insert(0, str(SCRIPTS))
@@ -605,16 +681,15 @@ class TestDraw(unittest.TestCase):
             (root / "bin" / name).write_text(text)
             (root / "bin" / name).chmod(0o755)
         (root / "tools" / "gh").symlink_to(root / "bin" / "gh")
+        (root / "open-pr.sh").write_text("gh pr create\n")
         calls, creates = root / "calls", root / "creates"
         arrangements = [{"GIT_EXIT": git, "CREATE_EXIT": create, "VIEW_EXIT": view, "GH": gh}
                         for git in "01" for create in "01" for view in "01" for gh in ("gh", "true")]
-        for command in WRAPPED:
-            self.assertIsNone(draw.runs_gh_pr_create(command))
         for command in PAST_THE_STAND_IN:
             self.assertEqual(draw.runs_gh_pr_create(command), "maybe")
-        for does, command, reason in shell_forms():
+        for does, command, expected in shell_forms():
             with self.subTest(command=command):
-                self.assertEqual(draw.runs_gh_pr_create(command), {"opens": "opens", "may": "maybe"}.get(does))
+                self.assertEqual(draw.runs_gh_pr_create(command), {"opens": "opens", "maybe": "maybe"}.get(does))
                 runs = []  # (the shell's exit, whether gh was asked to create a PR) per arrangement
                 for arrangement in arrangements:
                     calls.write_text("")
@@ -627,13 +702,7 @@ class TestDraw(unittest.TestCase):
                             break
                         subprocess.run(["sleep", "0.05"])
                     runs.append((code, creates.read_text() != ""))
-                passed = [called for code, called in runs if code == 0]
-                if does == "opens":
-                    self.assertTrue(passed and all(passed), runs)
-                elif does == "may" and not reason:
-                    self.assertIn(False, passed, runs)
-                elif does == "neither":
-                    self.assertFalse(any(called for _, called in runs), runs)
+                self.assertEqual(outcome(runs), expected, runs)
 
     def test_no_form_the_shell_test_runs_can_reach_a_program_outside_its_stand_ins(self) -> None:
         # Each form runs with `sh` in the place of gh, and a stand-in sh first on PATH that only records. A
@@ -649,7 +718,7 @@ class TestDraw(unittest.TestCase):
         (root / "tools" / "sh").symlink_to(root / "bin" / "sh")
         mark = root / "escaped"
         (root / "pr").write_text(f": > {mark}\n")
-        for does, command, reason in shell_forms():
+        for _, command, _ in shell_forms():
             with self.subTest(command=command):
                 mark.unlink(missing_ok=True)
                 probe = re.sub(r"\bgh\b", "sh", command)
@@ -757,7 +826,7 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(world.set_file()["set_aside"], [{"label": "A", "ticket": failed, "bucket": "0-50",
                                                            "reason": "check exited 1",
                                                            "check_output": f"checks/A-{failed}.txt"}])
-        self.assertEqual(result.stdout.splitlines()[1:4], ["0-50: pool 12, set aside 1, kept 10.",
+        self.assertEqual(result.stdout.splitlines()[2:5], ["0-50: pool 12, set aside 1, kept 10.",
                                                             "51-300: pool 12, set aside 0, kept 10.",
                                                             "301-1500: pool 12, set aside 0, kept 10."])
         self.assertEqual((world.state / f"checks/A-{failed}.txt").read_text(),
@@ -770,7 +839,9 @@ class TestDraw(unittest.TestCase):
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.", "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 9, set aside 0, kept 0.",
+            "Seed 2.",
+            "Vetoed 0 PRs of the listed repos: a call may have opened each, so none is in the pool.",
+            "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 9, set aside 0, kept 0.",
             "301-1500: pool 12, set aside 0, kept 0.", "No set written: a bucket cannot reach 10 tickets."])
         self.assertEqual(sorted(path.name for path in world.state.iterdir()),
                          ["draw.lock", "project-labels.json", "repos.json"])
@@ -782,7 +853,9 @@ class TestDraw(unittest.TestCase):
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
         self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.", "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
+            "Seed 2.",
+            "Vetoed 0 PRs of the listed repos: a call may have opened each, so none is in the pool.",
+            "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
             "301-1500: pool 11, set aside 2, kept 9.", "No set written: a bucket cannot reach 10 tickets."])
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
         self.assertFalse((world.state / "logs").exists())
@@ -838,7 +911,7 @@ class TestDraw(unittest.TestCase):
                                        "stand-in gh: the clone failed", "clone exit 1"])
         self.assertEqual(outputs[17][1:], [f"stand-in gh: no saved answer for api repos/{ALPHA}/activity?ref=refs/heads/"
                                            "ticket-17&per_page=100", "gh exit 1"])
-        self.assertEqual(result.stdout.splitlines()[1], "0-50: pool 17, set aside 6, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[2], "0-50: pool 17, set aside 6, kept 10.")
 
     def test_the_seed_gives_the_same_tickets_whatever_the_order_of_the_repo_list(self) -> None:
         alpha = full_pool(6)
@@ -879,7 +952,7 @@ class TestDraw(unittest.TestCase):
             [{"event": "ready_for_review", "created_at": 17}])
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[1], "0-50: pool 13, set aside 3, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[2], "0-50: pool 13, set aside 3, kept 10.")
         aside = {entry["ticket"]: entry for entry in world.set_file()["set_aside"]}
         self.assertEqual({number: entry["reason"] for number, entry in aside.items()}, dict.fromkeys(
             (11, 12, 13), "GitHub's record of the PR's history or of the pushes to its branch could not be read"))

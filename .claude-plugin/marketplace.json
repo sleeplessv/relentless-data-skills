@@ -291,7 +291,7 @@
     {
       "name": "model-router",
       "source": "./skills/model-router",
-      "description": "Route delegated tasks to the right model and effort across Google Gemini 4, OpenAI GPT-6, and Anthropic Claude 5 by task fit and token cost.",
+      "description": "Pick the model, reasoning effort and harness for each delegated task across Anthropic, OpenAI and Google models, by task fit, input and cost.",
       "version": "0.1.0",
       "author": {
         "name": "sleeplessv"
@@ -301,8 +301,9 @@
       "license": "Apache-2.0",
       "keywords": [
         "routing",
-        "orchestration",
+        "delegation",
         "models",
+        "harness",
         "subagents",
         "cost",
         "gemini",

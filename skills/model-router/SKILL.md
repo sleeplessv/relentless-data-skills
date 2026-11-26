@@ -1,78 +1,114 @@
 ---
 name: model-router
-description: Pick the model and reasoning effort for each delegated task across Google Gemini 4, OpenAI GPT-6, and Anthropic Claude 5, matched by task fit and token cost. Use when an orchestrator routes subagents or cross-agent helpers by workload or budget, or when the user asks which model should handle a task.
+description: Pick the model, reasoning effort and harness for each task a session hands to another agent, across Anthropic, OpenAI and Google models. Use when a session or another skill delegates work and must choose which model runs it, or when the user asks which model should handle a task.
 argument-hint: "[task or plan to route]"
 ---
 
-# Route tasks across frontier models
+# Route each task to a model
 
-Assign each delegated task to the cheapest model class and vendor that fits its modality, reasoning demand, and failure cost. Four model classes span Google Gemini 4, OpenAI GPT-6, and Anthropic Claude 5:
+A **route** is the model, reasoning effort and harness for one task, with the same-class model to use when that one cannot be reached. This skill produces routes and nothing else: the brief, the launch and the result belong to the skill doing the work.
 
-- **Apex.** Maximum reasoning depth and frontier autonomy for formal proofs, stuck architecture, multi-hour refactors, whole-repo grounding, and escalation (`Gemini 4 Carbon`, `GPT-6.2 Astra`, `Claude Fable 5.2`, `Claude Opus 5.5`).
-- **Strong.** High-capability daily engineering workhorses for feature coding, scoped refactors, reviews, and synthesis (`Gemini 4 Neon`, `GPT-6.2 Sol`, `Claude Sonnet 5.5`).
-- **Standard.** Fast, low-cost execution for routine edits, visual or GUI tasks, and worker fan-outs (`Gemini 4 Hydrogen`, `GPT-6.1 Terra`, or `Claude Sonnet 5.5` at `low` effort in Claude-only sessions).
-- **Light.** High-volume extraction, classification, file location, and routing (`Gemini 3.5 Flash-Lite`, `GPT-6 Luna`, `Claude Haiku 5.5`).
+Five words carry the rules:
 
-## 1. Check what the session can reach
+- **Main session.** The session a person started and talks to.
+- **Delegator.** A session that hands whole tasks to executors and checks their results. The main session is one whenever it hands tasks out; any other agent is one only when the session that started it said so. Only a delegator routes.
+- **Executor.** An agent a delegator starts for one whole task. It chooses no model or harness and starts no other executor. When it thinks part of its task belongs on another model, it reports that to its delegator.
+- **Helper.** An agent started for a small piece of its starter's own task, to keep bulk out of the starter's context. A delegator routes its helpers. An executor's helpers run on the model its own skill names, or the harness default.
+- **Carry.** A harness carries a model when it can run a session or an agent on it. One harness can carry several vendors' models.
 
-Identify the active harness, its vendor, and whether cross-vendor CLIs
-(`claude`, `codex`, `agy`) and Herdr (`HC_TERMINAL_ID`) are available. Read
-[references/dispatch.md](references/dispatch.md) when you need the probe
-script, exact per-harness model parameters, or cross-vendor launch flags.
+## What is already fixed
 
-Stay in the active harness by default. Crossing vendors starts a new process
-and drops prompt-cache sharing with the coordinator, which reaches 95 percent
-off cached input on Gemini 4 and 50 percent off cache reads on Claude Sonnet
-5.5. Cross vendors only when another lab holds a clear capability or cost
-advantage on the task, or when an independent review needs a second model
-family. When a target CLI or Herdr is unavailable, map the chosen model class
-to the active harness's own model in that class and record the substitution.
+Take as given, in this order, a model, class, effort or harness that the user named, then one the calling skill fixed. Route only what is left open.
 
-Done when the reachable harnesses, the session's model class, and whether
-cross-vendor dispatch is available are known.
+A model the user named is never swapped, substituted or escalated away. The session's own model never changes either; only the user can change it.
 
-## 2. Match each task to a model
+## 1. Find what the session can reach
 
-Split work into independent tasks before routing. Keep planning and final
-trade-off calls on a `strong` or `apex` coordinator, and send bounded edits,
-searches, and transforms to `standard` or `light` helpers. Take the first row
-in the table below that fits each task. Prices are standard uncached USD per 1M
-tokens (`input, output`). Read [references/catalog.md](references/catalog.md)
-when two models tie, when budget caps bind, or when you need context limits,
-cache rates, or multi-model pairing stacks.
+Establish four facts. [references/harnesses.md](references/harnesses.md) holds the probe commands; read it for any fact you do not already have.
 
-| Task shape | Class | First pick (in, out USD) | Same-class alternatives | Why it wins |
-| --- | --- | --- | --- | --- |
-| Formal math, strict proofs, scientific code, rigid constraints | `apex` | `GPT-6.2 Astra` (10.00, 50.00) | `Gemini 4 Carbon` (4.00, 20.00), `Claude Fable 5.2` (8.00, 40.00) | Highest ceiling on formal logic, FrontierMath, ARC-AGI, and strict rules. |
-| Ambiguous migrations, fuzzy specs, stuck design decisions | `apex` | `Claude Fable 5.2` (8.00, 40.00) | `Claude Opus 5.5` (4.00, 20.00), `Gemini 4 Carbon` (4.00, 20.00), `GPT-6.2 Astra` (10.00, 50.00) | Highest Claude reasoning ceiling when an escalation or advisor pass is needed above `Opus 5.5`. |
-| Multi-hour autonomous coding, messy refactors, nuanced prose | `apex` | `Claude Opus 5.5` (4.00, 20.00) | `Gemini 4 Carbon` (4.00, 20.00), `Claude Fable 5.2` (8.00, 40.00) | Sustains frontier design judgment and autonomous debugging across sprawling diffs at half `Fable 5.2` cost. |
-| Whole-repo audits, cyber defense, grounded long-context work | `apex` | `Gemini 4 Carbon` (4.00, 20.00) | `Claude Opus 5.5` (4.00, 20.00), `GPT-6.2 Astra` (10.00, 50.00) | Unified 1M multimodal window, lowest fabrication rate, and `4.00, 20.00` USD pricing (`Argon` saves thinking tokens). |
-| Scoped feature coding, test suites, multi-source synthesis | `strong` | `GPT-6.2 Sol` (2.00, 10.00) or `Claude Sonnet 5.5` (2.00, 10.00) | `Gemini 4 Neon` (3.00, 15.00) | Reaches 95 percent of `apex` coding quality at 2.00 input and 10.00 output USD. |
-| Independent defect or requirements review of a change | `strong` or `apex` | Cross-vendor `strong` or `apex` | Fresh same-vendor `strong` or `apex` helper | A second model family catches defects same-model review misses. Keep weaker models read-only. |
-| Invoices, forms, CAD drawings, screenshots, GUI automation | `standard` | `GPT-6.1 Terra` (1.00, 5.00) | `Gemini 4 Hydrogen` (1.50, 7.50); escalate novel desktop recovery to `Claude Opus 5.5` (4.00, 20.00) | Matches `Astra` on visual agentic exams at 1.00 input and 5.00 output USD. |
-| Native video, audio, or mixed PDF and media repositories | `standard` or `strong` | `Gemini 4 Hydrogen` (1.50, 7.50) or `Gemini 4 Neon` (3.00, 15.00) | `Gemini 3.5 Flash-Lite` (0.30, 2.50) for bulk media triage | Native audio and video across a unified 1M window with 95 percent cache discounts. |
-| Fast routine code edits, CI helpers, wide worker fan-outs | `standard` | `Gemini 4 Hydrogen` (1.50, 7.50) | `GPT-6.1 Terra` (1.00, 5.00), or `Claude Sonnet 5.5` at `low` effort (2.00, 10.00) | High-speed Gemini 4 execution for worker handoffs, with 0.075 USD cached reads. |
-| File location, log triage, classification, JSON extraction | `light` | `GPT-6 Luna` (0.10, 0.50) or `Claude Haiku 5.5` (0.10, 0.50) | `Gemini 3.5 Flash-Lite` (0.30, 2.50) | Costs 0.10 input and 0.50 output USD; `Luna` fits bulk ETL, `Haiku 5.5` fits live routing and sub-agent skims. |
+- The **home harness**: the harness the user named for this work ("use Cortex"), otherwise the one the session runs in. A harness the user did not name and the session does not run in is reached only as a model's own vendor harness.
+- Which models the home harness carries.
+- Whether Herdr and the `herdr-delegate` skill are present.
+- Which vendor CLIs are installed: `claude` for Anthropic, `codex` for OpenAI, `agy` for Google.
 
-Done when every task in the plan records one target model, its model class, its dispatch channel, and its fallback model.
+Done when all four are written down.
 
-## 3. Set reasoning effort
+## 2. Choose the class and the model
 
-Leave reasoning effort at the model default unless one of three cases applies:
+Give each task the lowest class with a row that fits it, and that row's first pick. [references/catalog.md](references/catalog.md) holds each model's price, input limits and IDs; read it when two picks tie, when a budget binds, or when the task's input is large or is not text.
 
-- **Low** (`low`, or `minimal` on `Gemini 3.5 Flash-Lite`) for `light` and `standard` helpers running file search, classification, or recorded commands, and for review passes tuned to cut false positives.
-- **High** (`high`) for `apex` and `strong` helpers handling root-cause debugging, formal proofs, security validation, or final defect reviews.
-- **Maximum** (`xhigh` on `Neon` and `Hydrogen`, `max` on `Astra`) only after a task failed its check at `high`. Raising effort from `low` to maximum multiplies token spend 2.5 to 5 times and can lower pass rates on routine coding.
+| Class | Task | First pick | Same-class alternatives |
+| --- | --- | --- | --- |
+| `light` | File location, log triage, classification, JSON extraction | `Claude Haiku 5.5` or `GPT-6 Luna` | `Gemini 3.8 Flash` |
+| `standard` | Routine edits, CI steps, wide batches of small tasks | `Gemini 4 Hydrogen` | `GPT-6.1 Terra`, `Claude Sonnet 5.5` at `low` effort |
+| `standard` | Invoices, forms, drawings, screenshots, GUI automation | `GPT-6.1 Terra` | `Gemini 4 Hydrogen` |
+| `strong` | Scoped feature coding, test suites, multi-source synthesis | `Claude Sonnet 5.5` or `GPT-6.2 Sol` | `Gemini 4 Neon` |
+| `strong` | A review of a change by an agent that wrote none of it | A `strong` or `apex` model from a vendor other than the author's | A fresh agent on the author's vendor |
+| `apex` | Long autonomous coding, sprawling refactors, ambiguous migrations, stuck design | `Claude Opus 5.5` | `Gemini 4 Carbon`, `GPT-6.2 Astra` |
+| `apex` | Formal mathematics, proofs, scientific code, rigid constraints | `GPT-6.2 Astra` | `Gemini 4 Carbon`, `Claude Opus 5.5` |
+| `apex` | Whole-repository audits and other work grounded in very long input | `Gemini 4 Carbon` | `Claude Opus 5.5`, `GPT-6.2 Astra` |
 
-Done when every task either leaves effort unset or names one of the three rules above.
+- **Input fit.** The model must accept the task's input kind and size. The catalog lists both, with the price step above each long-input threshold. A task whose input is audio or video goes to a model the catalog lists for it, in the class its row gives.
+- **Rank.** Within one vendor's models in a class, a rank orders them for escalation. `apex` has one: `Claude Opus 5.5`, then `Claude Fable 5.2`. Route to `Fable 5.2` directly only when the user names it.
+- **Reviewers.** A reviewer on a lower class than the author reads and reports; it edits nothing.
 
-## 4. Escalate on failed checks
+Done when every task names one class and one model.
 
-Agents overestimate their own pass rates, and issue text alone hides coupling. Pair upfront routing with check-driven escalation:
+## 3. Choose the harness
 
-1. Attach an external check (a test command, build, schema check, or independent review) to every write or transform task.
-2. When a task fails its check, dispatch a fresh helper one model class up (`light` to `standard`, `standard` to `strong`, `strong` to `apex`) with the failed check output and the prior helper's decisions.
-3. Cap retries at three total attempts per task, then report the task blocked with the failing output.
-4. Keep any helper with edit rights at or above the author's model class. A weaker reviewer that edits code lowers pass rates while raising spend.
+Take the first that holds:
 
-Done when every write or transform task names its check and its next-class escalation model, or sits at `apex`.
+A harness is **reachable** when the session runs in it, or when Herdr, `herdr-delegate` and that harness's CLI are all present.
+
+1. The home harness is reachable and carries the model. Run the task there: as an agent of the session when the session runs in it, through Herdr otherwise.
+2. The model's own vendor harness is reachable.
+3. Neither holds. Run a same-class model that the home harness carries and that fits the input, and record the substitution. When the home harness is not reachable, use the session's own.
+
+When the user named the model and neither 1 nor 2 holds, there is no substitute: step 6 applies. When no same-class model fits the input, the task is **blocked**.
+
+Each task gets its own route and its own agent. Grouping tasks under one agent is the calling skill's decision.
+
+[references/harnesses.md](references/harnesses.md) gives the model parameter for an agent of each harness and the flags `herdr-delegate` needs for each CLI. The catalog gives each harness's own ID for the model.
+
+Done when every task names its harness, and its substitute where 3 applied.
+
+## 4. Set the effort
+
+Leave reasoning effort at the model's default except in two cases:
+
+- **`low`** for `light` and `standard` tasks that search, classify or run recorded commands.
+- **`high`** for `apex` and `strong` tasks of root-cause debugging, proof, security validation or a final review of a change.
+
+Some harnesses cannot set effort for one agent; [references/harnesses.md](references/harnesses.md) names them. There the agent runs at the session's effort, and the route records the effort that was asked for and not applied.
+
+Done when every task leaves effort unset, names one of the two cases, or records an effort not applied.
+
+## 5. Check and escalate
+
+Give every task that writes or transforms a check: a command that ends in pass or fail, such as a test, a build or a schema check.
+
+When a task fails its check, start a fresh agent with the failing output and the first agent's decisions, on the next rung:
+
+1. One class up: `light` to `standard`, `standard` to `strong`, `strong` to `apex`.
+2. At `apex`, the next rank of the same vendor.
+3. At the top rank, the same model at its maximum effort, where the harness can set effort for that agent.
+
+Stop after three attempts in all, or when no rung is left, and report the task blocked with the failing output. A task on a model the user named, or one the calling skill fixed, climbs no rung: step 6 applies.
+
+Done when every task that writes or transforms names its check and its next rung, or is marked as having none.
+
+## 6. Say what was routed
+
+Before the first task starts, say in one line each case where your pick differs from a model the user named, or where the work the session keeps for itself fits a higher class than the session's own model.
+
+Then carry on, except in three cases:
+
+- A model the user named cannot be reached.
+- A task on a model the user named failed its check.
+- A model the user named, or the session's own model, is a lower class than the task's row.
+
+In those the main session waits for the user's answer. Any other agent reports the case to the session that started it, which decides.
+
+When the work ends, list every substitution and every effort not applied.
+
+Done when each difference was said before its task started, and the closing list is given or there was nothing to list.

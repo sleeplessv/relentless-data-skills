@@ -23,7 +23,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`implement-ticket`](skills/implement-ticket/) | Implement a GitHub ticket, verify the result, and prepare a pull request for review. |
 | [`land`](skills/land/) | Commit, publish, and merge working-tree changes through a pull request. |
 | [`metabase`](skills/metabase/) | Query and manage Metabase questions and dashboards, trace dependencies, and check dashboard configuration. |
-| [`model-router`](skills/model-router/) | Route delegated tasks to the right model and effort across Google Gemini 4, OpenAI GPT-6, and Anthropic Claude 5 by task fit and token cost. |
+| [`model-router`](skills/model-router/) | Pick the model, reasoning effort and harness for each delegated task across Anthropic, OpenAI and Google models, by task fit, input and cost. |
 | [`orchestrator-mode`](skills/orchestrator-mode/) | Coordinate work through subagents with scoped delegation, shared evidence, and verification. |
 | [`pbi-desktop-bridge`](skills/pbi-desktop-bridge/) | Reload Power BI Desktop in a Parallels Windows VM from a Mac and screenshot report pages, so an agent sees its PBIP edits rendered. |
 | [`prefect`](skills/prefect/) | Build, review, and debug Prefect 3 projects using documentation and live instance evidence. |

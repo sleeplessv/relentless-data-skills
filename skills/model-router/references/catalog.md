@@ -1,59 +1,85 @@
-# Frontier model catalog and economics
+# Model catalog
 
-Snapshot dated `2026-11`. Update prices, slugs, and capability notes together when a lab ships a new release.
+As of 2026-11-26. Every figure was read on that date from the vendor page listed under [Sources](#sources). When a vendor ships or reprices a model, update its row here, its row in [The ID each harness takes](#the-id-each-harness-takes), and the as-of date together.
 
-## Core four-class matrix
+## Models
 
-Prices are standard uncached USD per 1M tokens. Every model below accepts roughly 1M input tokens. Anthropic ships two `apex` models (`Fable 5.2` and `Opus 5.5`) and no standalone `1.00` USD `standard` model; Claude-only sessions cover `standard` tasks with `Claude Sonnet 5.5` at `low` effort.
+Prices are USD per 1M tokens at the standard rate, for the price in force on the as-of date.
 
-| Class | Vendor | Model | API ID | Input USD | Output USD | Cache read note | Context and max output | Reasoning control |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| `apex` | Google | Gemini 4 Carbon | `gemini-4-carbon` | 4.00 | 20.00 | 0.15 USD (95% off repeated context) | 1M unified, 64K sync out (1M background decode) | `low`, `medium` (default), `high` |
-| `apex` | OpenAI | GPT-6.2 Astra | `gpt-6.2-astra` | 10.00 | 50.00 | 30% to 40% batch and cache discounts | 1.05M input, 128K output | Adjustable (`low` to `max`) |
-| `apex` | Anthropic | Claude Fable 5.2 | `claude-fable-5-2` | 8.00 | 40.00 | Standard prompt cache discounts | 1M input, 128K output | Adaptive thinking with effort |
-| `apex` | Anthropic | Claude Opus 5.5 | `claude-opus-5-5` | 4.00 | 20.00 | Standard prompt cache discounts | 1M input, 128K output | Adaptive thinking with effort |
-| `strong` | Google | Gemini 4 Neon | `gemini-4-neon` | 3.00 | 15.00 | 0.15 USD (95% off repeated context) | 1M unified, 64K sync out (1M background decode) | `low`, `medium`, `high` (default), `xhigh` |
-| `strong` | OpenAI | GPT-6.2 Sol | `gpt-6.2-sol` | 2.00 | 10.00 | 30% to 40% batch and cache discounts | 1.05M input, 128K output | Adjustable effort |
-| `strong` | Anthropic | Claude Sonnet 5.5 | `claude-sonnet-5-5` | 2.00 | 10.00 | Reduced cache-read rate for agent loops | 1M input, 128K output | Adaptive thinking with effort |
-| `standard` | Google | Gemini 4 Hydrogen | `gemini-4-hydrogen` | 1.50 | 7.50 | 0.075 USD (95% off); AI Studio free tier | 1M unified, 64K sync out (1M background decode) | `low`, `medium`, `high`, `xhigh` |
-| `standard` | OpenAI | GPT-6.1 Terra | `gpt-6.1-terra` | 1.00 | 5.00 | 30% to 40% batch and cache discounts | 1.05M input, 128K output | Adjustable effort |
-| `light` | Google | Gemini 3.5 Flash-Lite | `gemini-3.5-flash-lite` | 0.30 | 2.50 | Standard cache discounts | 1M input, 64K output | `minimal` (default), `low`, `medium`, `high` |
-| `light` | OpenAI | GPT-6 Luna | `gpt-6-luna` | 0.10 | 0.50 | Standard cache discounts | 1.05M input, 128K output | Minimal fast mode |
-| `light` | Anthropic | Claude Haiku 5.5 | `claude-haiku-5-5` | 0.10 | 0.50 | Base rate applies under 100K input tokens | 1M input, 128K output | Lightweight adaptive |
+| Class | Vendor | Model | API ID | Input | Output | Cache read | Long input | Input kinds | Effort values (default) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `apex` | Anthropic | Claude Fable 5.2 | `claude-fable-5-2` | 8.00 | 40.00 | 0.20 | None | Text, image, PDF | `low`, `medium`, `high`, `xhigh`, `max` (`high`) |
+| `apex` | Anthropic | Claude Opus 5.5 | `claude-opus-5-5` | 4.00 | 20.00 | 0.20 | None | Text, image, PDF | `low`, `medium`, `high`, `xhigh`, `max` (`medium`) |
+| `apex` | OpenAI | GPT-6.2 Astra | `gpt-6.2-astra` | 8.00 | 40.00 | 0.40 | Above 272K | Text, image | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (`low`) |
+| `apex` | Google | Gemini 4 Carbon | `gemini-4-carbon` | 2.00 | 10.00 | 0.10 | None | Text, image, PDF, audio, video | `low`, `medium`, `high` (`medium`) |
+| `apex` | Google | Gemini 4 Argon | `gemini-4-argon` | 2.00 | 10.00 | 0.10 | None | Text, image, PDF, audio, video | `low`, `medium`, `high` (`medium`) |
+| `strong` | Anthropic | Claude Sonnet 5.5 | `claude-sonnet-5-5` | 2.00 | 10.00 | 0.10 | None | Text, image, PDF | `low`, `medium`, `high`, `xhigh`, `max` (`high`) |
+| `strong` | OpenAI | GPT-6.2 Sol | `gpt-6.2-sol` | 2.00 | 10.00 | 0.10 | Above 272K | Text, image | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (`low`) |
+| `strong` | Google | Gemini 4 Neon | `gemini-4-neon` | 3.00 | 15.00 | 0.15 | None | Text, image, PDF, audio, video | `low`, `medium`, `high`, `xhigh` (`high`) |
+| `standard` | OpenAI | GPT-6.1 Terra | `gpt-6.1-terra` | 1.00 | 5.00 | 0.05 | Above 272K | Text, image | `low`, `medium`, `high`, `xhigh`, `max`, `ultra` (`low`) |
+| `standard` | Google | Gemini 4 Hydrogen | `gemini-4-hydrogen` | 1.50 | 7.50 | 0.075 | None | Text, image, PDF, audio, video | `low`, `medium`, `high`, `xhigh` (`high`) |
+| `light` | Anthropic | Claude Haiku 5.5 | `claude-haiku-5-5` | 0.10 | 0.50 | 0.01 | Above 100K | Text, image, PDF | `low`, `medium`, `high`, `xhigh`, `max` (`medium`) |
+| `light` | OpenAI | GPT-6 Luna | `gpt-6-luna` | 0.10 | 0.50 | 0.01 | Above 272K | Text, image | `low`, `medium`, `high`, `xhigh`, `max` (`medium`) |
+| `light` | Google | Gemini 3.8 Flash | `gemini-3.8-flash` | 0.75 | 3.75 | 0.075 | None | Text, image, PDF, audio, video | `low`, `medium`, `high` (`medium`) |
 
-## Model notes by class
+- **Anthropic has no `standard` model.** A session that reaches only Anthropic models runs `standard` tasks on `Claude Sonnet 5.5` at `low` effort.
+- **`Gemini 4 Argon`** is carried by the same harnesses as `Carbon` at the same price. No row of the task table picks it; use it when the user names it.
+- **Maximum effort** is the last value in a model's list.
+- **OpenAI effort values and defaults** are the ones Codex lists (`codex debug models`), since Codex is the harness that runs these models. OpenAI's API pages do not state them for `Astra` and `Sol`.
 
-### Apex class
+## Long input
 
-- **Gemini 4 Carbon (`gemini-4-carbon`).** Google's heaviest deep-reasoning model (`4.00` input, `20.00` output USD). Best at multi-day software engineering loops, whole-repository comprehension, defensive cybersecurity validation, and cross-modal tasks mixing code, PDFs, audio, and video. Leads anti-fabrication benchmarks (AA-Omniscience) while matching `Claude Opus 5.5` on price and costing 60 percent less than `GPT-6.2 Astra`. Trade-off: slower per turn than `Neon`; pick `Neon` when tasks do not need deep `Carbon` deliberation. For extended analytical or math runs that burn too many thinking tokens on `Carbon`, `Gemini 4 Argon` (`gemini-4-argon`, `4.00` input, `20.00` output USD, `0.20` USD cache read) provides a token-frugal `apex` alternative.
-- **GPT-6.2 Astra (`gpt-6.2-astra`).** OpenAI's flagship reasoning model (`10.00` input, `50.00` output USD). Best at formal mathematics (FrontierMath, ARC-AGI), strict constraint adherence, bioinformatics and scientific computing, and complex hosted-shell or browser tool chains. Trade-off: highest price in the catalog (five times `Sol`), and can over-index on exhaustive detail when requirements are intentionally loose.
-- **Claude Opus 5.5 (`claude-opus-5-5`).** Anthropic's primary frontier model (`4.00` input, `20.00` output USD) for multi-hour autonomous coding, sprawling cross-system refactors, desktop computer use, and high-craft analytical writing. Excels when human prompts are under-specified and architectural taste matters, at half the cost of `Claude Fable 5.2`. Trade-off: twice the cost of `Claude Sonnet 5.5` and `GPT-6.2 Sol`, which match it on tightly scoped feature and terminal tasks.
-- **Claude Fable 5.2 (`claude-fable-5-2`).** Anthropic's upper `apex` ceiling (`8.00` input, `40.00` output USD) sitting above `Opus 5.5`. Best at hard software migrations, stuck architectural bottlenecks, and acting as an escalation advisor when `Opus 5.5` or `Sonnet 5.5` hits a structural wall. Trade-off: start frontier Claude runs on `Opus 5.5` and reserve `Fable 5.2` for escalations and advisor checkpoints.
+A model's price or reach changes above a threshold. Count the whole prompt, cached tokens included.
 
-### Strong class
+| Model | Threshold | Above it |
+| --- | --- | --- |
+| Claude Haiku 5.5 | 100,000 prompt tokens | Input 0.50, output 2.50, cache read 0.05. Up to 272,000 tokens `GPT-6 Luna` is then the cheaper `light` pick. |
+| GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, GPT-6 Luna | 272,000 input tokens | Input and cache read double and output is 1.5 times, for the whole request. |
+| GPT-6.2 Astra and GPT-6 Luna, in Codex | 272,000 tokens | Codex's window for these two. Larger input does not fit. |
+| GPT-6.2 Sol and GPT-6.1 Terra, in Codex | 500,000 tokens | Codex's window for these two. Larger input does not fit. |
 
-- **Gemini 4 Neon (`gemini-4-neon`).** Adapted from `Carbon` (`3.00` input, `15.00` output USD) to finish complex multi-step engineering and knowledge tasks faster with fewer wasted output tokens. Scores roughly 61 on the Artificial Analysis Intelligence Index, ranks near the top of Zapier's AutomationBench for business workflow execution, and supports `xhigh` thinking. Its `0.15` USD per 1M cache-read rate makes iterative long-context sessions economical.
-- **GPT-6.2 Sol (`gpt-6.2-sol`).** OpenAI's professional engineering workhorse (`2.00` input, `10.00` output USD). Reaches 95 to 99 percent of `Astra` capability on coding benchmarks (55 to 58 percent on Terminal-Bench 4.0 versus 58 to 59 percent for `Astra`) at 20 percent of the price. Default pick inside Codex and OpenAI stacks for feature implementation, scoped refactors, and structured synthesis. Trade-off: lacks native audio and video inputs, and costs twice `Terra` for screenshot-heavy UI jobs.
-- **Claude Sonnet 5.5 (`claude-sonnet-5-5`).** Anthropic's `strong` engineering daily driver (`2.00` input, `10.00` output USD) and direct price peer to `GPT-6.2 Sol`. High output token efficiency and reduced cache-read pricing let it trade blows with `Opus 5.5` on scoped developer benchmarks (such as Terminal-Bench 4.0) at half the price and much lower latency. Also covers `standard`-class duties inside Claude-only sessions when run at `low` effort.
+Every other window is about 1M tokens: 1M on Anthropic's API, 922,000 input tokens on OpenAI's, and 1,048,576 shared between input and output on Google's.
 
-### Standard class
+## Dated changes
 
-- **Gemini 4 Hydrogen (`gemini-4-hydrogen`).** Google's everyday developer default (`1.50` input, `7.50` output USD). Built for fast routine edits and high-frequency sub-agent handoffs, keeping the full 1M multimodal window and `xhigh` thinking option while dropping cached reads to `0.075` USD per 1M tokens.
-- **GPT-6.1 Terra (`gpt-6.1-terra`).** OpenAI's visual and GUI specialist (`1.00` input, `5.00` output USD). Tuned for parsing dense invoices, engineering drawings, forms, and UI screenshots, matching `Astra` on select visual agentic evaluations at one-tenth the cost. Trade-off: trails `Sol` by roughly 8 points on heavy terminal software engineering (about 50 percent versus 58 percent on Terminal-Bench 4.0), so keep backend coding on `Sol`.
-- **Anthropic in `standard` workflows.** Anthropic ships no standalone `1.00` USD model between `Sonnet 5.5` (`2.00` input, `10.00` output USD) and `Haiku 5.5` (`0.10` input, `0.50` output USD). Keep routine Claude-only worker steps on `Sonnet 5.5` with `low` effort to preserve prompt caching, or cross-dispatch high-volume GUI and invoice batches to `GPT-6.1 Terra`.
+Apply each from its date:
 
-### Light class
+- **2026-12-01.** `Gemini 4 Carbon` and `Gemini 4 Argon` become input 4.00, output 20.00, cache read 0.20.
+- **2027-01-01.** `Gemini 3.8 Flash` becomes input 1.50, output 7.50, cache read 0.15.
 
-- **Gemini 3.5 Flash-Lite (`gemini-3.5-flash-lite`).** Google's lowest-latency utility model (`0.30` input, `2.50` output USD) with a `minimal` default thinking mode and 1M multimodal input. Pick it over `Luna` and `Haiku 5.5` when high-volume streams contain audio, video, or huge PDFs; pick `Luna` or `Haiku 5.5` for plain text.
-- **GPT-6 Luna (`gpt-6-luna`).** OpenAI's bulk economy model (`0.10` input, `0.50` output USD, one-twentieth of `Sol`). Built for high-throughput classification, JSON schema extraction, PII redaction, and bulk summarization. Unsuited for open-ended coding (about 16 percent on Terminal-Bench 4.0).
-- **Claude Haiku 5.5 (`claude-haiku-5-5`).** Anthropic's fastest model (`0.10` input, `0.50` output USD under 100K input tokens). Strong text and basic logic parity for its size; best choice for live chat routing, file skimming, and nimble read-only helpers under `Opus 5.5` or `Sonnet 5.5`.
+## The ID each harness takes
 
-## Cost-efficient multi-model stacks
+`none` means the harness had no ID for that model on the as-of date. This table maps names; it does not say what an account can use. The harness's own list, read as [harnesses.md](harnesses.md) describes, decides what it carries.
 
-- **Google stack (`Carbon` or `Neon`, `Hydrogen`, and `3.5 Flash-Lite`).** Plan and audit whole repositories on `Carbon` or `Neon`, fan out file edits and test runs to `Hydrogen`, and pre-index media or logs with `3.5 Flash-Lite`. Keeping the run inside Gemini preserves 95 percent prompt-cache discounts across the 1M window.
-- **OpenAI stack (`Sol`, `Terra`, and `Luna`, with `Astra` on escalation).** Run everyday implementation on `GPT-6.2 Sol`, route screenshot and document steps to `GPT-6.1 Terra`, run extraction and triage on `GPT-6 Luna`, and escalate to `GPT-6.2 Astra` only when a formal proof or `Sol` check fails.
-- **Anthropic stack (`Opus 5.5` apex, `Sonnet 5.5` strong, `Haiku 5.5` light, and `Fable 5.2` escalation).** Default scoped tickets to `Sonnet 5.5`, run sprawling autonomous refactors on `Opus 5.5`, skim files with `Haiku 5.5`, and consult `Fable 5.2` at fixed checkpoints (before locking in a high-risk migration, or after an `Opus 5.5` check fails). In Anthropic's Advisor tool, advisor reads are uncached across calls; cap advisor `max_tokens` near `2048` and gate calls by explicit checkpoints rather than open-ended self-doubt.
-- **High-return cross-vendor pairs.** Three cross-vendor hops repay losing cache sharing:
-  1. `Claude Opus 5.5` or `Gemini 4 Carbon` author paired with a read-only `GPT-6.2 Astra` defect reviewer (`astra-review`).
-  2. `Claude` or `Codex` coordinator handing video, audio, or million-token repo grounding to `Gemini 4 Carbon` or `Hydrogen`.
-  3. Any coordinator handing high-volume invoice, schematic, or GUI automation batches to `GPT-6.1 Terra`.
+| Model | Claude Code | Codex | Antigravity | Cortex Code |
+| --- | --- | --- | --- | --- |
+| Claude Fable 5.2 | `fable` | none | none | none |
+| Claude Opus 5.5 | `opus` | none | `claude-opus-5-5-<effort>` | `claude-opus-5-5` |
+| Claude Sonnet 5.5 | `sonnet` | none | `claude-sonnet-5-5-<effort>` | `claude-sonnet-5-5` |
+| Claude Haiku 5.5 | `haiku` | none | none | `claude-haiku-5-5` |
+| GPT-6.2 Astra | none | Resolver family `astra` | none | `openai-gpt-6.2-astra` |
+| GPT-6.2 Sol | none | Resolver family `sol` | none | `openai-gpt-6.2-sol` |
+| GPT-6.1 Terra | none | Resolver family `terra` | none | `openai-gpt-6.1-terra` |
+| GPT-6 Luna | none | Resolver family `luna` | none | `openai-gpt-6-luna` |
+| Gemini 4 Carbon | none | none | `gemini-4-carbon-<effort>` | `gemini-4-carbon` |
+| Gemini 4 Argon | none | none | `gemini-4-argon-<effort>` | `gemini-4-argon` |
+| Gemini 4 Neon | none | none | `gemini-4-neon-<effort>` | `gemini-4-neon` |
+| Gemini 4 Hydrogen | none | none | `gemini-4-hydrogen-<effort>` | `gemini-4-hydrogen` |
+| Gemini 3.8 Flash | none | none | `gemini-3.8-flash-<effort>` | `gemini-3.8-flash` |
+
+- **Cortex Code** prefixes every OpenAI model with `openai-`.
+- **Antigravity** IDs end in the effort; `<effort>` stands for an effort `agy models` lists for that model, which can be fewer than the model's row above gives.
+- **Cursor** has no column: its IDs come from its own model list.
+
+## Sources
+
+- Anthropic prices, cache and long input: <https://platform.claude.com/docs/en/about-claude/pricing>
+- Anthropic windows and default effort: <https://platform.claude.com/docs/en/models/overview>
+- Anthropic effort values: <https://platform.claude.com/docs/en/build-with-claude/effort>
+- OpenAI prices and the 272K threshold: <https://developers.openai.com/api/docs/pricing.md>
+- OpenAI limits and input kinds: the model pages under <https://developers.openai.com/api/docs/models/>
+- Google prices and dated changes: <https://aistudio.google.com/docs/pricing>
+- Google limits and input kinds: the model pages under <https://aistudio.google.com/docs/models/>
+- Google effort values: <https://aistudio.google.com/docs/thinking>
+- Codex windows and effort values: `codex debug models`, on the as-of date.
+- Antigravity and Cortex Code IDs: `agy models` and the Cortex probe in [harnesses.md](harnesses.md), on one account on the as-of date.

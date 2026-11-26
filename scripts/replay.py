@@ -2,11 +2,14 @@
 """Rerun one ticket of the replay set with one agent. `--help` gives the steps and the files."""
 from __future__ import annotations
 
+import contextlib
 import fcntl
+import io
 import json
 import os
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -116,11 +119,13 @@ Exit 0: the version is recorded, whatever the session's exit status; a scan
 that failed is reported. Exit 1: an error. Before a session ran, or for a
 start taken as no session, nothing is recorded and what the replay made is
 removed. After a session ran, the clone and the version's repo are kept. A clone
-index that cannot be copied or read ends the replay with one line on standard
-error and nothing recorded. A row that cannot be written, after the version was
+index that the replay cannot inspect, copy or list with git (it reads a split
+index with its shared index) ends the replay with one line on standard error
+and nothing recorded. A row that cannot be written, after the version was
 recorded, ends it with one line that says the version is recorded without its
 row and names the command that writes the row from the session's log,
-python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl. A clone or version repo
+python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl, and
+the scan's own warnings are printed only when the row is written. A clone or version repo
 already in place is an error: remove both to replay the ticket again. Exit 2:
 bad usage."""
 
@@ -230,24 +235,43 @@ def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> 
 
 
 def tracked(store: Path, clone: Path) -> list[bytes]:
-    """The paths the clone's index lists, as the bytes git holds them, read from a copy of the index file as data.
-    Empty when the index is a link or not a file, or git cannot list the copy; a copy that cannot be made raises
-    ReplayError."""
+    """The paths the clone's index lists, as the bytes git holds them, read from a copy of the index file as data,
+    with the shared index of a split index copied beside it. Empty when the index is missing, empty, a link or not
+    a file. An index that cannot be inspected, copied or listed raises ReplayError."""
     index = clone / ".git" / "index"
-    if index.is_symlink() or not index.is_file():
+
+    def unreadable(why: str) -> ReplayError:
+        return ReplayError(f"the clone's index {str(index)!r} cannot be read ({why}).")
+    try:
+        info = os.lstat(index)
+    except (FileNotFoundError, NotADirectoryError):
         return []
-    copy = store / "replay-clone-index"
+    except OSError as error:
+        raise unreadable(error.strerror) from None
+    if not stat.S_ISREG(info.st_mode) or info.st_size == 0:
+        return []
+    made: list[Path] = []  # the copies this call makes; each name is this call's own
     try:
         try:
-            shutil.copyfile(index, copy)
+            handle, name = tempfile.mkstemp(dir=store, prefix="replay-clone-index-")
+            os.close(handle)
+            made.append(Path(name))
+            shutil.copyfile(index, name)
+            for shared in sorted(index.parent.glob("sharedindex.*")):  # a split index names one of these
+                if shared.is_file() and not shared.is_symlink():
+                    made.append(store / shared.name)
+                    shutil.copyfile(shared, store / shared.name)
         except OSError as error:
-            raise ReplayError(f"the clone's index {index} cannot be read ({error.strerror}). Nothing is recorded, and "
-                              "the clone and the version's repo are kept.") from None
+            raise unreadable(error.strerror) from None
         listed = subprocess.run(["git", "-C", str(clone), "ls-files", "-z"], stdin=subprocess.DEVNULL,
-                                capture_output=True, env=trusted(store, clone, "replay-clone-index"))
+                                capture_output=True, env=trusted(store, clone, Path(name).name))
     finally:
-        copy.unlink(missing_ok=True)
-    paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path] if listed.returncode == 0 else []
+        for path in made:
+            with contextlib.suppress(OSError):  # a failed cleanup must not hide the error that is on its way
+                path.unlink(missing_ok=True)
+    if listed.returncode:
+        raise unreadable(f"git ls-files exited {listed.returncode}")
+    paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path]
     # Each path must name a file or link in the clone itself: not under .git/, and not reached through a link
     # or as a folder, which a forced add would take whole, ignored files and all.
     return [os.fsencode(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
@@ -273,41 +297,47 @@ def remove(made: list[Path]) -> None:
         shutil.rmtree(path, ignore_errors=True)
 
 
+@contextlib.contextmanager
+def signals_held():
+    """SIGINT and SIGTERM wait until the block ends."""
+    held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, held)
+
+
 class Group:
     """The process group for what setup starts, made for one replay and held by a keeper that only waits, so the group
     outlives setup's shell. The invariant: `stop()` runs on every way out of the try that made the group, and ends
-    each process still in it. A process that starts its own group or session is not in it."""
+    each process still in it. The group keeps its owner until it has been signalled, so a call cut short by an
+    interrupt can be made again. A process that starts its own group or session is not in it."""
 
     def __init__(self) -> None:
         self.keeper: subprocess.Popen | None = None
 
     def run(self, command: str, cwd: Path) -> int:
         """Run `command` with sh in the group, which this makes first; the command's exit code."""
-        held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
-        try:  # a signal that comes now waits until the keeper is held, where stop() reaches it
+        with signals_held():  # a signal that comes now waits until the keeper is held, where stop() reaches it
             self.keeper = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
                                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                            stderr=subprocess.DEVNULL, process_group=0)
-        finally:
-            signal.pthread_sigmask(signal.SIG_SETMASK, held)
         return subprocess.Popen(command, shell=True, cwd=cwd, stdin=subprocess.DEVNULL,
                                 process_group=self.keeper.pid).wait()
 
     def stop(self) -> None:
-        """Kill what is left in the group and reap the keeper. A second call does nothing."""
-        keeper, self.keeper = self.keeper, None
-        if keeper is None:
-            return
-        held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
-        try:
+        """Kill what is left in the group and reap the keeper. A call after one that finished does nothing."""
+        with signals_held():
+            keeper = self.keeper
+            if keeper is None:
+                return
             try:  # the keeper is not reaped yet, so the group's id is still its own
                 os.killpg(keeper.pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            self.keeper = None  # after the signal; the group is no one's from here
             keeper.wait()
             keeper.stdin.close()
-        finally:
-            signal.pthread_sigmask(signal.SIG_SETMASK, held)
 
 
 def record(state: Path, version: dict) -> None:
@@ -357,6 +387,7 @@ def replay(label: str, ticket: int) -> int:
         finally:  # after the session, or on any way out before it ends: before the working tree is committed
             group.stop()
     except BaseException:
+        group.stop()  # finishes a stop that an interrupt cut short
         remove(made)
         raise
     _, log = scan.resolve(session)
@@ -367,24 +398,29 @@ def replay(label: str, ticket: int) -> int:
     commit = git(store, "commit-tree", "--no-gpg-sign", tree, "-p", found["base_commit"], "-m",
                  f"{VERSION} replay of {label}-{ticket}", env=trusted(store, clone))
     git(store, "update-ref", REF, commit, env=trusted(store, clone))
-    try:  # nothing the log holds may stop the record
-        row = scan.scan(session, log)
-        skills = row["skills"]
-        not_direct = skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)
-    except (Exception, SystemExit) as failure:  # scan exits on a line that is not JSON
-        print(f"replay: the session's log could not be scanned ({failure}); its row is left blank.", file=sys.stderr)
-        row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: the row of blanks
+    warnings = io.StringIO()  # what the scan and the row writer say stays unsaid when the row cannot be written
+    with contextlib.redirect_stderr(warnings):
+        try:  # nothing the log holds may stop the record
+            row = scan.scan(session, log)
+            skills = row["skills"]
+            not_direct = skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)
+        except (Exception, SystemExit) as failure:  # scan exits on a line that is not JSON
+            print(f"replay: the session's log could not be scanned ({failure}); its row is left blank.",
+                  file=sys.stderr)
+            row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: blanks
     version = {"label": label, "ticket": ticket, "version": VERSION, "commit": commit,
                "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
                "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
                "not_direct": not_direct}
     record(state, version)
     try:
-        scan.write_row(row)
-    except OSError as error:
+        with contextlib.redirect_stderr(warnings):
+            scan.write_row(row)
+    except Exception as error:  # a full disk, a lock that is a folder, a row json cannot write
         raise ReplayError(f"{label}-{ticket} {VERSION} is recorded at {commit} without its row "
-                          f"({error.strerror or type(error).__name__}). Write the row with: "
+                          f"({getattr(error, 'strerror', None) or type(error).__name__}). Write the row with: "
                           f"python3 scripts/scan.py {session}") from None
+    sys.stderr.write(warnings.getvalue())
     print(f"Recorded {label}-{ticket} {VERSION} at {commit}: session exit {status}"
           + (", skills unknown, marked not direct." if skills is None
              else ", marked not direct." if version["not_direct"] else "."))

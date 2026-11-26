@@ -15,6 +15,8 @@ Where a test checks how long a run waited, it takes its bounds from the times th
 run's output files were written, from another run's timed-out exit, or from the
 test's own clock readings around the run. Where a bound leaves slack for a late
 start, late scheduling or rounding, the comment where it is set says how much.
+The bound a run arms is not timed at all: a sitecustomize module on PYTHONPATH
+records each non-zero argument of signal.alarm, and the tests read the record.
 Every run sets TZ=UTC, so timestamps order the same in any zone.
 """
 from __future__ import annotations
@@ -38,29 +40,51 @@ GIT = shutil.which("git")
 DEADLINE = 120  # seconds; a bound on waiting for a file or a process, not a sleep
 START_TIME_PATTERN = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file gives it
 
-# What `--help` must state, each a whole sentence or clause of the help with its
-# line wrapping removed (the ticket's "Where it is written down").
-HELP_STATES = (
-    "a run without --fast takes a lock before its first check and holds it until it exits,",
-    "A run with --fast, --help or a usage error takes no lock and never waits.",
-    "The lock is fcntl.flock on one file, taken through python3 by scripts/check_lock.py.",
-    "The file is check.sh.lock in the clone's shared git directory (git rev-parse --git-common-dir),"
-    " so every worktree of the clone uses the same lock.",
-    "Only the system says whether the lock is held.",
-    "The file's presence and content decide nothing, so a killed run, even one killed with SIGKILL, blocks no later run.",
-    "A run that has to wait prints one line at once.",
-    "The line names the holder's process id and start time where the file gives them, and the longest the run will wait.",
-    "When its turn comes the run prints how long it waited.",
-    "CHECK_LOCK_WAIT sets that bound in whole seconds from 0 to 100000000 (default 1800).",
-    "At the bound the run prints one line on standard error, saying how long it waited and that no check was run,"
-    " and exits 75.",
-    "A run that cannot open or lock the file for any reason other than another holder prints one line and runs"
-    " without the lock.",
-    "CHECK_LOCK_FILE names another lock file, for the tests or for one deliberate run beside another.",
-    "No switch skips the lock.",
-    "Limits: a second clone on this machine has its own lock.",
-    "A run killed with SIGKILL frees the lock while processes it started may still be finishing.",
-)
+# What `--help` must state, each fact as the key terms that must meet in one
+# sentence of the help, so a rewording that keeps the fact passes and a help
+# that lacks it fails. A term is a regular expression, matched without case.
+HELP_FACTS = {
+    "a full run takes the lock before its first check and holds it until it exits": (
+        r"--fast", r"\bbefore\b", r"\bfirst check\b", r"\bholds?\b", r"\bexits?\b"),
+    "a run with --fast, --help or a usage error takes no lock and never waits": (
+        r"--fast", r"--help", r"\busage error\b", r"\bno lock\b", r"\bnever waits?\b"),
+    "the lock is fcntl.flock, taken through python3 by scripts/check_lock.py": (
+        r"\bfcntl\.flock\b", r"\bpython3\b", r"scripts/check_lock\.py"),
+    "the file is check.sh.lock in the shared git directory, one lock for every worktree": (
+        r"\bcheck\.sh\.lock\b", r"--git-common-dir", r"\bworktrees?\b"),
+    "only the system says whether the lock is held": (
+        r"\bsystem\b", r"\b(?:says?|tells?|reports?|decides?)\b", r"\bheld\b"),
+    "the file's presence and content decide nothing, even after SIGKILL": (
+        r"\bpresence\b", r"\bcontent\b", r"\bSIGKILL\b", r"\bkilled\b"),
+    "the script owns the lock and the checks it starts do not hold it": (
+        r"\bscript\b", r"\b(?:owns?|holds?)\b", r"\bchecks?\b", r"\b(?:not|never|no)\b"),
+    "the holder writes its pid and start time into the file": (
+        r"\bholder\b", r"\b(?:writes?|records?|stores?|puts?|saves?)\b", r"\b(?:process id|pid)\b", r"\btime\b"),
+    "a waiting run prints one line at once": (
+        r"\bwait\b", r"\bprints? one line\b", r"\b(?:at once|immediately)\b"),
+    "the line names the holder, its pid and start time, and the longest wait": (
+        r"\bline\b", r"\bholder", r"\b(?:process id|pid)\b", r"\bstart time\b", r"\blongest\b"),
+    "a waiter blocks on the system until it gives the lock": (
+        r"\bsystem\b", r"\bblocks?\b", r"\block\b", r"\b(?:until|gives?|grants?)\b"),
+    "the system picks the next waiter, in no fixed order": (
+        r"\bsystem\b", r"\b(?:picks?|chooses?|selects?)\b", r"\bnext\b", r"\border\b"),
+    "a run whose turn comes prints how long it waited": (
+        r"\bturn\b", r"\bprints?\b", r"\bhow long\b", r"\bwaited\b"),
+    "CHECK_LOCK_WAIT sets the bound in whole seconds, with its range and default": (
+        r"\bCHECK_LOCK_WAIT\b", r"\bwhole seconds\b", r"\b100000000\b", r"\b1800\b"),
+    "at the bound the run prints one line on standard error and exits 75": (
+        r"\bbound\b", r"\bstandard error\b", r"\bno check\b", r"\b75\b"),
+    "a run that cannot open or lock the file runs without the lock": (
+        r"\bcannot\b", r"\bother than\b", r"\bwithout the lock\b"),
+    "CHECK_LOCK_FILE names another lock file": (
+        r"\bCHECK_LOCK_FILE\b", r"\bfile\b", r"\btests\b"),
+    "no switch skips the lock": (r"\bno switch\b", r"\bskips?\b"),
+    "a second clone has its own lock": (r"\bLimits?\b", r"\bsecond clone\b", r"\bown lock\b"),
+    "a run killed with SIGKILL frees the lock while its processes may still run": (
+        r"\bSIGKILL\b", r"\bfrees?\b", r"\bprocesses\b", r"\bstill\b"),
+    "the exit statuses are 0, the failing check's own, 2 and 75": (
+        r"\bexit status\b", r"\b0\b", r"\b2\b", r"\b75\b"),
+}
 
 # The standard output of a full run in which every stand-in check passed.
 EVERY_CHECK = [
@@ -125,6 +149,23 @@ FAKE_CLAUDE = textwrap.dedent('''\
       until [ -e "$STANDIN_DIR/claude.go" ]; do sleep 0.02; done
     fi
     exit 0
+''')
+
+# Python reads this at start-up of every python3 the script runs, because setUp puts
+# its folder on PYTHONPATH. It appends each non-zero argument of signal.alarm to
+# STANDIN_DIR/alarms, so a test sees the bound the helper armed without timing it.
+ALARM_SHIM = textwrap.dedent('''\
+    import os, signal
+
+    _alarm = signal.alarm
+
+    def alarm(seconds):
+        if seconds:
+            with open(os.path.join(os.environ["STANDIN_DIR"], "alarms"), "a") as record:
+                record.write(f"{seconds}\\n")
+        return _alarm(seconds)
+
+    signal.alarm = alarm
 ''')
 
 # `--browser` runs its tests through `uv` from the shell function browser_tests,
@@ -224,12 +265,16 @@ class CheckLockTest(unittest.TestCase):
         for name, body in (("claude", FAKE_CLAUDE), ("uv", FAKE_UV)):
             (bin_dir / name).write_text(body)
             (bin_dir / name).chmod(0o755)
+        shim_dir = self.tmp / "shim"
+        shim_dir.mkdir()
+        (shim_dir / "sitecustomize.py").write_text(ALARM_SHIM)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("CHECK_", "STANDIN_", "GIT_"))}
         self.env.update(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
             CHECK_LOCK_FILE=str(self.lock),
             STANDIN_DIR=str(self.state),
             PYTHONDONTWRITEBYTECODE="1",
+            PYTHONPATH=str(shim_dir),
             TZ="UTC",  # a local clock repeats an hour once a year; UTC never does
             GIT_CONFIG_GLOBAL=os.devnull,
             GIT_CONFIG_NOSYSTEM="1",
@@ -302,13 +347,29 @@ class CheckLockTest(unittest.TestCase):
         self.assertIsNotNone(found, self.lock.read_text())
         return found[1]
 
-    def gave_up_after(self, proc: subprocess.Popen) -> float:
-        """Seconds from the run's waiting line to its give-up line, by the times their files were written.
+    def alarms(self) -> list[str]:
+        """The non-zero arguments the helper gave signal.alarm, as the shim recorded them."""
+        path = self.state / "alarms"
+        return path.read_text().splitlines() if path.exists() else []
 
-        The waiting line is the only write to standard output and the give-up line the only write to
-        standard error, so neither start-up nor a late poll by the test moves either end.
+    def assert_gave_up_after_one_second(self, proc: subprocess.Popen) -> None:
+        """The run printed its waiting line, then its give-up line, exited 75 and armed a 1 s alarm.
+
+        The alarm is the bound the helper arms, which the shim records, so no clock window is needed
+        to tell 1 s from 2 s. The waiting line is the only write to standard output and the give-up
+        line the only write to standard error, so the times of those files are the two lines' times.
         """
-        return (self.state / f"{proc.tag}.err").stat().st_mtime - (self.state / f"{proc.tag}.out").stat().st_mtime
+        self.assertEqual(proc.wait(timeout=DEADLINE), 75)
+        self.assertEqual(self.out(proc).splitlines(), ["check.sh: waiting up to 1 s for another run of scripts/check.sh."])
+        self.assertEqual(
+            self.err(proc).splitlines(),
+            ["check.sh: gave up after waiting 1 s for another run of scripts/check.sh; no check was run."],
+        )
+        self.assertEqual(self.alarms(), ["1"])
+        # 0.1 s below the bound for the file systems' time stamps; nothing above it, since the alarm is checked.
+        gap = (self.state / f"{proc.tag}.err").stat().st_mtime - (self.state / f"{proc.tag}.out").stat().st_mtime
+        self.assertGreaterEqual(gap, 0.9)
+        self.assertEqual(self.log(), [])
 
     def waited(self, proc: subprocess.Popen) -> int:
         """The seconds the run's turn line reports."""
@@ -321,26 +382,13 @@ class CheckLockTest(unittest.TestCase):
     def test_a_full_run_waits_then_gives_up_with_75_and_runs_no_check(self) -> None:
         self.hold()
         proc = self.start(name="late", CHECK_LOCK_WAIT="1")
-        rc = proc.wait(timeout=DEADLINE)
-        out, err = self.out(proc), self.err(proc)
-        # 0.1 s below the bound for the file systems' time stamps; 30 s above it for a loaded machine.
-        self.assertTrue(0.9 <= self.gave_up_after(proc) <= 31, self.gave_up_after(proc))
-        self.assertEqual(out.splitlines(), ["check.sh: waiting up to 1 s for another run of scripts/check.sh."])
-        self.assertEqual(
-            err.splitlines(),
-            ["check.sh: gave up after waiting 1 s for another run of scripts/check.sh; no check was run."],
-        )
-        self.assertEqual(rc, 75)
-        self.assertEqual(self.log(), [])
+        self.assert_gave_up_after_one_second(proc)
 
     def test_a_run_started_with_sigalrm_blocked_still_gives_up_at_its_bound(self) -> None:
         self.hold()
         proc = self.start(name="blocked", CHECK_LOCK_WAIT="1",
                           preexec=lambda: signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM}))
-        self.assertEqual(proc.wait(timeout=DEADLINE), 75)
-        # The same slack as the test above: time stamps below, a loaded machine above.
-        self.assertTrue(0.9 <= self.gave_up_after(proc) <= 31, self.gave_up_after(proc))
-        self.assertEqual(self.log(), [])
+        self.assert_gave_up_after_one_second(proc)
 
     def test_a_fast_run_starts_its_checks_at_once_while_the_lock_is_held(self) -> None:
         self.hold()
@@ -359,10 +407,13 @@ class CheckLockTest(unittest.TestCase):
         lines = (self.repo / "scripts" / "check.sh").read_text().splitlines()
         header = [re.sub(r"\A# ?", "", line) for line in lines[1:lines.index("set -euo pipefail")]]
         self.assertEqual(out.splitlines(), header)
-        text = " ".join(out.split())
-        for statement in HELP_STATES:
-            with self.subTest(states=statement[:40]):
-                self.assertRegex(text, rf"(?:\A|[.:] ){re.escape(statement)}(?: |\Z)")
+        sentences = re.split(r"(?<=\.) (?=[A-Z])", " ".join(out.split()))
+        for fact, terms in HELP_FACTS.items():
+            with self.subTest(states=fact):
+                self.assertTrue(
+                    any(all(re.search(term, sentence, re.IGNORECASE) for term in terms) for sentence in sentences),
+                    f"no sentence of the help holds every key term of: {fact}",
+                )
         rc, out, err = self.run_check("--bogus", name="bogus", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, out, err), (2, "", "check.sh: unknown argument: --bogus\n"))
         self.assertEqual(self.log(), [])

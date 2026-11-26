@@ -1,6 +1,6 @@
 {
   "name": "model-router",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Pick the model, reasoning effort and harness for each delegated task across Anthropic, OpenAI and Google models, by task fit, input and cost.",
   "author": {
     "name": "sleeplessv"

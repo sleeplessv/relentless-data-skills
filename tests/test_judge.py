@@ -145,7 +145,8 @@ class World:
         (self.state / "replay-set-1.json").write_text(json.dumps({
             "set": 1, "seed": 4, "drawn_at": "2026-01-05T10:00:00+00:00", "set_aside": [],
             "tickets": [{"label": "A", "ticket": 7, "bucket": "0-50", "size": 3, "title": "Print the total",
-                         "body": BODY, "base_commit": self.base, "ready_commit": self.ready, "model": "test-model",
+                         "body": BODY, "requirements": REQUIREMENTS, "base_commit": self.base,
+                         "ready_commit": self.ready, "model": "test-model",
                          "pr": 8, "session": "s-1", "log": "logs/s-1.jsonl", "check_output": "checks/A-7.txt"}]}))
         self.answer("R1: met\nR2: met\nR3: met\n")
         self.breaking = ""
@@ -280,95 +281,75 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(tree["stamp.txt"][1], b"$Format:%an %s$\n")
         self.assertEqual(tree["run.sh"][0], "100755")
 
-    def test_each_listed_requirement_is_one_r_line_however_its_text_wraps(self) -> None:
+    def set_requirements(self, *value: object) -> None:
+        """Give the set entry `value` as its requirements, or no requirements field when no value is given."""
         path = self.world.state / "replay-set-1.json"
         listed = json.loads(path.read_text())
-        listed["tickets"][0]["body"] = """## Acceptance criteria
-
-1. The report prints
-   the total.
-2. The total counts every row,
-blank rows too.
-
-- [ ] The help names the total.
-- A list of its own:
-  - its item is one too.
-"""
+        listed["tickets"][0].pop("requirements", None)
+        if value:
+            listed["tickets"][0]["requirements"] = value[0]
         path.write_text(json.dumps(listed))
-        self.world.answer("R1: met\nR2: met\nR3: met\nR4: met\nR5: met")
+
+    def test_the_requirements_are_the_set_entry_s_list_numbered_in_order(self) -> None:
+        # The body still lists three; the entry's list, which the draw wrote, is what the reviewer is given.
+        self.set_requirements(["Only this one.", "And this,\nwhich wraps."])
+        self.world.answer("R1: met\nR2: met")
         self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
-        requirements = self.world.record("prompt").split("the ticket gives them:\n\n", 1)[1].split("\n\n", 1)[0]
-        self.assertEqual(requirements.splitlines(), [
-            "R1: The report prints the total.", "R2: The total counts every row, blank rows too.",
-            "R3: The help names the total.", "R4: A list of its own:", "R5: its item is one too."])
+        prompt = self.world.record("prompt")
+        requirements = prompt.split("the ticket gives them:\n\n", 1)[1].split("\n\n", 1)[0]
+        self.assertEqual(requirements.splitlines(), ["R1: Only this one.", "R2: And this,", "which wraps."])
+        self.assertIn("<ticket>\nPrint the total\n\n" + BODY.strip() + "\n</ticket>\n", prompt)
 
-    def test_a_list_the_judge_cannot_read_with_certainty_is_an_error(self) -> None:
-        path = self.world.state / "replay-set-1.json"
-        listed = json.loads(path.read_text())
-        listed["tickets"][0]["body"] = ("## Acceptance\n\n- Print the total.\n"
-                                        "    <details><summary>Example</summary></details>\n- Count blank rows.\n")
-        path.write_text(json.dumps(listed))
-        self.world.answer("R1: met")
-        result = self.world.judge("A-7", "generation-one")
-        self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stderr, "judge: the list under the criteria heading of ticket A-7 cannot be read "
-                                        "with certainty at line 4 of its body, '    <details><summary>Example"
-                                        "</summary></details>'. --help says which lists the judge reads.\n")
-        self.assertFalse((self.world.state / "verdicts.jsonl").exists())
-        self.assertFalse((self.world.state / "judged").exists())
+    def test_an_entry_without_a_list_of_requirements_each_with_text_is_an_error_before_any_checkout(self) -> None:
+        for value in ((), ([],), (["One.", 3],), ([""],), (["One.", " \n"],), ("One.",), (3,), (None,),
+                      ({"R1": "One."},)):
+            with self.subTest(value=value):
+                self.set_requirements(*value)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr, "judge: the set entry of ticket A-7 holds no requirements: a list "
+                                                "of strings, each with text, as the draw writes it.\n")
+                self.assertFalse((self.world.records / "gh").exists())
+                self.assertFalse((self.world.records / "args").exists())
+                self.assertFalse((self.world.state / "verdicts.jsonl").exists())
+                self.assertFalse((self.world.state / "judged").exists())
 
-    def test_a_list_is_read_item_by_item_or_refused_at_the_first_line_it_cannot_be_sure_of(self) -> None:
-        sys.path.insert(0, str(SCRIPTS))
-        self.addCleanup(sys.path.remove, str(SCRIPTS))
-        with mock.patch.object(sys, "dont_write_bytecode", True):  # no scripts/__pycache__ in the checkout
-            draw = importlib.import_module("draw")
-        read = {  # the section under the heading: its requirements
-            "- [ ] One.\n- [x] Two.\n": ["One.", "Two."],
-            "1. The report prints\n   the total.\n2) Count.\n": ["The report prints the total.", "Count."],
-            "- Count every\nrow.\n- Show the total.\n": ["Count every row.", "Show the total."],
-            "- One.\n\n- Two.\n": ["One.", "Two."],
-            "- Check the totals.\n    - Count blank rows.\n": ["Check the totals.", "Count blank rows."],
-            "- Parent\n  - child\n\n  - child again\n- Sibling\n": ["Parent", "child", "child again", "Sibling"],
-            "- Implement the validator.\n  01. Reject nulls.\n  02. Report duplicates.\n": [
-                "Implement the validator.", "Reject nulls.", "Report duplicates."],
-            "Done means:\n\n### Must\n\n- One.\n\n### Should\n\n1. Two.\n": ["One.", "Two."],
-            "<!-- one per line -->\n- One.\n\n```\n- an example\n```\n\n- Two.\n": ["One.", "Two."],
-            "- One.\n\n## Notes\n\n- not a requirement\n": ["One."],
-        }
-        refused = {  # the section under the heading: the line the reader is not sure of
-            "- Print the total.\n    <details><summary>Example</summary></details>\n- Count blank rows.\n":
-                "    <details><summary>Example</summary></details>",
-            "- Export.\n    > Example\n  3. Reject nulls.\n": "    > Example",
-            "- Export.\n    > # Example\n  Keep the order.\n- Count.\n": "    > # Example",
-            "- Print a total.\n- ```text\n  - Example switch\n  ```\n": "- ```text",
-            "- Check input.\n-\n  Save the total.\n": "-",
-            "- The default retry count follows\n  the configuration, currently\n  3. A successful request resets it.\n":
-                "  3. A successful request resets it.",
-            "1. Count rows.\n   > Includes the header.\n2. Save the count.\n": "   > Includes the header.",
-            "- One.\n\n    ```\n    x\n    ```\n\n- Two.\n": "    ```",
-            "10. Report the total.\n    > Not a requirement.\n11. Print it.\n": "    > Not a requirement.",
-            "- Run it:\n\n  ```\n  make\n  ```\n\n  Then read the log.\n- Next.\n": "  ```",
-            "- One.\n\n      code\n\n- Two.\n": "      code",
-            "- Parent\n  - child\n\n  Parent again.\n- Sibling\n": "  Parent again.",
-            "- One.\n\n  More about one.\n": "  More about one.",
-            "- One.\n> A quote.\n- Two.\n": "> A quote.",
-            "Intro.\n---\n\n- One.\n": "---",
-            "- One.\n        - Too deep to be sure.\n": "        - Too deep to be sure.",
-            "- -  Two markers.\n": "- -  Two markers.",
-            "-      code after the marker\n": "-      code after the marker",
-            "Done means:\n2. Not a list in CommonMark.\n": "2. Not a list in CommonMark.",
-        }
-        for listed, expected in read.items():
-            with self.subTest(listed=listed):
-                self.assertEqual(draw.requirements(f"## Acceptance\n\n{listed}"), expected)
-        for listed, line in refused.items():
-            with self.subTest(listed=listed):
-                with self.assertRaises(draw.Unreadable) as refusal:
-                    draw.requirements(f"## Acceptance\n\n{listed}")
-                self.assertEqual((refusal.exception.number, refusal.exception.line),
-                                 (3 + listed.splitlines().index(line), line))
-        self.assertEqual(draw.requirements("## Acceptance\n\nNone yet.\n"), [])  # empty, which is not refused
-        self.assertFalse(draw.has_criteria("## Acceptance\n\n- One.\n> A quote.\n"))
+    def test_a_list_the_draw_stores_passes_the_judge_s_check_and_keeps_its_unicode(self) -> None:
+        # The draw's command line stores a ticket's list, the test copies that list into the judge's entry A-7, and
+        # the judge's command line passes it and numbers its items with their text as stored. An item left with only
+        # white space that is not a space, such as a no-break space, is one the draw refuses.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        self.addCleanup(sys.path.remove, str(Path(__file__).resolve().parent))
+        drawing = importlib.import_module("test_draw")
+        for criteria, stored in (("## Acceptance\n\n- [ ]  Keep the space.\n- [x]  Save.",
+                                  [" Keep the space.", " Save."]),
+                                 ("## Acceptance\n\n- [ ]  \n- Save.", None)):
+            with self.subTest(criteria=criteria):
+                folder = tempfile.TemporaryDirectory()
+                self.addCleanup(folder.cleanup)
+                draw = drawing.World(Path(folder.name), drawing.full_pool(criteria=criteria))
+                result = draw.draw()
+                if stored is None:
+                    self.assertEqual(result.returncode, 3, result.stderr)
+                    self.assertIn("Refused 36 tickets of the listed repos: a list under a criteria heading that the "
+                                  "draw cannot read with certainty keeps each out of the pool.", result.stdout)
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                [entry, *_] = draw.set_file()["tickets"]
+                self.assertEqual(entry["requirements"], stored)
+                self.set_requirements(entry["requirements"])
+                self.world.answer("R1: met\nR2: met")
+                self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+                self.assertIn("R1:  Keep the space.\nR2:  Save.\n", self.world.record("prompt"))
+
+    def test_the_help_points_to_the_draw_for_the_list_and_states_no_grammar(self) -> None:
+        help_text = " ".join(self.world.judge("--help").stdout.split())
+        self.assertIn(" The requirements are the list the draw stored in the ticket's entry of the replay set, "
+                      "numbered R1, R2 and on in the order written. python3 scripts/draw.py --help says which "
+                      "lists the draw reads. ", help_text)
+        for gone in ("a marker numbered other than 1 right after a line of text", "with certainty",
+                     "each with its text on its marker line", "stops the judge with an error that names the line"):
+            self.assertNotIn(gone, help_text)
 
     def test_an_interrupt_after_the_line_is_written_keeps_the_files_it_names(self) -> None:
         version = ("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))

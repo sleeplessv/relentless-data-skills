@@ -103,8 +103,10 @@ a field missing or of the wrong type, a set entry's label the draw would not
 give or bucket it does not use, a version name in versions.jsonl or
 verdicts.jsonl the judge would not take, or a second line for one ticket and
 version, one session or one ticket of the sets stops the report. The error
-names the folder or file, and the line or ticket entry where there is one,
-but not a refused label or version name; nothing else is printed.
+names the folder or file, and the ledger line or set ticket entry that fails
+a check. A set file that is not JSON, or not an object holding a list of
+tickets, and a ledger that is not UTF-8 are named by file alone. It never
+prints a refused label or version name, and nothing else is printed.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:
@@ -233,8 +235,7 @@ def count(part: int, whole: int) -> str:
 
 
 def median(values: list) -> str:
-    """To at most three places: exact for whole token counts below 2**52 and for minutes to two places, as scan.py
-    rounds them."""
+    """The median to at most three decimal places, or none; --help states where that is exact."""
     return f"{statistics.median(values):.3f}".rstrip("0").rstrip(".") if values else "none"
 
 
@@ -302,7 +303,8 @@ def main(argv: list[str]) -> int:
     state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
     try:
         sets, tickets = load_sets(state)
-        # Verdicts first: a verdict is saved after its replay's line, so a verdict read here has its line in place.
+        # Verdicts first, so a replay recorded before its verdict was saved has its line in the versions.jsonl read
+        # here; read the other way, one recorded and judged between the two reads would count as having no line.
         verdicts = load_verdicts(state)
         lines = report(sets, tickets, load_versions(state), verdicts, load_rows(state))
     except Unreadable as error:

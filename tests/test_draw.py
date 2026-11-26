@@ -735,7 +735,7 @@ class TestDraw(unittest.TestCase):
             "Either stop prints one line that says so, and no set was written.",
             "Once the set file is in place, a signal leaves the exit at 0 and the last line as the one that names the "
             "set.",
-            "A SIGINT the caller ignored stays ignored."]
+            "A SIGINT or SIGTERM the caller ignored stays ignored."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
         for sentence in sentences:
             with self.subTest(sentence=sentence):

@@ -323,7 +323,7 @@ tickets are set aside; no set was written, and the count per bucket is printed.
 Exit 130: Ctrl-C stopped the draw. Exit 143: SIGTERM stopped the draw. Either
 stop prints one line that says so, and no set was written. Once the set file is
 in place, a signal leaves the exit at 0 and the last line as the one that names
-the set. A SIGINT the caller ignored stays ignored."""
+the set. A SIGINT or SIGTERM the caller ignored stays ignored."""
 
 
 class DrawError(Exception):
@@ -1193,7 +1193,7 @@ def main(argv: list[str]) -> int:
     else:
         print(HELP, file=sys.stderr)
         return 2
-    for number in SIGNALS:  # a SIGINT the caller ignored stays ignored, as a job started with & expects
+    for number in SIGNALS:  # a signal the caller ignored stays ignored, as a job started with & expects
         if signal.getsignal(number) != signal.SIG_IGN:
             signal.signal(number, stopped)
     try:

@@ -5,8 +5,9 @@ repointing either at another database, or verifying that a change landed.
 Request shapes and endpoint behaviour live in
 [api-reference.md](api-reference.md); this file is the procedure.
 
-**A card is not a file, it is live.** Editing card *N* changes what every
-dashboard viewer sees, immediately, with no deploy step and no undo in the UI.
+Editing a card changes its dashboards immediately. In the UI, open the info
+sidebar and select History. The back arrow restores one of up to 15 saved
+versions of a question, dashboard or model. [Metabase History](https://www.metabase.com/docs/latest/exploration-and-organization/history)
 
 ## Editing a card: restore point, then verify
 
@@ -31,9 +32,9 @@ places it there. `create-card` still refuses to land it in the root collection
 
 ## Dashboards mutate through the wrapper too
 
-`mb create-dashboard`, `mb update-dashboard` and `mb restore <id> --dashboard`
-carry the same restore-point gate as their card equivalents; `mb backup <id>
---dashboard` snapshots one on its own. Restore-point filenames encode the kind
+Use `mb update-dashboard` to snapshot and update an existing dashboard.
+Use `mb backup <id> --dashboard` to snapshot it before a restore.
+Restore-point filenames encode the kind
 (`…__card139.json` vs `…__dashboard19.json`) and `restore` refuses a mismatch,
 because the two shapes are not interchangeable and the damage would be silent.
 
@@ -62,10 +63,10 @@ database, and the same table a different table id. Build the id map from
 | `source-table` | MBQL source (an id, not a name) |
 | field ids | positional, in **both** argument orders |
 | `source-field` | the FK column id behind an implicit join; a value under a key |
-| `source-card` | card-on-card |
+| MBQL source card or native `card` template tag | Reference to another saved question or model |
 | `parameter_mappings[].target` | the dashboard's wiring, separate from the card |
 
-`source-card` is the one that bites. A cloned card still pointing at the prod
+Check every card reference. A cloned card still pointing at the prod
 upstream renders perfectly and shows prod data on a dashboard labelled test.
 
 Before promising a repoint, confirm:
@@ -81,7 +82,7 @@ Then verify, in this order:
 
 1. `mb wiring <new dashboard>`: zero cross-database ids, exit 0.
 2. Assert no source-database id survives anywhere in each new card's
-   `dataset_query`, and that `source-card` points at the *new* upstream.
+   `dataset_query`, and that each MBQL or native card reference resolves to the new upstream.
 3. Reconcile row counts and group breakdowns against independent
    `mb sql --db <target>`, not against "it returned rows".
 4. Exercise **every** mapped filter, not one.

@@ -44,18 +44,21 @@ EVIDENCE = "\n".join(shown for shown, _ in FORMS)
 PROOF = re.compile("|".join(read for shown, read in FORMS if shown != "none"))
 RULES = """\
 Give one R line for each requirement, in order, and one F line for each
-finding, numbered F1, F2 and on. "breaks" names the requirement that the line
-at <file>:<line> breaks. "fails" shows the finding failing: what to give the
-change or do with it, and what goes wrong then. Write "none" when you can show
-neither. A finding with "breaks" or "fails" names each requirement, R<n>, that
-its line holds after <file>:<line>, and names no other; a finding with "none"
-names no requirement. A finding is proven when its evidence is "breaks" or
+finding, numbered F1, F2 and on. <file> may hold a colon: it ends at the first
+colon that is followed by a line number and a colon. "breaks" names the
+requirement that the line at <file>:<line> breaks. "fails" shows the finding
+failing: what to give the change or do with it, and what goes wrong then.
+Write "none" when you can show neither. A finding names a requirement by its
+R<n> in <what is wrong> or right after "breaks" or "fails". An R<n> later in
+the evidence, such as a label in what to give, names none. A finding with
+"breaks" or "fails" names each requirement it is about, and names no other; a
+finding with "none" names no requirement. A finding is proven when its evidence is "breaks" or
 "fails", and each "cannot tell" counts as a proven finding. A requirement that
 is not met needs a proven finding that names it. The review passes when no
 finding is proven, so with every requirement met and nothing wrong the answer
 is the R lines alone."""
 REQUIREMENT_LINE = re.compile(rf"R([1-9]\d*): ({'|'.join(ANSWERS)})")
-FINDING_LINE = re.compile(r"F([1-9]\d*): ([^\s:][^:]*):([1-9]\d*): (\S.*?) Evidence: (.+)")
+FINDING_LINE = re.compile(r"F([1-9]\d*): (\S.*?):([1-9]\d*): (\S.*?) Evidence: (.+)")
 NAMED = re.compile(r"\bR([1-9]\d*)\b")
 VERSION_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
@@ -275,7 +278,8 @@ def read_answer(text: str, count: int) -> dict | None:
             answers[f"R{found.group(1)}"] = found.group(2)
         elif found := FINDING_LINE.fullmatch(line):
             evidence = found.group(5).strip()
-            named = sorted({int(number) for number in NAMED.findall(f"{found.group(4)} {evidence}")})
+            # The evidence names a requirement only in its head, the part before its first colon.
+            named = sorted({int(number) for number in NAMED.findall(f"{found.group(4)} {evidence.split(':', 1)[0]}")})
             if int(found.group(1)) != len(findings) + 1 or not (
                     evidence == "none" and not named or PROOF.fullmatch(evidence)):
                 return None

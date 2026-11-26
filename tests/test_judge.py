@@ -421,6 +421,40 @@ class TestJudge(unittest.TestCase):
             {"finding": "F2", "file": "report.txt", "line": 1, "what": "Terse.", "evidence": "none",
              "requirements": [], "proven": False}])
 
+    def test_a_finding_in_a_file_whose_name_holds_a_colon_is_read(self) -> None:
+        self.world.answer("R1: not met\nR2: met\nR3: met\nF1: jobs/report:daily.sql:17: wrong join Evidence: breaks "
+                          "R1: drops rows")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.world.verdicts()[0]["review"]["findings"], [
+            {"finding": "F1", "file": "jobs/report:daily.sql", "line": 17, "what": "wrong join",
+             "evidence": "breaks R1: drops rows", "requirements": ["R1"], "proven": True}])
+
+    def test_a_label_like_r42_in_the_evidence_names_no_requirement(self) -> None:
+        self.set_requirements(["The report prints the total."])
+        self.world.answer("R1: not met\nF1: report.txt:2: wrong total Evidence: fails R1: give the row labelled R42 "
+                          "-> the total is wrong")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [verdict] = self.world.verdicts()
+        self.assertEqual((verdict["review"]["requirements"], verdict["review"]["passed"]), ({"R1": "not met"}, False))
+        self.assertEqual(verdict["review"]["findings"], [
+            {"finding": "F1", "file": "report.txt", "line": 2, "what": "wrong total",
+             "evidence": "fails R1: give the row labelled R42 -> the total is wrong", "requirements": ["R1"],
+             "proven": True}])
+
+    def test_the_help_and_the_prompt_say_where_a_file_name_ends_and_which_r_n_name_a_requirement(self) -> None:
+        self.world.judge("A-7", "generation-one")
+        help_text = " ".join(self.world.judge("--help").stdout.split())
+        prompt = " ".join(self.world.record("prompt").split())
+        for sentence in ("<file> may hold a colon: it ends at the first colon that is followed by a line number and "
+                         "a colon.",
+                         'A finding names a requirement by its R<n> in <what is wrong> or right after "breaks" or '
+                         '"fails". An R<n> later in the evidence, such as a label in what to give, names none.'):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, help_text)
+                self.assertIn(sentence, prompt)
+
     def test_a_finding_names_each_requirement_its_line_holds(self) -> None:
         self.world.answer("R1: not met\nR2: met\nR3: not met\nF1: report.txt:1: R1 and R3 lack the total; R2D2 is "
                           "no word. Evidence: fails: a two-row file -> printed no total.")

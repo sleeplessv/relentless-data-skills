@@ -251,11 +251,13 @@ class TestReport(unittest.TestCase):
         lines = self.lines()
         for version, judged, tokens, minutes in (("generation-one", 1, 100, 10), ("direct", 0, "none", "none")):
             start = lines.index(version)
-            self.assertEqual(lines[start + 4:start + 6], [
+            self.assertEqual(lines[start + 4:start + 7], [
                 f"  All: {judged} judged, {judged} of {judged} right first time, median total tokens {tokens}, "
                 f"median active minutes {minutes}.",
                 f"  Left out of every figure: 0 not direct, 1 with no verdict, {2 - judged} judged at a commit the "
-                "version does not record."])
+                "version does not record.",
+                "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 "
+                "blank."])
 
     def test_a_version_judged_with_no_replay_record_counts_with_blank_figures(self) -> None:
         tickets = self.world.draw(per_bucket=1)
@@ -280,24 +282,40 @@ class TestReport(unittest.TestCase):
                                    "active minutes 1.015.")
 
     def test_projects_appear_as_labels_only(self) -> None:
-        def build(world: World, first: tuple[str, ...], second: tuple[str, ...]) -> list[str]:
-            for labels in (first, second):
-                for at, ticket in enumerate(world.draw(labels=labels)):
-                    world.run("generation-one", ticket, at % 2 == 0, tokens=100 + at, minutes=1.0 + at)
-                    world.run("direct", ticket, at % 3 == 0, tokens=50 + at, minutes=0.5 + at)
-            result = world.report()
-            self.assertEqual((result.returncode, result.stderr), (0, ""))
-            return result.stdout.splitlines()
-
-        many = build(self.world, ("A", "B"), ("C",))  # A-1 and B-1 both, replayed as direct
-        folder = tempfile.TemporaryDirectory()
-        self.addCleanup(folder.cleanup)
-        one = build(World(Path(folder.name).resolve()), ("A",), ("A",))  # the same draw, all one project
-        self.assertEqual(many[0], "Replay sets 1 and 2: 60 tickets, of projects A, B and C.")
-        self.assertEqual(one[0], "Replay sets 1 and 2: 60 tickets, of project A.")
-        self.assertEqual(many[1:], one[1:])
-        for secret in (REPO, "alpha", "-project", TITLE, session(1), commit(1001)):
-            self.assertNotIn(secret, "\n".join(many))
+        for labels in (("A", "AB"), ("C",)):  # A-1 and AB-1 both, replayed as direct
+            for at, ticket in enumerate(self.world.draw(labels=labels)):
+                self.world.run("generation-one", ticket, at % 2 == 0, tokens=100 + at, minutes=1.0 + at)
+                self.world.run("direct", ticket, at % 3 == 0, tokens=50 + at, minutes=0.5 + at)
+        tail = [
+            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
+            "record.",
+            "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank."]
+        self.assertEqual(self.lines(), [  # the whole report: no line beyond these may name or count a project
+            "Replay sets 1 and 2: 60 tickets, of projects A, C and AB.",
+            "",
+            "generation-one",
+            "  0-50: 20 judged, 10 of 20 (50%) right first time, median total tokens 113.5, median active minutes "
+            "14.5.",
+            "  51-300: 20 judged, 10 of 20 (50%) right first time, median total tokens 114.5, median active minutes "
+            "15.5.",
+            "  301-1500: 20 judged, 10 of 20 (50%) right first time, median total tokens 115.5, median active "
+            "minutes 16.5.",
+            "  All: 60 judged, 30 of 60 (50%) right first time, median total tokens 114.5, median active minutes "
+            "15.5.",
+            *tail,
+            "",
+            "direct",
+            "  0-50: 20 judged, 20 of 20 (100%) right first time, median total tokens 63.5, median active minutes "
+            "14.",
+            "  51-300: 20 judged, 0 of 20 (0%) right first time, median total tokens 64.5, median active minutes 15.",
+            "  301-1500: 20 judged, 0 of 20 (0%) right first time, median total tokens 65.5, median active minutes "
+            "16.",
+            "  All: 60 judged, 20 of 60 (33%) right first time, median total tokens 64.5, median active minutes 15.",
+            *tail,
+            "",
+            "Warning sign 1: generation-one was right first time on 30 of 60 (50%) tickets, direct on 20 of 60 "
+            "(33%), a difference of 10.",
+            "The sign appears."])
 
     def test_a_third_version_is_printed_beside_the_other_two(self) -> None:
         tickets = self.world.draw(per_bucket=1)

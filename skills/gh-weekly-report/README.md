@@ -19,11 +19,11 @@ what changed.
   an optional narrowing filter. Nothing is derived from the repo you
   invoke the skill in, and nothing is read from committed config.
 - **Metric rules in the script, not the agent.** *Resolved* means the
-  actor closed the issue as `completed` (search cannot filter on
-  closed-by, so each candidate is verified with one API call);
-  not-planned closes and closed-unmerged PRs are separate lines rather
-  than noise in the headline numbers; reviews are checked against the
-  window per submission timestamp; commits are attributed to the PR that
+  actor closed the issue as `completed` or without a recorded reason.
+  The collector verifies each closer through the issue API. Duplicate
+  closes, not-planned closes and closed-unmerged PRs each have their own
+  line. The collector checks every review page by submission timestamp.
+  Commits are attributed to the PR that
   carried them or marked as direct pushes, so push-to-main solo weeks
   stay visible. Discussions are issues and PRs the actor commented on
   but did not author, with each candidate's comment times verified

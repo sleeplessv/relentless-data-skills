@@ -12,9 +12,9 @@ page wireframes showing what changed where, spec-checked measures with full
 DAX, and a ranked red-flags list. The reviewer is a Power BI expert, so show
 raw DAX and exact bindings.
 
-**Input:** an optional git ref range as the argument (`A...B`, `A..B`, or a
-single base ref meaning "vs working tree"). Default: `main...HEAD`. The user
-may also name pages to treat as scratch, beyond the automatic rule below.
+**Input:** an optional range (`A...B`, `A..B`, or a single base ref vs the working tree).
+Omit the range to compare HEAD with the merge base of origin's recorded default branch.
+If the default is unknown, ask for a range. The user may also name scratch pages.
 
 **Scope:** review and report. Findings go in the artifact, not into edits to
 the PBIP files, the DAX, or an issue tracker.
@@ -112,9 +112,9 @@ what is still unknown. A check with no findings is reported as confirmed clean.
    head (e.g. a missing name prefix).
 4. **Modified measure ripple.** For measures whose DAX changed, grep which
    other measures/visuals reference them and note affected downstream logic.
-5. **`USERELATIONSHIP` targets.** Confirm the named relationship exists
-   (check `relationships` in the change model and
-   `definition/relationships.tmdl` at head) and is inactive as expected.
+5. **`USERELATIONSHIP` targets.** Match both column arguments to the same relationship in
+   `definition/relationships.tmdl` at head. Active and inactive relationships are valid.
+   Check that the selected relationship gives the measure its intended filter path.
 6. **Visuals bound to unrelated tables.** Fields from two fact tables with
    no relationship path on the same visual.
 7. **Placeholder names.** Visuals left untitled where siblings are titled.

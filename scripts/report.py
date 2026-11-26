@@ -22,7 +22,6 @@ RATE_FLOOR = 20  # a count out of fewer tickets than this is never given as a ra
 # below the second. A difference between the two needs a second set of SET_SIZE tickets.
 SIGN_ONE = {30: (5, 3), 60: (8, 8)}
 SET_SIZE, DECIDING = min(SIGN_ONE), max(SIGN_ONE)
-LABEL = re.compile(r"[A-Z]+")  # every label draw.label_name gives, and nothing else
 TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool is not a COUNT
 # Why a version of a ticket is left out of every figure, as the report counts it.
 NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
@@ -54,26 +53,28 @@ the label the draw gave it, and prints counts and medians only, with no
 ticket, session or commit and no figure per project.
 
 A version is a name and a commit. {GENERATION_ONE}'s commit is the ready_commit its
-set records, and its session the set's session. Any other version, such as
-{DIRECT}, has its commit and session in versions.jsonl; a version judged with
-no line there has the commit its verdict names and no session. For each
+set records, and its session the set's session. {DIRECT} has its commit and
+session in its line in versions.jsonl. Any other version has them there too,
+or, with no line there, the commit its verdict names and no session. For each
 version, per size bucket and over the sets, the report prints the tickets
 judged, the tickets right first time, the median total tokens and the median
-active minutes, as exact as the scan saved them. A version of a ticket is
-judged when verdicts.jsonl holds true or false for it at its commit. Each
-version's figures cover the tickets it was judged on, so the medians of two
-versions cover the same tickets only once both are judged on every ticket.
-A count out of fewer than {RATE_FLOOR} tickets is printed as a count, such as 8 of
-10; out of {RATE_FLOOR} or more, the count is followed by its rate, such as
-20 of 30 (67%).
+active minutes. A version of a ticket is judged when verdicts.jsonl holds
+true or false for it at its commit. Each median covers the judged tickets
+whose scan row holds that figure. It is printed to at most three decimal
+places, which is exact for whole token counts below 2**52 and for minutes to
+two places, as scan.py rounds them. Tickets right first time out of fewer
+than {RATE_FLOOR} judged are printed as a count, such as 8 of 10; out of {RATE_FLOOR} or
+more judged, the count is followed by its rate, such as 20 of 30 (67%).
 
 Left out of every figure, and counted: a replay versions.jsonl marks not
 direct; a version with no verdict, a null verdict or no line at all; and a
-verdict on a commit other than the one the set or versions.jsonl records.
-Left out of the token figures, and counted: a judged version whose session
-or scan row is missing or has a blank total_tokens. Active minutes are left
-out the same way. Lines in versions.jsonl or verdicts.jsonl for a ticket in
-no set are left out and counted.
+verdict on a commit other than the one the set or versions.jsonl records,
+or for {DIRECT} with no line in versions.jsonl, since replay.py writes that
+line and may mark the replay not direct. Left out of the token figures, and
+counted: a judged version whose session or scan row is missing or has a
+blank total_tokens. Active minutes are left out the same way. Lines in
+versions.jsonl or verdicts.jsonl for a ticket in no set are left out and
+counted.
 
 Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s,
 over every ticket of the sets. It is printed only when every ticket has both
@@ -98,11 +99,12 @@ Files read, all written by the other scripts:
 
 A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing
 yet. A folder or file that cannot be read, a line that is not a JSON object,
-a field missing or of the wrong type, a label, bucket or version name the
-draw or the judge would not give, or a second line for one ticket and
-version, one session or one ticket of the sets stops the report with an
-error that names the folder or file, and the line, and nothing else is
-printed.
+a field missing or of the wrong type, a set entry's label the draw would not
+give or bucket it does not use, a version name in versions.jsonl or
+verdicts.jsonl the judge would not take, or a second line for one ticket and
+version, one session or one ticket of the sets stops the report. The error
+names the folder or file, and the line or ticket entry where there is one,
+but not a refused label or version name; nothing else is printed.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:
@@ -125,10 +127,10 @@ def checked(where: str, line: object, **wanted: tuple) -> dict:
 
 def json_lines(path: Path) -> list[tuple[str, object]]:
     """Each line of a JSON-lines file with where it is; none for a file that does not exist."""
-    if not path.exists():
-        return []
     try:
         text = path.read_text()
+    except FileNotFoundError:  # any other OSError reaches main()
+        return []
     except UnicodeDecodeError as error:
         raise Unreadable(f"{path} cannot be read ({type(error).__name__}).")
     lines = []
@@ -152,7 +154,11 @@ def by_key(lines: list[tuple[str, dict]], *key: str) -> dict[tuple, dict]:
 
 def load_sets(state: Path) -> tuple[list[int], dict[tuple[str, int], dict]]:
     """The set numbers, and every ticket of the sets by (label, ticket)."""
-    paths = sorted((int(found.group(1)), path) for path in (state.iterdir() if state.is_dir() else [])
+    try:
+        listing = list(state.iterdir())
+    except FileNotFoundError:  # any other OSError reaches main()
+        listing = []
+    paths = sorted((int(found.group(1)), path) for path in listing
                    if (found := re.fullmatch(r"replay-set-(\d+)\.json", path.name)))
     if not paths:
         raise Unreadable(f"no replay set in {state}.")
@@ -165,7 +171,7 @@ def load_sets(state: Path) -> tuple[list[int], dict[tuple[str, int], dict]]:
         for at, entry in enumerate(checked(str(path), saved, tickets=(list,))["tickets"], 1):
             where = f"{path}: ticket entry {at}"
             checked(where, entry, label=TEXT, ticket=COUNT, bucket=TEXT, session=TEXT, ready_commit=TEXT)
-            if not LABEL.fullmatch(entry["label"]):  # never printed as it stands: it may name the project
+            if not draw.LABEL.fullmatch(entry["label"]):  # an invalid label is never printed: it may name the project
                 raise Unreadable(f"{where}: label is not a label the draw gives.")
             if entry["bucket"] not in draw.BUCKETS:
                 raise Unreadable(f"{where}: bucket is not one the draw uses.")
@@ -174,7 +180,7 @@ def load_sets(state: Path) -> tuple[list[int], dict[tuple[str, int], dict]]:
 
 
 def versioned(where: str, line: object, **wanted: tuple) -> dict:
-    """The line, checked, once its version is a name the judge would take; the name is never printed as it stands."""
+    """The line, checked, once its version is a name the judge would take; an invalid name is never printed."""
     checked(where, line, label=TEXT, ticket=COUNT, version=TEXT, commit=TEXT, **wanted)
     if not judge.VERSION_NAME.fullmatch(line["version"]):
         raise Unreadable(f"{where}: version is not a version name.")
@@ -209,10 +215,12 @@ def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: di
         return NOT_DIRECT
     if verdict is None or verdict["right_first_time"] is None:
         return NO_VERDICT
-    # A version judged with no versions.jsonl line, such as one judged with --commit and --from, has the commit its
-    # verdict names and no session.
+    # Generation one has its commit and session in the set; a replay, in its versions.jsonl line. A version neither
+    # gives, such as one judged with --commit and --from, has the commit its verdict names and no session. A direct
+    # replay with no line has no commit of record: replay.py writes that line, and it may mark the replay not direct.
     commit, session = ((ticket["ready_commit"], ticket["session"]) if version == GENERATION_ONE
-                       else (replayed["commit"], replayed["session"]) if replayed else (verdict["commit"], None))
+                       else (replayed["commit"], replayed["session"]) if replayed
+                       else (None, None) if version == DIRECT else (verdict["commit"], None))
     if verdict["commit"] != commit:
         return OTHER_COMMIT
     row = rows.get(session, {})
@@ -225,7 +233,8 @@ def count(part: int, whole: int) -> str:
 
 
 def median(values: list) -> str:
-    """Exact for what the scan saves: whole tokens and minutes to two places, so a median has at most three."""
+    """To at most three places: exact for whole token counts below 2**52 and for minutes to two places, as scan.py
+    rounds them."""
     return f"{statistics.median(values):.3f}".rstrip("0").rstrip(".") if values else "none"
 
 
@@ -293,7 +302,9 @@ def main(argv: list[str]) -> int:
     state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
     try:
         sets, tickets = load_sets(state)
-        lines = report(sets, tickets, load_versions(state), load_verdicts(state), load_rows(state))
+        # Verdicts first: a verdict is saved after its replay's line, so a verdict read here has its line in place.
+        verdicts = load_verdicts(state)
+        lines = report(sets, tickets, load_versions(state), verdicts, load_rows(state))
     except Unreadable as error:
         print(f"report: {error}", file=sys.stderr)
         return 1

@@ -43,38 +43,43 @@ class World:
         # The report runs from a copy of scripts/, so a test sees anything a run writes beside it.
         self.source = root / "source"
         shutil.copytree(SCRIPTS, self.source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        (self.state / "project-labels.json").write_text(json.dumps({"A": REPO}))
         self.sets: list[list[dict]] = []
         self.versions: list[dict] = []
         self.verdicts: list[dict] = []
         self.rows: list[dict] = []
-        self.ids: dict[str, int] = {}  # each version's own number, for its commits and sessions
+        self.ids: dict[tuple[str, int, str], int] = {}  # each replay's own number, for its commit and session
 
-    def draw(self, per_bucket: int = 10, labels: str = "A") -> list[dict]:
+    def draw(self, per_bucket: int = 10, labels: tuple[str, ...] = ("A",)) -> list[dict]:
         """A new set of per_bucket tickets in each bucket, from the projects labelled in turn, written at once, as
-        the draw writes it."""
-        start = 1 + sum(map(len, self.sets))
-        tickets = [{"label": labels[at % len(labels)], "ticket": start + at, "bucket": BUCKETS[at % 3], "size": 10,
-                    "title": TITLE,
-                    "body": "## Acceptance criteria\n\n- [ ] The total.", "base_commit": commit(1),
-                    "ready_commit": commit(1000 + start + at), "model": "claude-test-model", "pr": 500 + start + at,
-                    "session": session(start + at), "log": f"logs/{session(start + at)}.jsonl",
-                    "check_output": f"checks/A-{start + at}.txt"} for at in range(3 * per_bucket)]
+        the draw writes it: each project numbers its own tickets, so A-1 and B-1 can both be in a set."""
+        start = sum(map(len, self.sets))
+        drawn = [ticket for tickets in self.sets for ticket in tickets]
+        tickets = []
+        for at in range(3 * per_bucket):
+            label, number = labels[at % len(labels)], start + at + 1  # number: unique over every set, for commits
+            ticket = 1 + sum(earlier["label"] == label for earlier in drawn + tickets)
+            tickets.append({"label": label, "ticket": ticket, "bucket": BUCKETS[at % 3], "size": 10, "title": TITLE,
+                            "body": "## Acceptance criteria\n\n- [ ] The total.", "base_commit": commit(1),
+                            "ready_commit": commit(1000 + number), "model": "claude-test-model", "pr": 500 + ticket,
+                            "session": session(number), "log": f"logs/{session(number)}.jsonl",
+                            "check_output": f"checks/{label}-{ticket}.txt"})
         self.sets.append(tickets)
         number = len(self.sets)
         (self.state / f"replay-set-{number}.json").write_text(json.dumps(
             {"set": number, "seed": 7, "drawn_at": "2026-11-26T10:00:00+00:00", "tickets": tickets,
              "set_aside": []}, indent=2) + "\n")
+        known = {label: f"example-org/{label.lower()}-project" for tickets in self.sets for label in
+                 {ticket["label"] for ticket in tickets}}
+        (self.state / "project-labels.json").write_text(json.dumps({**known, "A": REPO}))
         return tickets
 
     def replay(self, ticket: dict, version: str = "direct", not_direct: bool = False) -> dict:
-        number = 100000 * self.ids.setdefault(version, len(self.ids) + 1)
-        found = {"label": ticket["label"], "ticket": ticket["ticket"], "version": version,
-                 "commit": commit(5000 + ticket["ticket"] + number),
-                 "repo": f"replays/A-{ticket['ticket']}-{version}.git", "base_commit": ticket["base_commit"],
-                 "clone": f"replays/A-{ticket['ticket']}-{version}", "exit_status": 0,
-                 "session": session(9000 + ticket["ticket"] + number), "skills": [],
-                 "not_direct": not_direct}
+        key = (ticket["label"], ticket["ticket"], version)
+        number = 5000 + self.ids.setdefault(key, len(self.ids) + 1)
+        name = f"{ticket['label']}-{ticket['ticket']}-{version}"
+        found = {"label": ticket["label"], "ticket": ticket["ticket"], "version": version, "commit": commit(number),
+                 "repo": f"replays/{name}.git", "base_commit": ticket["base_commit"], "clone": f"replays/{name}",
+                 "exit_status": 0, "session": session(number), "skills": [], "not_direct": not_direct}
         self.versions.append(found)
         return found
 
@@ -82,7 +87,7 @@ class World:
         if at is None:
             at = ticket["ready_commit"] if version == "generation-one" else next(
                 line["commit"] for line in self.versions
-                if (line["ticket"], line["version"]) == (ticket["ticket"], version))
+                if (line["label"], line["ticket"], line["version"]) == (ticket["label"], ticket["ticket"], version))
         self.verdicts.append({"label": ticket["label"], "ticket": ticket["ticket"], "version": version, "commit": at,
                               "base_commit": ticket["base_commit"], "judged_at": "2026-11-26T11:00:00+00:00",
                               "check": {"passed": True, "reason": None, "output": "judged/x/check.txt"},
@@ -241,17 +246,16 @@ class TestReport(unittest.TestCase):
         self.world.run("generation-one", tickets[1], True)
         self.world.replay(tickets[0])
         self.world.judge(tickets[0], "direct", True, at=commit(78))  # not the replay's commit
-        self.world.judge(tickets[1], "direct", False, at=commit(79))  # no replay recorded, so the judge's commit
+        # The replay script records every direct replay, so one with no record may yet be marked not direct.
+        self.world.judge(tickets[1], "direct", True, at=commit(79))
         lines = self.lines()
-        for version, right, tokens, minutes in (("generation-one", 1, 100, 10), ("direct", 0, "none", "none")):
+        for version, judged, tokens, minutes in (("generation-one", 1, 100, 10), ("direct", 0, "none", "none")):
             start = lines.index(version)
-            self.assertEqual(lines[start + 4:start + 7], [
-                f"  All: 1 judged, {right} of 1 right first time, median total tokens {tokens}, median active minutes "
-                f"{minutes}.",
-                "  Left out of every figure: 0 not direct, 1 with no verdict, 1 judged at a commit the version does "
-                "not record.",
-                f"  Left out of the token figures: {1 - right} with a blank token count. Left out of the active "
-                f"minutes: {1 - right} blank."])
+            self.assertEqual(lines[start + 4:start + 6], [
+                f"  All: {judged} judged, {judged} of {judged} right first time, median total tokens {tokens}, "
+                f"median active minutes {minutes}.",
+                f"  Left out of every figure: 0 not direct, 1 with no verdict, {2 - judged} judged at a commit the "
+                "version does not record."])
 
     def test_a_version_judged_with_no_replay_record_counts_with_blank_figures(self) -> None:
         tickets = self.world.draw(per_bucket=1)
@@ -276,13 +280,24 @@ class TestReport(unittest.TestCase):
                                    "active minutes 1.015.")
 
     def test_projects_appear_as_labels_only(self) -> None:
-        self.world.draw(labels="BA")
-        self.world.draw(labels="C")
-        self.world.run("generation-one", self.world.sets[0][0], True)
-        result = self.world.report()
-        self.assertEqual(result.stdout.splitlines()[0], "Replay sets 1 and 2: 60 tickets, of projects A, B and C.")
-        for secret in (REPO, "alpha", TITLE, session(1), commit(1001)):
-            self.assertNotIn(secret, result.stdout)
+        def build(world: World, first: tuple[str, ...], second: tuple[str, ...]) -> list[str]:
+            for labels in (first, second):
+                for at, ticket in enumerate(world.draw(labels=labels)):
+                    world.run("generation-one", ticket, at % 2 == 0, tokens=100 + at, minutes=1.0 + at)
+                    world.run("direct", ticket, at % 3 == 0, tokens=50 + at, minutes=0.5 + at)
+            result = world.report()
+            self.assertEqual((result.returncode, result.stderr), (0, ""))
+            return result.stdout.splitlines()
+
+        many = build(self.world, ("A", "B"), ("C",))  # A-1 and B-1 both, replayed as direct
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        one = build(World(Path(folder.name).resolve()), ("A",), ("A",))  # the same draw, all one project
+        self.assertEqual(many[0], "Replay sets 1 and 2: 60 tickets, of projects A, B and C.")
+        self.assertEqual(one[0], "Replay sets 1 and 2: 60 tickets, of project A.")
+        self.assertEqual(many[1:], one[1:])
+        for secret in (REPO, "alpha", "-project", TITLE, session(1), commit(1001)):
+            self.assertNotIn(secret, "\n".join(many))
 
     def test_a_third_version_is_printed_beside_the_other_two(self) -> None:
         tickets = self.world.draw(per_bucket=1)
@@ -370,7 +385,28 @@ class TestReport(unittest.TestCase):
         self.world.save()
         self.world.state.chmod(0o100)  # searchable, not readable
         self.addCleanup(self.world.state.chmod, 0o700)
+        listing = subprocess.run([sys.executable, "-c", "import os, sys; os.listdir(sys.argv[1])",
+                                  str(self.world.state)], capture_output=True)
+        if listing.returncode == 0:
+            self.skipTest("the mode does not bind this user (root, or an access list)")
         self.error(f"{self.world.state} cannot be read (PermissionError).")
+
+    def test_a_folder_or_ledger_it_cannot_reach_is_an_error_not_absent(self) -> None:
+        # A link to itself: exists() and is_dir() answer false, and reading it fails with ELOOP, for any user.
+        self.world.baseline(20, 15)
+        self.world.save()
+        for name in ("versions.jsonl", "verdicts.jsonl", "scan-rows.jsonl"):
+            with self.subTest(name=name):
+                path = self.world.state / name
+                saved = path.read_bytes()
+                path.unlink()
+                path.symlink_to(name)
+                self.error(f"{path} cannot be read (OSError).")
+                path.unlink()
+                path.write_bytes(saved)
+        shutil.rmtree(self.world.state)
+        self.world.state.symlink_to(self.world.state.name)
+        self.error(f"{self.world.state} cannot be read (OSError).")
 
     def test_missing_versions_verdicts_and_rows_are_nothing_judged_yet(self) -> None:
         self.world.draw()

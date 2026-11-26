@@ -40,50 +40,55 @@ GIT = shutil.which("git")
 DEADLINE = 120  # seconds; a bound on waiting for a file or a process, not a sleep
 START_TIME_PATTERN = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file gives it
 
-# What `--help` must state, each fact as the key terms that must meet in one
-# sentence of the help, so a rewording that keeps the fact passes and a help
-# that lacks it fails. A term is a regular expression, matched without case.
+# What `--help` must state. Each row is a short label and the terms of one fact: regular
+# expressions, matched without case, that must all match in one window of the help, a
+# sentence or a sentence and its neighbour. A term joins the fact's subject to what the
+# help says of it, so a fact with part of its meaning changed fails; a term starting with
+# "!" must not match. A rewording that keeps the fact passes.
 HELP_FACTS = {
-    "a full run takes the lock before its first check and holds it until it exits": (
-        r"--fast", r"\bbefore\b", r"\bfirst check\b", r"\bholds?\b", r"\bexits?\b"),
-    "a run with --fast, --help or a usage error takes no lock and never waits": (
+    "lock scope": (
+        r"--fast", r"\bbefore\b[^.]{0,20}\bfirst check\b", r"\bholds?\b[^.]{0,25}\buntil\b[^.]{0,15}\bexits?\b"),
+    "lock exemptions": (
         r"--fast", r"--help", r"\busage error\b", r"\bno lock\b", r"\bnever waits?\b"),
-    "the lock is fcntl.flock, taken through python3 by scripts/check_lock.py": (
-        r"\bfcntl\.flock\b", r"\bpython3\b", r"scripts/check_lock\.py"),
-    "the file is check.sh.lock in the shared git directory, one lock for every worktree": (
-        r"\bcheck\.sh\.lock\b", r"--git-common-dir", r"\bworktrees?\b"),
-    "only the system says whether the lock is held": (
-        r"\bsystem\b", r"\b(?:says?|tells?|reports?|decides?)\b", r"\bheld\b"),
-    "the file's presence and content decide nothing, even after SIGKILL": (
-        r"\bpresence\b", r"\bcontent\b", r"\bSIGKILL\b", r"\bkilled\b"),
-    "the script owns the lock and the checks it starts do not hold it": (
-        r"\bscript\b", r"\b(?:owns?|holds?)\b", r"\bchecks?\b", r"\b(?:not|never|no)\b"),
-    "the holder writes its pid and start time into the file": (
-        r"\bholder\b", r"\b(?:writes?|records?|stores?|puts?|saves?)\b", r"\b(?:process id|pid)\b", r"\btime\b"),
-    "a waiting run prints one line at once": (
-        r"\bwait\b", r"\bprints?\b", r"\bline\b", r"\b(?:at once|immediately|straight away|right away)\b"),
-    "the line names the holder, its pid and start time, and the longest wait": (
-        r"\bline\b", r"\bholder", r"\b(?:process id|pid)\b", r"\bstart time\b", r"\blongest\b"),
-    "a waiter blocks on the system until it gives the lock": (
-        r"\bsystem\b", r"\bblocks?\b", r"\block\b", r"\b(?:until|gives?|grants?)\b"),
-    "the system picks the next waiter, in no fixed order": (
-        r"\bsystem\b", r"\b(?:picks?|chooses?|selects?)\b", r"\bnext\b", r"\border\b"),
-    "a run whose turn comes prints how long it waited": (
-        r"\bturn\b", r"\bprints?\b", r"\bhow long\b", r"\bwaited\b"),
-    "CHECK_LOCK_WAIT sets the bound in whole seconds, with its range and default": (
-        r"\bCHECK_LOCK_WAIT\b", r"\bwhole\b.*\bseconds\b", r"\b100000000\b", r"\b1800\b"),
-    "at the bound the run prints one line on standard error and exits 75": (
-        r"\bbound\b", r"\bstandard error\b", r"\bno check\b", r"\b75\b"),
-    "a run that cannot open or lock the file runs without the lock": (
-        r"\bcannot\b", r"\bother than\b", r"\bwithout the lock\b"),
-    "CHECK_LOCK_FILE names another lock file": (
-        r"\bCHECK_LOCK_FILE\b", r"\bfile\b", r"\btests\b"),
-    "no switch skips the lock": (r"\bno (?:switch|option|flag)\b", r"\b(?:skips?|disables?|bypass(?:es)?)\b"),
-    "a second clone has its own lock": (r"\bLimits?\b", r"\bsecond clone\b", r"\bown\b"),
-    "a run killed with SIGKILL frees the lock while its processes may still run": (
-        r"\bSIGKILL\b", r"\bfrees?\b", r"\bprocesses\b", r"\bstill\b"),
-    "the exit statuses are 0, the failing check's own, 2 and 75": (
-        r"\bexit status\b", r"\b0\b", r"\b2\b", r"\b75\b"),
+    "lock mechanism": (r"\bfcntl\.flock\b", r"\bpython3\b", r"scripts/check_lock\.py"),
+    "lock place": (r"\bcheck\.sh\.lock\b", r"--git-common-dir", r"\bworktrees?\b"),
+    "lock authority": (
+        r"\bonly\b|\balone\b", r"\bsystem\b[^.]{0,40}\b(?:says?|tells?|reports?|decides?)\b", r"\bheld\b"),
+    "file content": (
+        r"\bpresence\b", r"\bcontent\b", r"\bnothing\b", r"\bSIGKILL\b",
+        r"\b(?:blocks? no|never blocks?|(?:does|do) not block|cannot block)\b"),
+    "lock ownership": (
+        r"\bscript\b[^.]{0,60}\b(?:owns|holds|keeps)\b", r"\bchecks?\b[^.,]{0,40}\b(?:do not|never)\b"),
+    "holder record": (
+        r"\bholder\b[^.]{0,30}\b(?:writes?|records?|stores?|saves?|puts?)\b[^.]{0,30}\b(?:process id|pid)\b",
+        r"\bfile\b", r"\bstart time\b|\btime\b[^.]{0,20}\bstarted\b"),
+    "waiting line timing": (
+        r"\bwait\b", r"\bprints?\b[^.]{0,15}\bline\b", r"\b(?:at once|immediately|straight away|right away)\b"),
+    "waiting line content": (
+        r"\bline\b[^.]{0,30}\b(?:names?|shows?|gives?|states?|includes?)\b[^.]{0,20}\bholder\b",
+        r"\b(?:process id|pid)\b", r"\bstart time\b", r"\blongest\b"),
+    "waiter blocks": (
+        r"\bblocks?\b[^.]{0,25}\bsystem\b", r"\b(?:gives?|grants?)\b",
+        r"!\b(?:never|not|no longer)\s+blocks?\b", r"!\bpoll"),
+    "next waiter": (
+        r"\bsystem\b[^.]{0,20}\b(?:picks?|chooses?|selects?)\b[^.]{0,40}\bnext\b",
+        r"\b(?:no fixed order|any order|no (?:set|particular|guaranteed) order)\b",
+        r"!\bnever (?:picks?|chooses?|selects?)\b"),
+    "turn line": (r"\bturn\b", r"\bprints?\b[^.]{0,20}\bhow long\b[^.]{0,15}\bwaited\b"),
+    "wait bound": (
+        r"\bCHECK_LOCK_WAIT\b", r"\bwhole\b[^.]{0,20}\bseconds\b", r"\b0\b[^.]{0,10}\b100000000\b", r"\b1800\b"),
+    "give-up line": (
+        r"\bbound\b", r"\bstandard error\b", r"\bhow long\b", r"\bno check\b", r"\bexits? (?:with )?(?:status )?75\b"),
+    "lock refused": (
+        r"\bcannot\b", r"\bopen\b", r"\bother than\b[^.]{0,20}\bholder\b", r"\bruns? without the lock\b"),
+    "lock file override": (
+        r"\bCHECK_LOCK_FILE\b[^.]{0,30}\b(?:another|different|other|alternate)\b[^.]{0,10}\block file\b", r"\btests\b"),
+    "no bypass": (r"\bno (?:switch|option|flag)\b[^.]{0,15}\b(?:skips?|disables?|bypass(?:es)?)\b[^.]{0,15}\block\b",),
+    "second clone": (r"\bsecond clone\b[^.]{0,40}\b(?:own|separate)\b",),
+    "SIGKILL limit": (r"\bSIGKILL\b[^.]{0,30}\bfrees?\b[^.]{0,15}\block\b", r"\bprocesses\b[^.]{0,30}\bstill\b"),
+    "exit codes": (
+        r"\bexit (?:status|codes?)\b", r"\b0\b[^,]{0,30}\bevery check\b[^,]{0,10}\bpass", r"\bfailing check'?s? own\b",
+        r"\b2\b[^,]{0,25}\b(?:usage|CHECK_LOCK_WAIT)\b", r"\b75\b[^,.]{0,25}\bwait\b"),
 }
 
 # The standard output of a full run in which every stand-in check passed.
@@ -408,11 +413,13 @@ class CheckLockTest(unittest.TestCase):
         header = [re.sub(r"\A# ?", "", line) for line in lines[1:lines.index("set -euo pipefail")]]
         self.assertEqual(out.splitlines(), header)
         sentences = re.split(r"(?<=\.) (?=[A-Z])", " ".join(out.split()))
+        windows = sentences + [" ".join(pair) for pair in zip(sentences, sentences[1:])]
         for fact, terms in HELP_FACTS.items():
-            with self.subTest(states=fact):
+            with self.subTest(fact=fact):
                 self.assertTrue(
-                    any(all(re.search(term, sentence, re.IGNORECASE) for term in terms) for sentence in sentences),
-                    f"no sentence of the help holds every key term of: {fact}",
+                    any(all(bool(re.search(term.lstrip("!"), window, re.IGNORECASE)) != term.startswith("!")
+                            for term in terms) for window in windows),
+                    f"no part of the help states: {fact}",
                 )
         rc, out, err = self.run_check("--bogus", name="bogus", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, out, err), (2, "", "check.sh: unknown argument: --bogus\n"))

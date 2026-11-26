@@ -545,23 +545,26 @@ class World:
         (self.state / "repos.json").write_text(json.dumps(repos))
 
     def draw(self, *args: str, state: Path | None = None, prelude: str = "") -> subprocess.CompletedProcess[str]:
-        """Run the draw; `prelude` is Python run in the same process first, to break something the world cannot."""
+        """Run the draw, with SIGINT as `start` leaves it; `prelude` is Python run in the same process first, to break
+        something the world cannot."""
         program, env = self.command(args, state, prelude)
-        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True)
+        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True,
+                              preexec_fn=self.default_sigint)
 
     @staticmethod
     def default_sigint() -> None:
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
 
-    def start(self, *args: str) -> subprocess.Popen[str]:
-        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited.
+    def start(self, *args: str, caller: Callable[[], None] = default_sigint) -> subprocess.Popen[str]:
+        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited,
+        or as `caller` leaves it.
 
         A job a script starts with `&` with job control off has SIGINT ignored, and a caller may block it;
         either way the draw would not stop on the interrupt a test sends it."""
         program, env = self.command(args, None, "")
         return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, preexec_fn=self.default_sigint)
+                                stderr=subprocess.PIPE, preexec_fn=caller)
 
     def command(self, args: tuple[str, ...], state: Path | None, prelude: str) -> tuple[list[str], dict[str, str]]:
         answers = self.root / "answers"
@@ -737,6 +740,39 @@ class TestDraw(unittest.TestCase):
             "any other session only may have opened it, and that session only may have opened any other PR.",
             "The count is taken before the rules on the PR, its ticket and earlier sets, so it is the most PRs the "
             "veto can have cost the pool."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+
+    def test_help_states_each_known_limit_and_the_exit_on_a_signal_each_once(self) -> None:
+        sentences = [
+            "A Bash call and its result are paired only inside one transcript: a call in the session's log whose "
+            "result is in a helper's log gives no evidence.",
+            "A log is split into lines at line feeds only, so a log whose lines end in a bare carriage return is read "
+            "as one line.",
+            "SIGKILL or a crash between the two renames that put a saved log in place can leave the new log without "
+            "its folder, the earlier copy in logs/.old-<session>/ and the rest of the new one in "
+            "logs/.new-<session>/, until that session is saved again.",
+            "Ctrl-C or SIGTERM while a step that ran too long is being stopped can leave the draw waiting until that "
+            "step ends.",
+            "A helper's response whose message id is a number can stand in for a response in the session's log that "
+            "has no id, and supply the session's model.",
+            "When one helper folder of a session cannot be listed, none of that session's helpers is read, the "
+            "readable ones included.",
+            "When the scan row cannot be written after a log was saved, the new copy of the log stays in place, no "
+            "copy of the earlier one is kept, and scan-rows.jsonl.partial can be left.",
+            "The draw takes an answer from gh as it comes: a timeline that is blank or holds an empty event picks the "
+            "head at the PR's creation, a push whose after is not a commit id is saved as the commit, and a byte that "
+            "is not UTF-8 ends the draw before the answer is saved.",
+            "Output of git that is not UTF-8, such as a hook's message, ends the draw with Python's traceback and "
+            "exit 1, and no set written; so does the judge, which runs its check through the draw's git runner.",
+            "Exit 130: Ctrl-C stopped the draw.",
+            "Exit 143: SIGTERM stopped the draw.",
+            "Either stop prints one line that says so, and no set was written.",
+            "Once the set file is in place, a signal leaves the exit at 0 and the last line as the one that names the "
+            "set.",
+            "A SIGINT or SIGTERM the caller ignored stays ignored."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
         for sentence in sentences:
             with self.subTest(sentence=sentence):
@@ -1665,9 +1701,11 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
-    def draw_signalled_in_a_check(self, number: signal.Signals) -> World:
-        """Signal a draw whose check blocks until its private folder is removed, so only the signal ends it, and
-        assert the check is gone once the draw has ended. The folder's removal at cleanup releases a check the
+    def draw_signalled_in_a_check(self, *numbers: signal.Signals,
+                                  caller: Callable[[], None] = World.default_sigint) -> tuple[World, int, str]:
+        """Send each signal in turn to a draw whose check blocks until its private folder is removed, so only a signal
+        ends it, and assert the check is gone once the draw has ended. Return the world, the draw's exit status and its
+        standard error. The folder's removal at cleanup releases a check the
         draw left running. The waits: a poll for the check's pid, `communicate(timeout=60)` for the draw's exit, then a
         poll for the check's exit, each ending after 60 seconds; the cleanup's `communicate` follows the kill."""
         marks = Path(tempfile.mkdtemp())
@@ -1676,17 +1714,18 @@ class TestDraw(unittest.TestCase):
         check = (f"{CHECK} && echo $$ > {folder}/pid.tmp && mv {folder}/pid.tmp {folder}/pid"
                  f" && while test -d {folder}; do sleep 0.05; done")
         world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
-        draw = world.start("--seed", "1")
+        draw = world.start("--seed", "1", caller=caller)
         self.addCleanup(draw.communicate)  # closes the pipes, after the kill
         self.addCleanup(draw.kill)
         self.wait_for(lambda: (marks / "pid").exists() or draw.poll() is not None)
         self.assertTrue((marks / "pid").exists(), "the draw ended before the check started")
         pid = int((marks / "pid").read_text())
-        draw.send_signal(number)
-        draw.communicate(timeout=60)
+        for number in numbers:
+            draw.send_signal(number)
+        _, stderr = draw.communicate(timeout=60)
         self.assertTrue(self.wait_for(lambda: not self.alive(pid)),
                         f"the check (pid {pid}) is still running after the draw ended")
-        return world
+        return world, draw.returncode, stderr
 
     @staticmethod
     def alive(pid: int) -> bool:
@@ -1706,7 +1745,9 @@ class TestDraw(unittest.TestCase):
         return True
 
     def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
-        self.draw_signalled_in_a_check(signal.SIGINT)
+        _, status, stderr = self.draw_signalled_in_a_check(signal.SIGINT)
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual((status, stderr), (130, "draw: stopped by SIGINT; no set written.\n"))
 
     def test_a_log_that_cannot_be_saved_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))
@@ -1851,7 +1892,7 @@ class TestDraw(unittest.TestCase):
     def test_an_interrupt_while_a_timed_out_check_is_stopped_signals_its_group_once(self) -> None:
         world = self.world(full_pool(10))
         record = world.root / "killpg.txt"
-        result = world.draw("--seed", "1", prelude="import os, subprocess\n"
+        result = world.draw("--seed", "1", prelude="import os, signal, subprocess\n"
                             "real_wait = subprocess.Popen.wait\n"
                             "def wait(self, timeout=None):\n"
                             "    if timeout == 3600:  # every step times out at once\n"
@@ -1863,15 +1904,178 @@ class TestDraw(unittest.TestCase):
                             f"    with open({str(record)!r}, 'a') as out:\n"
                             "        out.write(f'{number}\\n')\n"
                             "    real_killpg(group, number)\n"
-                            "    raise KeyboardInterrupt  # as if Ctrl-C came right after the signal\n"
+                            "    os.kill(os.getpid(), signal.SIGINT)  # as if Ctrl-C came right after the signal\n"
                             "os.killpg = killpg")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(record.read_text(), f"{int(signal.SIGKILL)}\n")
         self.assertNotIn("PermissionError", result.stderr)
-        self.assertEqual(result.stderr.splitlines()[-1], "KeyboardInterrupt")
+        self.assertEqual(result.stderr.splitlines()[-1], "draw: stopped by SIGINT; no set written.")
+
+    def test_a_signal_once_the_set_file_is_in_place_leaves_the_draw_ending_with_its_set(self) -> None:
+        world = self.world(full_pool(10))
+        short = self.world(sized(1, 12, 20))  # writes no set: exit 3
+        # Python the draw runs first: it sends the draw the signal {number} right after one of its steps.
+        steps = {"the set file is in place": "import scan\nreal_write = scan.write_private\n"
+                                             "def write(path, text):\n"
+                                             "    real_write(path, text)\n"
+                                             "    if path.name.startswith('replay-set-'):\n"
+                                             "        os.kill(os.getpid(), {number})\n"
+                                             "scan.write_private = write",
+                 "the Wrote line": "import builtins\nreal_print = builtins.print\n"
+                                   "def print_(*args, **options):\n"
+                                   "    real_print(*args, **options)\n"
+                                   "    if str(args[0]).startswith('Wrote '):\n"
+                                   "        os.kill(os.getpid(), {number})\n"
+                                   "builtins.print = print_",
+                 "main returns": "real_exit = sys.exit\n"
+                                 "def exit_(status):\n"
+                                 "    os.kill(os.getpid(), {number})\n"
+                                 "    real_exit(status)\n"
+                                 "sys.exit = exit_"}
+        cases = [(world, signal.SIGTERM, "the set file is in place"), (world, signal.SIGINT, "the Wrote line"),
+                 (world, signal.SIGTERM, "main returns"), (short, signal.SIGINT, "main returns")]
+        for at, (each, number, step) in enumerate(cases):
+            with self.subTest(signal=number.name, after=step, sets=each is world):
+                state = each.root / f"state-{at}"
+                shutil.copytree(each.state, state)
+                prelude = (f"import os, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(each.source)!r})\n"
+                           + steps[step].format(number=int(number)))
+                result = each.draw("--seed", "1", state=state, prelude=prelude)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stderr, "")
+                if each is world:
+                    self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
+                                     (0, f"Wrote {state / 'replay-set-1.json'}."))
+                    self.assertEqual(len(each.set_file(state=state)["tickets"]), 15)
+                else:
+                    self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
+                                     (3, "No set written: a bucket holds no ticket that passes."))
+
+    def test_a_signal_while_a_log_is_saved_leaves_no_staging_folder_and_the_earlier_copy_as_it_was(self) -> None:
+        world = self.world(full_pool(10, by_helper=True))
+        fresh = world.root / "fresh"  # a machine directory with no copy of any log
+        shutil.copytree(world.state, fresh)
+        for ticket in world.tickets.values():  # the earlier copy holds a helper the sessions no longer have
+            folder = world.log_path(ticket).with_suffix("") / "subagents"
+            write_lines(folder / "agent-a2.jsonl", read_lines(folder / "agent-a1.jsonl"))
+        (world.state / "scan-rows.lock").mkdir()  # the first draw saves one log and then cannot write its row
+        self.assertEqual(world.draw("--seed", "1").returncode, 1)
+        (world.state / "scan-rows.lock").rmdir()
+        logs = world.state / "logs"
+        session = next(logs.glob("*.jsonl")).stem  # the draw saves this session's log first
+        for ticket in world.tickets.values():
+            (world.log_path(ticket).with_suffix("") / "subagents" / "agent-a2.jsonl").unlink()
+
+        def files(folder: Path) -> dict[str, bytes]:
+            """Every path under the folder, with each file's bytes."""
+            return {str(path.relative_to(folder)): path.read_bytes() if path.is_file() else b""
+                    for path in folder.rglob("*")}
+        earlier = files(logs)
+        self.assertIn(f"{session}/subagents/agent-a2.jsonl", earlier)
+        source = world.config / "projects" / "-work-example"
+        new = {name: data for name, data in files(source).items() if name.startswith(session)}
+        # Python the draw runs first: the draw gets the signal right after it copies a transcript of the session, or
+        # right after it moves the session's new log into logs/.
+        copy = ("import os, shutil\nreal_copy = shutil.copyfile\n"
+                "def copy(source, target, **options):\n"
+                "    real_copy(source, target, **options)\n"
+                "    if '.new-{session}' in str(target):\n"
+                "        os.kill(os.getpid(), {number})\n"
+                "    return target\n"
+                "shutil.copyfile = copy")
+        rename = ("import os\nreal_replace = os.replace\n"
+                  "def replace(source, target):\n"
+                  "    real_replace(source, target)\n"
+                  "    if str(source).endswith('.new-{session}/{session}.jsonl'):\n"
+                  "        os.kill(os.getpid(), {number})\n"
+                  "os.replace = replace")
+        cases = [("an earlier copy", world.state, copy, signal.SIGINT, earlier),
+                 ("no earlier copy", fresh, copy, signal.SIGTERM, {}),
+                 ("an earlier copy", world.state, rename, signal.SIGTERM, new)]  # once begun, the swap runs whole
+        for at, (has, state, prelude, number, after) in enumerate(cases):
+            with self.subTest(session=has, signal=number.name, at="copy" if prelude is copy else "the renames"):
+                copied = world.root / f"state-{at}"
+                shutil.copytree(state, copied)
+                result = world.draw("--seed", "1", state=copied,
+                                    prelude=prelude.format(session=session, number=int(number)))
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual((result.returncode, result.stderr),
+                                 (128 + number, f"draw: stopped by {number.name}; no set written.\n"))
+                self.assertEqual(files(copied / "logs"), after)
+                self.assertEqual(list(copied.glob("replay-set-*")), [])
+
+    def test_a_second_signal_does_not_change_how_the_draw_ends(self) -> None:
+        world = self.world(full_pool(10))
+        # Python the draw runs first: the first signal comes as the draw scans a session's new copy, the second
+        # while the draw cleans up after the first.
+        prelude = ("import os, signal, shutil, scan\nreal_scan, real_rmtree = scan.scan, shutil.rmtree\n"
+                   "both = {signal.SIGINT, signal.SIGTERM}\nstopping = []\n"
+                   "def scan_(session, path):\n"
+                   "    if '.new-' in str(path) and not stopping:\n"
+                   "        stopping.append(True)\n"
+                   "        {first}\n"
+                   "    return real_scan(session, path)\n"
+                   "def rmtree(path, *args, **options):\n"
+                   "    if stopping and os.path.basename(path).startswith('.new-'):\n"
+                   "        {second}\n"
+                   "    return real_rmtree(path, *args, **options)\n"
+                   "scan.scan, shutil.rmtree = scan_, rmtree")
+        together = "signal.pthread_sigmask(signal.SIG_BLOCK, both); os.kill(os.getpid(), signal.SIGTERM); " \
+                   "os.kill(os.getpid(), signal.SIGINT); signal.pthread_sigmask(signal.SIG_UNBLOCK, both)"
+        cases = [(signal.SIGINT, "SIGTERM at once after SIGINT", together, "pass"),
+                 (signal.SIGTERM, "SIGINT during the cleanup", "os.kill(os.getpid(), signal.SIGTERM)",
+                  "os.kill(os.getpid(), signal.SIGINT)")]
+        for at, (first, then, sent, second) in enumerate(cases):
+            with self.subTest(first=first.name, then=then):
+                state = world.root / f"state-{at}"
+                shutil.copytree(world.state, state)
+                prelude_ = (f"import sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(world.source)!r})\n"
+                            + prelude.replace("{first}", sent).replace("{second}", second))
+                result = world.draw("--seed", "1", state=state, prelude=prelude_)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual((result.returncode, result.stderr),
+                                 (128 + first, f"draw: stopped by {first.name}; no set written.\n"))
+                self.assertEqual(sorted(path.name for path in state.iterdir() if path.name.startswith(("draw-work", "replay-set"))), [])
+                self.assertEqual([path.name for path in (state / "logs").iterdir() if path.name.startswith(".")], [])
+
+    def test_a_caller_that_ignored_or_blocked_sigint_keeps_it_so_and_sigterm_still_stops_the_draw(self) -> None:
+        def ignored() -> None:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        def blocked() -> None:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        for caller in (ignored, blocked):
+            with self.subTest(sigint=caller.__name__):
+                world, status, stderr = self.draw_signalled_in_a_check(signal.SIGINT, signal.SIGTERM, caller=caller)
+                self.assertNotIn("Traceback", stderr)
+                self.assertEqual((status, stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
+                self.assertFalse((world.state / "draw-work").exists())
+
+    def test_a_signal_as_a_checks_cleanup_begins_still_stops_what_the_check_left_running(self) -> None:
+        marks = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, marks)
+        left = marks / "pid"
+        setup = f"{SETUP} && (sleep 300 & echo $! > {shlex.quote(str(left))})"  # still running when the check passes
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": CHECK, "setup": setup}])
+        # Python the draw runs first: SIGTERM comes as the first check's cleanup holds the signals.
+        prelude = ("import os, signal\nreal_mask = signal.pthread_sigmask\nsent = []\n"
+                   "def mask(how, numbers):\n"
+                   "    if how == signal.SIG_BLOCK and not sent:\n"
+                   "        sent.append(True)\n"
+                   "        os.kill(os.getpid(), signal.SIGTERM)\n"
+                   "    return real_mask(how, numbers)\n"
+                   "signal.pthread_sigmask = mask")
+        result = world.draw("--seed", "1", prelude=prelude)
+        pid = int(left.read_text())
+        self.addCleanup(lambda: self.alive(pid) and os.kill(pid, signal.SIGKILL))
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual((result.returncode, result.stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
+        self.assertTrue(self.wait_for(lambda: not self.alive(pid)), f"what setup left (pid {pid}) is still running")
+        self.assertFalse((world.state / "draw-work").exists())
 
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
-        world = self.draw_signalled_in_a_check(signal.SIGTERM)
+        world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]
         self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_model_takes_one_vote_per_parent_response_however_many_helpers_copy_it(self) -> None:

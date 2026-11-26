@@ -397,15 +397,14 @@ def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
     # with any text on either side, since an expansion or a quote beside it may still leave it whole when bash runs.
     # The text is read as it is, and with each escape read as bash, or zsh, reads it in a $'...' quote. In bash a NUL
     # ends the quote's text, so for each NUL the text is also read with the rest of its quote gone.
-    readings = [command, *(escape.sub(character, command) for escape in ESCAPES)]
-    nuls = [found for found in ESCAPES[0].finditer(command) if character(found) == "\0"]
-    if len(nuls) > MOST_NULS:
-        return "maybe"
-    readings += [ESCAPES[0].sub(character, command[:found.start()] + QUOTED.sub("", command[found.end():], 1))
-                 for found in nuls]
-    if not any(all(word in re.sub(r"\\\n|[\\'\"$]", "", text).lower() for word in ("gh", "pr", "create"))
-               for text in readings):
-        return None
+    def holds(text: str) -> bool:
+        return all(word in re.sub(r"\\\n|[\\'\"$]", "", text).lower() for word in ("gh", "pr", "create"))
+
+    if not any(holds(text) for text in (command, *(escape.sub(character, command) for escape in ESCAPES))):
+        nuls = [found for found in ESCAPES[0].finditer(command) if character(found) == "\0"]
+        if len(nuls) <= MOST_NULS and not any(holds(ESCAPES[0].sub(
+                character, command[:found.start()] + QUOTED.sub("", command[found.end():], 1))) for found in nuls):
+            return None
     return "opens" if exited_zero and opening_form(command) else "maybe"
 
 

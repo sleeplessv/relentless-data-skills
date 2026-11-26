@@ -134,7 +134,9 @@ FORMS: dict[str, dict[str, str]] = {
         "cd .\ngh pr create\n", "\n\ngh pr create --fill;", "git log > log.txt; gh pr create && git push",
         "git log >> log.txt; gh pr create", "gh pr create --fill | tail -n 1",
         "cat <<'END_2'\nBody text.\nEND_2\ngh pr create", "gh pr create --title 'it'\\''s \"quoted\"' --body \\$5",
-        "gh pr create --body \"$(cat <<'BODY_2'\nBody text.\nBODY_2\n)\"", AT_THE_LIMIT], "starts"),
+        "gh pr create --body \"$(cat <<'BODY_2'\nBody text.\nBODY_2\n)\"", AT_THE_LIMIT,
+        # Past the bound on NULs written as escapes, a call that holds the three words is still read for its form.
+        "gh pr create --body \"$(cat <<'EOF'\n" + "\\0" * 65 + "\nEOF\n)\""], "starts"),
     "maybe": {
         # The 13 commands the reader at 97b879d read wrongly.
         'time { :; } >"$((1 / 0))"; gh pr create': "none",

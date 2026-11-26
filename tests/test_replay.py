@@ -417,6 +417,35 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, "replay: project A is not in both project-labels.json and repos.json.\n")
 
+    def test_the_session_s_git_reads_no_file_of_the_caller_s_and_commits_in_the_clone(self) -> None:
+        # Settings, an ignore rule and an attribute that only the caller's files under HOME, and the user config
+        # file GIT_CONFIG_GLOBAL names, hold. The sandbox hides the home folder, so a session's git must not read them.
+        home = self.world.home
+        (home / ".config" / "git").mkdir(parents=True)
+        (home / ".config" / "git" / "ignore").write_text("notes.txt\n")
+        (home / ".config" / "git" / "attributes").write_text("* caller-attribute\n")
+        (home / ".gitconfig").write_text("[replay]\n\thome = caller\n")
+        with open(self.world.gitconfig, "a") as config:
+            config.write("[replay]\n\tglobal = caller\n")
+        result = self.replay("A", "7")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [start] = self.world.starts_made()
+        clone = self.world.clone
+
+        def session_git(*args: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(["git", *args], cwd=clone, env=start["env"], text=True, capture_output=True)
+        for key in ("replay.home", "replay.global"):
+            with self.subTest(key=key):
+                self.assertEqual(session_git("config", "--get", key).returncode, 1)
+        (clone / "notes.txt").write_text("a note\n")
+        self.assertEqual(session_git("status", "--porcelain", "--", "notes.txt").stdout, "?? notes.txt\n")
+        self.assertEqual(session_git("check-attr", "caller-attribute", "notes.txt").stdout,
+                         "notes.txt: caller-attribute: unspecified\n")
+        for args in (("status",), ("add", "notes.txt"), ("commit", "-q", "-m", "a note"), ("fetch", "-q", "origin")):
+            with self.subTest(args=args):
+                done = session_git(*args)
+                self.assertEqual((done.returncode, done.stderr), (0, ""))
+
     def test_the_session_is_scanned_into_a_row(self) -> None:
         result = self.replay("A", "7")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -501,6 +530,9 @@ class ReplayTest(unittest.TestCase):
         result = self.replay("--help")
         self.assertEqual(result.returncode, 0)
         self.assertIn("Usage: python3 scripts/replay.py LABEL TICKET", result.stdout)
+        self.assertIn(f"For git, its environment sets GIT_CONFIG_GLOBAL to {os.devnull} and GIT_CONFIG_NOSYSTEM to 1, "
+                      f"sets core.excludesFile and core.attributesFile to {os.devnull} through GIT_CONFIG_COUNT, and "
+                      "carries no other GIT_* variable of the caller's.", " ".join(result.stdout.split()))
         self.assertFalse(self.world.starts.exists())
 
 

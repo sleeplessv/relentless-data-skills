@@ -76,8 +76,13 @@ no sandboxed read under the home folder but the clone and those caches; network
 only to {", ".join(REGISTRIES)}; the file tools held to the
 clone; no WebFetch or WebSearch tool; no claude.ai connector and no hook. It does not inherit the variables a
 parent Claude Code session sets (CLAUDECODE, CLAUDE_CODE_*, and the rest of
-CLAUDE_* but {" and ".join(KEPT)}) or a GitHub token. Nothing is pushed, and no PR
-is opened.
+CLAUDE_* but {" and ".join(KEPT)}) or a GitHub token. For git, its environment
+sets GIT_CONFIG_GLOBAL to {os.devnull} and GIT_CONFIG_NOSYSTEM to 1, sets
+core.excludesFile and core.attributesFile to {os.devnull} through
+GIT_CONFIG_COUNT, and carries no other GIT_* variable of the caller's. The
+session's git then reads the clone's own config and no other config file, and
+no ignore or attributes file of the user's, which the sandbox would hide.
+Nothing is pushed, and no PR is opened.
 
 Files, all in the machine directory:
 
@@ -173,10 +178,12 @@ def command(clone: Path, model: str, session: str) -> list[str]:
 
 
 def environment() -> dict[str, str]:
-    env = {key: value for key, value in os.environ.items()
+    """The session's. Its git reads no file under the home folder: the sandbox hides them, and git dies on that."""
+    env = {key: value for key, value in plain().items()
            if not (key.startswith("CLAUDE") and key not in KEPT) and key not in DROPPED}
-    env["ENABLE_CLAUDEAI_MCP_SERVERS"] = "false"
-    return env
+    return {**env, "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "GIT_CONFIG_COUNT": "2",
+            "GIT_CONFIG_KEY_0": "core.excludesFile", "GIT_CONFIG_VALUE_0": os.devnull,
+            "GIT_CONFIG_KEY_1": "core.attributesFile", "GIT_CONFIG_VALUE_1": os.devnull}
 
 
 def trusted(store: Path, clone: Path, index: str = "replay-index") -> dict[str, str]:

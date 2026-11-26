@@ -1,0 +1,23 @@
+{
+  "name": "model-router",
+  "version": "0.1.1",
+  "description": "Pick the model, reasoning effort and harness for each delegated task across Anthropic, OpenAI and Google models, by task fit, input and cost.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/model-router",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "routing",
+    "delegation",
+    "models",
+    "harness",
+    "subagents",
+    "cost",
+    "gemini",
+    "openai",
+    "claude",
+    "multi-agent"
+  ]
+}

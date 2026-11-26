@@ -1679,14 +1679,14 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual({entry["model"] for entry in world.set_file()["tickets"]}, {MODEL})
 
-    def test_a_scan_row_file_that_cannot_be_read_ends_the_draw_naming_its_label_and_no_path(self) -> None:
+    def test_a_scan_row_line_that_cannot_be_read_is_kept_and_the_draw_goes_on(self) -> None:
         world = self.world(full_pool(10))
         (world.state / "scan-rows.jsonl").write_text("[]\n")
         result = world.draw("--seed", "1")
-        self.assertEqual(result.returncode, 1)
-        self.assertRegex(result.stderr, r"\Adraw: could not save the session log of project A ticket \d+ "
-                                        r"\(AttributeError\)\.\n\Z")
-        self.assertEqual(list(world.state.glob("replay-set-*")), [])
+        self.assertEqual(result.returncode, 0)
+        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n" * 30)
+        self.assertEqual((world.state / "scan-rows.jsonl").read_text().split("\n")[0], "[]")
+        self.assertEqual([path.name for path in world.state.glob("replay-set-*")], ["replay-set-1.json"])
 
     def test_a_failed_gh_call_names_the_label_keeps_gh_s_message_in_a_file_and_writes_no_set(self) -> None:
         world = self.world(full_pool(10))

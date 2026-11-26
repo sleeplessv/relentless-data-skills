@@ -174,7 +174,8 @@ to the Trash collection, so restoring one means un-archiving *before* setting
 - `source_card_id`: the card this card is built on. **The source chain.** Not
   sufficient on its own: a `source-card` can appear nested inside a join, and a
   card referencing two sources reports only one here. Walk `dataset_query`
-  recursively for every `source-card` / `source-table: "card__N"`.
+  recursively for `source-card`, `source-table: "card__N"` and the numeric
+  `card-id` on native template tags of type `card`.
 - `display`: `table`, `pivot`, `bar`, and others. The API accepts an unknown
   value and stores it, producing an unrenderable card; validate before sending.
 - `result_metadata`: column metadata including user-set display names and
@@ -317,7 +318,7 @@ same column has a different field id in each. Build the id map from
 `GET /api/database/<id>/metadata` on **both** databases and match on
 table+column *name*.
 
-Five independent things carry an id. Miss any one and the copy silently reads
+These fields carry ids. Miss any one and the copy silently reads
 the wrong database:
 
 | Where | Key | Notes |
@@ -326,7 +327,7 @@ the wrong database:
 | MBQL source | `source-table` | Table id, not a name |
 | Field references | positional | **Both argument orders**, see the two-orders section |
 | Implicit-join filters | `source-field` | The FK column id; easy to miss, it is a value under a key |
-| Card-on-card | `source-card` | **The dangerous one.** A clone still pointing at the prod upstream renders perfectly while showing prod data |
+| Card-on-card | MBQL source card or native `card` template tag | Check each reference against the cloned upstream. |
 | Dashboard wiring | `parameter_mappings[].target` | Separate from the card; legacy field order |
 
 Preconditions worth checking before promising anything:
@@ -344,7 +345,7 @@ Verification that actually catches the failures above:
 
 1. `mb wiring <new dashboard>`: zero cross-database ids.
 2. Assert no source-database id survives anywhere in each new card's
-   `dataset_query`, and that `source-card` points at the *new* upstream.
+   `dataset_query`, and that every card reference resolves to the new upstream.
 3. Reconcile row counts and group breakdowns against independent
    `mb sql --db <target>`, not against "it returned rows".
 4. **Exercise every mapped filter**, not one. Filters bind by four different

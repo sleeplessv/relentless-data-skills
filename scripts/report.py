@@ -131,6 +131,17 @@ left out when it prints the report. A line of nothing but whitespace is blank,
 and is passed over and not counted. A session whose row was such a line is left
 out of the token figures and counted, like one with no row.
 
+Every token figure includes the tokens a resumed session copied: the report
+takes none out of a figure or a verdict. python3 scripts/scan.py --help says
+which lines are copied and what copied_tokens holds. A copied response counts
+in total_tokens and, wherever the scan puts it, in a helper's tokens or in
+the session's own. Each version's block ends with the copied_tokens of the
+tickets in its token figures, summed, out of the total_tokens of the same
+tickets, with the share as a percent. Warning sign 2 gives the copied_tokens
+inside each side's sum, over the tickets it counts. A copied_tokens that is
+null, or absent from a row the scan wrote before it had that column, is
+blank: its ticket is left out of the copied tokens and counted.
+
 
 Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s,
 over every ticket of the sets. It is printed only when every ticket has both
@@ -183,18 +194,20 @@ Files read, all written by the other scripts:
                         not_direct of each line (scripts/replay.py).
   verdicts.jsonl        label, ticket, version, commit and right_first_time
                         of each line (scripts/judge.py).
-  scan-rows.jsonl       session, total_tokens, active_minutes and helpers of
-                        each row, and description, brief_head and
-                        total_tokens of each helper (scripts/scan.py).
+  scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes
+                        and helpers of each row, and description, brief_head
+                        and total_tokens of each helper (scripts/scan.py).
 
 A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing
 yet. A folder or file that cannot be read, a line of versions.jsonl or
 verdicts.jsonl that is not a JSON object, a field missing or of the wrong type
-(but not the session of a line of scan-rows.jsonl, above), a set entry's label
-the draw would not give or bucket it does not use, a version name in
-versions.jsonl or verdicts.jsonl the judge would not take, a total_tokens that
-is negative, infinite or not a number, helpers that hold more tokens than their
-row's total_tokens, or a second line for one ticket and version, one session or
+(but not the session of a line of scan-rows.jsonl, above, or a missing
+copied_tokens), a set entry's label the draw would not give or bucket it does
+not use, a version name in versions.jsonl or verdicts.jsonl the judge would
+not take, a total_tokens or copied_tokens that is negative, infinite or not a
+number, helpers that hold more tokens than their row's total_tokens, a
+copied_tokens more than its row's total_tokens or beside a blank one, or a
+second line for one ticket and version, one session or
 one ticket of the sets stops the report. The error goes on standard error and
 names the folder or file, and the ledger line, helper or set ticket entry that
 fails a check. A set file that is not JSON, or not an object holding a list of
@@ -325,11 +338,12 @@ def load_verdicts(state: Path) -> dict[tuple[str, int, str], dict]:
                    for where, line in json_lines(state / "verdicts.jsonl")], "label", "ticket", "version")
 
 
-def tokens_of(where: str, line: dict) -> int | float | None:
-    """The line's total_tokens, once it is blank or a count: a negative or infinite figure, or NaN, is none."""
-    value = line["total_tokens"]
+def tokens_of(where: str, line: dict, name: str = "total_tokens") -> int | float | None:
+    """The line's figure, once it is blank or a count: a negative or infinite figure, or NaN, is none. A figure the
+    line does not hold is blank."""
+    value = line.get(name)
     if value is not None and not 0 <= value < math.inf:
-        raise Unreadable(f"{where}: total_tokens is not a count of tokens.")
+        raise Unreadable(f"{where}: {name} is not a count of tokens.")
     return value
 
 
@@ -343,6 +357,11 @@ def scan_row(where: str, line: object) -> dict:
         held += tokens_of(at, checked(at, helper, description=text, brief_head=text, total_tokens=figure)) or 0
     if total is not None and held > total:  # scan.py gives each response to one helper or to the session
         raise Unreadable(f"{where}: its helpers hold more tokens than its total_tokens.")
+    if type(row.get("copied_tokens")) not in figure:  # a row the scan wrote before the column has none: a blank
+        raise Unreadable(f"{where}: copied_tokens is of the wrong type.")
+    copied = tokens_of(where, row, "copied_tokens")
+    if copied is not None and (total is None or copied > total):
+        raise Unreadable(f"{where}: copied_tokens is more than its total_tokens or beside a blank one.")
     return row
 
 
@@ -370,7 +389,7 @@ def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: di
     if verdict["commit"] != commit:
         return OTHER_COMMIT
     row = rows.get(session, {})
-    return {"right": verdict["right_first_time"], "tokens": row.get("total_tokens"),
+    return {"right": verdict["right_first_time"], "tokens": row.get("total_tokens"), "copied": row.get("copied_tokens"),
             "minutes": row.get("active_minutes"), "helpers": row.get("helpers")}
 
 
@@ -394,6 +413,16 @@ def figures(results: list[str | dict]) -> str:
     minutes = [result["minutes"] for result in judged if result["minutes"] is not None]
     return (f"{len(judged)} judged, {count(right, len(judged))} right first time, "
             f"median total tokens {median(tokens)}, median active minutes {median(minutes)}.")
+
+
+def copied_line(counted: list[dict]) -> str:
+    """The copied tokens of the tickets in a version's token figures whose row gives them, out of the same tickets'
+    total tokens; a blank copied count is left out and counted."""
+    said = [result for result in counted if result["copied"] is not None]
+    copied, total = sum(result["copied"] for result in said), sum(result["tokens"] for result in said)
+    return (f"  Copied tokens: {number(copied)} of the {number(total)} total tokens of the tickets with a copied count"
+            + (f", {copied / total:.1%}" if total else "") + f". Left out of the copied tokens: "
+            f"{len(counted) - len(said)} with a blank copied count.")
 
 
 def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict, skipped_scan_lines: int = 0) -> list[str]:
@@ -421,6 +450,7 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
         lines.append(f"  Left out of the token figures: {sum(result['tokens'] is None for result in judged)} with a "
                      f"blank token count. Left out of the active minutes: "
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
+        lines.append(copied_line([result for result in judged if result["tokens"] is not None]))
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
     judged_pairs = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
     return [*lines, "", *sign_one(judged_pairs, len(tickets)), "", *sign_two(judged_pairs, len(tickets))]
@@ -461,6 +491,7 @@ def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
             ownless += helper["total_tokens"] is None
     first, second = (sum(pair[side]["tokens"] for pair in counted) for side in (0, 1))
     own = first - sum(spend.values())
+    said = [[pair[side]["copied"] for pair in counted if pair[side]["copied"] is not None] for side in (0, 1)]
     extra, cut, unsorted = first - second, sum(spend[name] for name in CUT), spend[None] + own
 
     def share(part: int | float) -> str:
@@ -473,7 +504,10 @@ def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
              f"  The cut, {listed(list(CUT))}: {share(cut)}.",
              f"  Not sorted into a step: {share(unsorted)}: {number(spend[None])} in helpers that name no step, "
              f"{number(own)} the sessions' own, in no helper.",
-             "  A helper resumed for a fix round counts under the step it started as."]
+             "  A helper resumed for a fix round counts under the step it started as.",
+             f"  Copied tokens in these sums: {number(sum(said[0]))} of {GENERATION_ONE}'s, {number(sum(said[1]))} of "
+             f"{DIRECT}'s. Left out of the copied tokens: {len(counted) - len(said[0])} of {GENERATION_ONE}'s tickets "
+             f"and {len(counted) - len(said[1])} of {DIRECT}'s, with a blank copied count."]
     if len(judged) < total:
         return [*lines, f"No verdict: tickets {unjudged(judged, total)}"]
     if extra <= 0:

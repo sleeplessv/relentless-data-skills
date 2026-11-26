@@ -67,15 +67,20 @@ before changing dependencies. Record the versions used.
    `pyproject.toml` and leave the project without a bundled lock. If
    `dlt[hub]` is missing, run `uv add "dlt[hub]"`. Check that
    `uv run dlthub --version` succeeds.
-3. **Wire the active agent.** Check that `.dlt/.toolkits` records `init` for
-   the active agent and its files exist. If either is missing, run
+3. **Wire the active agent.** If `.dlt/.toolkits` lacks `init` for the active agent, run
    `uv run dlthub ai init --agent <agent>`, using `claude`, `cursor`, or `codex`.
    Inspect `uv run dlthub ai status`. If it reports missing MCP dependencies
    and the installed `dlthub` package declares the `mcp` extra, run
    `uv add "dlthub[mcp]"` and check that the warning clears.
-4. **Install each missing source toolkit** with
+4. **Install each unrecorded source toolkit** for this agent with
    `uv run dlthub ai toolkit install <toolkit> --agent <agent>`. Use the table
-   below for `<toolkit>`. Continue on exit 0 and verify the result at handoff.
+   below for `<toolkit>`. Check the exit code and the recorded files.
+5. **Repair missing files in a recorded toolkit.** A normal install can exit 0
+   with “already installed” even when files are missing. In a temporary copy of
+   the workspace, rerun the matching step 3 or 4 command with `--overwrite`.
+   Copy back only the missing files whose SHA3-256 matches the project's
+   `.dlt/.toolkits` record. If a hash differs, resolve the version difference
+   before updating the project. This preserves customized files and agent settings.
 
 ## Toolkit policy
 

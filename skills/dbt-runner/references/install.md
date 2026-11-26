@@ -22,7 +22,7 @@ env var, the private key, or a passphrase during discovery.
    **project root** (the directory dbt runs from; a project-local
    `profiles.yml` wins), then
    `~/.dbt/profiles.yml`. When it is not `~/.dbt/profiles.yml`, record the
-   path as `profiles_path` so the preflight checks the same file.
+   path as `profiles_path` (absolute or relative to the dbt project root).
    Record:
    - the default `target:` and the list of `outputs:`;
    - every `env_var('NAME')` reference → the `required_env_vars` list
@@ -52,9 +52,9 @@ env var, the private key, or a passphrase during discovery.
    OSS v2. A v1 project should pin `dbt-core<2`; if its lockfile resolved
    2.x, that is the mismatch, not a project bug. dbt Core 1.12+ can check a
    project against v2 with `--use-v2-parser` before an upgrade.
-4. **Packages.** Note whether `packages.yml` / `package-lock.yml` exist
-   and whether `dbt_packages/` is populated (preflight checks this every
-   session; just note the state).
+4. **Packages.** Look for package declarations in `packages.yml` or
+   `dependencies.yml`, a `package-lock.yml`, and the installed directory
+   (`packages-install-path` in `dbt_project.yml`, default `dbt_packages/`).
 
 ## Step 2: decisions (ask; recommend an answer each)
 

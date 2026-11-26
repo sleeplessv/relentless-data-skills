@@ -79,9 +79,10 @@ parent Claude Code session sets (CLAUDECODE, CLAUDE_CODE_*, and the rest of
 CLAUDE_* but {" and ".join(KEPT)}) or a GitHub token. For git, its environment
 sets GIT_CONFIG_GLOBAL to {os.devnull} and GIT_CONFIG_NOSYSTEM to 1, sets
 core.excludesFile and core.attributesFile to {os.devnull} through
-GIT_CONFIG_COUNT, and carries no other GIT_* variable of the caller's. The
-session's git then reads no user or system config file unless a repo's config
-includes one, and no ignore or attributes file of the user's.
+GIT_CONFIG_COUNT, and carries no other GIT_* variable of the caller's. These
+settings replace git's default lookups of the system config file, of
+~/.gitconfig, and of the config, ignore and attributes files under
+$XDG_CONFIG_HOME/git/ (~/.config/git/ when XDG_CONFIG_HOME is unset).
 Nothing is pushed, and no PR is opened.
 
 Files, all in the machine directory:

@@ -13,7 +13,7 @@ validating pipelines. This skill handles project setup and conventions.
 
 - **Detect project state.** Finds standalone rules and managed memory sections,
   reconciles recorded toolkits with installed files, and asks only for missing choices.
-- **Install the workbench.** Installs the workbench and its MCP dependency,
+- **Install the harness.** Scaffolds the workspace with `dlthub-init`, checks existing dependencies,
   configures the detected agent, and selects toolkits for the project's source
   types. The [installation procedure](SKILL.md#install)
   contains the commands and toolkit policy.
@@ -27,8 +27,8 @@ validating pipelines. This skill handles project setup and conventions.
 
 ## How it works
 
-The skill checks the manual installation procedure against current upstream
-guidance and installed CLI help. The sources are linked in `references/docs-map.md`.
+The skill uses the upstream initializer, with a manual path when it is unavailable.
+It checks the installed CLI and project files on re-entry. The sources are linked in `references/docs-map.md`.
 CI checks marked URLs weekly for liveness, not installation behavior.
 
 ## Install
@@ -67,7 +67,7 @@ continues the original task unless you accept.
 
 - **`scripts/check_doc_urls.py`** fetches every URL in this skill's docs map
   weekly and fails if any no longer resolves (catches dltHub moving pages or
-  the workbench README changing branches).
+  the harness README changing branches).
 - **`scripts/lint_skill.py`** verifies SKILL.md frontmatter, the "Use when"
   trigger, and the line budget.
 - **`tests/test_dlt_bootstrap.py`** validates the rule template's

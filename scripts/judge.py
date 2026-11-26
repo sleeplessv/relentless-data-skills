@@ -87,16 +87,11 @@ and the diff from the version's starting commit: from the merge base of the
 commit before the merged PR and the version's commit. It starts in a folder
 outside any git repo that holds the version's files as committed and no git
 history, so it sees no branch name, commit message or author, and it can read
-those files but change nothing. The requirements are the items under
-{draw.one_of([f'"## {heading}"' for heading in draw.CRITERIA_HEADINGS])}, numbered R1, R2 and
-on in the order written. The judge reads only a list it can read with
-certainty: items marked - * + or a number and . or ), each with its text on
-its marker line, that text wrapped onto the lines below it, and lists nested
-in items. Inside an item any other block, such as a quote, code, HTML or a
-second paragraph, an item with no text, a quote or an underline anywhere in
-the section, or a marker numbered other than 1 right after a line of text
-stops the judge with an error that names the line. The reviewer answers in
-fixed lines only:
+those files but change nothing. The requirements are the list the draw stored
+in the ticket's entry of the replay set, numbered R1, R2 and on in the order
+written. python3 scripts/draw.py --help says which lists the draw reads. An
+entry without that list, a list of strings each with text, stops the judge
+with an error before any checkout. The reviewer answers in fixed lines only:
 
 {indented(LINES)}
 
@@ -404,15 +399,12 @@ def publish(state: Path, record: dict, saved: Path) -> list[Path]:
 def judge(label: str, number: int, version: str, commit: str | None, source: Path | None) -> int:
     state = scan.state_dir()
     entry = find_ticket(state, label, number)
+    required = entry.get("requirements")
+    if not (isinstance(required, list) and required
+            and all(isinstance(text, str) and text.strip() for text in required)):
+        raise JudgeError(f"the set entry of ticket {label}-{number} holds no requirements: a list of strings, each "
+                         "with text, as the draw writes it.")
     repo = repo_entry(state, label)
-    try:
-        required = draw.requirements(entry.get("body"))
-    except draw.Unreadable as refusal:
-        raise JudgeError(f"the list under the criteria heading of ticket {label}-{number} cannot be read with "
-                         f"certainty at line {refusal.number} of its body, {refusal.line!r}. --help says which "
-                         "lists the judge reads.")
-    if not required:
-        raise JudgeError(f"ticket {label}-{number} has no requirements under the headings of --help.")
     # Each attempt keeps its files apart, so one that fails leaves the files of the line on record as they were.
     versions = state / "judged" / f"{label}-{number}-{version}"
     versions.mkdir(parents=True, exist_ok=True)

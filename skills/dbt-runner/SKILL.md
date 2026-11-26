@@ -43,9 +43,9 @@ private key file exists, the configured package directory is present with a clea
 `<runner> --version` reports the context file's `engine` and the major.minor
 of its `engine_version`. Exception: a `uv run` runner may sync an
 out-of-date environment first, which needs network. One line per
-check (`OK`/`FAIL`/`SKIP`), non-zero exit on any `FAIL`. Fix every `FAIL`
-before running dbt; each line says how. Don't re-run it before every
-command; once per session is the contract, plus once more after any
+check (`OK`/`FAIL`/`SKIP`), non-zero exit on any `FAIL`. Fix every `FAIL` and
+complete any manual verification requested by a `SKIP` before running dbt or `--connect`.
+Run preflight once per session and once more after any
 environment change (new shell, edited `.env`, switched target).
 A fresh worktree or scratch checkout is such a change, and the place the
 preflight pays: it starts without installed packages, often without `.env`,

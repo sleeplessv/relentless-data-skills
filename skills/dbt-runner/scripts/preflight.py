@@ -227,32 +227,38 @@ def top_level_setting(path: Path, key: str) -> str:
 def check_packages(project_root: Path, runner: str = "") -> tuple:
     lockfile = project_root / "package-lock.yml"
     lock_note = ""
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain", "--", "package-lock.yml"],
+            cwd=str(project_root), capture_output=True, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        result = None
+    if result is not None and result.returncode == 0 and result.stdout.strip():
+        return FAIL, (
+            "package-lock.yml has uncommitted changes."
+            " Review its staged and unstaged state with `git status --short -- package-lock.yml`."
+        )
     if lockfile.is_file():
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain", "--", "package-lock.yml"],
-                cwd=str(project_root), capture_output=True, timeout=30,
-            )
-        except (OSError, subprocess.TimeoutExpired):
-            result = None
         if result is None or result.returncode != 0:
             lock_note = " (lockfile git state not checkable)"
-        elif result.stdout.strip():
-            return FAIL, (
-                "package-lock.yml has uncommitted changes — something"
-                " (often a subagent running `dbt deps`) dirtied it."
-                " Remedy: inspect with `git diff package-lock.yml`;"
-                " revert unless the change was intentional."
-            )
         else:
             lock_note = " and package-lock.yml clean"
-    manifests = (project_root / "packages.yml", project_root / "dependencies.yml", lockfile)
+
+    declares_packages = False
+    manual_check = ""
+    for manifest in (project_root / "packages.yml", project_root / "dependencies.yml", lockfile):
+        try:
+            if top_level_setting(manifest, "packages").strip("[] \t"):
+                declares_packages = True
+        except ValueError as error:
+            manual_check = f"{error}. Verify package declarations and the install directory before running dbt."
+    if not declares_packages:
+        return SKIP, manual_check or "project declares no dbt packages"
     try:
-        if not any(top_level_setting(path, "packages").strip("[] \t") for path in manifests):
-            return SKIP, "project declares no dbt packages"
         install_path = top_level_setting(project_root / "dbt_project.yml", "packages-install-path")
     except ValueError as error:
-        return FAIL, f"{error}. Verify the package declarations and install directory manually."
+        return SKIP, f"{error}. Verify the resolved install directory before running dbt."
     install_path = install_path or "dbt_packages"
     if "{{" in install_path or "{%" in install_path:
         return SKIP, "templated packages-install-path; verify the resolved directory before running dbt"
@@ -262,6 +268,8 @@ def check_packages(project_root: Path, runner: str = "") -> tuple:
             f" Remedy: run `{runner or '<runner>'} deps` (every dbt_utils.*"
             " call fails until then)."
         )
+    if manual_check:
+        return SKIP, manual_check
     return OK, f"{install_path}/ present{lock_note}"
 
 
@@ -539,7 +547,7 @@ def main(argv=None) -> int:
             print("PREFLIGHT FAILED (connect)")
             return 1
 
-    print("PREFLIGHT OK — safe to run dbt.")
+    print("PREFLIGHT OK — complete any manual checks above before running dbt.")
     return 0
 
 

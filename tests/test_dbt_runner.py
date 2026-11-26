@@ -4,8 +4,7 @@ Standard library only, like the script itself. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-Nothing here ever talks to a warehouse: the git call in the packages check
-and the `<runner> debug` call behind --connect are mocked/stubbed. The
+Package checks use throwaway projects, and the live connection command is stubbed. The
 preflight's stdout format is asserted deliberately — agents parse it, so it
 is an interface, not an implementation detail.
 """
@@ -282,13 +281,30 @@ class PackagesCheckTests(unittest.TestCase):
             (root / "vendor packages" / "dep").mkdir(parents=True)
             self.assertEqual(preflight.check_packages(root)[0], preflight.OK)
 
-    def test_unsupported_yaml_requests_verification(self):
+    def test_flow_root_mappings_require_manual_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dbt_packages" / "dep").mkdir(parents=True)
+            for manifest, project, unknown in (
+                ("{packages: [{local: ../dep}]}", "name: demo", "packages.yml"),
+                ("packages: [{local: ../dep}]", "{packages-install-path: dbt_packages}", "dbt_project.yml"),
+            ):
+                with self.subTest(unknown=unknown):
+                    (root / "packages.yml").write_text(manifest)
+                    (root / "dbt_project.yml").write_text(project)
+                    status, msg = preflight.check_packages(root)
+                    self.assertEqual(status, preflight.SKIP)
+                    self.assertIn(unknown, msg)
+                    self.assertIn("before running dbt", msg)
+
+    def test_known_dependency_missing_despite_unreadable_manifest(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "packages.yml").write_text("{packages: [{local: ../dep}]}")
+            (root / "package-lock.yml").write_text("packages: [{local: ../dep}]")
             status, msg = preflight.check_packages(root)
             self.assertEqual(status, preflight.FAIL)
-            self.assertIn("Verify the package declarations", msg)
+            self.assertIn("dbt_packages/ is missing", msg)
 
     def test_templated_package_directory_requires_manual_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -301,15 +317,37 @@ class PackagesCheckTests(unittest.TestCase):
             self.assertEqual(status, preflight.SKIP)
             self.assertIn("verify the resolved directory", msg)
 
-    def test_clean_lockfile_ok(self):
+    def test_lockfile_status_in_a_git_project(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "package-lock.yml").write_text("packages:\n  - local: ../dep")
-            (root / "dbt_packages").mkdir()
-            clean = types.SimpleNamespace(returncode=0, stdout=b"")
-            with mock.patch.object(subprocess, "run", return_value=clean):
-                status, _ = preflight.check_packages(root)
-        self.assertEqual(status, preflight.OK)
+
+            def git(*args):
+                subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+            git("init", "-q")
+            project = root / "analytics"
+            (project / "dbt_packages").mkdir(parents=True)
+            lock = project / "package-lock.yml"
+            (project / "packages.yml").write_text("packages: [{local: ../dep}]")
+            (root / lock.name).write_text("unrelated untracked lock")
+            self.assertEqual(preflight.check_packages(project),
+                             (preflight.OK, "dbt_packages/ present"))
+            lock.write_text("packages: [{local: ../dep}]")
+            git("add", "analytics/package-lock.yml")
+            git("-c", "user.name=test", "-c", "user.email=test@example.org",
+                "-c", "commit.gpgsign=false", "commit", "-qm", "Track project lock")
+            self.assertEqual(preflight.check_packages(project),
+                             (preflight.OK, "dbt_packages/ present and package-lock.yml clean"))
+
+            (project / "packages.yml").write_text("{packages: [{local: ../dep}]}")
+            lock.unlink()
+            for staged in (False, True):
+                with self.subTest(staged=staged):
+                    if staged:
+                        git("add", "-u")
+                    status, msg = preflight.check_packages(project)
+                    self.assertEqual(status, preflight.FAIL)
+                    self.assertIn("package-lock.yml has uncommitted changes", msg)
 
     def test_dirty_lockfile_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -532,9 +570,15 @@ class MainOutputTests(unittest.TestCase):
         version = types.SimpleNamespace(
             returncode=0, stdout=FUSION_VERSION, stderr=""
         )
-        patcher = mock.patch.object(subprocess, "run", return_value=version)
-        self.run = patcher.start()
-        self.addCleanup(patcher.stop)
+        self.run = mock.Mock(return_value=version)
+        real_run = subprocess.run
+
+        def run(argv, **kwargs):
+            if argv[0] == "git":
+                return real_run(argv, **kwargs)
+            return self.run(argv, **kwargs)
+
+        self.enterContext(mock.patch.object(subprocess, "run", run))
 
     def test_all_green(self):
         with contextlib.ExitStack() as stack:

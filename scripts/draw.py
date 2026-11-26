@@ -295,9 +295,35 @@ taken off, as it then holds no item. That count is taken before the rules on a
 ticket's other PRs and earlier sets, so it is the most tickets the reader can
 have cost the pool.
 
+The draw has these known limits. A Bash call and its result are paired only
+inside one transcript: a call in the session's log whose result is in a
+helper's log gives no evidence. A log is split into lines at line feeds only,
+so a log whose lines end in a bare carriage return is read as one line.
+SIGKILL or a crash between the two renames that put a saved log in place can
+leave the new log without its folder, the earlier copy in logs/.old-<session>/
+and the rest of the new one in logs/.new-<session>/, until that session is
+saved again. Ctrl-C or SIGTERM while a step that ran too long is being stopped
+can leave the draw waiting until that step ends. A helper's response whose
+message id is a number can stand in for a response in the session's log that
+has no id, and supply the session's model. When one helper folder of a session
+cannot be listed, none of that session's helpers is read, the readable ones
+included. When the scan row cannot be written after a log was saved, the new
+copy of the log stays in place, no copy of the earlier one is kept, and
+scan-rows.jsonl.partial can be left. The draw takes an answer from gh as it
+comes: a timeline that is blank or holds an empty event picks the head at the
+PR's creation, a push whose after is not a commit id is saved as the commit,
+and a byte that is not UTF-8 ends the draw before the answer is saved. Output
+of git that is not UTF-8, such as a hook's message, ends the draw with
+Python's traceback and exit 1, and no set written; so does the judge, which
+runs its check through the draw's git runner.
+
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
-tickets are set aside; no set was written, and the count per bucket is printed."""
+tickets are set aside; no set was written, and the count per bucket is printed.
+Exit 130: Ctrl-C stopped the draw. Exit 143: SIGTERM stopped the draw. Either
+stop prints one line that says so, and no set was written. Once the set file is
+in place, a signal leaves the exit at 0 and the last line as the one that names
+the set. A SIGINT the caller ignored stays ignored."""
 
 
 class DrawError(Exception):
@@ -804,9 +830,11 @@ class Draw:
 
     def sessions(self) -> tuple[list[dict], int]:
         """Each session with a run that runs or may run `gh pr create` and prints a PR's URL, and how many
-        session logs could not be read. Each transcript, the log's and each helper's, is read once, and its
-        runs count whatever happens to another transcript of the session or to finding its helpers. A
-        session with any failure is counted and not eligible, but its readable runs count against others."""
+        session logs could not be read. The draw decides on one read of each transcript, the log's and each
+        helper's, and its runs count whatever happens to another transcript of the session or to finding its
+        helpers. A session that would be eligible is then scanned, which reads its live log and helpers' logs
+        again; a scan that fails makes it not eligible. A session with any failure is counted and not eligible,
+        but its readable runs count against others."""
         sessions, unreadable = [], 0
         for log in sorted((scan.config_dir() / "projects").glob("*/*.jsonl")):
             failed = False

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """mb — Metabase API wrapper.
 
-Reads run freely. Ad-hoc SQL is checked read-only. Every mutation captures a
-restore point first.
+Reads run freely. Ad-hoc SQL is checked read-only. Updates capture a restore
+point first.
 
 Resolution:
   METABASE_URL  process env -> .metabase/context.md frontmatter -> .env files
@@ -460,6 +460,13 @@ def _find_source_cards(node, acc):
         for k, v in node.items():
             if k in ("source-card", "source_card_id") and isinstance(v, int):
                 acc.add(v)
+            elif k == "template-tags" and isinstance(v, (dict, list)):
+                tags = v.values() if isinstance(v, dict) else v
+                for tag in tags:
+                    if isinstance(tag, dict) and tag.get("type") == "card":
+                        card_id = tag.get("card-id")
+                        if type(card_id) is int:
+                            acc.add(card_id)
             elif k == "source-table" and isinstance(v, str) and v.startswith("card__"):
                 acc.add(int(v[6:]))
             else:
@@ -521,7 +528,7 @@ def cmd_deps(a):
         frozen = []
         if me and len(me) > 200:
             for c in cards:
-                if c["id"] == a.id or c.get("source_card_id") == a.id:
+                if c["id"] == a.id or c["id"] in seen:
                     continue
                 other = _norm_sql(_native_of(c)[0])
                 if not other or len(other) < 200:

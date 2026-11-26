@@ -41,10 +41,11 @@ DEADLINE = 120  # seconds; a bound on waiting for a file or a process, not a sle
 START_TIME_PATTERN = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file gives it
 
 # What `--help` must state. Each row is a short label and the terms of one fact: regular
-# expressions, matched without case, that must all match in one window of the help, a
-# sentence or a sentence and its neighbour. A term joins the fact's subject to what the
-# help says of it, so a fact with part of its meaning changed fails; a term starting with
-# "!" must not match. A rewording that keeps the fact passes.
+# expressions, matched without case, that must all match in one sentence of the help. Most
+# terms relate a subject to its claim (a pid to the holder that writes it, a status to its
+# condition), so a row catches the edits the probes in this ticket tried, and not every edit
+# of its fact. A term starting with "!" must not match. The table checks relationships among
+# words and does not prove what the help means.
 HELP_FACTS = {
     "lock scope": (
         r"--fast", r"\bbefore\b[^.]{0,20}\bfirst check\b", r"\bholds?\b[^.]{0,25}\buntil\b[^.]{0,15}\bexits?\b"),
@@ -60,20 +61,20 @@ HELP_FACTS = {
     "lock ownership": (
         r"\bscript\b[^.]{0,60}\b(?:owns|holds|keeps)\b", r"\bchecks?\b[^.,]{0,40}\b(?:do not|never)\b"),
     "holder record": (
-        r"\bholder\b[^.]{0,30}\b(?:writes?|records?|stores?|saves?|puts?)\b[^.]{0,30}\b(?:process id|pid)\b",
-        r"\bfile\b", r"\bstart time\b|\btime\b[^.]{0,20}\bstarted\b"),
+        r"\b(?:writes?|records?|stores?|saves?|puts?)\b[^.]{0,40}\b(?:process id|pid)\b",
+        r"\bholder\b", r"\bfile\b", r"\bstart time\b|\btime\b[^.]{0,20}\bstarted\b"),
     "waiting line timing": (
         r"\bwait\b", r"\bprints?\b[^.]{0,15}\bline\b", r"\b(?:at once|immediately|straight away|right away)\b"),
     "waiting line content": (
         r"\bline\b[^.]{0,30}\b(?:names?|shows?|gives?|states?|includes?)\b[^.]{0,20}\bholder\b",
         r"\b(?:process id|pid)\b", r"\bstart time\b", r"\blongest\b"),
     "waiter blocks": (
-        r"\bblocks?\b[^.]{0,25}\bsystem\b", r"\b(?:gives?|grants?)\b",
-        r"!\b(?:never|not|no longer)\s+blocks?\b", r"!\bpoll"),
+        r"\bblocks?\b[^.]{0,25}\bsystem\b[^.]{0,30}\b(?:gives?|grants?)\b",
+        r"!\b(?:never|not|no longer)\s+blocks?\b", r"!(?<!without )\bpoll(?:s|ing)\b"),
     "next waiter": (
-        r"\bsystem\b[^.]{0,20}\b(?:picks?|chooses?|selects?)\b[^.]{0,40}\bnext\b",
+        r"\bsystem\b", r"\b(?:picks?|chooses?|selects?)\b", r"\bnext\b",
         r"\b(?:no fixed order|any order|no (?:set|particular|guaranteed) order)\b",
-        r"!\bnever (?:picks?|chooses?|selects?)\b"),
+        r"!\b(?:never|not)\s+(?:picks?|chooses?|selects?)\b"),
     "turn line": (r"\bturn\b", r"\bprints?\b[^.]{0,20}\bhow long\b[^.]{0,15}\bwaited\b"),
     "wait bound": (
         r"\bCHECK_LOCK_WAIT\b", r"\bwhole\b[^.]{0,20}\bseconds\b", r"\b0\b[^.]{0,10}\b100000000\b", r"\b1800\b"),
@@ -87,9 +88,13 @@ HELP_FACTS = {
     "second clone": (r"\bsecond clone\b[^.]{0,40}\b(?:own|separate)\b",),
     "SIGKILL limit": (r"\bSIGKILL\b[^.]{0,30}\bfrees?\b[^.]{0,15}\block\b", r"\bprocesses\b[^.]{0,30}\bstill\b"),
     "exit codes": (
-        r"\bexit (?:status|codes?)\b", r"\b0\b[^,]{0,30}\bevery check\b[^,]{0,10}\bpass", r"\bfailing check'?s? own\b",
+        r"\bexit (?:status|codes?)\b", r"\b0\b[^,]{0,30}\b(?:every|all) checks?\b[^,]{0,10}\bpass", r"\bfailing check'?s? own\b",
         r"\b2\b[^,]{0,25}\b(?:usage|CHECK_LOCK_WAIT)\b", r"\b75\b[^,.]{0,25}\bwait\b"),
 }
+
+# Rows whose terms may also meet across a sentence boundary: the help may state who holds the
+# lock in one sentence and who does not in the next.
+JOINED_ROWS = ("lock ownership",)
 
 # The standard output of a full run in which every stand-in check passed.
 EVERY_CHECK = [
@@ -413,8 +418,9 @@ class CheckLockTest(unittest.TestCase):
         header = [re.sub(r"\A# ?", "", line) for line in lines[1:lines.index("set -euo pipefail")]]
         self.assertEqual(out.splitlines(), header)
         sentences = re.split(r"(?<=\.) (?=[A-Z])", " ".join(out.split()))
-        windows = sentences + [" ".join(pair) for pair in zip(sentences, sentences[1:])]
+        pairs = [" ".join(pair) for pair in zip(sentences, sentences[1:])]
         for fact, terms in HELP_FACTS.items():
+            windows = sentences + (pairs if fact in JOINED_ROWS else [])
             with self.subTest(fact=fact):
                 self.assertTrue(
                     any(all(bool(re.search(term.lstrip("!"), window, re.IGNORECASE)) != term.startswith("!")

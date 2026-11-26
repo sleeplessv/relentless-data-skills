@@ -541,10 +541,13 @@ class World:
         return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True)
 
     def start(self, *args: str) -> subprocess.Popen[str]:
-        """Start the draw and return at once."""
+        """Start the draw and return at once, with SIGINT at its default whatever the test run inherited.
+
+        A job a script starts with `&` has SIGINT ignored, and Python keeps an ignore it inherits, so without this
+        the draw would not stop on the interrupt a test sends it."""
         program, env = self.command(args, None, "")
         return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
+                                stderr=subprocess.PIPE, preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
 
     def command(self, args: tuple[str, ...], state: Path | None, prelude: str) -> tuple[list[str], dict[str, str]]:
         answers = self.root / "answers"

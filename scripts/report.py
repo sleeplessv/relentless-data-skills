@@ -27,12 +27,13 @@ TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool
 # Why a version of a ticket is left out of every figure, as the report counts it.
 NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
                                        "judged at a commit the version does not record")
-# Warning sign 2: generation one's steps and the words that name each, in the order a helper is sorted. A re-check
-# names the fix it checks, and a fix names the review whose findings it fixes, so each comes before the step whose
-# words it borrows. A bare "fix" names no step, since a ticket's own title may hold it: a fix is "fix" or "address"
-# with a finding, comment or review in the same clause, or a fix round, worker or brief.
+# Warning sign 2: generation one's steps and the words that name each. A helper states its role before its subject,
+# so the step whose words come first in its text is its step, and the order here only breaks a tie. A bare "fix" names
+# no step, since a ticket's own title may hold it: a fix is "fix" or "address" with a finding, comment or review in
+# the same clause, or a fix round, worker or brief. A re-check is worded as the repo's measurements count one
+# (docs/research/orchestrated-run-measurements.md): a re-check, a re-verify, a follow-up check or a fix head.
 STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, words in (
-    ("re-check", r"re-?check"),
+    ("re-check", r"re-?check|re-?verif|follow-?up (?:review|check|verif)|fix head"),
     ("closing verification", r"verif(?:y|ier|ication)\b"),
     ("fix", r"(?:fix|address)(?:es|ing)?\b[^.:;\n]{0,60}\b(?:finding|comment|review)|fix(?:es)? (?:round|worker|brief)"
             r"|(?:late|class) fix"),
@@ -57,15 +58,20 @@ def listed(items: list) -> str:
     return " and ".join([", ".join(map(str, items[:-1])), str(items[-1])] if len(items) > 1 else map(str, items))
 
 
+def named(text: str | None) -> str | None:
+    """The step whose words come first in the text, once the names of generation-one skills are taken out; on a tie,
+    the first in STEPS. None when the text names no step."""
+    text = SKILL_NAME.sub(" ", text or "")
+    found = [(match.start(), at, name) for at, (name, words) in enumerate(STEPS) if (match := words.search(text))]
+    return min(found)[2] if found else None
+
+
 def step(description: str | None, brief_head: str | None) -> str | None:
-    """The step of generation one a helper took: the first in STEPS whose words its description holds, or, when its
-    description holds none, the first whose words the head of its brief holds. None when neither holds any. The name
-    of a generation-one skill is no step's words."""
-    for text in (description, brief_head):
-        for name, words in STEPS:
-            if text and words.search(SKILL_NAME.sub(" ", text)):
-                return name
-    return None
+    """The step of generation one a helper took: the one its description names or, when its description names none,
+    the one the head of its brief names. A review whose brief names a re-check is a re-check: the description names
+    the reviewer, the brief says which pass it makes. None when neither names a step."""
+    told, briefed = named(description), named(brief_head)
+    return briefed if told is None or (told, briefed) == ("review", "re-check") else told
 
 
 HELP = f"""\
@@ -117,42 +123,40 @@ appear, by the difference:
 Any other number of tickets gives no verdict.
 
 Warning sign 2 is answered from the scan rows of {GENERATION_ONE}'s sessions,
-over every ticket of the sets, once every ticket has both versions judged.
-The extra cost is the total_tokens {GENERATION_ONE} spent minus those {DIRECT}
-spent. A ticket is left out of both sides, and counted, when either version
-has a blank total_tokens, or else when {GENERATION_ONE}'s row lists no
-helpers (null).
+over every ticket of the sets. The extra cost is the total_tokens
+{GENERATION_ONE} spent minus those {DIRECT} spent. A ticket is left out of both
+sides, and counted, when it lacks either version judged or either version
+has a blank total_tokens. The figures cover the tickets left; the verdict
+waits, as for warning sign 1, until every ticket has both versions judged.
 
-Each helper the rows list is sorted into a step of generation one, by the
-words of its description or, when its description names no step, by the
-words of the head of its brief. A helper that names two steps takes the
-first; one that names none is not sorted. The words of each step are STEPS
-in scripts/report.py. A bare "fix" is no step, since a ticket's title may
-hold it: a fix says "fix" or "address" with a finding, comment or review in
-the same clause, or names a fix round, worker or brief. The name of a
-generation-one skill names the whole run, so it is no step's words: a helper
-that owns a run is not sorted unless other words name a step. The skills:
-
-  {listed(list(draw.GENERATION_ONE))}.
-
-The steps, in the order a helper is sorted:
+Each helper the rows list is sorted into a step of generation one: the step
+whose words come first in its description or, when its description names
+none, in the head of its brief. A helper states its role before its subject,
+so a ticket's title later in the text does not decide. A description that
+names a review gives way to a brief that names a re-check. The words of each
+step, and the reasons for them, are STEPS in scripts/report.py; the names of
+the generation-one skills (SKILL_NAME there) name the whole run and are no
+step's words. The steps:
 
   {listed([name for name, _ in STEPS])}.
 
 The cut is the helpers' tokens in {listed(list(CUT))}.
-The sign appears when the cut is more than half the extra cost, and not at
-half or below. The report gives the verdict without the tokens not sorted,
-and with them counted as cut, and says when the two differ. With no extra
-cost, or no ticket left, it gives none.
+Not sorted are the tokens of helpers that name no step and the sessions' own
+tokens, in no helper: a session's own turns serve every step, and the rows
+cannot split them. A row with no list of helpers (null) counts all its
+tokens as the session's own. The sign appears when the cut is more than half
+the extra cost, and not at half or below. The report gives the verdict
+without the tokens not sorted, and with them counted as cut, and says when
+the two differ. With no extra cost, or no ticket left, it gives none.
 
 A row lists a helper once, under the description and brief it started with,
-so a helper resumed for a fix round counts under the step it started as. The
-session's own tokens, in no helper, are neither cut nor not sorted. A helper
-with a blank total_tokens has no tokens of its own: its responses are in
-another helper's or the session's, and it adds nothing to a step. The report
-prints the session's own tokens and the number of such helpers. A share of
-tokens is not a count of tickets, so the report gives it as a percent of
-{GENERATION_ONE}'s tokens at any number of tickets.
+so a helper resumed for a fix round counts under the step it started as, and
+the cut can be smaller than generation one's real spend on those steps. A
+helper with a blank total_tokens has no tokens of its own: its responses are
+in another helper's or the session's, and it adds nothing to a step; the
+report prints how many there are. A share of tokens is not a count of
+tickets, so the report gives it as a percent of {GENERATION_ONE}'s tokens at
+any number of tickets.
 
 Files read, all written by the other scripts:
 
@@ -365,16 +369,20 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
         lines.append(f"  Left out of the token figures: {sum(result['tokens'] is None for result in judged)} with a "
                      f"blank token count. Left out of the active minutes: "
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
-    return [*lines, "", *sign_one(results, len(tickets)), "", *sign_two(results, len(tickets))]
-
-
-def sign_one(results: dict[str, dict], total: int) -> list[str]:
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
-    missing = sum(not (isinstance(first, dict) and isinstance(second, dict)) for first, second in pairs)
-    if missing:
-        return [f"Warning sign 1: no verdict. Tickets without both {GENERATION_ONE} and {DIRECT} judged: "
-                f"{missing} of {total}."]
-    first, second = (sum(pair[side]["right"] for pair in pairs) for side in (0, 1))
+    judged = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
+    return [*lines, "", *sign_one(judged, len(tickets)), "", *sign_two(judged, len(tickets))]
+
+
+def unjudged(judged: list[tuple[dict, dict]], total: int) -> str:
+    return f"without both {GENERATION_ONE} and {DIRECT} judged: {total - len(judged)} of {total}."
+
+
+def sign_one(judged: list[tuple[dict, dict]], total: int) -> list[str]:
+    """Warning sign 1 over the tickets with both versions judged; a verdict only when that is every ticket."""
+    if len(judged) < total:
+        return [f"Warning sign 1: no verdict. Tickets {unjudged(judged, total)}"]
+    first, second = (sum(pair[side]["right"] for pair in judged) for side in (0, 1))
     difference = first - second
     lines = [f"Warning sign 1: {GENERATION_ONE} was right first time on {count(first, total)} tickets, {DIRECT} on "
              f"{count(second, total)}, a difference of {difference}."]
@@ -386,45 +394,46 @@ def sign_one(results: dict[str, dict], total: int) -> list[str]:
             else f"Not decided: a second set of {SET_SIZE} is needed, and {DECIDING} tickets decide."]
 
 
-def sign_two(results: dict[str, dict], total: int) -> list[str]:
-    pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
-    missing = sum(not (isinstance(first, dict) and isinstance(second, dict)) for first, second in pairs)
-    if missing:
-        return [f"Warning sign 2: no verdict. Tickets without both {GENERATION_ONE} and {DIRECT} judged: "
-                f"{missing} of {total}."]
-    counted = [pair for pair in pairs if pair[0]["tokens"] is not None and pair[1]["tokens"] is not None]
-    kept = [pair for pair in counted if pair[0]["helpers"] is not None]
-    left = (f"  Left out of both sides: {len(pairs) - len(counted)} with a blank token count, "
-            f"{len(counted) - len(kept)} with no list of {GENERATION_ONE}'s helpers.")
-    if not kept:
-        return [f"Warning sign 2: no verdict. No ticket has both token counts and {GENERATION_ONE}'s helpers.", left]
+def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
+    """Warning sign 2 over the tickets with both versions judged and both token counts; a verdict only when every
+    ticket has both versions judged."""
+    counted = [pair for pair in judged if pair[0]["tokens"] is not None and pair[1]["tokens"] is not None]
+    left = (f"  Left out of both sides: {total - len(judged)} without both versions judged, "
+            f"{len(judged) - len(counted)} with a blank token count.")
+    if not counted:
+        return ["Warning sign 2: no verdict. No ticket has both versions judged and both token counts.", left]
     spend, ownless = dict.fromkeys([*(name for name, _ in STEPS), None], 0), 0
-    for first, _ in kept:
-        for helper in first["helpers"]:
+    for first, _ in counted:
+        for helper in first["helpers"] or []:  # a row with no list of helpers: all its tokens are the session's own
             spend[step(helper["description"], helper["brief_head"])] += helper["total_tokens"] or 0
             ownless += helper["total_tokens"] is None
-    first, second = (sum(pair[side]["tokens"] for pair in kept) for side in (0, 1))
-    extra, cut, unsorted = first - second, sum(spend[name] for name in CUT), spend[None]
+    first, second = (sum(pair[side]["tokens"] for pair in counted) for side in (0, 1))
+    own = first - sum(spend.values())
+    extra, cut, unsorted = first - second, sum(spend[name] for name in CUT), spend[None] + own
 
     def share(part: int | float) -> str:
         return f"{number(part)} tokens, {part / first:.1%} of {GENERATION_ONE}'s" if first else f"{number(part)} tokens"
 
-    lines = [f"Warning sign 2: on {len(kept)} of {total} tickets, {GENERATION_ONE} spent {number(first)} tokens and "
-             f"{DIRECT} {number(second)}, an extra cost of {number(extra)}.", left,
+    lines = [f"Warning sign 2: on {len(counted)} of {total} tickets, {GENERATION_ONE} spent {number(first)} tokens "
+             f"and {DIRECT} {number(second)}, an extra cost of {number(extra)}.", left,
              f"  {GENERATION_ONE}'s helpers by step: " + ", ".join(f"{name} {number(spend[name])}" for name, _ in STEPS)
              + f". {ownless} helpers have no tokens of their own.",
              f"  The cut, {listed(list(CUT))}: {share(cut)}.",
-             f"  Not sorted into a step: {share(unsorted)}.",
-             f"  The sessions' own, in no helper: {share(first - sum(spend.values()))}.",
+             f"  Not sorted into a step: {share(unsorted)}: {number(spend[None])} in helpers that name no step, "
+             f"{number(own)} the sessions' own, in no helper.",
              "  A helper resumed for a fix round counts under the step it started as."]
+    if len(judged) < total:
+        return [*lines, f"No verdict: tickets {unjudged(judged, total)}"]
     if extra <= 0:
         return [*lines, f"No verdict: {GENERATION_ONE} cost no more than {DIRECT}, so there is no extra cost to cut."]
-    without, within = ("The sign appears." if 2 * part > extra else "The sign does not appear."
-                        for part in (cut, cut + unsorted))
+    verdict_without_unsorted, verdict_with_unsorted = (
+        "The sign appears." if 2 * part > extra else "The sign does not appear." for part in (cut, cut + unsorted))
     lines += [f"Without the spend not sorted, the cut is {number(cut)} tokens against half the extra cost, "
-              f"{number(extra / 2)}. {without}",
-              f"With it counted as cut, the cut is {number(cut + unsorted)} tokens. {within}"]
-    return lines if without == within else [*lines, "The two verdicts differ: the spend not sorted decides the sign."]
+              f"{number(extra / 2)}. {verdict_without_unsorted}",
+              f"With it counted as cut, the cut is {number(cut + unsorted)} tokens. {verdict_with_unsorted}"]
+    if verdict_without_unsorted == verdict_with_unsorted:
+        return lines
+    return [*lines, "The two verdicts differ: the spend not sorted decides the sign."]
 
 
 def main(argv: list[str]) -> int:

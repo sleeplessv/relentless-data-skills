@@ -58,13 +58,14 @@ class World:
         self.rows: list[dict] = []
         self.ids: dict[tuple[str, int, str], int] = {}  # each replay's own number, for its commit and session
 
-    def draw(self, per_bucket: int = 10, labels: tuple[str, ...] = ("A",)) -> list[dict]:
-        """A new set of per_bucket tickets in each bucket, from the projects labelled in turn, written at once, as
-        the draw writes it: each project numbers its own tickets, so A-1 and B-1 can both be in a set."""
+    def draw(self, per_bucket: int = 10, labels: tuple[str, ...] = ("A",), count: int | None = None) -> list[dict]:
+        """A new set of per_bucket tickets in each bucket, or of count tickets over the buckets in turn, from the
+        projects labelled in turn, written at once, as the draw writes it: each project numbers its own tickets, so
+        A-1 and B-1 can both be in a set."""
         start = sum(map(len, self.sets))
         drawn = [ticket for tickets in self.sets for ticket in tickets]
         tickets = []
-        for at in range(3 * per_bucket):
+        for at in range(3 * per_bucket if count is None else count):
             label, number = labels[at % len(labels)], start + at + 1  # number: unique over every set, for commits
             ticket = 1 + sum(earlier["label"] == label for earlier in drawn + tickets)
             tickets.append({"label": label, "ticket": ticket, "bucket": BUCKETS[at % 3], "size": 10, "title": TITLE,
@@ -118,10 +119,10 @@ class World:
         self.judge(ticket, version, right)
         self.scan(name, tokens, minutes, helpers)
 
-    def baseline(self, first: int, second: int, sets: int = 1) -> None:
-        """Sets of 30 with both versions judged on every ticket: generation one right on `first` tickets, the
-        direct replays on `second`."""
-        tickets = [ticket for _ in range(sets) for ticket in self.draw()]
+    def baseline(self, first: int, second: int, *sizes: int) -> None:
+        """Sets of the sizes given, one set of 30 when none is, with both versions judged on every ticket: generation
+        one right on `first` tickets, the direct replays on `second`."""
+        tickets = [ticket for size in sizes or (30,) for ticket in self.draw(count=size)]
         for at, ticket in enumerate(tickets):
             self.run("generation-one", ticket, at < first)
             self.run("direct", ticket, at < second)
@@ -175,6 +176,11 @@ def no_helpers(spent: int, unjudged: int = 0) -> list[str]:
             "  A helper resumed for a fix round counts under the step it started as."]
 
 
+NOT_DECIDED = ("Not decided: a second set is needed, the rest of the pool: every remaining pool ticket whose check "
+               "passes, with no limit per bucket. Over both sets together, the sign appears at a difference of at least "
+               "2/15 of the tickets judged, rounded up, and does not appear below that.")
+
+
 def section(lines: list[str], sign: int) -> list[str]:
     """The report's lines on one warning sign, up to the blank line after them."""
     start = next(at for at, line in enumerate(lines) if line.startswith(f"Warning sign {sign}"))
@@ -196,8 +202,8 @@ class TestReport(unittest.TestCase):
         result = self.world.report(save=False)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (1, "", f"report: {message}\n"))
 
-    def sign(self, first: int, second: int, sets: int = 1) -> list[str]:
-        self.world.baseline(first, second, sets)
+    def sign(self, first: int, second: int, *sizes: int) -> list[str]:
+        self.world.baseline(first, second, *sizes)
         return section(self.lines(), 1)
 
     def test_it_prints_each_version_per_bucket_and_over_the_set(self) -> None:
@@ -228,7 +234,7 @@ class TestReport(unittest.TestCase):
             "",
             "Warning sign 1: generation-one was right first time on 5 of 6 tickets, direct on 2 of 6, a difference "
             "of 3.",
-            "No verdict: the table of warning sign 1 has lines for 30 and 60 tickets, not 6.",
+            "The sign appears.",
             "",
             "Warning sign 2: on 6 of 6 tickets, generation-one spent 21000 tokens and direct 2100, an extra cost of "
             "18900.",
@@ -577,8 +583,10 @@ class TestReport(unittest.TestCase):
         for first, second in ((20, 16), (20, 17)):
             with self.subTest(difference=first - second):
                 self.setUp()
-                self.assertEqual(self.sign(first, second)[1],
-                                 "Not decided: a second set of 30 is needed, and 60 tickets decide.")
+                self.assertEqual(self.sign(first, second), [
+                    f"Warning sign 1: generation-one was right first time on {first} of 30 ({first / 30:.0%}) "
+                    f"tickets, direct on {second} of 30 ({second / 30:.0%}), a difference of {first - second}.",
+                    NOT_DECIDED])
 
     def test_on_30_tickets_2_or_fewer_the_sign_does_not_appear(self) -> None:
         for first, second in ((20, 18), (15, 20)):
@@ -593,10 +601,60 @@ class TestReport(unittest.TestCase):
         for second, verdict in ((32, "The sign appears."), (33, "The sign does not appear.")):
             with self.subTest(difference=40 - second):
                 self.setUp()
-                lines = self.sign(40, second, sets=2)
+                lines = self.sign(40, second, 30, 30)
                 self.assertEqual(lines[1], verdict)
                 self.assertEqual(self.world.report().stdout.splitlines()[0],
                                  "Replay sets 1 and 2: 60 tickets, of project A.")
+
+    def test_on_one_set_of_14_tickets_3_or_more_appears_2_is_not_decided_and_1_or_fewer_does_not(self) -> None:
+        for second, verdict in ((7, "The sign appears."), (8, NOT_DECIDED), (9, "The sign does not appear.")):
+            with self.subTest(difference=10 - second):
+                self.setUp()
+                self.assertEqual(self.sign(10, second, 14), [
+                    f"Warning sign 1: generation-one was right first time on 10 of 14 tickets, direct on {second} of "
+                    f"14, a difference of {10 - second}.", verdict])
+
+    def verdicts(self, first: int, *sizes: int) -> Callable[[int], str]:
+        """The verdict line of warning sign 1 at each difference, over the sets of the sizes given, with generation
+        one right on `first` tickets; the section holds the counts' line and that line only."""
+        def verdict(difference: int) -> str:
+            self.setUp()
+            lines = self.sign(first, first - difference, *sizes)
+            self.assertEqual(len(lines), 2)
+            return lines[1]
+        return verdict
+
+    def test_on_one_set_of_29_tickets_5_or_more_appears_3_to_4_is_not_decided_and_2_or_fewer_does_not(self) -> None:
+        verdict = self.verdicts(10, 29)
+        for difference, expected in ((5, "The sign appears."), (4, NOT_DECIDED), (3, NOT_DECIDED),
+                                     (2, "The sign does not appear.")):
+            with self.subTest(difference=difference):
+                self.assertEqual(verdict(difference), expected)
+
+    def test_on_one_set_of_5_tickets_1_or_more_appears_and_0_or_fewer_does_not(self) -> None:
+        verdict = self.verdicts(3, 5)  # 1/6 and 1/10 of 5 both round up to 1, so no difference is not decided
+        for difference, expected in ((1, "The sign appears."), (0, "The sign does not appear."),
+                                     (-1, "The sign does not appear.")):
+            with self.subTest(difference=difference):
+                self.assertEqual(verdict(difference), expected)
+
+    def test_over_two_sets_of_29_tickets_4_or_more_appears_and_3_or_fewer_does_not(self) -> None:
+        verdict = self.verdicts(20, 14, 15)
+        for difference, expected in ((4, "The sign appears."), (3, "The sign does not appear.")):
+            with self.subTest(difference=difference):
+                self.assertEqual(verdict(difference), expected)
+                self.assertEqual(self.world.report().stdout.splitlines()[0],
+                                 "Replay sets 1 and 2: 29 tickets, of project A.")
+
+    def test_three_sets_take_the_line_of_the_sets_together(self) -> None:
+        verdict = self.verdicts(20, 10, 10, 10)  # 30 tickets: 2/15 gives 4, where one set of 30 is not decided
+        for difference, expected in ((4, "The sign appears."), (3, "The sign does not appear.")):
+            with self.subTest(difference=difference):
+                self.assertEqual(verdict(difference), expected)
+
+    def test_a_set_with_no_ticket_gives_no_verdict(self) -> None:
+        self.world.draw(count=0)
+        self.assertEqual(section(self.lines(), 1), ["Warning sign 1: no verdict. The sets hold no ticket."])
 
     def test_the_verdict_waits_for_both_versions_on_every_ticket(self) -> None:
         self.world.baseline(20, 10)
@@ -866,6 +924,19 @@ class TestReport(unittest.TestCase):
                       "file alone. It never prints a refused label or version name, and prints nothing\n"
                       "on standard output.\n", text + "\n")
 
+    def test_help_states_the_rule_of_warning_sign_1(self) -> None:
+        text = " ".join(self.world.report("--help").stdout.split())  # the help is wrapped at any word
+        for fact in ("a share of the tickets judged, rounded up.",
+                     "Over one set, the sign appears at a difference of at least 1/6 of the tickets",
+                     "does not appear below 1/10 of them.",
+                     "Between the two it is not decided, and a second set is needed, the rest of the pool: every "
+                     "remaining pool ticket whose check passes, with no limit per bucket.",
+                     "Over two sets or more, taken together, it appears at a difference of at least 2/15 of the tickets",
+                     "Sets that hold no ticket give no verdict."):
+            with self.subTest(fact=fact):
+                self.assertIn(fact, text)
+        self.assertNotIn("Any other number of tickets", text)
+
     def test_help_exits_0_and_bad_usage_exits_2(self) -> None:
         self.world.draw()
         for args in (["--help"], ["-h"]):
@@ -877,9 +948,6 @@ class TestReport(unittest.TestCase):
                           result.stdout.splitlines())
             self.assertIn("The cut is the helpers' tokens in closing verification, fix and re-check.",
                           result.stdout.splitlines())
-            self.assertIn("  30 tickets: appears at 5 or more, not decided at 3 to 4, not at 2 or fewer.",
-                          result.stdout.splitlines())
-            self.assertIn("  60 tickets: appears at 8 or more, not at 7 or fewer.", result.stdout.splitlines())
         for args in (["--set", "1"], ["extra"], ["--help", "extra"]):
             with self.subTest(args=args):
                 result = self.world.report(*args)

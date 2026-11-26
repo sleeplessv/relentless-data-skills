@@ -9,6 +9,8 @@ import os
 import re
 import statistics
 import sys
+import textwrap
+from fractions import Fraction
 from pathlib import Path
 
 sys.dont_write_bytecode = True  # importing the siblings would otherwise write scripts/__pycache__/ into the checkout
@@ -20,10 +22,11 @@ import scan  # noqa: E402
 
 GENERATION_ONE, DIRECT = judge.GENERATION_ONE, replay.VERSION
 RATE_FLOOR = 20  # a count out of fewer tickets than this is never given as a rate
-# Warning sign 1, by the tickets in the sets: the sign appears at the first difference or more, and does not appear
-# below the second. A difference between the two needs a second set of SET_SIZE tickets.
-SIGN_ONE = {30: (5, 3), 60: (8, 8)}
-SET_SIZE, DECIDING = min(SIGN_ONE), max(SIGN_ONE)
+# Warning sign 1, by the difference as a share of the tickets judged, rounded up. Over one set the sign appears at
+# APPEARS or more and does not appear below UNDECIDED; between the two, a second set is drawn, SECOND_SET. Over two
+# sets or more, taken together, it appears at TOGETHER or more and does not appear below that.
+APPEARS, UNDECIDED, TOGETHER = Fraction(1, 6), Fraction(1, 10), Fraction(2, 15)
+SECOND_SET = "the rest of the pool: every remaining pool ticket whose check passes, with no limit per bucket"
 TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool is not a COUNT
 # Why a version of a ticket is left out of every figure, as the report counts it.
 NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
@@ -47,10 +50,9 @@ NO_ROLE = re.compile("|".join([*map(re.escape, draw.GENERATION_ONE), r"#\d+:[^.\
 AGAIN = re.compile(r"\b(?:follow-?up|round \d|fix(?:es)? round)", re.IGNORECASE)  # words that make a review a re-check
 
 
-def table_line(tickets: int) -> str:
-    appears, below = SIGN_ONE[tickets]
-    undecided = f" not decided at {below} to {appears - 1}," if below < appears else ""
-    return f"  {tickets} tickets: appears at {appears} or more,{undecided} not at {below - 1} or fewer."
+def rounded_up(share: Fraction, tickets: int) -> int:
+    """The share of the tickets, rounded up, in whole numbers, so exact for every count."""
+    return -(-share.numerator * tickets // share.denominator)
 
 
 def listed(items: list) -> str:
@@ -132,15 +134,16 @@ and is passed over and not counted. A session whose row was such a line is left
 out of the token figures and counted, like one with no row.
 
 
-Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s,
-over every ticket of the sets. It is printed only when every ticket has both
-versions judged; otherwise the report says how many tickets do not. The sign
-appears, is not decided (a second set of {SET_SIZE} is needed), or does not
-appear, by the difference:
-
-{chr(10).join(map(table_line, SIGN_ONE))}
-
-Any other number of tickets gives no verdict.
+{textwrap.fill(
+    f"Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s, over every ticket of the sets. "
+    "It is printed only when every ticket has both versions judged; otherwise the report says how many tickets do "
+    "not. Each line the difference is held against is a share of the tickets judged, rounded up. Over one set, the "
+    f"sign appears at a difference of at least {APPEARS} of the tickets and does not appear below {UNDECIDED} of "
+    "them. Between the two it is not decided, and a second set is needed, "
+    f"{SECOND_SET}. Over two sets or more, taken together, it appears at a difference of at least {TOGETHER} of the "
+    f"tickets and does not appear below that. One set of 30 tickets gives {rounded_up(APPEARS, 30)} and "
+    f"{rounded_up(UNDECIDED, 30)}; 60 tickets over two sets give {rounded_up(TOGETHER, 60)}. Sets that hold no "
+    "ticket give no verdict.", 78)}
 
 Warning sign 2 is answered from the scan rows of {GENERATION_ONE}'s sessions,
 over every ticket of the sets. The extra cost is the total_tokens
@@ -423,27 +426,29 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
     judged_pairs = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
-    return [*lines, "", *sign_one(judged_pairs, len(tickets)), "", *sign_two(judged_pairs, len(tickets))]
+    return [*lines, "", *sign_one(judged_pairs, len(tickets), len(sets)), "", *sign_two(judged_pairs, len(tickets))]
 
 
 def unjudged(judged: list[tuple[dict, dict]], total: int) -> str:
     return f"without both {GENERATION_ONE} and {DIRECT} judged: {total - len(judged)} of {total}."
 
 
-def sign_one(judged: list[tuple[dict, dict]], total: int) -> list[str]:
-    """Warning sign 1 over the tickets with both versions judged; a verdict only when that is every ticket."""
+def sign_one(judged: list[tuple[dict, dict]], total: int, sets: int) -> list[str]:
+    """Warning sign 1 over the tickets with both versions judged; a verdict only when that is every ticket and there
+    is at least one. One set gives the line of one set; two or more, the line of the sets together."""
     if len(judged) < total:
         return [f"Warning sign 1: no verdict. Tickets {unjudged(judged, total)}"]
+    if not total:
+        return ["Warning sign 1: no verdict. The sets hold no ticket."]
     first, second = (sum(pair[side]["right"] for pair in judged) for side in (0, 1))
     difference = first - second
     lines = [f"Warning sign 1: {GENERATION_ONE} was right first time on {count(first, total)} tickets, {DIRECT} on "
              f"{count(second, total)}, a difference of {difference}."]
-    if total not in SIGN_ONE:
-        return [*lines, f"No verdict: the table of warning sign 1 has lines for {listed(list(SIGN_ONE))} tickets, "
-                        f"not {total}."]
-    appears, below = SIGN_ONE[total]
+    appears, below = ((rounded_up(TOGETHER, total),) * 2 if sets > 1
+                      else (rounded_up(APPEARS, total), rounded_up(UNDECIDED, total)))
     return [*lines, "The sign appears." if difference >= appears else "The sign does not appear." if difference < below
-            else f"Not decided: a second set of {SET_SIZE} is needed, and {DECIDING} tickets decide."]
+            else f"Not decided: a second set is needed, {SECOND_SET}. Over both sets together, the sign appears at a "
+                 f"difference of at least {TOGETHER} of the tickets judged, rounded up, and does not appear below that."]
 
 
 def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:

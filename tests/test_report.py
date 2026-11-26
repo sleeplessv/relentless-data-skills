@@ -165,7 +165,7 @@ EVERY_STEP = [
 
 def no_helpers(spent: int) -> list[str]:
     """Warning sign 2's lines between its first line and its verdicts, for sessions with no helpers."""
-    return ["  Left out of both sides: 0 tickets with a blank token count, 0 with no list of generation-one's helpers.",
+    return ["  Left out of both sides: 0 with a blank token count, 0 with no list of generation-one's helpers.",
             "  generation-one's helpers by step: re-check 0, closing verification 0, fix 0, review 0, implement 0, "
             "publish 0, explore 0. 0 helpers have no tokens of their own.",
             "  The cut, closing verification, fix and re-check: 0 tokens, 0.0% of generation-one's.",
@@ -248,7 +248,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(self.two(EVERY_STEP, 2277, 1000), [
             "Warning sign 2: on 30 of 30 tickets, generation-one spent 68310 tokens and direct 30000, an extra cost of "
             "38310.",
-            "  Left out of both sides: 0 tickets with a blank token count, 0 with no list of generation-one's helpers.",
+            "  Left out of both sides: 0 with a blank token count, 0 with no list of generation-one's helpers.",
             "  generation-one's helpers by step: re-check 300, closing verification 630, fix 1200, review 2400, "
             "implement 4860, publish 9600, explore 19200. 30 helpers have no tokens of their own.",
             "  The cut, closing verification, fix and re-check: 2130 tokens, 3.1% of generation-one's.",
@@ -302,7 +302,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(section(self.lines(), 2), [
             "Warning sign 2: on 27 of 30 tickets, generation-one spent 27000 tokens and direct 21600, an extra cost of "
             "5400.",
-            "  Left out of both sides: 2 tickets with a blank token count, 1 with no list of generation-one's helpers.",
+            "  Left out of both sides: 2 with a blank token count, 1 with no list of generation-one's helpers.",
             "  generation-one's helpers by step: re-check 0, closing verification 2700, fix 0, review 0, implement 0, "
             "publish 0, explore 0. 0 helpers have no tokens of their own.",
             "  The cut, closing verification, fix and re-check: 2700 tokens, 10.0% of generation-one's.",
@@ -319,8 +319,7 @@ class TestReport(unittest.TestCase):
             self.world.run("direct", ticket, True, tokens=None)
         self.assertEqual(section(self.lines(), 2), [
             "Warning sign 2: no verdict. No ticket has both token counts and generation-one's helpers.",
-            "  Left out of both sides: 30 tickets with a blank token count, 0 with no list of generation-one's "
-            "helpers."])
+            "  Left out of both sides: 30 with a blank token count, 0 with no list of generation-one's helpers."])
 
     def test_a_count_out_of_fewer_than_20_is_never_a_rate(self) -> None:
         self.world.baseline(17, 14)

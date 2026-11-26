@@ -382,7 +382,7 @@ def sign_two(results: dict[str, dict], total: int) -> list[str]:
                 f"{missing} of {total}."]
     counted = [(first, second) for first, second in pairs if first["tokens"] is not None and second["tokens"] is not None]
     kept = [pair for pair in counted if pair[0]["helpers"] is not None]
-    left = (f"  Left out of both sides: {len(pairs) - len(counted)} tickets with a blank token count, "
+    left = (f"  Left out of both sides: {len(pairs) - len(counted)} with a blank token count, "
             f"{len(counted) - len(kept)} with no list of {GENERATION_ONE}'s helpers.")
     if not kept:
         return [f"Warning sign 2: no verdict. No ticket has both token counts and {GENERATION_ONE}'s helpers.", left]

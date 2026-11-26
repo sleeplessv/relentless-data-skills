@@ -518,7 +518,8 @@ class TestReport(unittest.TestCase):
         self.world.baseline(20, 10)
         self.world.draw()
         self.assertEqual(section(self.lines(), 1),
-                         ["Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 60."])
+                         ["Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of "
+                          "60."])
 
     def test_lines_for_a_ticket_in_no_set_are_left_out_and_counted(self) -> None:
         self.world.baseline(20, 15)
@@ -629,7 +630,8 @@ class TestReport(unittest.TestCase):
              "scan-rows.jsonl:2: helper 1: total_tokens is not a count of tokens."),
             ("scan-rows.jsonl", field("helpers", [helper(None, None, float("inf"))]),
              "scan-rows.jsonl:2: helper 1: total_tokens is not a count of tokens."),
-            ("scan-rows.jsonl", field("total_tokens", -100), "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
+            ("scan-rows.jsonl", field("total_tokens", -100),
+             "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
             ("scan-rows.jsonl", field("total_tokens", float("nan")),
              "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
             ("scan-rows.jsonl", field("helpers", [helper(None, None, 60), helper(None, None, 41)]),

@@ -312,6 +312,9 @@ class Unreadable(ValueError):
         self.number, self.line = number, line
 
 
+SIGNALS = (signal.SIGINT, signal.SIGTERM)  # what stops the draw, with one line that says so
+
+
 class Stopped(BaseException):
     """SIGINT or SIGTERM, whose number it holds, raised where the draw is so that each cleanup runs; no handler for
     errors catches it."""
@@ -1111,6 +1114,9 @@ class Draw:
                       "ready_commit", "model", "pr", "session", "log", "check_output")
             number = 1 + max(self.sets(), default=0)
             path = self.state / f"replay-set-{number}.json"
+            # From here the draw ends with its set: a signal stays held past its exit, and a signal that came just
+            # before is raised here, with no set written.
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
             scan.write_private(path, json.dumps({
                 "set": number, "seed": self.seed, "drawn_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "tickets": [{field: entry[field] for field in fields} for entry in kept],
@@ -1131,10 +1137,13 @@ def main(argv: list[str]) -> int:
     else:
         print(HELP, file=sys.stderr)
         return 2
-    for number in (signal.SIGINT, signal.SIGTERM):
+    for number in SIGNALS:
         signal.signal(number, stopped)
     try:
-        return Draw(seed).run()
+        try:
+            return Draw(seed).run()
+        finally:  # the draw's last line is printed, or is printed below: no signal follows it
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
     except Stopped as stop:
         number = signal.Signals(stop.args[0])
         print(f"draw: stopped by {number.name}; no set written.", file=sys.stderr)

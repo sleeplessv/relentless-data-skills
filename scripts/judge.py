@@ -22,10 +22,13 @@ import scan  # noqa: E402
 GENERATION_ONE = "generation-one"
 EXIT_NO_VERDICT = 3
 REVIEW_TIMEOUT = draw.CHECK_TIMEOUT
+# Set to any value, it stops Claude Code writing the session's log (Claude Code 2.1.332).
+NO_LOG = "CLAUDE_CODE_SKIP_PROMPT_HISTORY"
+# The review's files: an attempt's folder that holds either is not taken back on an error.
+REVIEWED = ("review.txt", "session.jsonl")
 # One requirements review on the strong class, headless, that can read the version's files and change nothing.
 # --safe-mode loads no CLAUDE.md, skill, plugin, hook, MCP server or auto memory; --tools leaves only the
-# read tools; --permission-prompts none denies whatever would ask. review() adds --session-id, and Claude Code
-# writes the session's log under its projects folder, from where keep_log moves it into the attempt's folder.
+# read tools; --permission-prompts none denies whatever would ask. review() adds --session-id.
 CLAUDE = ["claude", "-p", "--model", "opus", "--effort", "medium", "--output-format", "json", "--safe-mode",
           "--strict-mcp-config", "--tools", "Read,Grep,Glob", "--permission-prompts", "none"]
 # Output that is not UTF-8, such as a diff of a Latin-1 file, is kept with its odd bytes written as \xe9.
@@ -127,22 +130,26 @@ holds the ticket, project-labels.json and repos.json, and writes:
                         review's answer as it came; session.jsonl, the
                         review session's log, with session/ beside it when
                         Claude Code keeps a folder for the session. The
-                        judge starts the review with --session-id and,
-                        when the session ends, moves its log and folder
-                        here from $CLAUDE_CONFIG_DIR/projects (default
-                        ~/.claude), so none of them stays there.
+                        judge starts the review with --session-id, and
+                        without {NO_LOG}, which stops
+                        the log being written. When the session ends, the
+                        judge moves its log and folder here from
+                        $CLAUDE_CONFIG_DIR/projects (default ~/.claude; a
+                        relative one is read from where the judge was
+                        started), so none of them stays there.
                         session.jsonl and each file in session/ are mode
                         0600. The line on record names the files of its
                         own attempt. Once a new line is written the judge
                         tries to remove the folder of the attempt it
-                        replaced, its log included; a folder no line names
-                        can stay behind after an interrupt or a failed
-                        removal.
+                        replaced, its log included; when that fails or is
+                        interrupted, the folder stays and no line names it.
   judge-work/           Clones and checkouts, removed when the judge ends.
 
-Exit 0: a verdict was recorded. Exit 1: an error; nothing was recorded, not
-even the log of a review that ran, and the line and files of an earlier
-attempt stay as they were. Exit 2: bad usage.
+Exit 0: a verdict was recorded. Exit 1: an error; no line was recorded, and
+the line and files of an earlier attempt stay as they were. An error or an
+interrupt once the review session has started leaves the attempt's folder,
+with the review's answer and log as far as they were written, and no line
+names it. Exit 2: bad usage.
 Exit {EXIT_NO_VERDICT}: the review gave no verdict, recorded as null."""
 
 PROMPT = f"""\
@@ -309,7 +316,7 @@ def review(prompt: str, folder: Path, session: str) -> tuple[str, str | None]:
     fails."""
     try:
         done = subprocess.run([*CLAUDE, "--session-id", session], input=prompt, cwd=folder, capture_output=True,
-                              timeout=REVIEW_TIMEOUT, **TEXT)
+                              timeout=REVIEW_TIMEOUT, env={k: v for k, v in os.environ.items() if k != NO_LOG}, **TEXT)
     except subprocess.TimeoutExpired:
         return "", f"the review ran for more than {REVIEW_TIMEOUT} seconds"
     try:
@@ -339,9 +346,8 @@ def private_copy(source: str | Path, target: str | Path) -> None:
 
 
 def keep_log(session: str, saved: Path) -> Path | None:
-    """Move the session's log from where Claude Code wrote it into `saved` as session.jsonl, with the folder Claude
-    Code keeps beside a log as session/, each file private; remove the project folder it leaves empty. The kept log,
-    or None when the session left none."""
+    """Copy the session's log, and the folder beside it, into `saved`, then remove them where Claude Code wrote
+    them. The kept log, or None when there is none."""
     _, log = scan.resolve(session)
     if not log.is_file():
         return None
@@ -392,9 +398,11 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
                                requirements="\n".join(f"R{at}: {text}" for at, text in enumerate(required, 1)))
         scan.write_private(saved / "prompt.txt", prompt)
         session = str(uuid.uuid4())
-        answer, reason = review(prompt, folder, session)
-        scan.write_private(saved / "review.txt", answer)
-        log = keep_log(session, saved)
+        try:
+            answer, reason = review(prompt, folder, session)
+            scan.write_private(saved / "review.txt", answer)
+        finally:  # an interrupt during the session leaves a partial log, which is kept too
+            log = keep_log(session, saved)
         reason = reason or (None if log else "the review session left no log")
         reading = None if reason else read_answer(answer, len(required))
         if reading is None and not reason:
@@ -413,7 +421,7 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
                        **({"requirements": None, "findings": None, "proven": None} if reading is None else
                           {key: reading[key] for key in ("requirements", "findings", "proven")}),
                        "lines": path("review.txt"), "prompt": path("prompt.txt"),
-                       "log": path("session.jsonl") if log else None},
+                       "log": str(log.relative_to(state)) if log else None},
             "right_first_time": None if reading is None else failed is None and reading["passed"]}
 
 
@@ -449,6 +457,9 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
         raise JudgeError(f"the set entry of ticket {label}-{number} holds no requirements: a list of strings, each "
                          "with text, as the draw writes it.")
     repo = repo_entry(state, label)
+    config = scan.config_dir()
+    if not config.is_absolute():  # the session runs in the review's folder, so a relative one would point there
+        os.environ["CLAUDE_CONFIG_DIR"] = str(config.absolute())
     # Each attempt keeps its files apart, so one that fails leaves the files of the line on record as they were.
     versions = state / "judged" / f"{label}-{number}-{version}"
     versions.mkdir(parents=True, exist_ok=True)
@@ -457,8 +468,10 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
         record = attempt(state, label, number, version, commit, source, entry, repo, required, saved)
         replaced = publish(state, record, saved)
     except BaseException:
-        # Only an attempt that no line names is taken back: an interrupt can land after the line is written.
-        if all(folder_of(state, line) != saved for line in ledger(state)):
+        # Only an attempt that no line names, and that holds nothing of a review, is taken back: an interrupt can
+        # land after the line is written, and once the review session has started its answer and log stay.
+        if not any((saved / name).exists() for name in REVIEWED) and all(
+                folder_of(state, line) != saved for line in ledger(state)):
             shutil.rmtree(saved, ignore_errors=True)
         raise
     for folder in replaced:  # once the new line is written; an interrupt here leaves only an unnamed folder

@@ -1732,6 +1732,59 @@ class TestDraw(unittest.TestCase):
                     self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
                                      (3, "No set written: a bucket cannot reach 10 tickets."))
 
+    def test_a_signal_while_a_log_is_saved_leaves_no_staging_folder_and_the_earlier_copy_as_it_was(self) -> None:
+        world = self.world(full_pool(10, by_helper=True))
+        fresh = world.root / "fresh"  # a machine directory with no copy of any log
+        shutil.copytree(world.state, fresh)
+        for ticket in world.tickets.values():  # the earlier copy holds a helper the sessions no longer have
+            folder = world.log_path(ticket).with_suffix("") / "subagents"
+            write_lines(folder / "agent-a2.jsonl", read_lines(folder / "agent-a1.jsonl"))
+        (world.state / "scan-rows.lock").mkdir()  # the first draw saves one log and then cannot write its row
+        self.assertEqual(world.draw("--seed", "1").returncode, 1)
+        (world.state / "scan-rows.lock").rmdir()
+        logs = world.state / "logs"
+        session = next(logs.glob("*.jsonl")).stem  # the draw saves this session's log first
+        for ticket in world.tickets.values():
+            (world.log_path(ticket).with_suffix("") / "subagents" / "agent-a2.jsonl").unlink()
+
+        def files(folder: Path) -> dict[str, bytes]:
+            """Every path under the folder, with each file's bytes."""
+            return {str(path.relative_to(folder)): path.read_bytes() if path.is_file() else b""
+                    for path in folder.rglob("*")}
+        earlier = files(logs)
+        self.assertIn(f"{session}/subagents/agent-a2.jsonl", earlier)
+        source = world.config / "projects" / "-work-example"
+        new = {name: data for name, data in files(source).items() if name.startswith(session)}
+        # Python the draw runs first: the draw gets the signal right after it copies a transcript of the session, or
+        # right after it moves the session's new log into logs/.
+        copy = ("import os, shutil\nreal_copy = shutil.copyfile\n"
+                "def copy(source, target, **options):\n"
+                "    real_copy(source, target, **options)\n"
+                "    if '.new-{session}' in str(target):\n"
+                "        os.kill(os.getpid(), {number})\n"
+                "    return target\n"
+                "shutil.copyfile = copy")
+        rename = ("import os\nreal_replace = os.replace\n"
+                  "def replace(source, target):\n"
+                  "    real_replace(source, target)\n"
+                  "    if str(source).endswith('.new-{session}/{session}.jsonl'):\n"
+                  "        os.kill(os.getpid(), {number})\n"
+                  "os.replace = replace")
+        cases = [("an earlier copy", world.state, copy, signal.SIGINT, earlier),
+                 ("no earlier copy", fresh, copy, signal.SIGTERM, {}),
+                 ("an earlier copy", world.state, rename, signal.SIGTERM, new)]  # once begun, the swap runs whole
+        for at, (has, state, prelude, number, after) in enumerate(cases):
+            with self.subTest(session=has, signal=number.name, at="copy" if prelude is copy else "the renames"):
+                copied = world.root / f"state-{at}"
+                shutil.copytree(state, copied)
+                result = world.draw("--seed", "1", state=copied,
+                                    prelude=prelude.format(session=session, number=int(number)))
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual((result.returncode, result.stderr),
+                                 (128 + number, f"draw: stopped by {number.name}; no set written.\n"))
+                self.assertEqual(files(copied / "logs"), after)
+                self.assertEqual(list(copied.glob("replay-set-*")), [])
+
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
         world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]
         self.assertFalse((world.state / "draw-work").exists())

@@ -63,7 +63,7 @@ def named(text: str | None) -> str | None:
     text names no step.
 
     Taking the first step named assumes a helper's text names its own role before any other step. Where it does not,
-    the sort is wrong: "Verify CSV headers", a ticket's title with no number, describing the helper that implements
+    the sort can be wrong: "Verify CSV headers", a ticket's title with no number, describing the helper that implements
     it, is sorted as closing verification."""
     text = NO_ROLE.sub(" ", text or "")
     found = sorted((match.start(), at, name) for at, (name, words) in enumerate(STEPS) if (match := words.search(text)))
@@ -138,12 +138,11 @@ sides, and counted, when it lacks either version judged or either version
 has a blank total_tokens. The figures cover the tickets left; the verdict
 waits, as for warning sign 1, until every ticket has both versions judged.
 
-Each helper the rows list is sorted into a step of generation one by the
-words of its description or, when its description names none, of the head
-of its brief. The words, the rules, what the sort assumes about how a helper
-words its text and where that fails are STEPS, named() and step() in
-scripts/report.py. A helper sorted into the wrong step can move the cut
-either way. The steps:
+The report reads each helper's description and the head of its brief, and
+puts the helper in a step of generation one or leaves it not sorted. How it
+chooses, and where it can sort wrong, are in step() and named() in
+scripts/report.py, with each step's words in STEPS. A helper sorted into
+the wrong step can move the cut either way. The steps:
 
   {listed([name for name, _ in STEPS])}.
 

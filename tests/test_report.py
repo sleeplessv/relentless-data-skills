@@ -145,9 +145,9 @@ def tree(folder: Path) -> dict[str, tuple]:
             for path in sorted(folder.rglob("*"))}
 
 
-# One helper of each of generation one's steps, with tokens of 2**n each so that every step's sum tells which
-# helpers it took, then helpers sorted by the head of the brief, one sorted into no step, and one with no tokens of
-# its own. The re-check and the fix also name a step later in their text.
+# One helper of each of generation one's steps, with tokens of 10 times a power of two (10 to 640) so that every
+# step's sum tells which helpers it took, then helpers sorted by the head of the brief, one sorted into no step, and
+# one with no tokens of its own. The re-check and the fix also name a step later in their text.
 EVERY_STEP = [
     helper("Re-check fix round 1", "This is a re-check after one fix round. Read the review skill.", 10),
     helper("Closing verification on the final head", "You are the closing verifier for ticket #12.", 20),
@@ -262,9 +262,8 @@ class TestReport(unittest.TestCase):
             "The two verdicts differ: the spend not sorted decides the sign."])
 
     def test_a_helper_is_sorted_by_its_description_then_by_its_brief(self) -> None:
-        # The step a text names first decides, except that a description that names a review and a brief that names a
-        # re-check make a re-check. Each shape fix round 1 closed sits beside a helper whose step its words name, but
-        # for "Re-verify the fixed head", which has none.
+        # The shapes fix round 1 closed, sorted by the rules of step() and named(). Each sits beside a helper whose step
+        # its words name, but for "Re-verify the fixed head", which has none.
         lines = self.two([
             helper("Follow-up review of the fix head", "Confirm the accepted findings are closed.", 1),
             helper("Standards review of the change", "You are a Standards reviewer.", 2),
@@ -281,9 +280,9 @@ class TestReport(unittest.TestCase):
                                    "fix 7680, review 300, implement 1440, publish 1920, explore 0. 0 helpers have no "
                                    "tokens of their own.")
 
-    def test_each_probe_text_lands_on_its_step_beside_the_same_words_in_another_step(self) -> None:
-        # The texts two reviews probed the sort with, each followed by its mirror: the same words in a helper whose
-        # step is another. None is a helper sorted into no step.
+    def test_each_probe_text_lands_on_its_step_beside_a_contrast_case(self) -> None:
+        # The texts two reviews probed the sort with, each followed by a contrast case that shares its words: a helper
+        # of another step or, for "Apply the late fix", one not sorted (its_step None).
         for description, brief, its_step in [
             ("Fix header parsing", "Implement the parser change for ticket #12.", "implement"),
             ("Review the fix head", "Confirm the accepted findings are closed.", "re-check"),
@@ -605,6 +604,7 @@ class TestReport(unittest.TestCase):
         self.world.verdicts = [line for line in self.world.verdicts
                                if (line["version"], line["ticket"]) not in (("direct", 1), ("generation-one", 2))]
         self.world.verdicts[-1]["right_first_time"] = None
+        self.world.versions.reverse()  # the replays' ledger in another order than the draw's
         lines = self.lines()
         self.assertEqual(section(lines, 1), ["Warning sign 1: no verdict. Tickets without both generation-one and "
                                              "direct judged: 3 of 30."])

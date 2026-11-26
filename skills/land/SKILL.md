@@ -14,14 +14,15 @@ Take the current working-tree changes from branch to merged PR in one pass: bran
 
 ## Step 0: Preflight
 
-Run `git status`, `git remote get-url origin`, `gh auth status`, and `gh repo view --json url,defaultBranchRef`. Confirm the GitHub URL identifies the same repository as `origin`. Set `default_branch` to `defaultBranchRef.name` for the whole run. Stop if a command fails, the repositories differ, or the default branch is empty. Then run:
+Run `git status`, `gh auth status`, and `gh repo view --json url,defaultBranchRef`. From the result take the GitHub `host`, `repo` (`OWNER/REPO`), and `default_branch` (`defaultBranchRef.name`). Confirm both `git remote get-url origin` and every URL from `git remote get-url --push --all origin` identify this repository. Stop on any failure, mismatch, or missing value. Then run:
 
 ```bash
 git fetch origin "refs/heads/$default_branch:refs/remotes/origin/$default_branch"
 git log --oneline "origin/$default_branch..HEAD"
+if [ "$(git branch --show-current)" = "$default_branch" ]; then git merge-base --is-ancestor HEAD "origin/$default_branch"; fi
 ```
 
-Both commands must succeed. On a clean feature branch, resume at Step 5 for an open PR (the Step 2 check), or at the Step 3 push for commits ahead with no PR. On a clean default branch, report any commits ahead and stop. With a clean tree, no open PR, and no commits ahead, there is nothing to ship.
+Stop on any failure. Ancestry exit 1 on the default branch means it has local-only commits. Report the commits listed above and leave the branch and working tree intact. On a clean feature branch, resume at Step 5 for an open PR found by Step 2, or at the Step 3 push for commits ahead with no PR. A clean tree with neither has nothing to ship.
 
 **Run all `gh` and `git fetch`/`pull`/`push`/`ls-remote` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
 
@@ -35,22 +36,23 @@ Form the commit groups **before** any branching (the `smart-git-commit` grouping
 
 ## Step 2: Pick the branch
 
-Decide where the changes should live from git/gh state; only ask when it is genuinely ambiguous. On the default branch, skip the detection below and go straight to a fresh branch. On a feature branch, detect "merged" two ways (either signal counts, because squash merges are not git ancestors) and check for an open PR (an open PR means live work):
+On the default branch, create a fresh branch. On a feature branch, set `branch` to the nonempty output of `git branch --show-current`. Check ancestry and PRs against the fetched default:
 
 ```bash
 git merge-base --is-ancestor HEAD "origin/$default_branch" && echo ancestor-merged
-gh pr list --head "$(git branch --show-current)" --state merged --json number
-gh pr list --head "$(git branch --show-current)" --state open --json number
+gh api --hostname "$host" -X GET "repos/$repo/pulls" --paginate -f state=all -f head="${repo%/*}:$branch" -f base="$default_branch" --jq 'map({number, source: .head.repo.full_name, head: .head.ref, base: .base.ref, state, merged_at})'
 ```
+
+Ancestry exit 0 means merged, 1 means check PR history, and any other exit stops. Require a successful, complete API read of every page. Use only rows matching `repo`, `branch`, and `default_branch` exactly. An open row supplies the PR number and takes precedence. A `merged_at` timestamp records a merge. Stop if a lookup fails or its result is ambiguous.
 
 | Current state | Action |
 |---|---|
 | On the default branch | Create a fresh branch off the updated default branch |
-| Feature branch, already merged, no commits beyond `origin/$default_branch` | Stale. Create a fresh branch off the updated default branch; uncommitted changes carry over with the checkout (stash, pull, branch, pop if the checkout conflicts) |
+| Feature branch, already merged, no commits beyond `origin/$default_branch` | Stale. Create a fresh branch from the fetched default |
 | Feature branch, not merged (unmerged commits or an open PR) | Live work. Use it as-is, skip branch creation. When splitting, only the group related to this branch's work stays here; the rest get fresh branches off the default branch |
 | Merged AND new local commits on top | The one ambiguous case. Ask: fresh branch off the default branch, or continue on this one? |
 
-Fresh-branch mechanics: `git checkout "$default_branch" && git pull --ff-only origin "$default_branch" && git checkout -b <branch>`.
+Fresh-branch mechanics: `git checkout --no-track -b <branch> "origin/$default_branch"`. The checkout carries uncommitted changes and stops if it would overwrite them.
 
 **Branch name (fixed format):** `<type>/<short-slug>`. `type` is the conventional-commit type of the dominant change group, slug is 2-4 kebab-case words. Examples: `feat/land-skill`, `fix/null-order-totals`.
 
@@ -66,12 +68,7 @@ Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), st
 
 ## Step 4: Open the PR
 
-```bash
-gh pr create --base "$default_branch" --title "<conventional subject>" --body "$(cat <<'EOF'
-<body>
-EOF
-)"
-```
+Reuse the matching open PR from Step 2 if its head is still the current branch. Otherwise write the body to a file and run `gh pr create --base "$default_branch" --head <current-branch> --title "<conventional subject>" --body-file <body-file>`.
 
 - The title is the conventional-commit subject of the dominant change (e.g. `feat: add land skill`). Squash merge makes the title the commit on the default branch, so it must itself be a valid conventional commit.
 - Load the **`pr`** skill with the Skill tool (`Skill: pr`) and write the body to its template: Summary, Evidence, Merge Danger. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.

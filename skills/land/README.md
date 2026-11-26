@@ -22,10 +22,10 @@ The skill runs these steps in order:
    asks, because a merge nobody confirms must never bundle unrelated work.
 2. **Picks the branch.** It reads the git and `gh` state and asks only in the
    one ambiguous case:
-   - On the default branch, it creates a branch off its updated tip.
+   - On the default branch, it creates a branch at the fetched remote tip once it has ruled out local-only commits.
    - On a branch that is already merged, it moves the changes to a new branch
-     off the default branch. It uses `gh pr list` to detect squash merges, because a squash
-     merge is not a git ancestor.
+     off the default branch. It checks GitHub for PRs from that repository and branch into
+     the default branch, which also identifies squash merges.
    - On a branch with unmerged commits or an open PR, it stays on that branch.
    - On a merged branch with new local commits, it asks which branch to use.
 

@@ -372,6 +372,12 @@ def vetoed(result: subprocess.CompletedProcess[str]) -> int:
     return int(found[0].split()[1])
 
 
+def refused(result: subprocess.CompletedProcess[str]) -> int:
+    """How many tickets of the listed repos a draw printed that it left out for a list it cannot read."""
+    found = [line for line in result.stdout.splitlines() if line.startswith("Refused ")]
+    return int(found[0].split()[1])
+
+
 def counts(result: subprocess.CompletedProcess[str]) -> tuple[int, int, int]:
     """The 0-50 pool, the 51-300 pool and the count of skipped logs a draw printed."""
     printed = result.stdout.splitlines()
@@ -607,7 +613,8 @@ class TestOneDraw(unittest.TestCase):
                 "label": "A", "ticket": ticket.number, "bucket": entry["bucket"], "size": ticket.size,
                 "title": f"Ticket {ticket.number}",
                 "body": f"## What to build\n\nThing {ticket.number}.\n\n{ticket.criteria}\n",
-                "base_commit": world.bases[ticket.number], "ready_commit": ticket.commit("a"), "model": MODEL,
+                "requirements": ["The report prints the total."], "base_commit": world.bases[ticket.number],
+                "ready_commit": ticket.commit("a"), "model": MODEL,
                 "pr": ticket.pr, "session": ticket.session, "log": f"logs/{ticket.session}.jsonl",
                 "check_output": f"checks/A-{ticket.number}.txt"})
         self.assertEqual(json.loads((world.state / "project-labels.json").read_text()), {"A": ALPHA})
@@ -637,6 +644,8 @@ class TestOneDraw(unittest.TestCase):
             "Seed 7.", "Skipped 1 session logs that could not be read.",
             "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
             "opened it, keeps it out of the pool.",
+            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
+            "certainty keeps each out of the pool.",
             "0-50: pool 12, set aside 0, kept 10.",
             "51-300: pool 12, set aside 0, kept 10.", "301-1500: pool 12, set aside 0, kept 10.",
             f"Wrote {state / 'replay-set-1.json'}."])
@@ -949,6 +958,177 @@ class TestDraw(unittest.TestCase):
                 self.assertEqual(result.returncode, 3, result.stderr)
                 self.assertEqual(counts(result), (pool, 0, 0))
 
+    def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
+        cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
+        # Ticket 1 has a list and ticket 2 none. The draw cannot read the lists of tickets 3, 4 and 5, of ticket
+        # 300, which two PRs close, and of ticket 7, which an earlier set holds. Ticket 8's repo is not listed and
+        # ticket 9's PR is not merged, so their bodies are never read.
+        world = self.world([
+            Ticket(1, 20), Ticket(2, 20, criteria="## Acceptance\n\nNone yet."), Ticket(3, 20, criteria=cannot),
+            Ticket(4, 100, criteria=cannot), Ticket(5, 20, criteria=cannot.replace("Count rows.", "- [ ]")),
+            Ticket(21, 20, issue=300, criteria=cannot), Ticket(22, 100, issue=300, criteria=cannot),
+            Ticket(7, 20, criteria=cannot), Ticket(8, 20, repo=BETA, criteria=cannot),
+            Ticket(9, 20, state="OPEN", criteria=cannot)])
+        (world.state / "replay-set-1.json").write_text(json.dumps({
+            "set": 1, "seed": 1, "drawn_at": "2026-01-05T12:00:00+00:00", "set_aside": [],
+            "tickets": [{"label": "A", "ticket": 7}]}))
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        printed = result.stdout.splitlines()
+        self.assertEqual(printed[printed.index(next(line for line in printed if line.startswith("Vetoed "))) + 1],
+                         "Refused 5 tickets of the listed repos: a list under a criteria heading that the draw "
+                         "cannot read with certainty keeps each out of the pool.")
+        self.assertEqual(counts(result), (1, 0, 0))
+
+    def test_help_states_the_lists_the_draw_reads_and_the_refused_count(self) -> None:
+        sentences = [
+            "The draw reads the body as CommonMark's blocks, and a line ends only at a line feed, a carriage return "
+            "or both.",
+            "Code, fenced or indented, and HTML blocks hide what they hold.",
+            "In the section the draw reads lists of items marked - * + or ASCII digits and . or ), each with its text "
+            "on its marker line.",
+            "An item's text can wrap onto the lines after it, however they are indented, until a blank line or the "
+            "next item.",
+            "It is read without its marker or a task box.",
+            "A list nested in an item, its markers at most 3 columns past the item's text, gives items of its own "
+            "after their parent.",
+            "Between lists stand paragraphs, headings of level three and deeper, breaks such as * * *, and code and "
+            "HTML blocks.",
+            "Any other line in the section is one the draw cannot read with certainty: inside an item, a quote, code, "
+            "a fence, HTML, a heading, a break or a second paragraph; an item with no text, or with a task box and no "
+            "text; an item that opens another block on its marker line; a quote; an underline below a line of text; "
+            "and a marker numbered other than 1 that would start a list right after a line of text.",
+            "So is any line of the body that opens a fence or an HTML block on an item's marker line, and any line "
+            "indented less than the first line of the fence or HTML block it falls in.",
+            "The items of the list are the ticket's requirements, in the order written, and the draw stores them in "
+            "its entry of the set.",
+            "A ticket entry holds label, ticket, bucket, size, title, body, requirements, base_commit, ready_commit, "
+            "model, pr, session, log and check_output.",
+            "Its requirements are a list of strings.",
+            "After the count of vetoed PRs and before the count per bucket, the draw prints how many tickets of the "
+            "listed repos it left out because it cannot read their list with certainty.",
+            "A ticket with no list under the headings is not counted.",
+            "That count is taken before the rules on a ticket's other PRs and earlier sets, so it is the most tickets "
+            "the reader can have cost the pool."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+                self.assertRegex(help_text, rf"(?:\A|[.:] ){re.escape(sentence)}(?: |\Z)")
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        for function in (draw.requirements, draw.opens, draw.hides):
+            flat = " ".join((function.__doc__ or "").split())
+            with self.subTest(function=function.__name__):
+                for gone in ("starts a block that is not a paragraph's text", "end the list", "marker numbered",
+                             "with its text on its marker line", "CommonMark's blocks"):
+                    self.assertNotIn(gone, flat)
+
+    def read_or_refuse(self, cases: dict[str, list[str] | str]) -> None:
+        """Each body's requirements, or the line the reader refuses it at."""
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        for body, expected in cases.items():
+            with self.subTest(body=body):
+                if isinstance(expected, list):
+                    self.assertEqual(draw.requirements(body), expected)
+                    continue
+                with self.assertRaises(draw.Unreadable) as refusal:
+                    draw.requirements(body)
+                lines = re.split(r"\r\n|\r|\n", body)
+                self.assertEqual((refusal.exception.number, refusal.exception.line),
+                                 (1 + lines.index(expected), expected))
+
+    def test_a_list_is_read_item_by_item_or_refused_at_the_first_line_it_cannot_be_sure_of(self) -> None:
+        read = {  # the section under the heading: its requirements
+            "- [ ] One.\n- [x] Two.\n": ["One.", "Two."],
+            "1. The report prints\n   the total.\n2) Count.\n": ["The report prints the total.", "Count."],
+            "- Count every\nrow.\n- Show the total.\n": ["Count every row.", "Show the total."],
+            "- One.\n\n- Two.\n": ["One.", "Two."],
+            "- Check the totals.\n    - Count blank rows.\n": ["Check the totals.", "Count blank rows."],
+            "- Parent\n  - child\n\n  - child again\n- Sibling\n": ["Parent", "child", "child again", "Sibling"],
+            "- Implement the validator.\n  01. Reject nulls.\n  02. Report duplicates.\n": [
+                "Implement the validator.", "Reject nulls.", "Report duplicates."],
+            "Done means:\n\n### Must\n\n- One.\n\n### Should\n\n1. Two.\n": ["One.", "Two."],
+            "<!-- one per line -->\n- One.\n\n```\n- an example\n```\n\n- Two.\n": ["One.", "Two."],
+            "- One.\n\n## Notes\n\n- not a requirement\n": ["One."],
+            "None yet.\n": [],  # empty, which is not refused
+        }
+        refused = {  # the section under the heading: the line the reader is not sure of
+            "- Print the total.\n    <details><summary>Example</summary></details>\n- Count blank rows.\n":
+                "    <details><summary>Example</summary></details>",
+            "- Export.\n    > Example\n  3. Reject nulls.\n": "    > Example",
+            "- Export.\n    > # Example\n  Keep the order.\n- Count.\n": "    > # Example",
+            "- Print a total.\n- ```text\n  - Example switch\n  ```\n": "- ```text",
+            "- Check input.\n-\n  Save the total.\n": "-",
+            "- The default retry count follows\n  the configuration, currently\n  3. A successful request resets it.\n":
+                "  3. A successful request resets it.",
+            "1. Count rows.\n   > Includes the header.\n2. Save the count.\n": "   > Includes the header.",
+            "- One.\n\n    ```\n    x\n    ```\n\n- Two.\n": "    ```",
+            "10. Report the total.\n    > Not a requirement.\n11. Print it.\n": "    > Not a requirement.",
+            "- Run it:\n\n  ```\n  make\n  ```\n\n  Then read the log.\n- Next.\n": "  ```",
+            "- One.\n\n      code\n\n- Two.\n": "      code",
+            "- Parent\n  - child\n\n  Parent again.\n- Sibling\n": "  Parent again.",
+            "- One.\n\n  More about one.\n": "  More about one.",
+            "- One.\n> A quote.\n- Two.\n": "> A quote.",
+            "Intro.\n---\n\n- One.\n": "---",
+            "- One.\n        - Too deep to be sure.\n": "        - Too deep to be sure.",
+            "- -  Two markers.\n": "- -  Two markers.",
+            "-      code after the marker\n": "-      code after the marker",
+            "Done means:\n2. Not a list in CommonMark.\n": "2. Not a list in CommonMark.",
+        }
+        self.read_or_refuse({f"## Acceptance\n\n{listed}": expected
+                             for listed, expected in {**read, **refused}.items()})
+
+    def test_the_six_cases_the_reader_misread_now_read_right_or_are_refused(self) -> None:
+        # The cases of #295, each of which gave a wrong list before: the list CommonMark's blocks give, or the line
+        # the reader refuses the body at.
+        self.read_or_refuse({
+            # 1. Another section's item opens a fence on its marker line; its closing fence hid the second section.
+            "## Acceptance criteria\n\n- One.\n\n## Notes\n\n- ```text\n  example\n  ```\n\n## Done when\n\n- Two.\n"
+            "- Three.\n": "- ```text",
+            # 2. Another section's item holds an HTML block, which ends with the item; it hid the heading after it.
+            "## Acceptance criteria\n\n- One.\n\n## Notes\n\n- A note.\n  <div>\n## Done when\n\n- Two.\n":
+                "## Done when",
+            # 3. * ** after a paragraph is a break, not an item.
+            "## Acceptance criteria\n\nIntro.\n* **\n\n- One.\n": ["One."],
+            # 4. A digit that is not ASCII starts no item: an Arabic-Indic one and a fullwidth one.
+            "## Acceptance criteria\n\n- One.\n\u0661. Two.\n": ["One. \u0661. Two."],
+            "## Acceptance criteria\n\nIntro.\n\n\uff11. One.\n": [],
+            # 5. U+2028 ends no line, so what follows it is neither an item nor a heading.
+            "## Acceptance criteria\n\n- One,\u2028- two.\n": ["One,\u2028- two."],
+            "## Acceptance criteria\n\n- One,\u2028## and more.\n- Two.\n": ["One,\u2028## and more.", "Two."],
+            # 6. A task box with no text is no requirement.
+            "## Acceptance criteria\n\n- [ ]\n- Two.\n": "- [ ]",
+        })
+
+    def test_a_line_ends_only_at_a_line_feed_a_carriage_return_or_both(self) -> None:
+        # str.splitlines also ends a line at each of these; CommonMark does not.
+        cases: dict[str, list[str] | str] = {
+            f"## Acceptance\n\n- One,{character}- two.\n": [f"One,{character}- two."]
+            for character in "\v\f\x1c\x1d\x1e\x85\u2028\u2029"}
+        cases["## Acceptance\r\n\r\n- One.\r- Two.\r\n"] = ["One.", "Two."]
+        self.read_or_refuse(cases)
+
+    def test_the_four_forms_the_reader_refused_are_refused_or_read_right(self) -> None:
+        self.read_or_refuse({
+            "## Acceptance\n\n- < 200 ms per request at p95.\n": "- < 200 ms per request at p95.",
+            "## Acceptance\n\n- ```x``` is printed.\n": "- ```x``` is printed.",
+            "## Acceptance\n\n- One.\n\n- - -\n\n- Two.\n": ["One.", "Two."],
+            "## Acceptance\n\n- One.\n\n> A quote.\n\n- Two.\n": "> A quote.",
+        })
+
+    def test_a_block_opened_indented_is_read_only_while_no_line_falls_left_of_it(self) -> None:
+        # Inside an item a fence or an HTML block ends with the item; at the top level it does not. The reader cannot
+        # tell which, so a line indented less than the block's first line refuses the body.
+        self.read_or_refuse({
+            "## Steps\n\n1. Run:\n\n   ```sh\n   ## Acceptance\n   ```\n\n## Acceptance\n\n- One.\n": ["One."],
+            "## Steps\n\n1. Run:\n\n   ```sh\n   make\n```\n\n## Acceptance\n\n- One.\n": "```",
+            "## Steps\n\n- Note.\n  <!--\nhidden\n  -->\n\n## Acceptance\n\n- One.\n": "hidden",
+        })
+
     def test_the_model_is_a_name_from_the_session_s_own_responses_or_a_helper_s_copy_of_one(self) -> None:
         for case, pool in (("a helper's copy", 1), ("a helper's own", 0), (17, 0), (" ", 0)):
             with self.subTest(case=case):
@@ -1011,7 +1191,7 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(world.set_file()["set_aside"], [{"label": "A", "ticket": failed, "bucket": "0-50",
                                                            "reason": "check exited 1",
                                                            "check_output": f"checks/A-{failed}.txt"}])
-        self.assertEqual(result.stdout.splitlines()[2:5], ["0-50: pool 12, set aside 1, kept 10.",
+        self.assertEqual(result.stdout.splitlines()[3:6], ["0-50: pool 12, set aside 1, kept 10.",
                                                             "51-300: pool 12, set aside 0, kept 10.",
                                                             "301-1500: pool 12, set aside 0, kept 10."])
         self.assertEqual((world.state / f"checks/A-{failed}.txt").read_text(),
@@ -1027,6 +1207,8 @@ class TestDraw(unittest.TestCase):
             "Seed 2.",
             "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
             "opened it, keeps it out of the pool.",
+            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
+            "certainty keeps each out of the pool.",
             "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 9, set aside 0, kept 0.",
             "301-1500: pool 12, set aside 0, kept 0.", "No set written: a bucket cannot reach 10 tickets."])
         self.assertEqual(sorted(path.name for path in world.state.iterdir()),
@@ -1042,6 +1224,8 @@ class TestDraw(unittest.TestCase):
             "Seed 2.",
             "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
             "opened it, keeps it out of the pool.",
+            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
+            "certainty keeps each out of the pool.",
             "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
             "301-1500: pool 11, set aside 2, kept 9.", "No set written: a bucket cannot reach 10 tickets."])
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
@@ -1098,7 +1282,7 @@ class TestDraw(unittest.TestCase):
                                        "stand-in gh: the clone failed", "clone exit 1"])
         self.assertEqual(outputs[17][1:], [f"stand-in gh: no saved answer for api repos/{ALPHA}/activity?ref=refs/heads/"
                                            "ticket-17&per_page=100", "gh exit 1"])
-        self.assertEqual(result.stdout.splitlines()[2], "0-50: pool 17, set aside 6, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 17, set aside 6, kept 10.")
 
     def test_the_seed_gives_the_same_tickets_whatever_the_order_of_the_repo_list(self) -> None:
         alpha = full_pool(6)
@@ -1139,7 +1323,7 @@ class TestDraw(unittest.TestCase):
             [{"event": "ready_for_review", "created_at": 17}])
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[2], "0-50: pool 13, set aside 3, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 13, set aside 3, kept 10.")
         aside = {entry["ticket"]: entry for entry in world.set_file()["set_aside"]}
         self.assertEqual({number: entry["reason"] for number, entry in aside.items()}, dict.fromkeys(
             (11, 12, 13), "GitHub's record of the PR's history or of the pushes to its branch could not be read"))

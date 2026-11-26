@@ -68,7 +68,7 @@ HTML_BLOCKS = [
                 r"html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|"
                 r"section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|/>|$)", re.I), BLANK)]
 # A list item's marker and the spaces after it; more than 4 spaces make the item open with code.
-MARKER = re.compile(r"(?:[-*+]|(\d{1,9})[.)])(?: {1,4}|[ \t]*$)")
+MARKER = re.compile(r"(?:[-*+]|([0-9]{1,9})[.)])(?: {1,4}|[ \t]*$)")
 SETEXT = re.compile(r"(?:=+|-+)[ \t]*")  # the underline that makes the paragraph above it a heading
 BREAK = re.compile(r"([-*_])(?:[ \t]*\1){2,}[ \t]*")  # - - - is a break, not an item
 # The start of a block that is not a paragraph or a list: a quote, HTML, a fence, an ATX heading, an underline, a break.
@@ -160,10 +160,30 @@ The pool is every ticket that meets all of these:
 - The ticket's body holds an item of a list under
   {one_of([f'"## {heading}"' for heading in CRITERIA_HEADINGS])}, read as Markdown:
   a list in code or in an HTML block does not count, and a "# " or "## "
-  heading ends the section. A list the draw cannot read with
-  certainty does not count either: judge.py --help says which lists it reads.
+  heading ends the section. A list the draw cannot read with certainty does
+  not count either: the lists it reads are below.
 - The PR's repo is in repos.json, and the ticket is in no earlier set, kept or
   set aside.
+
+The draw reads the body as CommonMark's blocks, and a line ends only at a line
+feed, a carriage return or both. Code, fenced or indented, and HTML blocks
+hide what they hold. In the section the draw reads lists of items marked - * +
+or ASCII digits and . or ), each with its text on its marker line. An item's
+text can wrap onto the lines after it, however they are indented, until a
+blank line or the next item. It is read without its marker or a task box. A
+list nested in an item, its markers at most 3 columns past the item's text,
+gives items of its own after their parent. Between lists stand paragraphs,
+headings of level three and deeper, breaks such as * * *, and code and HTML
+blocks. Any other line in the section is one the draw cannot read with
+certainty: inside an item, a quote, code, a fence, HTML, a heading, a break or
+a second paragraph; an item with no text, or with a task box and no text; an
+item that opens another block on its marker line; a quote; an underline below
+a line of text; and a marker numbered other than 1 that would start a list
+right after a line of text. So is any line of the body that opens a fence or
+an HTML block on an item's marker line, and any line indented less than the
+first line of the fence or HTML block it falls in. The items of the list are
+the ticket's requirements, in the order written, and the draw stores them in
+its entry of the set.
 
 A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
@@ -200,11 +220,12 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
                         AA, AB and on.
   replay-set-<n>.json   Set n, as {{"set", "seed", "drawn_at", "tickets",
                         "set_aside"}}. A ticket entry holds label, ticket,
-                        bucket, size, title, body, base_commit, ready_commit,
-                        model, pr, session, log and check_output. A set-aside
-                        entry holds label, ticket, bucket, reason and
-                        check_output. Paths are relative to the machine
-                        directory.
+                        bucket, size, title, body, requirements, base_commit,
+                        ready_commit, model, pr, session, log and
+                        check_output. Its requirements are a list of
+                        strings. A set-aside entry holds label, ticket,
+                        bucket, reason and check_output. Paths are relative
+                        to the machine directory.
   checks/<label>-<ticket>.txt
                         The output of each try: its setup and check, or what
                         the clone, checkout or gh call that failed printed on
@@ -241,6 +262,12 @@ its result's is missing or cannot be read. That call may have opened that PR,
 so it counts against other sessions and against the session's other PRs; the
 session can still put that PR's ticket in the pool through another call that
 opened it.
+
+After the count of vetoed PRs and before the count per bucket, the draw prints
+how many tickets of the listed repos it left out because it cannot read their
+list with certainty. A ticket with no list under the headings is not counted.
+That count is taken before the rules on a ticket's other PRs and earlier sets,
+so it is the most tickets the reader can have cost the pool.
 
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
@@ -491,40 +518,32 @@ def parent_model(main: list[dict], helpers: list[dict]) -> str | None:
     return max(counts, key=counts.get) if counts else None
 
 
-def has_criteria(body: str | None) -> bool:
-    """True when the body holds an item of a list under a "## " heading among the CRITERIA_HEADINGS."""
-    try:
-        return bool(requirements(body))
-    except Unreadable:  # not an empty list: a list the reader refuses, which the draw leaves out all the same
-        return False
-
-
 def opens(line: str) -> bool:
-    """True when the line, its indent taken off, starts a block that is not a paragraph's text."""
+    """True when the line, its indent taken off, may start a block other than a paragraph, so the reader does not
+    take it as an item's text. It also holds for lines that CommonMark reads as text, such as one that starts with <."""
     return bool(OPENS.match(line) or MARKER.match(line))
+
+
+def hides(line: str) -> bool:
+    """True when the line, its indent taken off, opens a code fence or an HTML block."""
+    return bool(re.match(r"`{3,}(?!.*`)|~{3,}", line) or any(begin.match(line) for begin, _ in HTML_BLOCKS)
+                or TAG_LINE.fullmatch(line))
 
 
 def requirements(body: str | None) -> list[str]:
     """The text of each item of a list under a "## " heading among the CRITERIA_HEADINGS, in the order written.
-    Unreadable names the first line of the section the reader cannot read with certainty.
-
-    The body is read as CommonMark's blocks: code, fenced or indented, and HTML blocks hide what they
-    hold; one of those ATX headings opens the section, and any ATX heading of level one or two ends it.
-    In the section the reader reads lists of items marked - * + or a number and . or ), each with its
-    text on its marker line. An item's text can wrap onto the lines after it, however they are indented, until a blank
-    line or the next item; it is read without its marker or a task box. A list nested in an item, its
-    markers at most 3 columns past the item's text, gives items of its own after their parent. Between
-    lists stand paragraphs, headings of level three and deeper, breaks, and code and HTML blocks, which
-    end the list. Any other line refuses the list: inside an item, a quote, code, a fence, HTML, a
-    heading, a break or a second paragraph; an item with no text on its marker line, or that opens
-    another block there; a quote; an underline below a line of text; and a marker numbered other than
-    1 right after a line of text, where it would start a list."""
+    Unreadable names the first line the reader cannot read with certainty. HELP says which lists it reads."""
     headings = {heading.lower() for heading in CRITERIA_HEADINGS}
     found: list[str] = []
     columns: list[int] = []  # the text column of each open item of the section, outermost first
     under = paragraph = False  # paragraph: the line before is text that a line of text continues
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
-    for number, text in enumerate((body or "").expandtabs(4).splitlines(), 1):
+    opened = 0  # the indent of the open fence or HTML block's first line
+    # CommonMark ends a line only at \n, \r or both; str.splitlines also ends one at \v, \f, \x85 and others.
+    for number, text in enumerate(re.split(r"\r\n|\r|\n", (body or "").expandtabs(4)), 1):
+        if (fence or html) and text.strip(" \t") and len(text) - len(text.lstrip(" ")) < opened:
+            # Inside an item the block ends with the item, and at the top level it does not: no telling which.
+            raise Unreadable(number, text)
         if fence:  # a fence ends at a line of at least as many of its own character
             if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
                 fence = ""
@@ -540,13 +559,21 @@ def requirements(body: str | None) -> list[str]:
             continue
         depth = sum(column <= indent for column in columns)  # the open items the line is indented into
         marker = MARKER.match(line) if indent - (columns[depth - 1] if depth else 0) < 4 else None
+        marker = None if BREAK.fullmatch(line) else marker  # * * * is a break, not an item
+        rest = line
+        while (inner := MARKER.match(rest)) and not BREAK.fullmatch(rest):
+            rest = rest[inner.end():].lstrip(" ")
+        if marker and hides(rest):  # a fence or HTML block opened on an item's marker line ends with the item
+            raise Unreadable(number, text)
         if under and (depth or marker or line.startswith(">") or paragraph and SETEXT.fullmatch(line)):
             content = line[marker.end():] if marker else ""
             if marker and content.strip() and not content.startswith(" ") and not opens(content) and not (
                     depth == len(columns) and paragraph and int(marker.group(1) or 1) != 1):
                 del columns[depth:]
                 columns.append(indent + marker.end())
-                found.append(re.sub(r"\A\[[ xX]\][ \t]+", "", content).strip())
+                found.append(re.sub(r"\A\[[ xX]\](?:[ \t]+|\Z)", "", content.strip()).strip())
+                if not found[-1]:  # a task box with no text
+                    raise Unreadable(number, text)
                 paragraph = True
             elif depth and paragraph and not opens(line):
                 found[-1] += " " + line.strip()
@@ -556,10 +583,11 @@ def requirements(body: str | None) -> list[str]:
         start = indent < 4 and (next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
                                 or ((None, BLANK) if not paragraph and TAG_LINE.fullmatch(line) else None))
         if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
-            fence = opening.group()
+            fence, opened = opening.group(), indent
         elif start:
             begin, end = start
             html = None if begin and end is not BLANK and end.search(line, begin.match(line).end()) else end
+            opened = indent
         elif indent < 4 and (heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line)):
             if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
                 under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
@@ -681,10 +709,16 @@ class Draw:
             return None
         number = closes[0]["number"]
         issue = self.gh(label, json.loads, "issue", "view", str(number), "--repo", repo["repo"], "--json", "title,body")
-        if not has_criteria(issue.get("body")):
+        try:
+            required = requirements(issue.get("body"))
+        except Unreadable:
+            self.refused.add((repo["repo"], number))
+            return None
+        if not required:
             return None
         return {"label": label, "ticket": number, "bucket": bucket, "size": size, "title": issue["title"],
-                "body": issue["body"], "pr": pr, "session": opener["log"].stem, "model": opener["model"],
+                "body": issue["body"], "requirements": required, "pr": pr, "session": opener["log"].stem,
+                "model": opener["model"],
                 "repo": repo, "merge": view["mergeCommit"]["oid"], "created": view["createdAt"],
                 "branch": view["headRefName"], "fork": view["isCrossRepository"], "source": opener["log"],
                 "transcripts": opener["transcripts"]}
@@ -775,6 +809,7 @@ class Draw:
         print(f"Vetoed {vetoed} PRs of the listed repos: a call that may have opened each, or another PR of the "
               f"session that opened it, keeps it out of the pool.")
         tickets: dict[tuple[str, int], dict | None] = {}
+        self.refused: set[tuple[str, int]] = set()  # the tickets whose list the reader refuses
         for (repo, pr), found in sorted(touched.items()):
             if repo not in repos or not alone((repo, pr), found, ()):
                 continue
@@ -788,6 +823,8 @@ class Draw:
             if candidate:
                 key = (repo, candidate["ticket"])
                 tickets[key] = None if key in tickets else candidate  # a ticket with two PRs has no PR of its own
+        print(f"Refused {len(self.refused)} tickets of the listed repos: a list under a criteria heading that the draw "
+              f"cannot read with certainty keeps each out of the pool.")
         used = self.used()
         buckets: dict[str, list[dict]] = {name: [] for name in BUCKETS}
         for _, found in sorted(tickets.items()):  # by repo and ticket, so the repo list's order changes nothing
@@ -1013,8 +1050,8 @@ class Draw:
                 return EXIT_SHORT
             for candidate in kept:
                 candidate["log"] = self.save_log(candidate)
-            fields = ("label", "ticket", "bucket", "size", "title", "body", "base_commit", "ready_commit", "model",
-                      "pr", "session", "log", "check_output")
+            fields = ("label", "ticket", "bucket", "size", "title", "body", "requirements", "base_commit",
+                      "ready_commit", "model", "pr", "session", "log", "check_output")
             number = 1 + max(self.sets(), default=0)
             path = self.state / f"replay-set-{number}.json"
             scan.write_private(path, json.dumps({

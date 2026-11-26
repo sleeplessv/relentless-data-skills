@@ -4,8 +4,7 @@ Standard library only, like the script itself. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-Nothing here ever talks to a warehouse: the git call in the packages check
-and the `<runner> debug` call behind --connect are mocked/stubbed. The
+Package checks use throwaway projects, and the live connection command is stubbed. The
 preflight's stdout format is asserted deliberately — agents parse it, so it
 is an interface, not an implementation detail.
 """
@@ -240,32 +239,120 @@ class PackagesCheckTests(unittest.TestCase):
 
     def test_manifest_without_dbt_packages_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "packages.yml").write_text("packages: []")
+            (Path(tmp) / "packages.yml").write_text("packages:\n  - local: ../dep")
             status, msg = preflight.check_packages(Path(tmp))
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("<runner> deps", msg)
 
     def test_missing_dbt_packages_names_context_runner(self):
         with tempfile.TemporaryDirectory() as tmp:
-            (Path(tmp) / "packages.yml").write_text("packages: []")
+            (Path(tmp) / "packages.yml").write_text("packages:\n  - local: ../dep")
             status, msg = preflight.check_packages(Path(tmp), "uv run dbt")
         self.assertEqual(status, preflight.FAIL)
         self.assertIn("`uv run dbt deps`", msg)
 
-    def test_clean_lockfile_ok(self):
+    def test_dependency_manifest_distinguishes_packages_from_mesh_projects(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "package-lock.yml").write_text("packages: []")
+            manifest = root / "dependencies.yml"
+            for value, expected in [
+                ("projects:\n  - name: upstream", preflight.SKIP),
+                ("  projects:\n    - name: upstream\n      packages: [nested]", preflight.SKIP),
+                ("packages: [ ] # no packages", preflight.SKIP),
+                ("packages:  # installed by dbt deps\n- local: ../dep", preflight.FAIL),
+                ("packages: [{local: ../dep}]", preflight.FAIL),
+            ]:
+                with self.subTest(value=value):
+                    manifest.write_text(value)
+                    status, _ = preflight.check_packages(root)
+                    self.assertEqual(status, expected)
+
+    def test_packages_install_path_is_relative_to_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dependencies.yml").write_text("packages:\n  - local: ../dep")
+            (root / "dbt_project.yml").write_text(
+                'packages-install-path: "vendor packages" # local install'
+            )
             (root / "dbt_packages").mkdir()
-            clean = types.SimpleNamespace(returncode=0, stdout=b"")
-            with mock.patch.object(subprocess, "run", return_value=clean):
-                status, _ = preflight.check_packages(root)
-        self.assertEqual(status, preflight.OK)
+            status, msg = preflight.check_packages(root)
+            self.assertEqual(status, preflight.FAIL)
+            self.assertIn("vendor packages", msg)
+            (root / "vendor packages" / "dep").mkdir(parents=True)
+            self.assertEqual(preflight.check_packages(root)[0], preflight.OK)
+
+    def test_flow_root_mappings_require_manual_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "dbt_packages" / "dep").mkdir(parents=True)
+            for manifest, project, unknown in (
+                ("{packages: [{local: ../dep}]}", "name: demo", "packages.yml"),
+                ("packages: [{local: ../dep}]", "{packages-install-path: dbt_packages}", "dbt_project.yml"),
+            ):
+                with self.subTest(unknown=unknown):
+                    (root / "packages.yml").write_text(manifest)
+                    (root / "dbt_project.yml").write_text(project)
+                    status, msg = preflight.check_packages(root)
+                    self.assertEqual(status, preflight.SKIP)
+                    self.assertIn(unknown, msg)
+                    self.assertIn("before running dbt", msg)
+
+    def test_known_dependency_missing_despite_unreadable_manifest(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "packages.yml").write_text("{packages: [{local: ../dep}]}")
+            (root / "package-lock.yml").write_text("packages: [{local: ../dep}]")
+            status, msg = preflight.check_packages(root)
+            self.assertEqual(status, preflight.FAIL)
+            self.assertIn("dbt_packages/ is missing", msg)
+
+    def test_templated_package_directory_requires_manual_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "packages.yml").write_text("packages: [{local: ../dep}]")
+            (root / "dbt_project.yml").write_text(
+                """packages-install-path: "{{ env_var('PACKAGE_DIR') }}" """
+            )
+            status, msg = preflight.check_packages(root)
+            self.assertEqual(status, preflight.SKIP)
+            self.assertIn("verify the resolved directory", msg)
+
+    def test_lockfile_status_in_a_git_project(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+
+            def git(*args):
+                subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+
+            git("init", "-q")
+            project = root / "analytics"
+            (project / "dbt_packages").mkdir(parents=True)
+            lock = project / "package-lock.yml"
+            (project / "packages.yml").write_text("packages: [{local: ../dep}]")
+            (root / lock.name).write_text("unrelated untracked lock")
+            self.assertEqual(preflight.check_packages(project),
+                             (preflight.OK, "dbt_packages/ present"))
+            lock.write_text("packages: [{local: ../dep}]")
+            git("add", "analytics/package-lock.yml")
+            git("-c", "user.name=test", "-c", "user.email=test@example.org",
+                "-c", "commit.gpgsign=false", "commit", "-qm", "Track project lock")
+            self.assertEqual(preflight.check_packages(project),
+                             (preflight.OK, "dbt_packages/ present and package-lock.yml clean"))
+
+            (project / "packages.yml").write_text("{packages: [{local: ../dep}]}")
+            lock.unlink()
+            for staged in (False, True):
+                with self.subTest(staged=staged):
+                    if staged:
+                        git("add", "-u")
+                    status, msg = preflight.check_packages(project)
+                    self.assertEqual(status, preflight.FAIL)
+                    self.assertIn("package-lock.yml has uncommitted changes", msg)
 
     def test_dirty_lockfile_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            (root / "package-lock.yml").write_text("packages: []")
+            (root / "package-lock.yml").write_text("packages:\n  - local: ../dep")
             (root / "dbt_packages").mkdir()
             dirty = types.SimpleNamespace(
                 returncode=0, stdout=b" M package-lock.yml\n"
@@ -325,6 +412,16 @@ class ProfileCheckTests(unittest.TestCase):
                 )
         self.assertEqual(status, preflight.OK)
         self.assertIn(str(project.profiles), msg)
+
+    def test_recorded_relative_profiles_path_uses_the_dbt_project_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            profile_dir = root / "config with spaces"
+            profile_dir.mkdir()
+            (profile_dir / "profiles.yml").write_text(PROFILES_YML)
+            ctx = {"profiles_path": "config with spaces/profiles.yml",
+                   "profile": "corp_dt", "target": "local"}
+            self.assertEqual(preflight.check_profile(ctx, root)[0], preflight.OK)
 
     def test_dbt_profiles_dir_beats_project_root(self):
         with contextlib.ExitStack() as stack:
@@ -473,9 +570,15 @@ class MainOutputTests(unittest.TestCase):
         version = types.SimpleNamespace(
             returncode=0, stdout=FUSION_VERSION, stderr=""
         )
-        patcher = mock.patch.object(subprocess, "run", return_value=version)
-        self.run = patcher.start()
-        self.addCleanup(patcher.stop)
+        self.run = mock.Mock(return_value=version)
+        real_run = subprocess.run
+
+        def run(argv, **kwargs):
+            if argv[0] == "git":
+                return real_run(argv, **kwargs)
+            return self.run(argv, **kwargs)
+
+        self.enterContext(mock.patch.object(subprocess, "run", run))
 
     def test_all_green(self):
         with contextlib.ExitStack() as stack:
@@ -489,6 +592,27 @@ class MainOutputTests(unittest.TestCase):
         for check in ("env:", "key:", "packages:", "profile:", "runner:"):
             self.assertIn(check, out)
         self.assertIn("OK   runner: `uv run dbt --version` reports v2", out)
+
+    def test_indented_dependency_uses_indented_root_install_path(self):
+        with contextlib.ExitStack() as stack:
+            project = TempProject(stack)
+            key = stack.enter_context(tempfile.NamedTemporaryFile(suffix=".p8"))
+            stack.enter_context(mock.patch.dict(os.environ, dict(
+                self.ENV, SNOWFLAKE_PRIVATE_KEY_PATH=key.name
+            )))
+            (project.root / "packages.yml").write_text(
+                "---\n# local dependency\n  packages:\n    - local: ../dep\n"
+            )
+            (project.root / "dbt_project.yml").write_text(
+                "  name: local\n  packages-install-path: vendor\n  version: '1.0'\n"
+            )
+            code, out = run_main(project.root)
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL packages: vendor/ is missing", out)
+            (project.root / "vendor").mkdir()
+            code, out = run_main(project.root)
+            self.assertEqual(code, 0)
+            self.assertIn("OK   packages: vendor/ present", out)
 
     def test_runner_mismatch_fails_preflight(self):
         self.run.return_value = types.SimpleNamespace(
@@ -552,6 +676,15 @@ class ConnectTests(unittest.TestCase):
         self.assertIn("OK connect", out)
         self.assertEqual(run.call_args[0][0],
                          ["uv", "run", "dbt", "debug", "--target", "local"])
+
+    def test_connect_uses_context_profile_and_recorded_directory(self):
+        ctx = dict(self.CTX, profile="analytics",
+                   profiles_path="config with spaces/profiles.yml")
+        _, _, run = self._run(ctx=ctx, return_value=types.SimpleNamespace(returncode=0))
+        self.assertEqual(run.call_args.args[0], [
+            "uv", "run", "dbt", "debug", "--target", "local", "--profile", "analytics",
+            "--profiles-dir", str(Path("config with spaces").resolve()),
+        ])
 
     def test_path_runner(self):
         ok = types.SimpleNamespace(returncode=0)

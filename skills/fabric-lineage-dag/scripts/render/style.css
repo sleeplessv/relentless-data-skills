@@ -205,7 +205,7 @@ figcaption { font-size: 12px; color: var(--text-2); margin-top: 6px; max-width: 
 .stat b { font-family: var(--font-display); font-size: 18px; font-weight: 600; }
 
 /* Main */
-.main { flex: 1; display: flex; min-height: 0; }
+.main { position: relative; flex: 1; display: flex; min-height: 0; }
 .canvas { flex: 1; position: relative; overflow: hidden; background: var(--bg); min-width: 0; }
 .canvas svg.graph { width: 100%; height: 100%; display: block; touch-action: none; }
 .canvas .toolbar { position: absolute; top: 8px; left: 8px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
@@ -269,7 +269,6 @@ figcaption { font-size: 12px; color: var(--text-2); margin-top: 6px; max-width: 
 .details ul.links .k { color: var(--text-3); font-family: var(--font-mono); font-size: 10.5px; }
 .details .empty { color: var(--text-3); padding: 24px 0; text-align: center; }
 .details .actions { display: flex; gap: 6px; margin: 8px 0; flex-wrap: wrap; }
-.details-toggle { position: absolute; right: 8px; top: 8px; }
 .sched { background: var(--surface-2); border-radius: 4px; padding: 6px 8px; font-size: 12.5px; }
 .sched.off { opacity: .7; }
 .more { color: var(--text-3); font-size: 12px; }

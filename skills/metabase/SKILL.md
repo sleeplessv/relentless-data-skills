@@ -7,9 +7,8 @@ description: Use when working with Metabase, reading or editing a question/card,
 
 Operate a Metabase instance through its REST API via the `mb` wrapper.
 
-**A card is not a file, it is live.** Editing card *N* changes what every
-dashboard viewer sees, immediately, with no deploy step and no undo in the UI.
-So reads run freely, and every mutation captures a **restore point** first.
+Editing a card changes its dashboards immediately. Metabase History can revert
+saved versions. The wrapper also takes a local **restore point** before updates.
 
 ## First action, every invocation
 
@@ -61,11 +60,10 @@ not SQL. `mb sql-of <id> --compiled` substitutes them.
 
 ## The source chain
 
-Cards stack: a card's source can be a table **or another card**, so a dashboard
-number may sit three cards from the tables. Trace the whole chain before
-concluding anything about where a number comes from. `mb deps <id>` walks it
-downward; `--deep` adds transitive dependents and a SQL-similarity scan. Use it
-before any edit. Two traps live in this chain:
+To trace a dashboard number upstream, inspect each source card with `mb card <id>`.
+Follow MBQL source cards (including joins) and native SQL template tags of type
+`card` by their `card-id`. Before editing, use `mb deps <id>` to find downstream
+cards and dashboards. `--deep` adds transitive card dependents and a SQL-similarity scan.
 
 - **A frozen copy.** Some cards inline a *compiled snapshot* of an upstream
   card's SQL as native text rather than holding a live reference. It looks
@@ -94,8 +92,8 @@ filters, and treat a non-zero exit as a stop.
 
 ## Mutating anything, restore point then verify
 
-Every write goes through the wrapper, which captures a restore point into
-`.metabase/restore-points/` first. Never bypass it with raw `curl`.
+Every write goes through the wrapper. Before editing an existing item, capture a
+restore point in `.metabase/restore-points/`. Both update commands do this automatically.
 
 1. **Establish blast radius.** `mb deps <id> --deep` shows which dashboards
    display it, which cards are built on it, and which may be frozen copies.

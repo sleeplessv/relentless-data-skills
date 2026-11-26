@@ -7,9 +7,9 @@ metadata:
 
 # Fabric lineage DAG
 
-The main thread **coordinates**: it fixes the contract, fans out five extractors in parallel, applies their shared `lineage_common.py` patches, then dispatches merge, render, copy pass, and publishes. Every dispatched agent gets the scratchpad path, `--repo`, the id contract below, and the reference file for its step. Scripts run from the run's own copy in `<scratch>/scripts/` (made in Step 1) with `uv run --python 3.13 --no-project` (stdlib; plain `python3` works if it is 3.13 or newer) and the render step with Node. `<skill-dir>` is the installed skill: agents read it and never edit it; every script patch lands in `<scratch>/scripts/` and is logged in `<scratch>/patches.md` for the user to upstream.
+The main thread **coordinates**: it fixes the contract, fans out five extractors in parallel, applies their shared `lineage_common.py` patches, then dispatches merge and render, reviews the copy and delivers the graph. Every dispatched agent gets the scratchpad path, `--repo`, the id contract below, and the reference file for its step. Scripts run from the run's own copy in `<scratch>/scripts/` (made in Step 1) with `uv run --python 3.13 --no-project` (stdlib; plain `python3` works if it is 3.13 or newer) and the render step with Node. `<skill-dir>` is the installed skill: agents read it and never edit it; every script patch lands in `<scratch>/scripts/` and is logged in `<scratch>/patches.md` for the user to upstream.
 
-**Input:** a Fabric workspace exported to Git (`*.DataPipeline`, `*.Notebook`, `*.Lakehouse`, `*.SemanticModel`, `*.Report` folders with `.platform` files). **Output:** `lineage.html` published as an artifact, plus `validation-report.md` in the scratchpad.
+**Input:** a Fabric workspace exported to Git (`*.DataPipeline`, `*.Notebook`, `*.Lakehouse`, `*.SemanticModel`, `*.Report` folders with `.platform` files). **Output:** a verified `lineage.html` and `validation-report.md` in the scratchpad, plus a published URL when the Artifact tool is available.
 
 ## Id contract (every extractor uses exactly this)
 
@@ -78,12 +78,12 @@ Done when: `test.js` prints `PASS` (no console errors, no external hosts beyond 
 
 ## Step 5: Copy pass
 
-Run `unslop` over the page's user-facing strings (title, subtitle, explainer caption, gap bullets, notices, empty states) and rebuild.
+Review the title, subtitle, explainer caption, gap bullets, notices and empty states. Use `unslop` when available. Otherwise edit them directly for clarity. Rebuild after edits.
 
 Done when: the rebuilt page still passes `test.js`.
 
-## Step 6: Publish
+## Step 6: Deliver the graph
 
-Load `artifact-design`, then publish `lineage.html` with the Artifact tool: noun-phrase title, one-sentence description, an `icon` on the first publish (omit it on redeploys so the artifact keeps it), a version label. Relay the artifact URL, the validation totals, the top gaps, and the script patches from `<scratch>/patches.md` to the user.
+Return links to the verified `<scratch>/lineage.html` and `<scratch>/validation-report.md`. When the Artifact tool is available, also publish the page and return its URL. Follow `artifact-design` if installed. Otherwise use a noun-phrase title, a one-sentence description and a version label. Supply an icon on the first publish only.
 
-Done when: the URL is returned and the message names the numbers the page shows (nodes, edges, live, forks, unresolved) and the gap headlines.
+The handoff includes the page's counts (nodes, edges, live, forks, unresolved), the gap headlines and the script patches from `<scratch>/patches.md`.

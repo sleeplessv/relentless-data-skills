@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +26,12 @@ def stamp(minute: float) -> str:
     """A log timestamp `minute` minutes after a fixed start, in the log's format."""
     moment = datetime(2026, 1, 5, 10, tzinfo=timezone.utc) + timedelta(minutes=minute)
     return moment.isoformat(timespec="milliseconds").replace("+00:00", "Z")
+
+
+def figures(given: int, output: int, write: int, read: int) -> dict[str, int]:
+    """A row's token columns."""
+    return {"input_tokens": given, "output_tokens": output, "cache_write_tokens": write, "cache_read_tokens": read,
+            "total_tokens": given + output + write + read}
 
 
 class Log:
@@ -75,7 +82,8 @@ class Log:
             self.lines.append(line)
         return message_id
 
-    def agent_call(self, minute: float, usage: tuple[int, int, int, int], tool_use_id: str, prompt: str) -> str:
+    def agent_call(self, minute: float, usage: tuple[int, int, int, int] | None, tool_use_id: str,
+                   prompt: str) -> str:
         return self.assistant(minute, usage, content=[{
             "type": "tool_use", "id": tool_use_id, "name": "Agent",
             "input": {"description": "helper", "prompt": prompt, "subagent_type": "general-purpose"}}])
@@ -120,9 +128,9 @@ class TestScan(unittest.TestCase):
         return {**os.environ, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
                 "CLAUDE_CONFIG_DIR": str(self.config)}
 
-    def scan(self, *args: str) -> subprocess.CompletedProcess[str]:
+    def scan(self, *args: str, umask: int = -1) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, str(SCAN), *args], cwd=self.root, env=self.environment(),
-                              text=True, capture_output=True)
+                              text=True, capture_output=True, umask=umask)
 
     def rows(self, state: Path | None = None) -> list[dict]:
         path = (state or self.state) / "scan-rows.jsonl"
@@ -233,20 +241,29 @@ class TestScan(unittest.TestCase):
         child = Log(self.session, "adraft").user(1.5, "Plan the work.")
         child.assistant(2, (1, 10, 100, 1000), message_id=planned)
         drafted = child.agent_call(4, (2, 20, 200, 2000), "toolu_grandchild", "Fork: check part one.")
-        self.helper("adraft", "Draft", child, "toolu_child", isFork=True, spawnDepth=2, parentAgentId="aplan")
         grandchild = Log(self.session, "acheck").user(1.5, "Plan the work.")
         grandchild.assistant(2, (1, 10, 100, 1000), message_id=planned)
         grandchild.assistant(4, (2, 20, 200, 2000), message_id=drafted)
         grandchild.assistant(5, (3, 30, 300, 3000))
         self.helper("acheck", "Check", grandchild, "toolu_grandchild",
                     isFork=True, spawnDepth=3, parentAgentId="adraft")
+        for depth in ({"spawnDepth": 2}, {}):
+            with self.subTest(child=depth):
+                self.state = self.root / f"state-{len(depth)}"
+                self.helper("adraft", "Draft", child, "toolu_child", isFork=True, parentAgentId="aplan", **depth)
 
-        self.scan(str(self.log_path()))
+                result = self.scan(str(self.log_path()))
 
-        row = self.only_row()
-        self.assertEqual(row["total_tokens"], 4 + 2222 + 2222 + 3333)
-        self.assertEqual([(helper["id"], helper["total_tokens"]) for helper in row["helpers"]],
-                         [("acheck", 3333), ("adraft", 2222), ("aplan", 2222)])
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(self.rows(), [{
+                    "session": self.session, **figures(8, 71, 701, 7001), "active_minutes": 5.0,
+                    "auto_compactions": 0, "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": [
+                        {"id": "acheck", "description": "Check", "brief_head": "Fork: check part one.",
+                         **figures(3, 30, 300, 3000)},
+                        {"id": "adraft", "description": "Draft", "brief_head": "Fork: draft part one.",
+                         **figures(2, 20, 200, 2000)},
+                        {"id": "aplan", "description": "Plan", "brief_head": "Plan the work.",
+                         **figures(2, 20, 200, 2000)}]}])
 
     def test_brief_head_is_cut_to_its_first_200_characters(self) -> None:
         main = Log(self.session).user(0, "Go.")
@@ -495,16 +512,26 @@ class TestScan(unittest.TestCase):
 
         self.assertEqual(sorted(row["session"] for row in self.rows()), sorted([other, self.session]))
 
-    def test_the_rows_file_and_a_new_machine_directory_are_owner_only(self) -> None:
+    def test_the_machine_directory_its_rows_and_its_lock_are_owner_only_under_any_umask(self) -> None:
         log = Log(self.session).user(0, "Go.")
         log.assistant(1, (1, 1, 1, 1))
         log.write(self.log_path())
+        for umask in (0o022, 0o077):
+            for existing in (False, True):
+                with self.subTest(umask=oct(umask), existing=existing):
+                    self.state = self.root / f"state-{umask:o}-{existing}"
+                    if existing:  # made by an earlier version, with looser modes
+                        self.state.mkdir()
+                        self.state.chmod(0o755)
+                        (self.state / "scan-rows.lock").touch()
+                        (self.state / "scan-rows.lock").chmod(0o644)
 
-        self.scan(str(self.log_path()))
-        self.scan(str(self.log_path()))
+                    result = self.scan(str(self.log_path()), umask=umask)
 
-        for path in (self.state, self.state / "scan-rows.jsonl"):
-            self.assertEqual(path.stat().st_mode & 0o077, 0, path)
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual({path.name: oct(stat.S_IMODE(path.stat().st_mode))
+                                      for path in (self.state, *self.state.iterdir())},
+                                     {self.state.name: "0o700", "scan-rows.jsonl": "0o600", "scan-rows.lock": "0o600"})
 
     def test_a_helper_without_a_description_takes_its_dispatch_description(self) -> None:
         main = Log(self.session).user(0, "Go.")
@@ -532,6 +559,25 @@ class TestScan(unittest.TestCase):
         self.assertIn(":2:", result.stderr)
         self.assertEqual(self.only_row()["total_tokens"], 12)
 
+    def test_a_line_nested_too_deep_is_skipped_while_cut_off_at_the_end_and_refused_once_ended(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.log_path())
+        with self.log_path().open("a") as file:
+            file.write("[" * 12000)
+        cut_off = self.scan(str(self.log_path()))
+        self.assertEqual((cut_off.returncode, cut_off.stderr), (0, ""))
+        self.assertEqual(self.only_row()["total_tokens"], 4)
+        with self.log_path().open("a") as file:
+            file.write("\n")
+        self.state = self.root / "state-ended"
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stdout, result.stderr),
+                         (1, "", f"{self.log_path()}:3: not a JSON line\n"))
+        self.assertFalse(self.state.exists())
+
     def test_a_last_line_cut_off_mid_write_is_skipped(self) -> None:
         log = Log(self.session).user(0, "Go.")
         log.assistant(1, (1, 1, 1, 1))
@@ -550,6 +596,228 @@ class TestScan(unittest.TestCase):
         self.assertEqual(result.returncode, 0)
         self.assertIn("Usage:", result.stdout)
         self.assertFalse(self.state.exists())
+
+
+    def test_a_parent_chain_that_loops_names_itself_or_names_no_helper_still_gives_every_response_once(self) -> None:
+        main = Log(self.session).user(0, "Build it.")
+        main.assistant(1, (1, 1, 1, 1))
+        main.write(self.log_path())
+        for agent, parent_id, usage in (("aloop", "bloop", (1, 0, 0, 0)), ("bloop", "aloop", (0, 1, 0, 0)),
+                                        ("aself", "aself", (0, 0, 1, 0)), ("aorphan", "agone", (0, 0, 0, 1))):
+            log = Log(self.session, agent).user(2, "Work.")
+            log.assistant(3, usage)
+            self.helper(agent, agent, log, "toolu_" + agent, parentAgentId=parent_id, spawnDepth="not read")
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows(), [{
+            "session": self.session, **figures(2, 2, 2, 2), "active_minutes": 3.0, "auto_compactions": 0,
+            "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": [
+                {"id": "aloop", "description": "aloop", "brief_head": "Work.", **figures(1, 0, 0, 0)},
+                {"id": "aorphan", "description": "aorphan", "brief_head": "Work.", **figures(0, 0, 0, 1)},
+                {"id": "aself", "description": "aself", "brief_head": "Work.", **figures(0, 0, 1, 0)},
+                {"id": "bloop", "description": "bloop", "brief_head": "Work.", **figures(0, 1, 0, 0)}]}])
+
+    def test_a_timestamp_that_is_not_an_iso_time_stops_the_scan_naming_the_log(self) -> None:
+        for number, (stamp, usage) in enumerate((("yesterday", (1, 1, 1, 1)), (1767607200, (1, 1, 1, 1)),
+                                                 ("yesterday", None))):
+            with self.subTest(timestamp=stamp, usage=usage):
+                self.state = self.root / f"state-{number}"
+                log = Log(self.session).user(0, "Go.")
+                log.assistant(1, usage)
+                log.lines[0]["timestamp"] = stamp
+                log.write(self.log_path())
+
+                result = self.scan(str(self.log_path()))
+
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (
+                    1, "", f"{self.log_path()}: a timestamp that is not an ISO time\n"))
+                self.assertFalse(self.state.exists())
+
+    def test_a_line_with_no_timestamp_or_a_null_one_is_left_out(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.assistant(50, (1, 1, 1, 1))
+        log.lines[1]["timestamp"] = None
+        del log.lines[2]["timestamp"]
+
+        result = self.scan(str(log.write(self.log_path())))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [{
+            "session": self.session, **figures(2, 2, 2, 2), "active_minutes": 0.0, "auto_compactions": 0,
+            "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}])
+
+    def test_times_with_no_time_zone_anywhere_are_read(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(5, (1, 1, 1, 1))
+        for line in log.lines:
+            line["timestamp"] = line["timestamp"].removesuffix("Z")
+
+        result = self.scan(str(log.write(self.log_path())))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual(self.rows(), [{
+            "session": self.session, **figures(1, 1, 1, 1), "active_minutes": 5.0, "auto_compactions": 0,
+            "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}])
+
+    def test_times_with_and_without_a_time_zone_stop_the_scan_naming_the_log_that_breaks_the_pattern(self) -> None:
+        main = Log(self.session).user(0, "Go.")
+        main.agent_call(1, (1, 1, 1, 1), "toolu_one", "Look.")
+        main.write(self.log_path())
+        helper = Log(self.session, "aone").user(1.5, "Look.")
+        helper.assistant(2, (1, 1, 1, 1))
+        helper.lines[1]["timestamp"] = "2026-01-05T10:02:00.000"
+        self.helper("aone", "Look", helper, "toolu_one")
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (
+            1, "", f"{self.project / self.session / 'subagents' / 'agent-aone.jsonl'}: "
+                   "times with and without a time zone in one session\n"))
+        self.assertFalse(self.state.exists())
+
+    def test_a_helpers_meta_json_it_cannot_read_stops_the_scan_naming_the_file(self) -> None:
+        meta = self.project / self.session / "subagents" / "agent-aone.meta.json"
+        # A session with no token counts is read the same way.
+        for usage in ((1, 1, 1, 1), None):
+            main = Log(self.session).user(0, "Go.")
+            main.agent_call(1, usage, "toolu_one", "Look.")
+            main.write(self.log_path())
+            helper = Log(self.session, "aone").user(1.5, "Look.")
+            helper.assistant(2, usage)
+            self.helper("aone", "Look", helper, "toolu_one")
+            whole = meta.read_bytes()
+            for number, (content, error) in enumerate((
+                    (whole[:20], "not a JSON object"), (b"[]", "not a JSON object"),
+                    (b'{"description": "Look \xff"}', "not a JSON object"),
+                    ('{"description": "Look"}'.encode("utf-16"), "not a JSON object"),
+                    (b"[" * 12000, "not a JSON object"),
+                    (b'{"parentAgentId": 7}', "parentAgentId is neither text nor null"),
+                    (b'{"toolUseId": ["toolu_one"]}', "toolUseId is neither text nor null"),
+                    (b'{"description": {}}', "description is neither text nor null"))):
+                with self.subTest(usage=usage, content=content[:30]):
+                    self.state = self.root / f"state-{usage is None}-{number}"
+                    meta.write_bytes(content)
+
+                    result = self.scan(str(self.log_path()))
+
+                    self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                     (1, "", f"{meta}: {error}\n"))
+                    self.assertFalse(self.state.exists())
+
+    def test_an_argument_that_starts_with_a_dash_and_is_no_jsonl_path_prints_usage_and_exits_2(self) -> None:
+        usage = self.scan("--help").stdout
+        # A log at the path the first argument names, relative to the folder the scan runs in.
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.root / "--state-dir=out" / "x")
+        for number, args in enumerate((["--state-dir=out/x"], ["-"], ["-x"], ["--help", "x"], ["x", "--help"])):
+            with self.subTest(args=args):
+                self.state = self.root / f"state-{number}"
+                result = self.scan(*args)
+
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (2, "", usage))
+                self.assertFalse(self.state.exists())
+
+    def test_a_jsonl_path_that_starts_with_a_dash_is_scanned(self) -> None:
+        result = self.scan("-x.jsonl")
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assert_blank_row("-x")
+
+    def test_a_rows_file_line_that_is_not_a_json_object_is_kept_and_named(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.log_path())
+        self.state.mkdir()
+        rows = self.state / "scan-rows.jsonl"
+        session = self.session.encode()
+        # Line number, bytes, and whether the scan names it. Its last line has no newline, as a write cut off
+        # would leave it.
+        lines = [
+            (1, b'{"session": "other", "total_tokens": 4}\r', False), (2, b"[]", True), (3, b"not json", True),
+            (4, b"", True), (5, b" \t", True), (6, b'{"note": "no session"}', False), (7, b"\xff\xfe cut", True),
+            (8, b"torn\rinside\r", True), (9, b'{"session": "' + session + b'", "note": "\xff"}', True),
+            (10, b"[" * 12000, True), (12, b'{"session": "x", "tot', True)]
+        replaced = b'{"session": "' + session + b'", "total_tokens": 1}\r'
+        rows.write_bytes(b"\n".join(data for _, data, _ in lines[:10]) + b"\n" + replaced + b"\n" + lines[10][1])
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stderr), (0, "".join(
+            f"{rows}:{number}: not a JSON object, kept as it is\n" for number, _, named in lines if named)))
+        row = {"session": self.session, **figures(1, 1, 1, 1), "active_minutes": 1.0, "auto_compactions": 0,
+               "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}
+        self.assertEqual(rows.read_bytes(), b"".join(data + b"\n" for _, data, _ in lines)
+                         + json.dumps(row).encode() + b"\n")
+
+    def test_a_renamed_copy_of_a_log_is_keyed_by_the_last_session_id_in_it(self) -> None:
+        later = str(uuid.uuid4())
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.log_path())
+        copy = Log(later).user(2, "Go on.")
+        copy.assistant(3, (2, 2, 2, 2))
+        copy.lines[:0] = log.lines
+        copy.write(self.root / "saved" / "copy.jsonl")
+
+        for path in (self.log_path(), self.root / "saved" / "copy.jsonl"):
+            self.scan(str(path))
+
+        common = {"auto_compactions": 0, "typed_compactions": 0, "model": MODEL, "skills": [], "helpers": []}
+        self.assertEqual(self.rows(), [
+            {"session": self.session, **figures(1, 1, 1, 1), "active_minutes": 1.0, **common},
+            {"session": later, **figures(3, 3, 3, 3), "active_minutes": 3.0, **common}])
+
+    def test_a_log_with_no_session_id_is_keyed_by_the_files_name(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        for line in log.lines:
+            del line["sessionId"]
+
+        self.scan(str(log.write(self.root / "saved.jsonl")))
+
+        self.assertEqual(self.only_row()["session"], "saved")
+
+    def test_a_machine_directory_and_lock_reached_through_symlinks_are_made_owner_only(self) -> None:
+        log = Log(self.session).user(0, "Go.")
+        log.assistant(1, (1, 1, 1, 1))
+        log.write(self.log_path())
+        real = self.root / "real-state"
+        real.mkdir()
+        real.chmod(0o755)
+        lock = self.root / "real-lock"
+        lock.write_text("")
+        lock.chmod(0o644)
+        self.state.symlink_to(real)
+        (real / "scan-rows.lock").symlink_to(lock)
+
+        result = self.scan(str(self.log_path()))
+
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertEqual((oct(stat.S_IMODE(real.stat().st_mode)), oct(stat.S_IMODE(lock.stat().st_mode))),
+                         ("0o700", "0o600"))
+        self.assertTrue(self.state.is_symlink() and (real / "scan-rows.lock").is_symlink())
+
+    def test_help_gives_the_three_steps_of_the_rows_key_and_what_the_scan_refuses(self) -> None:
+        help_text = " ".join(self.scan("--help").stdout.split())
+
+        for sentence in (
+                "A log whose lines carry the file's name as a session id is keyed by the file's name.",
+                "Otherwise it is keyed by the session id of the last line that carries one, since a log's own "
+                "lines come after the lines it copied.",
+                "A log with no session id at all is keyed by the file's name.",
+                "A line of scan-rows.jsonl that is not a JSON object is kept as it is, and the scan names it on "
+                "standard error.",
+                "The scan stops with exit 1, one line on standard error and no row written when it cannot read an "
+                "input: a log line that is not JSON, unless it is the last line, cut off mid-write; a timestamp "
+                "that is not an ISO time, or one session's times with and without a time zone; or a helper's "
+                "meta.json that is not a JSON object, or whose parentAgentId, toolUseId or description is neither "
+                "text nor null."):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, help_text)
 
 
 if __name__ == "__main__":

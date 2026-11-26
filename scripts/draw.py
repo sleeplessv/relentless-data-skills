@@ -247,6 +247,9 @@ def label_name(number: int) -> str:
     return label
 
 
+LABEL = re.compile(r"[A-Z]+")  # every name label_name gives, and nothing else
+
+
 def generation_one(skills: list[str]) -> bool:
     # A plugin's skill may carry the plugin's name as a prefix, as in plugin:implement-ticket.
     return any(name.split(":")[-1] in GENERATION_ONE for name in skills)

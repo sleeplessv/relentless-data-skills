@@ -11,9 +11,10 @@ never run here. Every run uses a lock file of its own: CHECK_LOCK_FILE in the
 test's temporary folder, or the throwaway repository's own git directory.
 
 Tests wait on a file or on a process's exit, never on a sleep of fixed length.
-Where a test checks how long a run waited, it reads the bound from the times the
-run's output files were written, or from another run's timed-out exit, so a
-process that starts or is scheduled late cannot shorten what is measured.
+Where a test checks how long a run waited, it takes its bounds from the times the
+run's output files were written, from another run's timed-out exit, or from the
+test's own clock readings around the run. Where a bound leaves slack for a late
+start, late scheduling or rounding, the comment where it is set says how much.
 Every run sets TZ=UTC, so timestamps order the same in any zone.
 """
 from __future__ import annotations

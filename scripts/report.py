@@ -143,7 +143,7 @@ out of the token figures and counted, like one with no row.
     f"{SECOND_SET}. Over two sets or more, taken together, it appears at a difference of at least {TOGETHER} of the "
     f"tickets and does not appear below that. One set of 30 tickets gives {rounded_up(APPEARS, 30)} and "
     f"{rounded_up(UNDECIDED, 30)}; 60 tickets over two sets give {rounded_up(TOGETHER, 60)}. Sets that hold no "
-    "ticket give no verdict.", 78)}
+    "ticket give no verdict.", 78, break_on_hyphens=False)}
 
 Warning sign 2 is answered from the scan rows of {GENERATION_ONE}'s sessions,
 over every ticket of the sets. The extra cost is the total_tokens

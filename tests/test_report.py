@@ -810,7 +810,7 @@ class TestReport(unittest.TestCase):
             without[0], "Left out: scan-rows.jsonl lines that are no scan row: 1.", *without[1:]],
             f"report: {rows}:1: not a JSON object, left out.\n"))
 
-    def test_a_row_that_names_a_session_stops_the_report_beside_a_line_left_out(self) -> None:
+    def test_a_row_that_names_a_session_stops_the_report_and_the_line_left_out_before_it_is_still_named(self) -> None:
         self.world.baseline(20, 15)
         self.world.save()
         good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
@@ -818,14 +818,16 @@ class TestReport(unittest.TestCase):
         self.write_rows(good[0], b"[]", b"", wrong, *good[3:])
         # The wrong figure is on line 4: the damaged line 2 and the blank line 3 count as lines.
         result = self.world.report(save=False)
+        rows = self.world.state / "scan-rows.jsonl"
         self.assertEqual((result.returncode, result.stdout, result.stderr), (
-            1, "", f"report: {self.world.state}/scan-rows.jsonl:4: total_tokens is missing or of the wrong type.\n"))
+            1, "", f"report: {rows}:2: not a JSON object, left out.\n"
+                   f"report: {rows}:4: total_tokens is missing or of the wrong type.\n"))
 
     def test_blank_lines_of_the_rows_file_are_passed_over_and_not_counted(self) -> None:
         self.world.baseline(20, 15)
         clean = self.lines()
         good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
-        self.write_rows(b"", b"  ", *good, b"\t")
+        self.write_rows(b"", b"  ", *good, b"\t", "\u00a0\u2003".encode())
         result = self.world.report(save=False)
         self.assertEqual((result.returncode, result.stdout.splitlines(), result.stderr), (0, clean, ""))
 
@@ -848,13 +850,14 @@ class TestReport(unittest.TestCase):
     def test_help_states_which_lines_of_the_rows_file_are_left_out(self) -> None:
         text = self.world.report("--help").stdout
         self.assertIn(
-            "A line of scan-rows.jsonl is no row when the scan would not read it as a JSON\n"
-            "object (json_object in scripts/scan.py says which) or when it is an object whose\n"
-            "session is not text. The scan keeps such a line, and the report leaves it out: it\n"
-            "names the line once on standard error, with the file, the line number and the\n"
-            "reason, and prints on standard output how many lines it left out. A session whose\n"
-            "row was such a line is left out of the token figures and counted, like one with no\n"
-            "row.\n", text + "\n")
+            "A nonblank line of scan-rows.jsonl is no row when the scan would not read it as a\n"
+            "JSON object (json_object in scripts/scan.py says which) or when it is an object\n"
+            "whose session is not text. The scan keeps such a line, and the report leaves it\n"
+            "out: it names the line once on standard error, with the file, the line number and\n"
+            "the reason, as it reads the file, and prints on standard output how many lines it\n"
+            "left out. A line of nothing but whitespace is blank, and is passed over and not\n"
+            "counted. A session whose row was such a line is left out of the token figures and\n"
+            "counted, like one with no row.\n", text + "\n")
 
     def test_help_exits_0_and_bad_usage_exits_2(self) -> None:
         self.world.draw()

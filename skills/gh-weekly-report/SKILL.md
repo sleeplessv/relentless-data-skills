@@ -107,6 +107,9 @@ uv run --python 3.13 --no-project <skill-dir>/scripts/render.py --data <...>/wee
   user named a destination.
 - Copy `week.json` beside the report; it is the re-render receipt, so
   on tweak requests re-run render from it instead of re-collecting.
+  Rendering an older receipt moves known duplicate closes into their own
+  count in both weeks. Recovering reviews the old collector missed requires
+  collecting those weeks again.
 - The report embeds all data but pulls Tailwind and Chart.js from CDNs:
   offline, charts are skipped with a visible note and the page stays
   readable.

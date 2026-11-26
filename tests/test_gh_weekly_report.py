@@ -754,6 +754,35 @@ class TestRenderMainNarratives(unittest.TestCase):
 
 
 class TestInject(unittest.TestCase):
+    def test_render_reclassifies_duplicates_in_both_periods_of_an_old_receipt(self):
+        def closed(number, reason):
+            return {**issue(number, "alice", reason), "number": number,
+                    "repo": "acme/data", "url": f"https://github.com/acme/data/issues/{number}"}
+
+        week = tiny_week()
+        week["current"]["issues_resolved"] = [closed(9, "duplicate"), closed(3, "completed")]
+        week["previous"]["issues_resolved"] = [closed(2, "duplicate"), closed(1, "duplicate")]
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            data = root / "week.json"
+            receipt = json.dumps(week, indent=2)
+            data.write_text(receipt)
+            buckets = {i["key"]: "triage/review" for items in week["current"].values()
+                       for i in items}
+            (root / "buckets.json").write_text(json.dumps(buckets))
+            (root / "template").write_text(render.MARKER)
+            out = root / "report"
+            with contextlib.redirect_stdout(io.StringIO()):
+                render.main(["--data", str(data), "--buckets", str(root / "buckets.json"),
+                             "--template", str(root / "template"), "--out", str(out)])
+            self.assertEqual(data.read_text(), receipt)
+            rendered = json.loads(out.read_text())
+        for period, resolved, duplicates in (("current", [3], [9]), ("previous", [], [2, 1])):
+            self.assertEqual([i["number"] for i in rendered[period]["issues_resolved"]], resolved)
+            self.assertEqual([i["number"] for i in rendered[period]["issues_duplicate"]], duplicates)
+        self.assertEqual(rendered["current"]["issues_duplicate"][0],
+                         {**closed(9, "duplicate"), "bucket": "triage/review"})
+
     def test_data_lands_at_the_marker(self):
         html = render.inject("<script id=\"report-data\" "
                              "type=\"application/json\">__REPORT_DATA__</script>",

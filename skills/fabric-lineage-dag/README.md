@@ -59,7 +59,7 @@ npx skills add sleeplessv/relentless-data-skills/skills/fabric-lineage-dag
 ## Files
 
 - `SKILL.md`: the id contract and the six-step procedure (config, five
-  extractors, merge/validate, render, copy pass, publish).
+  extractors, merge/validate, render, copy pass, delivery).
 - `references/extractors.md`: per-source parsing rules and edge cases.
 - `references/validation.md`: merge rules and the report checklist.
 - `references/render.md`: UX spec, performance rules, design tokens,

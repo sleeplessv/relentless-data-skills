@@ -444,7 +444,7 @@ def main(argv: list[str]) -> int:
     if argv in (["-h"], ["--help"]):
         print(HELP)
         return 0
-    found = re.fullmatch(r"([A-Z]+)-([1-9]\d*)", argv[0]) if argv else None
+    found = re.fullmatch(rf"({draw.LABEL.pattern})-([1-9]\d*)", argv[0]) if argv else None
     options = dict(zip(argv[2::2], argv[3::2]))
     usable = found and len(argv) >= 2 and VERSION_NAME.fullmatch(argv[1]) and (
         (argv[1] == GENERATION_ONE and len(argv) == 2)

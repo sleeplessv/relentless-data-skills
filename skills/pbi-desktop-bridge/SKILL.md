@@ -16,8 +16,8 @@ Its exit code is the result: 0 done, 3 a **refusal**, the rest in `pbi-vm.sh --h
 <skill-dir>/scripts/pbi-vm.sh status
 ```
 
-Ready means the JSON lists one instance whose `currentFilePath` is the `.pbip` you are editing
-(`\\Mac\Home\` is the Mac home folder). For any other result, follow [setup](references/setup.md).
+Ready means the project instance has `bridgeStatus: "connected"` and its `currentFilePath` is the
+`.pbip` you are editing (`\\Mac\Home\` is the Mac home folder). For other results, follow [setup](references/setup.md).
 
 The wrapper keeps its state and screenshots in `.pbi-desktop/` at the repo's top level. Keep that folder
 out of git. From the top level:

@@ -68,8 +68,17 @@ folder.mkdir(parents=True, exist_ok=True)
 base = {"sessionId": session, "cwd": str(cwd), "version": "2.1.332", "userType": "external"}
 lines = [{**base, "type": "user", "uuid": "u1", "timestamp": "2026-01-05T10:00:00.000Z",
           "message": {"role": "user", "content": prompt}}]
+call = os.environ.get("STANDIN_SKILL_CALL")  # a Skill call by this name loads STANDIN_SKILL's folder
+if os.environ.get("STANDIN_SKILL") and call:
+    lines += [{**base, "type": "assistant", "uuid": "c1", "timestamp": "2026-01-05T10:00:20.000Z", "message": {
+                   "role": "assistant", "content": [
+                       {"type": "tool_use", "id": "toolu_skill", "name": "Skill", "input": {"skill": call}}]}},
+              {**base, "type": "user", "uuid": "c2", "timestamp": "2026-01-05T10:00:25.000Z", "message": {
+                   "role": "user", "content": [
+                       {"type": "tool_result", "tool_use_id": "toolu_skill", "content": "Launching skill"}]}}]
 if os.environ.get("STANDIN_SKILL"):
     lines.append({**base, "type": "user", "uuid": "u2", "timestamp": "2026-01-05T10:00:30.000Z", "isMeta": True,
+                  **({"sourceToolUseID": "toolu_skill"} if call else {}),
                   "message": {"role": "user", "content": [{"type": "text", "text":
                       "Base directory for this skill: /skills/" + os.environ["STANDIN_SKILL"] + "\n\n# Body"}]}})
 if os.environ.get("STANDIN_LOG") != "no-usage":
@@ -475,6 +484,20 @@ class ReplayTest(unittest.TestCase):
                 self.assertEqual(version["not_direct"], marked)
                 if marked:
                     self.assertTrue(result.stdout.endswith(": session exit 0, marked not direct.\n"), result.stdout)
+
+    def test_a_session_that_loaded_a_generation_one_skill_through_a_prefixed_call_is_marked_not_direct(self) -> None:
+        result = self.replay("A", "7", STANDIN_SKILL="implement-ticket-folder",
+                             STANDIN_SKILL_CALL="example-plugin:implement-ticket")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(version, {
+            "label": "A", "ticket": 7, "version": "direct", "commit": version["commit"],
+            "repo": "replays/A-7-direct.git", "base_commit": self.world.base, "clone": "replays/A-7-direct",
+            "exit_status": 0, "session": self.session(), "skills": ["implement-ticket"], "not_direct": True})
+        self.assertEqual(result.stdout,
+                         f"Recorded A-7 direct at {version['commit']}: session exit 0, marked not direct.\n")
+        self.assertEqual([row["skills"] for row in self.world.rows()], [["implement-ticket"]])
 
     def test_a_session_whose_skills_the_scan_cannot_tell_is_marked_not_direct(self) -> None:
         result = self.replay("A", "7", STANDIN_SKILL="tdd", STANDIN_LOG="no-usage")

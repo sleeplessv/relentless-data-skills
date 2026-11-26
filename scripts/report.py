@@ -51,8 +51,8 @@ printed as a count, such as 8 of 10; out of {RATE_FLOOR} or more, the count is
 followed by its rate, such as 20 of 30 (67%).
 
 Left out of every figure, and counted: a replay versions.jsonl marks not
-direct; a version with no verdict, null or no line, the version's own lack of
-a replay included; and a verdict on a commit other than the version's. Left
+direct; a version with no verdict, a null verdict or no line at all, as for a
+version never replayed; and a verdict on a commit other than the version's. Left
 out of the token figures, and counted: a judged version whose scan row is
 missing or has a blank total_tokens. Active minutes are left out the same
 way. Lines in versions.jsonl or verdicts.jsonl for a ticket in no set are

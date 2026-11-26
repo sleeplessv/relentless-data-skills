@@ -2,10 +2,14 @@
 """Rerun one ticket of the replay set with one agent. `--help` gives the steps and the files."""
 from __future__ import annotations
 
+import contextlib
 import fcntl
+import io
 import json
 import os
 import shutil
+import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -47,18 +51,30 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    shares a file with the version's repo. The clone is checked out under the
    git settings of step 4. The full clone is removed before the session.
 2. Runs the repo's setup command from repos.json, where it has one, with sh in
-   the clone.
+   the clone, in a process group made for the replay. What setup starts runs on
+   through the session. It is stopped once the session has ended, before step 4
+   commits the working tree, and on every other way the replay ends: a setup
+   that fails, a start that is refused, an error, Ctrl-C or SIGTERM. SIGKILL to
+   the replay leaves it running, and a process that starts its own group or
+   session is not followed.
 3. Starts one headless Claude Code session in the clone: `claude -p` on the
    entry's model, with the ticket's title and body as its whole prompt on
    standard input, prompts switched off (--permission-mode bypassPermissions),
    and the confinement below.
 4. Commits whatever the clone's working tree holds into the version's repo:
    every file git would add, and every file or link the clone's index lists,
-   ignored or not. The git settings of every git command the replay starts
-   itself, gh's aside: no config file but the repo's own (none from the clone's .git/ here, so nothing
-   the session left there runs; no user or system config file), and no GIT_*
-   variable from the caller. Git's default attribute and ignore files still
-   apply: $XDG_CONFIG_HOME/git/attributes and git/ignore (by default under
+   ignored or not. The replay reads each name in the index as the bytes git
+   holds it, in any locale. The replay's own git commands, gh's aside, set
+   GIT_CONFIG_NOSYSTEM to 1 and GIT_CONFIG_GLOBAL to {os.devnull}, which
+   switch off git's default lookups of the system config file and of the user
+   config files (~/.gitconfig and $XDG_CONFIG_HOME/git/config); a config file
+   that a repo's own config names with include.path is still read. They carry
+   no GIT_* variable from the caller. The version's repo records the tree. A
+   private repo, made beside it for this step, lists a copy of the clone's
+   index and reads objects from the clone's .git/objects. Neither repo reads
+   the clone's config, so nothing the session left in the clone's .git/ runs.
+   Git's default
+   attribute and ignore files still apply: $XDG_CONFIG_HOME/git/attributes and git/ignore (by default under
    ~/.config/) and the system attributes file. A start that left no session
    log and changed nothing is taken as no session: nothing is recorded.
 5. Scans the session. A log that is missing or cannot be scanned gives the
@@ -105,9 +121,17 @@ Files, all in the machine directory:
 Exit 0: the version is recorded, whatever the session's exit status; a scan
 that failed is reported. Exit 1: an error. Before a session ran, or for a
 start taken as no session, nothing is recorded and what the replay made is
-removed. After a session ran, the clone and the version's repo are kept; the
-version is recorded only when the error came while its row was written, and
-then it has no row. A clone or version repo
+removed. After a session ran, the clone and the version's repo are kept. A clone
+index that is not a regular file, or that the replay cannot copy or list with
+git, ends the replay with one line on standard error and nothing recorded. Git
+lists a split index with its shared index and a sparse index with the trees
+in the clone's objects. A listing that exits 0 but writes to standard error,
+as git does when it cannot read such a tree, counts as one git cannot list.
+A row that cannot be written, after the version was
+recorded, ends it with one line that says the version is recorded without its
+row and names the command that writes the row from the session's log,
+python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl, and
+the scan's own warnings are printed only when the row is written. A clone or version repo
 already in place is an error: remove both to replay the ticket again. Exit 2:
 bad usage."""
 
@@ -216,19 +240,53 @@ def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> 
         git(clone, "config", key, value)
 
 
-def tracked(store: Path, clone: Path) -> list[str]:
-    """The paths the clone's index lists, read from a copy of the index file as data. None when the index is a
-    link or not a file, or git cannot list the copy; a copy that cannot be made raises."""
+def tracked(store: Path, clone: Path) -> list[bytes]:
+    """The paths the clone's index lists, as the bytes git holds them. Empty when the clone has no index file. The
+    index must be a regular file, which is copied as data into a private git folder with the shared indexes beside it
+    that a split index reads, and listed there; the version's repo is not touched. The private folder reads objects
+    from the clone's .git/objects, where git finds the trees a sparse index names. An index the replay will not read
+    with certainty raises ReplayError: one git cannot list, or whose listing prints anything on standard error, which
+    is how git reports a tree it could not read while it still exits 0."""
     index = clone / ".git" / "index"
-    if index.is_symlink() or not index.is_file():
+
+    def unreadable(why: str) -> ReplayError:
+        return ReplayError(f"the clone's index {str(index)!r} cannot be read ({why}).")
+    try:
+        info = os.lstat(index)
+    except FileNotFoundError:
         return []
-    shutil.copyfile(index, store / "replay-clone-index")
-    listed = run("git", "-C", str(clone), "ls-files", "-z", env=trusted(store, clone, "replay-clone-index"))
-    (store / "replay-clone-index").unlink()
-    paths = [Path(path) for path in listed.stdout.split("\0") if path] if listed.returncode == 0 else []
+    except OSError as error:  # an unsearchable .git, or a .git that is a file naming another folder
+        raise unreadable(error.strerror) from None
+    if not stat.S_ISREG(info.st_mode):  # a link or a folder: native git follows some, the replay reads none
+        raise unreadable("not a regular file")
+    try:  # every step of making, filling and listing the private folder ends, if it fails, in the index's one line
+        with tempfile.TemporaryDirectory(dir=store.parent, ignore_cleanup_errors=True) as private:
+            meta = Path(private)
+            made = run("git", "init", "-q", "--bare", private, env=plain())
+            if made.returncode:
+                raise unreadable(f"git init exited {made.returncode}")
+            shutil.copyfile(index, meta / "index")
+            for shared in sorted(index.parent.glob("sharedindex.*")):  # one of these is what a split index reads
+                if shared.is_file() and not shared.is_symlink():
+                    with contextlib.suppress(OSError):  # one the index does not name may be unreadable; git
+                        shutil.copyfile(shared, meta / shared.name)  # fails below when the named one is missing
+            # A link with a name of the replay's own, so the alternates file holds no path of the caller's.
+            (meta / "clone-objects").symlink_to(index.parent / "objects")
+            (meta / "objects" / "info" / "alternates").write_text("../clone-objects\n")
+            listed = subprocess.run(["git", "-c", "advice.sparseIndexExpanded=false", "-C", str(clone), "ls-files",
+                                     "-z"], stdin=subprocess.DEVNULL, capture_output=True,
+                                    env={**trusted(store, clone), "GIT_DIR": str(meta),
+                                         "GIT_INDEX_FILE": str(meta / "index")})
+    except OSError as error:
+        raise unreadable(error.strerror or type(error).__name__) from None
+    if listed.returncode:
+        raise unreadable(f"git ls-files exited {listed.returncode}")
+    if listed.stderr:  # git exits 0 when it cannot read a tree of a sparse index, and leaves that tree's files out
+        raise unreadable("git ls-files reported an error")
+    paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path]
     # Each path must name a file or link in the clone itself: not under .git/, and not reached through a link
     # or as a folder, which a forced add would take whole, ignored files and all.
-    return [str(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
+    return [os.fsencode(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
             and not any((clone / Path(*path.parts[:end])).is_symlink() for end in range(1, len(path.parts)))
             and ((clone / path).is_symlink() or (clone / path).is_file())]
 
@@ -240,7 +298,7 @@ def snapshot(store: Path, clone: Path, base: str) -> str:
     git(clone, "add", "-A", env=env)
     paths = tracked(store, clone)
     if paths:
-        (store / "replay-tracked").write_text("\0".join(paths))
+        (store / "replay-tracked").write_bytes(b"\0".join(paths))
         git(clone, "add", "-f", f"--pathspec-from-file={store / 'replay-tracked'}", "--pathspec-file-nul", env=env)
         (store / "replay-tracked").unlink()
     return git(clone, "write-tree", env=env)
@@ -249,6 +307,49 @@ def snapshot(store: Path, clone: Path, base: str) -> str:
 def remove(made: list[Path]) -> None:
     for path in made:
         shutil.rmtree(path, ignore_errors=True)
+
+
+@contextlib.contextmanager
+def signals_held():
+    """SIGINT and SIGTERM wait until the block ends."""
+    held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, held)
+
+
+class Group:
+    """The process group for what setup starts, made for one replay and held by a keeper that only waits, so the group
+    outlives setup's shell. The invariant: `stop()` runs on every way out of the try that made the group, and ends
+    each process still in it. The group keeps its owner until it has been signalled, so a call cut short by an
+    interrupt can be made again. A process that starts its own group or session is not in it."""
+
+    def __init__(self) -> None:
+        self.keeper: subprocess.Popen | None = None
+
+    def run(self, command: str, cwd: Path) -> int:
+        """Run `command` with sh in the group, which this makes first; the command's exit code."""
+        with signals_held():  # a signal that comes now waits until the keeper is held, where stop() reaches it
+            self.keeper = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.buffer.read()"],
+                                           stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
+                                           stderr=subprocess.DEVNULL, process_group=0)
+        return subprocess.Popen(command, shell=True, cwd=cwd, stdin=subprocess.DEVNULL,
+                                process_group=self.keeper.pid).wait()
+
+    def stop(self) -> None:
+        """Kill what is left in the group and reap the keeper. A call after one that finished does nothing."""
+        with signals_held():
+            keeper = self.keeper
+            if keeper is None:
+                return
+            try:  # the keeper is not reaped yet, so the group's id is still its own
+                os.killpg(keeper.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            self.keeper = None  # after the signal; the group is no one's from here
+            keeper.wait()
+            keeper.stdin.close()
 
 
 def record(state: Path, version: dict) -> None:
@@ -279,21 +380,26 @@ def replay(label: str, ticket: int) -> int:
         raise ReplayError(f"{clone} is already in place. Remove it and {store} to replay the ticket again.")
     made = [clone]
     session = str(uuid.uuid4())
+    group = Group()
     try:
-        if store.exists():
-            raise ReplayError(f"{store} is already in place. Remove it and {clone} to replay the ticket again.")
-        made.append(store)
-        cut(listed["repo"], label, found, clone, store)
-        setup = listed.get("setup")
-        if setup:
-            code = subprocess.run(setup, shell=True, cwd=clone, stdin=subprocess.DEVNULL).returncode
-            if code:
-                raise ReplayError(f"the setup command exited {code}; no session started.")
-        before = snapshot(store, clone, found["base_commit"])
-        prompt = f"{found['title']}\n\n{found['body']}"
-        status = subprocess.run(command(clone, found["model"], session), cwd=clone, input=prompt, text=True,
-                                env=environment()).returncode
+        try:
+            if store.exists():
+                raise ReplayError(f"{store} is already in place. Remove it and {clone} to replay the ticket again.")
+            made.append(store)
+            cut(listed["repo"], label, found, clone, store)
+            setup = listed.get("setup")
+            if setup:
+                code = group.run(setup, clone)
+                if code:
+                    raise ReplayError(f"the setup command exited {code}; no session started.")
+            before = snapshot(store, clone, found["base_commit"])
+            prompt = f"{found['title']}\n\n{found['body']}"
+            status = subprocess.run(command(clone, found["model"], session), cwd=clone, input=prompt, text=True,
+                                    env=environment()).returncode
+        finally:  # after the session, or on any way out before it ends: before the working tree is committed
+            group.stop()
     except BaseException:
+        group.stop()  # finishes a stop that an interrupt cut short
         remove(made)
         raise
     _, log = scan.resolve(session)
@@ -304,19 +410,29 @@ def replay(label: str, ticket: int) -> int:
     commit = git(store, "commit-tree", "--no-gpg-sign", tree, "-p", found["base_commit"], "-m",
                  f"{VERSION} replay of {label}-{ticket}", env=trusted(store, clone))
     git(store, "update-ref", REF, commit, env=trusted(store, clone))
-    try:  # nothing the log holds may stop the record
-        row = scan.scan(session, log)
-        skills = row["skills"]
-        not_direct = skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)
-    except (Exception, SystemExit) as failure:  # scan exits on a line that is not JSON
-        print(f"replay: the session's log could not be scanned ({failure}); its row is left blank.", file=sys.stderr)
-        row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: the row of blanks
+    warnings = io.StringIO()  # what the scan and the row writer say stays unsaid when the row cannot be written
+    with contextlib.redirect_stderr(warnings):
+        try:  # nothing the log holds may stop the record
+            row = scan.scan(session, log)
+            skills = row["skills"]
+            not_direct = skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)
+        except (Exception, SystemExit) as failure:  # scan exits on a line that is not JSON
+            print(f"replay: the session's log could not be scanned ({failure}); its row is left blank.",
+                  file=sys.stderr)
+            row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: blanks
     version = {"label": label, "ticket": ticket, "version": VERSION, "commit": commit,
                "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
                "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
                "not_direct": not_direct}
     record(state, version)
-    scan.write_row(row)
+    try:
+        with contextlib.redirect_stderr(warnings):
+            scan.write_row(row)
+    except Exception as error:  # a full disk, a lock that is a folder, a row json cannot write
+        raise ReplayError(f"{label}-{ticket} {VERSION} is recorded at {commit} without its row "
+                          f"({getattr(error, 'strerror', None) or type(error).__name__}). Write the row with: "
+                          f"python3 scripts/scan.py {session}") from None
+    sys.stderr.write(warnings.getvalue())
     print(f"Recorded {label}-{ticket} {VERSION} at {commit}: session exit {status}"
           + (", skills unknown, marked not direct." if skills is None
              else ", marked not direct." if version["not_direct"] else "."))
@@ -330,11 +446,15 @@ def main(argv: list[str]) -> int:
     if len(argv) != 2 or not argv[1].isdecimal() or argv[0].startswith("-"):
         print(HELP, file=sys.stderr)
         return 2
+    signal.signal(signal.SIGTERM, draw.terminated)
     try:
         return replay(argv[0], int(argv[1]))
     except (ReplayError, draw.DrawError) as error:
         print(f"replay: {error}", file=sys.stderr)
         return 1
+    except draw.Terminated:
+        print("replay: stopped by SIGTERM.", file=sys.stderr)
+        return 128 + signal.SIGTERM
 
 
 if __name__ == "__main__":

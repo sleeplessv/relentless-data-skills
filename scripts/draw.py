@@ -100,7 +100,7 @@ The pool is every ticket that meets all of these:
       cd repo && gh pr create --fill 2>&1 | tail -1
   - Every other command is cd, git, cat or tail. It may write its output to
     a file with > or >>, send its errors to its output with 2>&1, and read a
-    here-document with a quoted delimiter, as in
+    here-document whose delimiter is in single quotes, as in
       cat > body.md <<'EOF'
       Body text.
       EOF
@@ -366,14 +366,10 @@ def opening_form(command: str) -> bool:
         return False
     if current["words"]:
         commands.append(current)
-    opening = False
-    for found in commands:
-        if found["words"][:3] == ["gh", "pr", "create"]:
-            last = found["list"] == commands[-1]["list"]
-            opening = opening or found["first"] and last and set(found["redirects"]) <= {"2>&1"}
-        elif found["words"][0] not in OTHERS:
-            return False
-    return opening
+    gh = [found for found in commands if found["words"][:3] == ["gh", "pr", "create"]]
+    return (len(gh) == 1 and gh[0]["first"] and gh[0]["list"] == commands[-1]["list"]
+            and set(gh[0]["redirects"]) <= {"2>&1"}
+            and all(found["words"][0] in OTHERS for found in commands if found is not gh[0]))
 
 
 Run = tuple[datetime | None, datetime | None, bool]

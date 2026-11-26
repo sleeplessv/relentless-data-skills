@@ -169,6 +169,7 @@ FORMS: dict[str, dict[str, str]] = {
         # Forms near the list that it leaves off.
         "gh pr create  # open it": "starts",
         "GH=1 gh pr create": "starts",
+        "gh pr create; gh pr create": "starts",
         "gh pr 'cre'ate": "starts",
         "./tools/gh pr create": "starts",
         "gh pr create --body \"$(cat <<'EOF'\nEOF)\nEOF\n)\"": "starts",

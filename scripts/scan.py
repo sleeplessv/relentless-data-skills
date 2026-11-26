@@ -16,6 +16,22 @@ by the session id of the last line that carries one, since a log's own lines
 come after the lines it copied. A log with no session id at all is keyed by the
 file's name.
 
+The row's skills list each skill the logs show loaded once, in the order of
+first load, never with a plugin prefix. A skill that a successful Skill call
+loaded takes the name the call gives, less everything up to its last colon.
+The line that gives that load's folder names the call in sourceToolUseID and
+adds no second entry, and a load of the same folder with no call takes the
+call's name too. A skill with no such call, as one the user typed, takes its
+folder's last name. A call that failed, has no result or gives no name adds no
+entry. So two skills of one name from two plugins are one entry: a typed skill
+leaves no prefix to recover.
+
+A line whose sessionId is text other than the row's session is a copied line,
+as the lines a resumed session copied from an earlier one are. Copied lines, in
+the session's log or a helper's, count in every column like the session's own.
+copied_tokens is the part of total_tokens from the responses that only copied
+lines carry: 0 when there are none, blank when total_tokens is blank.
+
 The row replaces any earlier row for the same session in scan-rows.jsonl in the
 machine directory: $DELIVER_STATE_DIR, default ~/.local/state/deliver. The scan
 makes that directory 0700, and scan-rows.jsonl and scan-rows.lock 0600. A line
@@ -161,22 +177,29 @@ def tool_calls(lines: list[dict]) -> dict[str, dict]:
 
 
 def skills(lines: list[dict]) -> list[str]:
-    """The skills the lines show loaded, in the order they were first loaded."""
+    """The skills the lines show loaded, named as the module's docstring says, in the order of first load."""
     calls = tool_calls(lines)
-    found: list[str] = []
+    loads: list[tuple[Path | None, str | None]] = []  # (None, call id) for a call, (folder, its call's id) for a folder
     for line in lines:
         if line.get("type") != "user":
             continue
-        names = [Path(text[len(SKILL_LINE):].splitlines()[0].strip()).name
-                 for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
-        # A bundled skill has no folder, so no such line: its successful Skill call names it.
         content = (line.get("message") or {}).get("content")
         for part in content if isinstance(content, list) else []:
             call = calls.get(part.get("tool_use_id")) if isinstance(part, dict) else None
             if call and call.get("name") == "Skill" and part.get("type") == "tool_result" and not part.get("is_error"):
-                names.append(str((call.get("input") or {}).get("skill", "")).split(":")[-1])
-        found.extend(name for name in dict.fromkeys(names) if name and name not in found)
-    return found
+                loads.append((None, part["tool_use_id"]))
+        source = line.get("sourceToolUseID")
+        loads += [(Path(text[len(SKILL_LINE):].splitlines()[0].strip()), source if isinstance(source, str) else None)
+                  for text in (texts(line) if line.get("isMeta") else []) if text.startswith(SKILL_LINE)]
+
+    def call_name(call_id: str | None) -> str:
+        given = (calls.get(call_id) or {}).get("input")
+        skill = given.get("skill") if isinstance(given, dict) else None
+        return skill.split(":")[-1] if isinstance(skill, str) else ""
+    called = {call_id: call_name(call_id) for folder, call_id in loads if folder is None}
+    by_call = {folder: called[call_id] for folder, call_id in loads if folder is not None and called.get(call_id)}
+    names = [called[call_id] if folder is None else by_call.get(folder, folder.name) for folder, call_id in loads]
+    return list(dict.fromkeys(name for name in names if name))
 
 
 def helper_logs(log: Path) -> list[Path]:
@@ -221,7 +244,7 @@ def read_meta(log: Path) -> dict:
 
 def scan(session: str, log: Path) -> dict:
     row: dict = {"session": session}
-    blank = {**blank_tokens(), "active_minutes": None, "auto_compactions": None,
+    blank = {**blank_tokens(), "copied_tokens": None, "active_minutes": None, "auto_compactions": None,
              "typed_compactions": None, "model": None, "skills": None, "helpers": None}
     if not log.is_file():
         return {**row, **blank}
@@ -265,7 +288,11 @@ def scan(session: str, log: Path) -> dict:
 
     compactions = {line.get("uuid"): (line.get("compactMetadata") or {}).get("trigger")
                    for line in every if line.get("subtype") == "compact_boundary"}
-    return {**row, **total, "active_minutes": active_minutes(times),
+    copied = [isinstance(line.get("sessionId"), str) and line["sessionId"] != row["session"] for line in every]
+    only_copied = (usages([line for line, mark in zip(every, copied) if mark]).keys()
+                   - usages([line for line, mark in zip(every, copied) if not mark]).keys())
+    return {**row, **total, "copied_tokens": sum(sum(final[key].values()) for key in only_copied),
+            "active_minutes": active_minutes(times),
             "auto_compactions": sum(t == "auto" for t in compactions.values()),
             "typed_compactions": sum(t == "manual" for t in compactions.values()),
             "model": model(main), "skills": skills(every), "helpers": listed}

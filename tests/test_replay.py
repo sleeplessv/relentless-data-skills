@@ -476,6 +476,43 @@ class ReplayTest(unittest.TestCase):
                 if marked:
                     self.assertTrue(result.stdout.endswith(": session exit 0, marked not direct.\n"), result.stdout)
 
+    def test_a_session_that_loaded_a_generation_one_skill_through_a_prefixed_call_is_marked_not_direct(self) -> None:
+        # The stand-in loads its skill by a folder line alone. This wrapper puts a plugin's Skill call and its result
+        # before that line and names the call in it, as Claude Code writes a skill that a call loaded.
+        inner = self.world.bin / "claude-folder-only"
+        (self.world.bin / "claude").rename(inner)
+        (self.world.bin / "claude").write_text(f"""#!/usr/bin/env python3
+import json, os, subprocess, sys
+from pathlib import Path
+args = sys.argv[1:]
+status = subprocess.run([{str(inner)!r}, *args]).returncode
+session = args[args.index("--session-id") + 1]
+log = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / str(Path.cwd()).replace("/", "-") / (session + ".jsonl")
+lines = [json.loads(text) for text in log.read_text().splitlines()]
+base = {{key: lines[1][key] for key in ("sessionId", "cwd", "version", "userType", "timestamp")}}
+call = {{"type": "tool_use", "id": "toolu_skill", "name": "Skill",
+        "input": {{"skill": "example-plugin:implement-ticket"}}}}
+lines[1:1] = [{{**base, "type": "assistant", "uuid": "c1", "message": {{"role": "assistant", "content": [call]}}}},
+              {{**base, "type": "user", "uuid": "c2", "message": {{"role": "user", "content": [
+                  {{"type": "tool_result", "tool_use_id": "toolu_skill", "content": "Launching skill"}}]}}}}]
+lines[3]["sourceToolUseID"] = "toolu_skill"
+log.write_text("".join(json.dumps(line) + "\\n" for line in lines))
+sys.exit(status)
+""")
+        (self.world.bin / "claude").chmod(0o755)
+
+        result = self.replay("A", "7", STANDIN_SKILL="implement-ticket-folder")
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(version, {
+            "label": "A", "ticket": 7, "version": "direct", "commit": version["commit"],
+            "repo": "replays/A-7-direct.git", "base_commit": self.world.base, "clone": "replays/A-7-direct",
+            "exit_status": 0, "session": self.session(), "skills": ["implement-ticket"], "not_direct": True})
+        self.assertEqual(result.stdout,
+                         f"Recorded A-7 direct at {version['commit']}: session exit 0, marked not direct.\n")
+        self.assertEqual([row["skills"] for row in self.world.rows()], [["implement-ticket"]])
+
     def test_a_session_whose_skills_the_scan_cannot_tell_is_marked_not_direct(self) -> None:
         result = self.replay("A", "7", STANDIN_SKILL="tdd", STANDIN_LOG="no-usage")
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -8,6 +8,37 @@
 #              (needs uv and network access); a skipped test fails the run
 #   --base     baseline for skill_versions.py; also settable via CHECK_BASE.
 #              Default: git merge-base HEAD origin/main, falling back to main.
+#
+# One full run at a time: a run without --fast takes a lock before its first
+# check and holds it until it exits, so it waits while another run of this
+# clone holds the lock. A run with --fast, --help or a usage error takes no
+# lock and never waits.
+#
+# The lock is fcntl.flock on one file, taken through python3 by
+# scripts/check_lock.py. The file is check.sh.lock in the clone's shared git
+# directory (git rev-parse --git-common-dir), so every worktree of the clone
+# uses the same lock. Only the system says whether the lock is held. The file's
+# presence and content decide nothing, so a killed run, even one killed with
+# SIGKILL, blocks no later run. The script's own process holds the lock and the
+# checks it starts do not, so a process that a check leaves running cannot keep
+# it. The holder writes its process id and start time into the file, and only
+# the waiting line reads them.
+#
+# A run that has to wait prints one line at once. The line names the holder's
+# process id and start time where the file gives them, and the longest the run
+# will wait. When its turn comes the run prints how long it waited.
+# CHECK_LOCK_WAIT sets that bound in whole seconds from 0 to 86400 (default
+# 1800). At the bound the run prints one line on standard error, runs no check,
+# and exits 75. A run that cannot open or lock the file for any reason other
+# than another holder prints one line and runs without the lock.
+# CHECK_LOCK_FILE names another lock file, for the tests or for one deliberate
+# run beside another. No switch skips the lock.
+#
+# Limits: a second clone on this machine has its own lock. A run killed with
+# SIGKILL frees the lock while processes it started may still be finishing.
+#
+# Exit status: 0 when every check passes, the failing check's own status, 2 for
+# bad usage or a bad CHECK_LOCK_WAIT, 75 when the wait ran out.
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
@@ -29,7 +60,7 @@ while [ $# -gt 0 ]; do
       ;;
     --base=*) base="${1#--base=}" ;;
     -h | --help)
-      sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'
+      sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)

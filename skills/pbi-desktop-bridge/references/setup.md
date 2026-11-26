@@ -34,7 +34,7 @@ ask the administrator about the `DesktopNamedPipeBridge` policy if access is dis
 Done when it prints JSON with `"status": "ok"`. It installs the Power BI Desktop Bridge CLI with npm and
 downloads the TOM library from NuGet, both inside the VM, and skips whichever is already there. It needs
 Node.js 20+ with npm in the VM. Install Power BI Desktop there before opening a project.
-[Microsoft's Bridge CLI package](https://www.npmjs.com/package/@microsoft/powerbi-desktop-bridge-cli/v/1.1.0)
+[Microsoft's Bridge CLI 1.1.0 package metadata](https://registry.npmjs.org/@microsoft%2fpowerbi-desktop-bridge-cli/1.1.0)
 
 ## The share
 

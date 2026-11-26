@@ -1,9 +1,9 @@
 # dossier
 
 The **`dossier`** agent skill turns a subject (a system, a process, research findings, a
-decision) into a dossier: one self-contained HTML document that opens with the claim it defends
-and carries the argument in numbered figures and tables. Every dossier shares one locked house
-style, so the tenth looks like the first.
+decision) into one HTML file. It opens with the claim it defends and carries the argument
+in numbered figures and tables. Axis charts and sequence diagrams load their rendering
+libraries from `cdn.jsdelivr.net`. Text, tables, and inline SVGs work offline.
 
 Formerly `visual-report`. The rename started a new identity at `0.1.0`; the old install name no
 longer resolves.
@@ -35,9 +35,8 @@ amber marks callouts only; GitHub's diff colours appear only inside diffs. Every
 WCAG AA. The reasons and the trade-off are in
 [ADR-0002](../../docs/adr/0002-dossier-locked-house-style.md).
 
-The page loads Mermaid (sequence diagrams) and Vega-Lite (axis charts) from `cdn.jsdelivr.net`
-at pinned versions, so it renders fully only with network access. Interactivity is inline
-vanilla JS.
+Mermaid draws sequence diagrams and Vega-Lite draws axis charts. The scaffold pins their
+versions and keeps the page's other interactions in inline JavaScript.
 
 ## Prerequisites
 

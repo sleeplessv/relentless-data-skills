@@ -108,7 +108,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Target**: the resolved connection, environment, project root, snowman dir, and `.env` file for one snowman run, produced by `resolve_target`.
 - **Branch diff**: the lines the checked-out branch adds and removes, measured from the point where it split from the default branch to the working tree. It is what the branch's PR would show if everything were committed now. _Avoid_: session lines, PR diff.
 - **Session edits**: the lines Claude added and removed during one Claude Code session, whatever branch they landed on. Distinct from the branch diff.
-- **Dossier**: a single self-contained HTML document that explains one system, process, finding or decision through numbered figures and tables, in the house style every dossier shares. _Avoid_: visual report, explainer, writeup (as names for the document).
+- **Dossier**: a single HTML file that explains one system, process, finding or decision through numbered figures and tables, in the house style every dossier shares. _Avoid_: visual report, explainer, writeup (as names for the document).
 - **Answer box**: the box at the top of a dossier stating the one claim the dossier defends. Every dossier has one, explainers included. _Avoid_: summary, TL;DR, verdict box.
 - **Key findings**: the numbered list of three to five one-sentence findings directly under the answer box, each linking to the section that holds its evidence. _Avoid_: insights summary, highlights, executive summary.
 - **Figure**: a numbered visual in a dossier, with a "So what" pull quote above its caption. Tables follow the same rule on their own counter ("Table 2"). _Avoid_: chart (for the general case), diagram (for the general case).

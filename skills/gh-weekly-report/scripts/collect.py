@@ -88,19 +88,23 @@ def parse_range(from_arg: str | None, to_arg: str | None) -> tuple[date, date]:
     return start, end
 
 
-def split_closed_issues(candidates: list[dict], actor: str) -> tuple[list[dict], list[dict]]:
+def split_closed_issues(
+    candidates: list[dict], actor: str,
+) -> tuple[list[dict], list[dict], list[dict]]:
     """Resolved = closed by the actor with reason `completed` (or none, as
-    API closes carry no reason); the actor's `not_planned` closes are kept
-    as a separate line; closes by anyone else are not the actor's work."""
-    resolved, not_planned = [], []
+    API closes can carry no reason). Report not-planned and duplicate closes separately."""
+    resolved, not_planned, duplicates = [], [], []
     for item in candidates:
         if item.get("closed_by") != actor:
             continue
-        if item.get("state_reason") == "not_planned":
-            not_planned.append(item)
-        else:
+        reason = item.get("state_reason")
+        if reason in (None, "completed"):
             resolved.append(item)
-    return resolved, not_planned
+        elif reason == "not_planned":
+            not_planned.append(item)
+        elif reason == "duplicate":
+            duplicates.append(item)
+    return resolved, not_planned, duplicates
 
 
 def abandoned_prs(closed: list[dict], merged_keys: set[str]) -> list[dict]:
@@ -208,7 +212,8 @@ def fetch_reviews_given(owner: str | None, actor: str, start: date,
     for pr in candidates:
         if pr["author"] == actor:
             continue
-        reviews = gh_json(["api", f"repos/{pr['repo']}/pulls/{pr['number']}/reviews"])
+        reviews = parse_concatenated_json(run_gh(
+            ["api", f"repos/{pr['repo']}/pulls/{pr['number']}/reviews", "--paginate"]))
         mine = reviews_in_window(reviews, actor, start, end)
         if mine:
             pr["review_states"] = sorted({r["state"] for r in mine})
@@ -295,7 +300,7 @@ def collect_period(owner: str | None, actor: str, start: date, end: date,
     # any such involvement is not found.
     closed_candidates = search("issues", ["--involves", actor, "--state",
                                           "closed", "--closed", rng], owner)
-    resolved, not_planned = split_closed_issues(
+    resolved, not_planned, duplicates = split_closed_issues(
         [fetch_closed_issue_detail(i) for i in closed_candidates], actor)
 
     prs_created = search("prs", ["--author", actor, "--created", rng], owner)
@@ -308,6 +313,7 @@ def collect_period(owner: str | None, actor: str, start: date, end: date,
         "issues_created": created,
         "issues_resolved": resolved,
         "issues_not_planned": not_planned,
+        "issues_duplicate": duplicates,
         "prs_created": prs_created,
         "prs_merged": prs_merged,
         "prs_abandoned": abandoned_prs(prs_closed, {p["key"] for p in prs_merged}),

@@ -6,10 +6,9 @@ dashboard number actually comes from, runs read-only ad-hoc SQL against a
 connected database, audits dashboard filter wiring, and edits cards and
 dashboards under a restore-point gate.
 
-The framing the whole skill hangs off: **a card is not a file, it is live.**
-Editing card *N* changes what every dashboard viewer sees immediately, with no
-deploy step and no undo in the UI. So reads run freely, and every mutation
-captures a restore point first.
+Editing a card changes its dashboards immediately. You can revert saved
+versions in Metabase History. The wrapper also captures a local restore point
+before updating a card or dashboard.
 
 ## What it does
 
@@ -25,8 +24,9 @@ captures a restore point first.
   substitutes `{{tag}}` / `[[…]]`, which are Metabase syntax and not runnable
   SQL.
 - **Source-chain and blast-radius tracing.** Cards stack on cards, so a
-  dashboard number can sit three cards from the tables. `mb deps <id>` walks the
-  chain downward; `--deep` adds transitive dependents plus a SQL-similarity scan
+  dashboard number can sit three cards from the tables. Read upstream sources
+  with `mb card <id>`. Use `mb deps <id>` for downstream cards and dashboards.
+  `--deep` adds transitive card dependents plus a SQL-similarity scan
   for **frozen copies**, cards holding an inlined compiled snapshot of an
   upstream card, which look identical in the UI but silently stopped inheriting
   upstream edits.
@@ -44,9 +44,8 @@ captures a restore point first.
   `SELECT … INTO`, and side-effecting functions. It is documented honestly as a
   **speed bump, not a sandbox**. The durable control is a read-only database
   role on the Metabase connection.
-- **Restore-point-gated mutations.** `update-card`, `update-dashboard`,
-  `create-*` and `restore` all go through the wrapper, which snapshots to
-  `.metabase/restore-points/` (gitignored) before every write. Filenames encode
+- **Restore points.** `update-card` and `update-dashboard` snapshot the existing
+  item to `.metabase/restore-points/` (gitignored) before the update. Filenames encode
   the kind (`…__card139.json` vs `…__dashboard19.json`) and `restore` refuses a
   mismatch. Updates refuse unknown fields, `create-*` refuses the root
   collection without `--allow-root`, and `update-dashboard` refuses a shorter

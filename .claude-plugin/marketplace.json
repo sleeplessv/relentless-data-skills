@@ -318,7 +318,7 @@
       "name": "pbi-desktop-bridge",
       "source": "./skills/pbi-desktop-bridge",
       "description": "Reload Power BI Desktop in a Parallels Windows VM from a Mac and screenshot report pages, so an agent sees its PBIP edits rendered.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },

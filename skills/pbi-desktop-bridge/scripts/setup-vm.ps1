@@ -8,8 +8,12 @@ try {
   $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('Path', 'User')
   $cli = Join-Path $env:APPDATA 'npm\powerbi-desktop.cmd'
   $cliInstalled = $false
+  if (-not (Get-Command node -ErrorAction SilentlyContinue) -or
+      [int](node -p "process.versions.node.split('.')[0]") -lt 20) {
+    throw 'Install Node.js 20 or newer in the VM, then run setup again.'
+  }
   if (-not (Test-Path $cli)) {
-    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'Node.js is not installed in the VM. Install it there, then run setup again.' }
+    if (-not (Get-Command npm -ErrorAction SilentlyContinue)) { throw 'Install npm in the VM, then run setup again.' }
     $ErrorActionPreference = 'Continue'   # npm writes notices to stderr
     npm install -g '@microsoft/powerbi-desktop-bridge-cli' 2>&1 | Out-Null
     $ErrorActionPreference = 'Stop'

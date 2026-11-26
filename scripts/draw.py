@@ -355,6 +355,14 @@ def stopped(number: int, frame: object) -> None:
         raise Stopped(number)
 
 
+Terminated = Stopped  # the name scripts/replay.py catches
+
+
+def terminated(number: int, frame: object) -> None:
+    """scripts/replay.py's SIGTERM handler: raises at each signal, as it did before the draw had `stopped`."""
+    raise Stopped(number)
+
+
 def held(cleanup: Callable[[], None]) -> None:
     """Run `cleanup` with SIGINT and SIGTERM held. A signal during it is raised once it is done; so is one that came
     just before it, which holding the signals raises."""

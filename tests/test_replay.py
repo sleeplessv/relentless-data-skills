@@ -15,9 +15,11 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -47,8 +49,11 @@ exit 1
 # line that is not JSON, to "no-usage" leaves out the response that holds token counts;
 # STANDIN_TRAP names a file that a post-commit hook and a required clean filter, which
 # the session leaves in the clone, would create if anything ran them. STANDIN_TRACK set
-# replaces replayed.txt with skills.lock, which the repo's .gitignore matches: the session
-# adds it to git with -f and commits it. The other knobs still act alongside it.
+# replaces replayed.txt with the file it names, which the repo's .gitignore matches when it
+# ends in .lock: the session adds it to git with -f and commits it. The other knobs still act alongside it.
+# STANDIN_INDEX_DENY set leaves the clone's index file with mode 000, as a session can.
+# STANDIN_WATCH names a file holding a process id; the start record says whether that process
+# is running. STANDIN_HOLD names a file the session creates before it waits for a signal.
 CLAUDE = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -56,8 +61,15 @@ args = sys.argv[1:]
 prompt = sys.stdin.read()
 cwd = Path.cwd()
 with open(os.environ["STANDIN_STARTS"], "a") as starts:
+    watch, alive = os.environ.get("STANDIN_WATCH"), None
+    if watch:
+        try:
+            os.kill(int(Path(watch).read_text()), 0)
+            alive = True
+        except ProcessLookupError:
+            alive = False
     starts.write(json.dumps({"args": args, "cwd": str(cwd), "prompt": prompt, "env": dict(os.environ),
-                             "setup_done": (cwd / ".setup-done").exists()}) + "\n")
+                             "setup_done": (cwd / ".setup-done").exists(), "watched_alive": alive}) + "\n")
 settings = json.loads(args[args.index("--settings") + 1]) if "--settings" in args else {}
 if os.environ.get("STANDIN_NO_SANDBOX") and (settings.get("sandbox") or {}).get("failIfUnavailable"):
     print("Error: sandbox required but unavailable", file=sys.stderr)
@@ -92,8 +104,9 @@ if os.environ.get("STANDIN_LOG") != "none":
     (folder / (session + ".jsonl")).write_text("not json\n" + text if os.environ.get("STANDIN_LOG") == "bad" else text)
 if os.environ.get("STANDIN_TRACK"):
     import subprocess
-    (cwd / "skills.lock").write_text("pinned\n")
-    subprocess.run(["git", "add", "-f", "skills.lock"], check=True)
+    tracked = os.environ["STANDIN_TRACK"]
+    (cwd / tracked).write_text("pinned\n")
+    subprocess.run(["git", "add", "-f", tracked], check=True)
     subprocess.run(["git", "commit", "-q", "-m", "pin"], check=True)
 else:
     (cwd / "replayed.txt").write_text("the replay's change\n")
@@ -106,6 +119,12 @@ if os.environ.get("STANDIN_TRAP"):
     (cwd / ".gitattributes").write_text("* filter=trap\n")
     with open(cwd / ".git" / "config", "a") as config:
         config.write(f'[filter "trap"]\n\tclean = "{cwd / '.git' / 'trap-filter'}"\n\trequired = true\n')
+if os.environ.get("STANDIN_INDEX_DENY"):
+    (cwd / ".git" / "index").chmod(0)
+if os.environ.get("STANDIN_HOLD"):
+    import time
+    Path(os.environ["STANDIN_HOLD"]).write_text("holding\n")
+    time.sleep(60)
 sys.exit(int(os.environ.get("STANDIN_EXIT", "0")))
 '''
 
@@ -211,6 +230,17 @@ class World:
 
     def rows(self) -> list[dict]:
         return self.jsonl(self.state / "scan-rows.jsonl")
+
+    def names(self, commit: str) -> list[bytes]:
+        """The paths of a commit in the version's repo, exactly as git holds them."""
+        listed = subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", commit], cwd=self.store,
+                                env=self.git_env(), check=True, capture_output=True).stdout
+        return [name for name in listed.split(b"\0") if name]
+
+    def start(self, *args: str, **extra: str) -> subprocess.Popen[str]:
+        """The replay, running, for a test that signals it."""
+        return subprocess.Popen([sys.executable, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
+                                env=self.env(**extra), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 
 class ReplayTest(unittest.TestCase):
@@ -400,10 +430,158 @@ class ReplayTest(unittest.TestCase):
 
     def test_a_file_the_session_added_to_git_past_an_ignore_rule_is_in_the_version(self) -> None:
         # With no log, the tracked file is also what tells a session that ran from a refused start.
-        result = self.replay("A", "7", STANDIN_TRACK="1", STANDIN_LOG="none")
+        result = self.replay("A", "7", STANDIN_TRACK="skills.lock", STANDIN_LOG="none")
         self.assertEqual(result.returncode, 0, result.stderr)
         [version] = self.world.versions()
         self.assertEqual(self.git("show", f"{version['commit']}:skills.lock", cwd=self.world.store), "pinned")
+
+    BASE_FILES = [b".gitignore", b".setup-done", b"README.md"]
+
+    def test_a_tracked_file_whose_name_holds_a_carriage_return_is_in_the_version_under_that_name(self) -> None:
+        name = "a\rb.lock"
+        result = self.replay("A", "7", STANDIN_TRACK=name)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(self.world.names(version["commit"]), [*self.BASE_FILES, name.encode()])
+
+    def test_a_tracked_file_with_a_non_ascii_name_is_in_the_version_when_the_locale_is_not_utf_8(self) -> None:
+        name = "café.lock"
+        result = self.replay("A", "7", STANDIN_TRACK=name, LC_ALL="C", PYTHONUTF8="0")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stderr, "")
+        [version] = self.world.versions()
+        self.assertEqual(self.world.names(version["commit"]), [*self.BASE_FILES, name.encode()])
+
+    def test_a_tracked_file_whose_name_is_not_utf_8_is_in_the_version_under_its_bytes(self) -> None:
+        name = b"caf\xe9.lock"
+        probe = self.world.root / os.fsdecode(name)
+        try:
+            probe.write_bytes(b"")
+        except OSError:
+            self.skipTest("this file system refuses a name that is not UTF-8")
+        probe.unlink()
+        result = self.replay("A", "7", STANDIN_TRACK=os.fsdecode(name))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [version] = self.world.versions()
+        self.assertEqual(self.world.names(version["commit"]), [*self.BASE_FILES, name])
+
+    @unittest.skipIf(os.geteuid() == 0, "root reads a file whatever its mode")
+    def test_a_clone_index_that_cannot_be_read_ends_in_one_line_and_records_nothing(self) -> None:
+        result = self.replay("A", "7", STANDIN_INDEX_DENY="1")
+        index = self.world.clone / ".git" / "index"
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"replay: the clone's index {index} cannot be read (Permission denied). "
+                                        "Nothing is recorded, and the clone and the version's repo are kept.\n")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.world.versions(), [])
+        self.assertEqual(self.world.rows(), [])
+        self.assertTrue(self.world.clone.is_dir())
+        self.assertTrue(self.world.store.is_dir())
+        self.assertEqual(sorted(path.name for path in self.world.store.glob("replay-*")), ["replay-index"])
+
+    def test_a_row_that_cannot_be_written_ends_in_one_line_that_names_the_scan_command(self) -> None:
+        (self.world.state / "scan-rows.lock").mkdir()
+        result = self.replay("A", "7")
+        [version] = self.world.versions()
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
+                                        f"(Is a directory). Write the row with: python3 scripts/scan.py "
+                                        f"{self.session()}\n")
+        self.assertEqual(result.stdout, "")
+        self.assertEqual(self.world.rows(), [])
+        self.assertTrue(self.world.clone.is_dir())
+        self.assertTrue(self.world.store.is_dir())
+
+    def watch_setup(self, tail: str = "") -> Path:
+        """A setup command that starts a process outliving it, whose pid it writes to the returned file."""
+        watch = self.world.root / "watched.pid"
+        self.world.write("repos.json", [{"repo": REPO, "check": "true", "setup":
+                                         f"touch .setup-done && {{ sleep 60 </dev/null >/dev/null 2>&1 & "
+                                         f'echo $! > "$STANDIN_WATCH"; }}{tail}'}])
+        return watch
+
+    def assert_gone(self, watch: Path) -> None:
+        pid = int(watch.read_text())
+        for _ in range(100):
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return
+            time.sleep(0.05)
+        os.kill(pid, signal.SIGKILL)
+        self.fail(f"the process setup started, {pid}, is still running")
+
+    def test_what_setup_starts_runs_through_the_session_and_is_gone_when_the_replay_has_exited(self) -> None:
+        watch = self.watch_setup()
+        result = self.replay("A", "7", STANDIN_WATCH=str(watch))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [start] = self.world.starts_made()
+        self.assertIs(start["watched_alive"], True)
+        self.assert_gone(watch)
+
+    def test_what_setup_starts_is_gone_when_the_setup_fails_or_the_session_s_start_is_refused(self) -> None:
+        for tail, extra, message in (
+                (" && exit 4", {}, "replay: the setup command exited 4; no session started."),
+                ("", {"STANDIN_NO_SANDBOX": "1"}, "replay: claude exited 1, left no session log and changed "
+                                                  "nothing, so no session started.")):
+            with self.subTest(tail=tail, extra=extra):
+                watch = self.watch_setup(tail)
+                result = self.replay("A", "7", STANDIN_WATCH=str(watch), **extra)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr.splitlines()[-1], message)  # the stand-in's own error comes before
+                self.assert_gone(watch)
+
+    def test_what_setup_starts_is_gone_when_the_replay_is_interrupted_during_setup_or_the_session(self) -> None:
+        for number in (signal.SIGINT, signal.SIGTERM):
+            for where in ("setup", "session"):
+                with self.subTest(signal=number.name, where=where):
+                    shutil.rmtree(self.world.clone, ignore_errors=True)
+                    shutil.rmtree(self.world.store, ignore_errors=True)
+                    holding = self.world.root / "holding"
+                    holding.unlink(missing_ok=True)
+                    watch = self.watch_setup(f" && touch {holding} && sleep 60" if where == "setup" else "")
+                    extra = {"STANDIN_HOLD": str(holding)} if where == "session" else {}
+                    replay = self.world.start("A", "7", STANDIN_WATCH=str(watch), **extra)
+                    self.addCleanup(replay.kill)
+                    for _ in range(400):
+                        if holding.exists() or replay.poll() is not None:
+                            break
+                        time.sleep(0.05)
+                    self.assertTrue(holding.exists())
+                    replay.send_signal(number)
+                    _, stderr = replay.communicate(timeout=60)
+                    self.assertNotEqual(replay.returncode, 0)
+                    if number == signal.SIGTERM:
+                        self.assertEqual((replay.returncode, stderr), (128 + signal.SIGTERM, "replay: stopped by SIGTERM.\n"))
+                    self.assert_gone(watch)
+
+    def test_the_group_setup_started_is_stopped_whichever_call_after_it_is_interrupted(self) -> None:
+        # The invariant: once setup has run, no exit of the replay leaves a process of its group running.
+        # Each call the replay makes between setup and its end takes a Ctrl-C in turn.
+        points = (("replay", "snapshot", 1), ("replay", "command", 1), ("replay", "environment", 1),
+                  ("scan", "resolve", 1), ("replay", "snapshot", 2), ("scan", "scan", 1), ("replay", "record", 1),
+                  ("scan", "write_row", 1))
+        wrapper = ("import sys\nsys.path.insert(0, {scripts!r})\nimport replay, scan\n"
+                   "module, name, nth = {{'replay': replay, 'scan': scan}}[sys.argv[1]], sys.argv[2], int(sys.argv[3])\n"
+                   "real, calls = getattr(module, name), []\n"
+                   "def interrupted(*args, **options):\n"
+                   "    calls.append(1)\n"
+                   "    if len(calls) == nth:\n"
+                   "        raise KeyboardInterrupt\n"
+                   "    return real(*args, **options)\n"
+                   "setattr(module, name, interrupted)\n"
+                   "sys.exit(replay.main(['A', '7']))\n").format(scripts=str(SCRIPTS))
+        for module, name, nth in points:
+            with self.subTest(call=f"{module}.{name} #{nth}"):
+                shutil.rmtree(self.world.clone, ignore_errors=True)
+                shutil.rmtree(self.world.store, ignore_errors=True)
+                watch = self.watch_setup()
+                env = self.world.env(STANDIN_WATCH=str(watch))
+                result = subprocess.run([sys.executable, "-c", wrapper, module, name, str(nth)], cwd=self.world.root,
+                                        env=env, text=True, capture_output=True, timeout=120)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("KeyboardInterrupt", result.stderr)
+                self.assert_gone(watch)
 
     def test_an_untouched_file_keeps_its_base_bytes_with_core_autocrlf_in_the_operator_s_settings(self) -> None:
         with open(self.world.gitconfig, "a") as config:
@@ -568,8 +746,27 @@ class ReplayTest(unittest.TestCase):
                       "the system config file, of ~/.gitconfig, and of the config, ignore and attributes files under "
                       "$XDG_CONFIG_HOME/git/ (~/.config/git/ when XDG_CONFIG_HOME is unset).",
                       " ".join(result.stdout.split()))
+        text = " ".join(result.stdout.split())
+        step4 = text[text.index("4. Commits whatever"):text.index("5. Scans the session")]
+        self.assertEqual(step4.count(
+            f"The replay's own git commands, gh's aside, set GIT_CONFIG_NOSYSTEM to 1 and GIT_CONFIG_GLOBAL to "
+            f"{os.devnull}, which switch off git's default lookups of the system config file and of the user config "
+            "files (~/.gitconfig and $XDG_CONFIG_HOME/git/config); a config file that a repo's own config names with "
+            "include.path is still read."), 1)
+        self.assertNotIn("no user or system config file", text)
+        for sentence in (
+                "The replay reads each name in the index as the bytes git holds it, in any locale.",
+                "What setup starts runs on through the session. It is stopped once the session has ended, before step 4 "
+                "commits the working tree, and on every other way the replay ends: a setup that fails, a start that is "
+                "refused, an error, Ctrl-C or SIGTERM. SIGKILL to the replay leaves it running, and a process that "
+                "starts its own group or session is not followed.",
+                "A clone index that cannot be copied or read ends the replay with one line on standard error and "
+                "nothing recorded. A row that cannot be written, after the version was recorded, ends it with one "
+                "line that says the version is recorded without its row and names the command that writes the row "
+                "from the session's log, python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl."):
+            with self.subTest(sentence=sentence[:40]):
+                self.assertEqual(text.count(sentence), 1)
         self.assertFalse(self.world.starts.exists())
-
 
 
 if __name__ == "__main__":

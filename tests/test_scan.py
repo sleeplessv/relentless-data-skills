@@ -82,7 +82,8 @@ class Log:
             self.lines.append(line)
         return message_id
 
-    def agent_call(self, minute: float, usage: tuple[int, int, int, int], tool_use_id: str, prompt: str) -> str:
+    def agent_call(self, minute: float, usage: tuple[int, int, int, int] | None, tool_use_id: str,
+                   prompt: str) -> str:
         return self.assistant(minute, usage, content=[{
             "type": "tool_use", "id": tool_use_id, "name": "Agent",
             "input": {"description": "helper", "prompt": prompt, "subagent_type": "general-purpose"}}])
@@ -246,7 +247,6 @@ class TestScan(unittest.TestCase):
         grandchild.assistant(5, (3, 30, 300, 3000))
         self.helper("acheck", "Check", grandchild, "toolu_grandchild",
                     isFork=True, spawnDepth=3, parentAgentId="adraft")
-        # Ancestry comes from parentAgentId, so the child's spawnDepth changes nothing.
         for depth in ({"spawnDepth": 2}, {}):
             with self.subTest(child=depth):
                 self.state = self.root / f"state-{len(depth)}"
@@ -559,22 +559,24 @@ class TestScan(unittest.TestCase):
         self.assertIn(":2:", result.stderr)
         self.assertEqual(self.only_row()["total_tokens"], 12)
 
-    def test_a_line_nested_too_deep_to_read_stops_the_scan_unless_it_is_the_last(self) -> None:
+    def test_a_line_nested_too_deep_is_skipped_while_cut_off_at_the_end_and_refused_once_ended(self) -> None:
         log = Log(self.session).user(0, "Go.")
         log.assistant(1, (1, 1, 1, 1))
         log.write(self.log_path())
         with self.log_path().open("a") as file:
             file.write("[" * 12000)
-        before = self.scan(str(self.log_path()))
+        cut_off = self.scan(str(self.log_path()))
+        self.assertEqual((cut_off.returncode, cut_off.stderr), (0, ""))
+        self.assertEqual(self.only_row()["total_tokens"], 4)
         with self.log_path().open("a") as file:
             file.write("\n")
+        self.state = self.root / "state-ended"
 
         result = self.scan(str(self.log_path()))
 
-        self.assertEqual((before.returncode, before.stderr), (0, ""))
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (1, "", f"{self.log_path()}:3: not a JSON line\n"))
-        self.assertEqual(self.only_row()["total_tokens"], 4)
+        self.assertFalse(self.state.exists())
 
     def test_a_last_line_cut_off_mid_write_is_skipped(self) -> None:
         log = Log(self.session).user(0, "Go.")

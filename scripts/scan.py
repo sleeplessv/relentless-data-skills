@@ -19,8 +19,9 @@ The row replaces any earlier row for the same session in scan-rows.jsonl in the
 machine directory: $DELIVER_STATE_DIR, default ~/.local/state/deliver. The scan
 makes that directory 0700, and scan-rows.jsonl and scan-rows.lock 0600. A line
 of scan-rows.jsonl that is not a JSON object is kept as it is, and the scan
-names it on standard error. A session whose log is gone, or holds no token
-counts, gets a row of nulls; a null is a blank, never a zero.
+names it on standard error. A session whose log is gone gets a row of nulls,
+and so does one whose inputs the scan can read but whose logs hold no token
+counts; a null is a blank, never a zero.
 
 The scan stops with exit 1, one line on standard error and no row written when
 it cannot read an input: a log line that is not JSON, unless it is the last
@@ -49,7 +50,7 @@ KINDS = {  # row column: usage field in the log
     "cache_read_tokens": "cache_read_input_tokens",
 }
 GAP_MINUTES = 30
-NOT_JSON = (ValueError, RecursionError)  # json.loads raises RecursionError on JSON nested too deep
+NOT_JSON = (ValueError, RecursionError)  # json.loads can raise RecursionError on JSON nested too deep (3.13 does)
 BRIEF_HEAD = 200
 SKILL_LINE = "Base directory for this skill: "
 

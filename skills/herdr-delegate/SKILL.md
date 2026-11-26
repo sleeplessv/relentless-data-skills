@@ -146,5 +146,5 @@ when every finding is confirmed, rejected with a reason, or marked unchecked.
 hc kill "$ID"; hc rm "$ID"
 ```
 
-Remove only helpers you started, on every exit: errors, blockers and timeouts too. Keep one for
-a follow-up (`hc send "$ID" "..."`) only until it is answered or dropped; tell the user if one outlives the session.
+Clean up as soon as step 5 is done, before you act on the findings, not at the end of your own task. Remove only helpers you started, on every exit: errors, blockers and timeouts too.
+Keep one for a follow-up (`hc send "$ID" "..."`) only until it is answered or dropped; tell the user if one outlives the session.

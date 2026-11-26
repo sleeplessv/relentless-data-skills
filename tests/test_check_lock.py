@@ -181,9 +181,7 @@ class CheckLockTest(unittest.TestCase):
         scripts = self.repo / "scripts"
         scripts.mkdir(parents=True)
         for name in ("check.sh", "check_lock.py"):
-            source = REPO_ROOT / "scripts" / name
-            if source.exists():
-                shutil.copy2(source, scripts / name)
+            shutil.copy2(REPO_ROOT / "scripts" / name, scripts / name)
         (scripts / "lint_skill.py").write_text(STANDIN_BODY)
         for name in ("sync_registry.py", "skill_versions.py"):
             (scripts / name).write_text("")
@@ -237,9 +235,12 @@ class CheckLockTest(unittest.TestCase):
         return proc
 
     def stop(self, proc: subprocess.Popen) -> None:
-        if proc.poll() is None:
+        """End the run and anything left in its process group, such as a killed holder's body."""
+        try:
             os.killpg(proc.pid, signal.SIGKILL)
-            proc.wait()
+        except ProcessLookupError:
+            pass
+        proc.wait()
 
     def run_check(self, *args: str, **kwargs) -> tuple[int, str, str]:
         proc = self.start(*args, **kwargs)

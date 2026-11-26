@@ -192,10 +192,12 @@ def copied_tokens(copied: int | float, total: int | float, share: str | None, bl
 def sign_two_copied(first: Copied, second: Copied) -> str:
     """Warning sign 2's line on the copied tokens inside each side's sum: each side as (copied, total, share, blank),
     the share as copied_tokens takes it."""
-    return (f"  Copied tokens in these sums: {first[0]} of the {first[1]} total tokens of generation-one's tickets "
-            f"with a copied count{shown(first[2])}, and {second[0]} of the {second[1]} of direct's{shown(second[2])}. "
-            f"Left out of the copied tokens: {first[3]} of generation-one's tickets and {second[3]} of direct's, with "
-            "a blank copied count.")
+    (first_copied, first_total, first_share, first_blank), (second_copied, second_total, second_share, second_blank) = (
+        first, second)
+    return (f"  Copied tokens in these sums: {first_copied} of the {first_total} total tokens of generation-one's "
+            f"tickets with a copied count{shown(first_share)}, and {second_copied} of the {second_total} total tokens "
+            f"of direct's tickets with a copied count{shown(second_share)}. Left out of the copied tokens: "
+            f"{first_blank} of generation-one's tickets and {second_blank} of direct's, with a blank copied count.")
 
 
 def no_helpers(spent: int, copied: str, unjudged: int = 0) -> list[str]:
@@ -420,8 +422,9 @@ class TestReport(unittest.TestCase):
                 lines = self.two([helper("Re-check", None, 400)], 1000, direct)
                 self.assertEqual(lines[0], f"Warning sign 2: on 30 of 30 tickets, generation-one spent 30000 tokens "
                                            f"and direct {30 * direct}, an extra cost of {extra}.")
-                self.assertEqual(lines[-1], "No verdict: generation-one cost no more than direct, so there is no "
-                                            "extra cost to cut.")
+                self.assertEqual(lines[-2:], [
+                    sign_two_copied((0, 30000, "0.0%", 0), (0, 30 * direct, "0.0%", 0)),
+                    "No verdict: generation-one cost no more than direct, so there is no extra cost to cut."])
 
     def test_a_ticket_left_out_of_the_token_figures_is_left_out_of_both_sides(self) -> None:
         cut = [helper("Closing verification", None, 100)]
@@ -447,15 +450,16 @@ class TestReport(unittest.TestCase):
 
     def test_sign_two_gives_the_copied_tokens_inside_each_side(self) -> None:
         for at, ticket in enumerate(self.world.draw()):
-            # Ticket 0: generation one's row from before the column. 1 and 3: direct's null. 2: generation one's
-            # blank total leaves it out of both sides, and direct's 70 copied with it, out of sign 2's but in direct's.
+            # By draw position: at 0, generation one's row is from before the column. At 1 and 3, direct's copied
+            # count is null. At 2, generation one's blank total leaves the ticket out of both sides of sign 2, and
+            # direct's 70 copied with it, which direct's own block still counts.
             self.world.run("generation-one", ticket, True, tokens=None if at == 2 else 1000,
                            copied=OLD if at == 0 else 100)
             self.world.run("direct", ticket, True, tokens=800, copied=None if at in (1, 3) else 70 if at == 2 else 40)
         lines = self.lines()
         self.assertEqual([line for line in lines if line.startswith("  Copied tokens: ")], [
             copied_tokens(2800, 28000, "10.0%", 1),  # generation-one: 28 tickets say, of the 29 with a total
-            copied_tokens(1150, 22400, "5.1%", 2)])  # direct: 27 times 40 and 70, of 30 tickets
+            copied_tokens(1150, 22400, "5.1%", 2)])  # direct: 27 times 40 and the 70, of the 28 of 30 that say
         self.assertEqual(section(lines, 2), [
             "Warning sign 2: on 29 of 30 tickets, generation-one spent 29000 tokens and direct 23200, an extra cost of "
             "5800.",
@@ -467,11 +471,60 @@ class TestReport(unittest.TestCase):
             "The two verdicts differ: the spend not sorted decides the sign."])
 
     def test_sign_two_prints_no_share_of_no_tokens(self) -> None:
-        for at, ticket in enumerate(self.world.draw()):  # no row of direct's in the pairs says, and one is 0 tokens
+        # Generation one: at draw position 0 a row of 0 tokens, 0 copied; every other row from before the column.
+        # Direct: every row from before the column.
+        for at, ticket in enumerate(self.world.draw()):
             self.world.run("generation-one", ticket, True, tokens=0 if at == 0 else 1000, copied=0 if at == 0 else OLD)
-            self.world.run("direct", ticket, True, tokens=800, copied=None)
+            self.world.run("direct", ticket, True, tokens=800, copied=OLD)
         self.assertEqual(section(self.lines(), 2)[6],
                          sign_two_copied((0, 0, None, 29), (0, 0, None, 30)))
+
+    def test_sign_two_prints_a_share_for_one_side_without_the_other(self) -> None:
+        # One side's rows are all from before the column, so it has no share; the other's say 40 copied of 800.
+        for old_side in ("generation-one", "direct"):
+            with self.subTest(old_side=old_side):
+                self.setUp()
+                for ticket in self.world.draw():
+                    for version in ("generation-one", "direct"):
+                        self.world.run(version, ticket, True, tokens=800, copied=OLD if version == old_side else 40)
+                said, old = (1200, 24000, "5.0%", 0), (0, 0, None, 30)
+                self.assertEqual(section(self.lines(), 2)[6], sign_two_copied(
+                    *((old, said) if old_side == "generation-one" else (said, old))))
+
+    def verdict_lines(self, copied: int, cut: int, direct_copied: int) -> tuple[list[str], list[str]]:
+        """Warning sign 2's lines from its copied line on, with the column and without it, on 30 tickets where
+        generation one spends 100 tokens with `cut` in a closing verification and direct spends 50."""
+        for ticket in self.world.draw():
+            self.world.run("generation-one", ticket, True, tokens=100, copied=copied,
+                           helpers=[helper("Closing verification", None, cut)])
+            self.world.run("direct", ticket, True, tokens=50, copied=direct_copied)
+        with_column = section(self.lines(), 2)[6:]
+        for row in self.world.rows:
+            row.pop("copied_tokens")
+        return with_column, section(self.lines(), 2)[6:]
+
+    def test_copied_tokens_change_no_verdict_of_sign_two(self) -> None:
+        # Each fixture sits where taking the copied tokens out of a figure the verdict is built from would change a
+        # verdict line: out of the extra cost or generation one's sum (the first), or out of the cut or direct's
+        # sum (the second).
+        for (copied, cut, direct_copied), verdicts in [
+            ((60, 20, 0), [
+                "Without the spend not sorted, the cut is 600 tokens against half the extra cost, 750. The sign does "
+                "not appear.",
+                "With it counted as cut, the cut is 3000 tokens. The sign appears.",
+                "The two verdicts differ: the spend not sorted decides the sign."]),
+            ((10, 30, 10), [
+                "Without the spend not sorted, the cut is 900 tokens against half the extra cost, 750. The sign "
+                "appears.",
+                "With it counted as cut, the cut is 3000 tokens. The sign appears."]),
+        ]:
+            with self.subTest(copied=copied, cut=cut, direct_copied=direct_copied):
+                self.setUp()
+                with_column, without = self.verdict_lines(copied, cut, direct_copied)
+                self.assertEqual(with_column, [sign_two_copied((30 * copied, 3000, f"{copied / 100:.1%}", 0),
+                                                               (30 * direct_copied, 1500, f"{direct_copied / 50:.1%}",
+                                                                0)), *verdicts])
+                self.assertEqual(without, [sign_two_copied((0, 0, None, 30), (0, 0, None, 30)), *verdicts])
 
     def test_the_column_changes_no_other_line_and_no_verdict(self) -> None:
         # Copied tokens on both sides, a row without the column, and helpers of every step.
@@ -1007,8 +1060,12 @@ class TestReport(unittest.TestCase):
                 "wrote before it had that column, is blank: its ticket is left out of the copied\n"
                 "tokens and counted.\n")
         self.assertIn("\n\n" + rule + "\n", text)
-        self.assertEqual(" ".join(text.split()).count("Every token figure includes the tokens a resumed session "
-                                                      "copied: the report takes none out of a figure or a verdict."), 1)
+        sentence = " ".join(rule[:rule.index("verdict.") + len("verdict.")].split())  # the rule's first sentence
+        self.assertEqual(" ".join(text.split()).count(sentence), 1)
+        # Every share the report prints is a percent, and each sentence names the right whole.
+        self.assertIn("A share of tokens is not a count of\ntickets, so the report gives every share as a percent at "
+                      "any number of\ntickets. The cut and the tokens not sorted are percents of generation-one's\n"
+                      "tokens. Each copied share is of the total printed beside it.\n", text)
         self.assertIn("  scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes\n"
                       "                        and helpers of each row, and description, brief_head\n"
                       "                        and total_tokens of each helper (scripts/scan.py).\n", text)

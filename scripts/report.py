@@ -184,8 +184,9 @@ the cut can be smaller than generation one's real spend on those steps. A
 helper with a blank total_tokens has no tokens of its own: its responses are
 in another helper's or the session's, and it adds nothing to a step; the
 report prints how many there are. A share of tokens is not a count of
-tickets, so the report gives it as a percent of {GENERATION_ONE}'s tokens at
-any number of tickets.
+tickets, so the report gives every share as a percent at any number of
+tickets. The cut and the tokens not sorted are percents of {GENERATION_ONE}'s
+tokens. Each copied share is of the total printed beside it.
 
 Files read, all written by the other scripts:
 
@@ -416,21 +417,21 @@ def figures(results: list[str | dict]) -> str:
             f"median total tokens {median(tokens)}, median active minutes {median(minutes)}.")
 
 
-def copied_of(results: list[dict]) -> tuple[str, str, int]:
-    """Of the results whose row gives a copied count: "<copied tokens> of the <total tokens>", then ", <share>", or
-    nothing when that total is 0. Then how many results have a blank copied count."""
+def copied_of(results: list[dict], whose: str) -> tuple[str, int]:
+    """Of the results whose row gives a copied count, "<copied> of the <total> total tokens of <whose> tickets with a
+    copied count", then ", <share>", or nothing when that total is 0; and how many results have a blank copied
+    count."""
     known = [result for result in results if result["copied"] is not None]
     copied, total = sum(result["copied"] for result in known), sum(result["tokens"] for result in known)
-    return (f"{number(copied)} of the {number(total)}", f", {copied / total:.1%}" if total else "",
-            len(results) - len(known))
+    return (f"{number(copied)} of the {number(total)} total tokens of {whose} tickets with a copied count"
+            + (f", {copied / total:.1%}" if total else ""), len(results) - len(known))
 
 
 def copied_line(counted: list[dict]) -> str:
     """The copied tokens of the tickets in a version's token figures whose row gives them, out of the same tickets'
     total tokens; a blank copied count is left out and counted."""
-    part, share, blank = copied_of(counted)
-    return (f"  Copied tokens: {part} total tokens of the tickets with a copied count{share}. Left out of the copied "
-            f"tokens: {blank} with a blank copied count.")
+    copied_of_total, blank = copied_of(counted, "the")
+    return f"  Copied tokens: {copied_of_total}. Left out of the copied tokens: {blank} with a blank copied count."
 
 
 def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict, skipped_scan_lines: int = 0) -> list[str]:
@@ -499,8 +500,8 @@ def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
             ownless += helper["total_tokens"] is None
     first, second = (sum(pair[side]["tokens"] for pair in counted) for side in (0, 1))
     own = first - sum(spend.values())
-    (first_part, first_share, first_blank), (second_part, second_share, second_blank) = (
-        copied_of([pair[side] for pair in counted]) for side in (0, 1))
+    (first_copied_of_total, first_blank), (second_copied_of_total, second_blank) = (
+        copied_of([pair[side] for pair in counted], f"{name}'s") for side, name in ((0, GENERATION_ONE), (1, DIRECT)))
     extra, cut, unsorted = first - second, sum(spend[name] for name in CUT), spend[None] + own
 
     def share(part: int | float) -> str:
@@ -514,10 +515,9 @@ def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
              f"  Not sorted into a step: {share(unsorted)}: {number(spend[None])} in helpers that name no step, "
              f"{number(own)} the sessions' own, in no helper.",
              "  A helper resumed for a fix round counts under the step it started as.",
-             f"  Copied tokens in these sums: {first_part} total tokens of {GENERATION_ONE}'s tickets with a copied "
-             f"count{first_share}, and {second_part} of {DIRECT}'s{second_share}. Left out of the copied tokens: "
-             f"{first_blank} of {GENERATION_ONE}'s tickets and {second_blank} of {DIRECT}'s, with a blank copied "
-             "count."]
+             f"  Copied tokens in these sums: {first_copied_of_total}, and {second_copied_of_total}. Left out of the "
+             f"copied tokens: {first_blank} of {GENERATION_ONE}'s tickets and {second_blank} of {DIRECT}'s, with a "
+             "blank copied count."]
     if len(judged) < total:
         return [*lines, f"No verdict: tickets {unjudged(judged, total)}"]
     if extra <= 0:

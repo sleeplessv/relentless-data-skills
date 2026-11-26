@@ -61,9 +61,14 @@ as-of date. Probe commands and per-harness parameters are in
 
 ## Not yet
 
-[`orchestrator-mode`](../orchestrator-mode/) and the generation-two skills still
-choose their own models, under different class names. Load `model-router` beside
-`orchestrator-mode` only once
+[`orchestrator-mode`](../orchestrator-mode/) and the skills that take their
+model classes from it ([`implement-ticket`](../implement-ticket/),
+[`implement-feature`](../implement-feature/) and
+[`implement-backlog`](../implement-backlog/)) still choose their own models,
+under different class names: their strong class is Opus, which this skill calls
+`apex`. Loaded beside one of them, `model-router` routes only the work the main
+session hands out directly; the workers those skills start never load it and
+keep their own classes. Load the two together only once
 [#331](https://github.com/sleeplessv/relentless-data-skills/issues/331) lands;
 generation two follows in
 [#328](https://github.com/sleeplessv/relentless-data-skills/issues/328).

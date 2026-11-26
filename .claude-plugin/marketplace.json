@@ -292,7 +292,7 @@
       "name": "model-router",
       "source": "./skills/model-router",
       "description": "Pick the model, reasoning effort and harness for each delegated task across Anthropic, OpenAI and Google models, by task fit, input and cost.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "sleeplessv"
       },

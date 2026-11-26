@@ -80,8 +80,8 @@ CLAUDE_* but {" and ".join(KEPT)}) or a GitHub token. For git, its environment
 sets GIT_CONFIG_GLOBAL to {os.devnull} and GIT_CONFIG_NOSYSTEM to 1, sets
 core.excludesFile and core.attributesFile to {os.devnull} through
 GIT_CONFIG_COUNT, and carries no other GIT_* variable of the caller's. The
-session's git then reads the clone's own config and no other config file, and
-no ignore or attributes file of the user's, which the sandbox would hide.
+session's git then reads no user or system config file unless a repo's config
+includes one, and no ignore or attributes file of the user's.
 Nothing is pushed, and no PR is opened.
 
 Files, all in the machine directory:
@@ -178,7 +178,7 @@ def command(clone: Path, model: str, session: str) -> list[str]:
 
 
 def environment() -> dict[str, str]:
-    """The session's. Its git reads no user config, ignore or attributes file, which the sandbox would hide."""
+    """The session's, with the git settings --help gives."""
     env = {key: value for key, value in plain().items()
            if not (key.startswith("CLAUDE") and key not in KEPT) and key not in DROPPED}
     return {**env, "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "GIT_CONFIG_COUNT": "2",

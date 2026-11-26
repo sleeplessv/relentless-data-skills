@@ -177,9 +177,11 @@ class World:
                    STANDIN_STARTS=str(self.starts), TMPDIR=str(self.root), **PARENT)
         return {**env, **extra}
 
-    def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+    def replay(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
+        """Run the replay in env(**extra), less the variables unset names."""
+        env = {key: value for key, value in self.env(**extra).items() if key not in unset}
         return subprocess.run([sys.executable, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
-                              env=self.env(**extra), text=True, capture_output=True, timeout=120)
+                              env=env, text=True, capture_output=True, timeout=120)
 
     @property
     def clone(self) -> Path:
@@ -209,9 +211,9 @@ class ReplayTest(unittest.TestCase):
         self.world = World(Path(temp.name).resolve())
         self.git = self.world.git
 
-    def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+    def replay(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
         """Run the replay, then hold every session it started to the whole confinement."""
-        result = self.world.replay(*args, **extra)
+        result = self.world.replay(*args, unset=unset, **extra)
         for start in self.world.starts_made():
             self.assert_confined(start)
         return result
@@ -418,25 +420,33 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.stderr, "replay: project A is not in both project-labels.json and repos.json.\n")
 
     def test_the_session_s_git_reads_no_file_of_the_caller_s_and_commits_in_the_clone(self) -> None:
-        # Settings, an ignore rule and an attribute that only the caller's files under HOME, and the user config
-        # file GIT_CONFIG_GLOBAL names, hold. The sandbox hides the home folder, so a session's git must not read them.
+        # Settings, an ignore rule and an attribute that only the caller's files under HOME and XDG_CONFIG_HOME, and
+        # the user config file GIT_CONFIG_GLOBAL names, hold. The sandbox hides the home folder, so a session's git
+        # must not read them, whether the caller sets GIT_CONFIG_GLOBAL or not.
         home = self.world.home
-        (home / ".config" / "git").mkdir(parents=True)
-        (home / ".config" / "git" / "ignore").write_text("notes.txt\n")
-        (home / ".config" / "git" / "attributes").write_text("* caller-attribute\n")
+        xdg = home / ".config"
+        (xdg / "git").mkdir(parents=True)
+        (xdg / "git" / "ignore").write_text("notes.txt\n")
+        (xdg / "git" / "attributes").write_text("* caller-attribute\n")
+        (xdg / "git" / "config").write_text("[replay]\n\txdg = caller\n")
         (home / ".gitconfig").write_text("[replay]\n\thome = caller\n")
         with open(self.world.gitconfig, "a") as config:
             config.write("[replay]\n\tglobal = caller\n")
-        result = self.replay("A", "7")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        [start] = self.world.starts_made()
+        for unset in (("GIT_CONFIG_GLOBAL",), ()):
+            shutil.rmtree(self.world.clone, ignore_errors=True)
+            shutil.rmtree(self.world.store, ignore_errors=True)
+            result = self.replay("A", "7", XDG_CONFIG_HOME=str(xdg), unset=unset)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            start = self.world.starts_made()[-1]
+            for key in ("replay.home", "replay.xdg", "replay.global"):
+                with self.subTest(unset=unset, key=key):
+                    looked = subprocess.run(["git", "config", "--get", key], cwd=self.world.clone, env=start["env"],
+                                            capture_output=True)
+                    self.assertEqual(looked.returncode, 1)
         clone = self.world.clone
 
         def session_git(*args: str) -> subprocess.CompletedProcess[str]:
             return subprocess.run(["git", *args], cwd=clone, env=start["env"], text=True, capture_output=True)
-        for key in ("replay.home", "replay.global"):
-            with self.subTest(key=key):
-                self.assertEqual(session_git("config", "--get", key).returncode, 1)
         (clone / "notes.txt").write_text("a note\n")
         self.assertEqual(session_git("status", "--porcelain", "--", "notes.txt").stdout, "?? notes.txt\n")
         self.assertEqual(session_git("check-attr", "caller-attribute", "notes.txt").stdout,
@@ -532,7 +542,9 @@ class ReplayTest(unittest.TestCase):
         self.assertIn("Usage: python3 scripts/replay.py LABEL TICKET", result.stdout)
         self.assertIn(f"For git, its environment sets GIT_CONFIG_GLOBAL to {os.devnull} and GIT_CONFIG_NOSYSTEM to 1, "
                       f"sets core.excludesFile and core.attributesFile to {os.devnull} through GIT_CONFIG_COUNT, and "
-                      "carries no other GIT_* variable of the caller's.", " ".join(result.stdout.split()))
+                      "carries no other GIT_* variable of the caller's. The session's git then reads no user or system "
+                      "config file unless a repo's config includes one, and no ignore or attributes file of the "
+                      "user's.", " ".join(result.stdout.split()))
         self.assertFalse(self.world.starts.exists())
 
 

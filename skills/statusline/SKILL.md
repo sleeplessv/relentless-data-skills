@@ -28,7 +28,7 @@ The gradient needs a terminal with 24-bit colour, such as iTerm2, Ghostty, Warp,
 ### Step 1: Check prerequisites
 
 - Run `command -v jq`. If `jq` is missing, tell the user to install it and stop. On macOS, the command is `brew install jq`. On Linux, use the distribution's package.
-- Run `gh auth status`. If `gh` is missing or signed out, tell the user that the PR line stays hidden until they install `gh` or run `gh auth login`. Then continue.
+- Run `gh auth status`. If `gh` is missing, the PR line stays hidden. If signed out, the script can still display cached results. Tell the user how to install `gh` or run `gh auth login` to fetch PRs, then continue.
 - Resolve the absolute path of this skill's `scripts/statusline.sh`.
 
 ### Step 2: Copy the script
@@ -47,7 +47,7 @@ If the file does not exist, create it with only the `statusLine` key below. Othe
 "statusLine": { "type": "command", "command": "~/.claude/statusline.sh", "refreshInterval": 30 }
 ```
 
-`refreshInterval` reruns the script every 30 seconds, so the PR line catches up while the session is idle. Without it, Claude Code reruns the script only on conversation events.
+`refreshInterval` adds a 30-second timer so the PR line catches up while the session is idle. Claude Code also runs the script on session start and on events such as assistant messages, permission-mode changes, and edits to the status-line command. [Claude Code update triggers](https://code.claude.com/docs/en/statusline#when-the-status-line-updates)
 
 Change only that key and keep every other setting. Run `jq empty <file>` to confirm that the file is still valid JSON.
 
@@ -61,6 +61,6 @@ echo '{"model":{"display_name":"Opus 5.5"},"effort":{"level":"high"},"context_wi
 
 Done when the output shows `Opus 5.5 · high`, `▰▰▱▱▱▱▱▱▱▱ 42k/200k (21%)`, the directory name, and the branch. Off the default branch, a branch with changes also shows its diff, such as `+120 −34`. Report the rendered lines to the user.
 
-The first run starts a background fetch of the PR counts, so the PR line can appear only on a later run. Run the command again after a few seconds. If the repo has no open PRs, the line stays hidden.
+With `gh` available, the script reads cached PRs while refreshing them in the background when due. On a cold cache, run the command again after a few seconds. With a fresh empty list, a branch named `ticket-51-x` shows `on 51 (no PR)`. A branch without an issue number shows just the first line. A cache at least two minutes old shows its age even when empty, for example `PRs (5m old)`.
 
-Tell the user that the status line appears from their next message in a session without `CLAUDE_CONFIG_DIR`. After a user-level install, a profile that sets `CLAUDE_CONFIG_DIR` needs the `statusLine` key in that directory's `settings.json`, as [Tell Claude accounts apart](README.md#tell-claude-accounts-apart) describes. If the status line does not appear, tell them to restart Claude Code. Before the first message of a session, the line shows `0/0 (0%)` because Claude Code has no usage to report yet.
+Tell the user the status line appears when Claude Code reloads the saved command and when a session starts. After a user-level install, a profile that sets `CLAUDE_CONFIG_DIR` needs the `statusLine` key in that directory's `settings.json`, as [Tell Claude accounts apart](README.md#tell-claude-accounts-apart) describes. If the status line does not appear, tell them to restart Claude Code. Before Claude Code reports context usage, missing token counts display as zero.

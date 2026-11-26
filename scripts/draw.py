@@ -333,6 +333,20 @@ class GhFailed(DrawError):
         self.output = output
 
 
+def remove(path: Path) -> None:
+    """Remove a tree a try may have left, first giving its owner write access to each folder in it, as a check
+    can leave a folder read-only; what still cannot be removed stays."""
+    for folder, names, _ in os.walk(path):
+        for name in names:
+            inner = os.path.join(folder, name)
+            if not os.path.islink(inner):
+                try:
+                    os.chmod(inner, os.lstat(inner).st_mode & 0o7777 | 0o700)
+                except OSError:
+                    pass
+    shutil.rmtree(path, ignore_errors=True)
+
+
 def label_name(number: int) -> str:
     """1 is A, 26 is Z, 27 is AA."""
     label = ""
@@ -900,7 +914,7 @@ class Draw:
         label, repo = candidate["label"], candidate["repo"]["repo"]
         if label not in self.clones:
             target = self.work / label
-            shutil.rmtree(target, ignore_errors=True)  # what an earlier failed clone left would make this one fail
+            remove(target)  # what an earlier failed clone left would make this one fail
             result = subprocess.run(["gh", "repo", "clone", repo, str(target)], text=True, capture_output=True)
             if result.returncode:  # the repo's next ticket tries again
                 return target, (f"$ gh repo clone {repo} {target}\n{result.stdout}{result.stderr}".rstrip("\n")
@@ -980,6 +994,7 @@ class Draw:
             try:
                 stop()
                 self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
+                remove(tree)  # what git leaves, such as a folder the check made read-only
                 self.git("-C", str(clone), "worktree", "prune")
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, held)
@@ -1085,7 +1100,7 @@ class Draw:
             buckets = self.pool(repos, self.labels(repos))
             kept: list[dict] = []
             aside: list[dict] = []
-            shutil.rmtree(self.work, ignore_errors=True)
+            remove(self.work)
             self.work.mkdir()
             try:
                 for name, found in buckets.items():
@@ -1100,7 +1115,7 @@ class Draw:
                         else:
                             kept.append(candidate)
             finally:
-                shutil.rmtree(self.work, ignore_errors=True)
+                remove(self.work)
             for name, found in buckets.items():
                 print(f"{name}: pool {len(found)}, set aside {sum(entry['bucket'] == name for entry in aside)}, "
                       f"kept {sum(entry['bucket'] == name for entry in kept)}.")

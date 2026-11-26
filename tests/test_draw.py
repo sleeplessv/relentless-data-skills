@@ -326,6 +326,14 @@ def sized(start: int, count: int, size: int, **fields: object) -> list[Ticket]:
     return [Ticket(number, size, **fields) for number in range(start, start + count)]
 
 
+def writable(root: Path) -> None:
+    """Give the owner write access to each folder under `root`, so that a folder a check made read-only can go."""
+    for folder, names, _ in os.walk(root):
+        for name in names:
+            if not os.path.islink(os.path.join(folder, name)):
+                os.chmod(os.path.join(folder, name), 0o700)
+
+
 def full_pool(per_bucket: int = 12, **fields: object) -> list[Ticket]:
     """`per_bucket` tickets of 20, 100 and 800 changed lines, numbered from 1, 101 and 201."""
     return sized(1, per_bucket, 20, **fields) + sized(101, per_bucket, 100, **fields) + sized(201, per_bucket, 800, **fields)
@@ -1001,8 +1009,10 @@ class TestDraw(unittest.TestCase):
         world = self.world(full_pool(criteria=criteria))
         result = world.draw()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([entry["requirements"] for entry in world.set_file()["tickets"]],
-                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * len(world.set_file()["tickets"]))
+        tickets = world.set_file()["tickets"]
+        self.assertNotEqual(tickets, [])
+        self.assertEqual([entry["requirements"] for entry in tickets],
+                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * len(tickets))
 
     def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
         cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
@@ -1373,7 +1383,7 @@ class TestDraw(unittest.TestCase):
         world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + short)
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[3:], [
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
             "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
             "301-1500: pool 4, set aside 1, kept 3.", f"Wrote {world.state / 'replay-set-1.json'}."])
         self.assertEqual(result.stderr, "")
@@ -1401,7 +1411,7 @@ class TestDraw(unittest.TestCase):
                 self.assertFalse((world.state / "draw-work").exists())
                 if passes:
                     self.assertEqual(result.returncode, 0)
-                    self.assertEqual(result.stdout.splitlines()[3:], [
+                    self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
                         "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 5, kept 1.",
                         "301-1500: pool 2, set aside 0, kept 2.", f"Wrote {world.state / 'replay-set-1.json'}."])
                     drawn = world.set_file()
@@ -1412,7 +1422,7 @@ class TestDraw(unittest.TestCase):
                                      sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
                 else:
                     self.assertEqual(result.returncode, 3)
-                    self.assertEqual(result.stdout.splitlines()[3:], [
+                    self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
                         "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 6, kept 0.",
                         "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
                     self.assertEqual(list(world.state.glob("replay-set-*")), [])
@@ -1422,7 +1432,7 @@ class TestDraw(unittest.TestCase):
         world = self.world(sized(1, 2, 20) + sized(201, 2, 800))
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[3:], [
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
             "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 0, set aside 0, kept 0.",
             "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
         self.assertEqual(result.stderr, "")
@@ -1435,7 +1445,7 @@ class TestDraw(unittest.TestCase):
         world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + sized(201, 2, 800, passes=False))
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[3:], [
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
             "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
             "301-1500: pool 2, set aside 2, kept 0.", "No set written: a bucket holds no ticket that passes."])
         self.assertEqual(result.stderr, "")
@@ -1444,6 +1454,33 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
         self.assertFalse((world.state / "logs").exists())
         self.assertFalse((world.state / "draw-work").exists())
+
+    def test_a_folder_a_check_left_read_only_does_not_stop_the_next_draw(self) -> None:
+        # Pools 6, 1, 6 leave 1, 0, 1 for the second draw, which writes no set; pools 6, 6, 6 leave one in each.
+        check = CHECK + " && mkdir fixture && touch fixture/input && chmod 555 fixture"
+        for middle, second in ((1, ["0-50: pool 1, set aside 0, kept 1.", "51-300: pool 0, set aside 0, kept 0.",
+                                    "301-1500: pool 1, set aside 0, kept 1.",
+                                    "No set written: a bucket holds no ticket that passes."]),
+                               (6, ["0-50: pool 1, set aside 0, kept 1.", "51-300: pool 1, set aside 0, kept 1.",
+                                    "301-1500: pool 1, set aside 0, kept 1."])):
+            with self.subTest(middle=middle):
+                world = self.world(sized(1, 6, 20) + sized(101, middle, 100) + sized(201, 6, 800),
+                                   repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
+                self.addCleanup(writable, world.root)  # runs before the folder's own removal
+                leftover = world.state / "draw-work" / "A-999" / "fixture"  # as a stopped draw could leave it
+                leftover.mkdir(parents=True)
+                (leftover / "input").touch()
+                leftover.chmod(0o555)
+                first = world.draw("--seed", "2")
+                self.assertEqual((first.returncode, first.stderr), (0, ""))
+                self.assertFalse((world.state / "draw-work").exists())
+                result = world.draw("--seed", "2")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(result.returncode, 0 if middle == 6 else 3)
+                written = [f"Wrote {world.state / 'replay-set-2.json'}."] if middle == 6 else []
+                self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:],
+                                 ["Seed 2.", *second, *written])
+                self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_same_seed_on_the_same_pool_and_check_results_gives_the_same_set(self) -> None:
         world = self.world(full_pool(13) + [Ticket(14, 20, passes=False), Ticket(114, 100, passes=False)])
@@ -1787,8 +1824,10 @@ class TestDraw(unittest.TestCase):
         (world.state / "scan-rows.jsonl").write_text("[]\n")
         result = world.draw("--seed", "1")
         self.assertEqual(result.returncode, 0)
+        tickets = world.set_file()["tickets"]
+        self.assertNotEqual(tickets, [])
         self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n"
-                         * len(world.set_file()["tickets"]))
+                         * len(tickets))
         self.assertEqual((world.state / "scan-rows.jsonl").read_text().split("\n")[0], "[]")
         self.assertEqual([path.name for path in world.state.glob("replay-set-*")], ["replay-set-1.json"])
 

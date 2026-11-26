@@ -90,9 +90,15 @@ Push only when the request asked for it: the user said "push" ("commit and push"
 
 For a branch with an existing upstream, run `git push --dry-run --porcelain`. Stop if the preview fails. Read each push URL from its `To` line and each destination branch from the right-hand `refs/heads/...` in its ref updates. This includes push-remote overrides, push URLs, and renamed destination branches.
 
-- On GitHub, set `repo` to the push repository in `HOST/OWNER/REPO` form and `branch` to the destination branch name. Run `gh pr list --repo "$repo" --head "$branch" --state merged --limit 1 --json number --jq length`. Exit 0 and output `0` clear the check. Output `1` means a merged PR exists. For a fork that sends PRs upstream, also check the upstream project for a merged PR from that fork and branch.
+- On GitHub, take `host` and the push repository from the preview URL, and `branch` from the destination ref. Use `gh api --hostname "$host" "repos/<push-owner>/<push-repo>" --jq '{full_name, fork, parent: .parent.full_name}'` to get the canonical source (`source` = `full_name`). Set `target` to that source, then repeat for its upstream PR target when it is a fork (normally `parent`). Keep the same source and branch in both lookups.
+
+  ```bash
+  gh api --hostname "$host" -X GET "repos/$target/pulls" --paginate -f state=closed -f head="${source%/*}:$branch" --jq 'map({number, source: .head.repo.full_name, head: .head.ref, merged_at})'
+  ```
+
+  A PR counts only when its source and head match `source` and `branch` exactly and `merged_at` has a timestamp. A lookup clears only after exit 0 and every page shows no matching merge.
 - On another forge, check its merged requests for the same source project and branch using its CLI or web interface. For example, look for merged merge requests on GitLab. A plain Git remote with no review service needs only the Git preview.
-- If a merge is found, the review host is unknown, or a required lookup fails (including missing `gh`, authentication, or unexpected output), keep the commits local and report why. After every destination clears its check, run:
+- If a merge is found, a review target is unknown, or a required lookup fails or returns incomplete data, keep the commits local and report why. After every destination clears its check, run:
 
 ```bash
 git push

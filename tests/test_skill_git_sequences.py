@@ -708,10 +708,11 @@ class SmartGitCommitTests(unittest.TestCase):
         self.sb = Sandbox(self)
         self.origin = self.sb.origin_with_main()
         self.work = self.sb.clone(self.origin, "work")
-        text = SMART_COMMIT_SKILL.read_text(encoding="utf-8")
         self.commit = doc_block(SMART_COMMIT_SKILL, "Step 4: Commit each group", "git commit")
-        push_blocks = fenced_blocks(section(text, "Step 5: Push when asked"))
-        self.push, self.push_upstream = (split_commands(b) for b in push_blocks)
+        pushes = [block for block in fenced_blocks(section(SMART_COMMIT_SKILL.read_text(),
+                                                           "Step 5: Push when asked"))
+                  if block.startswith("git push")]
+        self.push, self.push_upstream = map(split_commands, pushes)
 
     def test_commit_block_creates_one_local_commit_and_does_not_push(self):
         (self.work / "a.txt").write_text("a\n", encoding="utf-8")

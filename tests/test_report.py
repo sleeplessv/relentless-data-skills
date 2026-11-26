@@ -130,13 +130,13 @@ class World:
         for name, lines in (("versions", self.versions), ("verdicts", self.verdicts), ("scan-rows", self.rows)):
             (self.state / f"{name}.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
 
-    def report(self, *args: str, save: bool = True) -> subprocess.CompletedProcess[str]:
+    def report(self, *args: str, save: bool = True, text: bool = True) -> subprocess.CompletedProcess:
         if save:
             self.save()
         env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
         env.update({"HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state)})
         return subprocess.run([sys.executable, str(self.source / "report.py"), *args], cwd=self.root, env=env,
-                              text=True, capture_output=True)
+                              text=text, capture_output=True)
 
 
 def tree(folder: Path) -> dict[str, tuple]:
@@ -825,11 +825,12 @@ class TestReport(unittest.TestCase):
 
     def test_blank_lines_of_the_rows_file_are_passed_over_and_not_counted(self) -> None:
         self.world.baseline(20, 15)
-        clean = self.world.report()
+        clean = self.world.report(text=False)  # bytes, so that a changed line ending shows
+        self.assertEqual((clean.returncode, clean.stderr), (0, b""))
         good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
         self.write_rows(b"", b"  ", *good, b"\t", "\u00a0\u2003".encode())
-        result = self.world.report(save=False)
-        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, clean.stdout, ""))
+        result = self.world.report(save=False, text=False)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, clean.stdout, b""))
 
     def test_a_damaged_line_of_versions_or_verdicts_still_stops_it_whatever_the_rows_file_holds(self) -> None:
         for name, damage in (("versions.jsonl", b"{broken"), ("verdicts.jsonl", b"[]"), ("versions.jsonl", b"\xff"),

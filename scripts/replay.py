@@ -69,8 +69,11 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    switch off git's default lookups of the system config file and of the user
    config files (~/.gitconfig and $XDG_CONFIG_HOME/git/config); a config file
    that a repo's own config names with include.path is still read. They carry
-   no GIT_* variable from the caller, and this step runs on the version's repo,
-   so nothing the session left in the clone's .git/ runs. Git's default
+   no GIT_* variable from the caller. The version's repo records the tree. A
+   private repo, made beside it for this step, lists a copy of the clone's
+   index and reads objects from the clone's .git/objects. Neither repo reads
+   the clone's config, so nothing the session left in the clone's .git/ runs.
+   Git's default
    attribute and ignore files still apply: $XDG_CONFIG_HOME/git/attributes and git/ignore (by default under
    ~/.config/) and the system attributes file. A start that left no session
    log and changed nothing is taken as no session: nothing is recorded.
@@ -120,8 +123,11 @@ that failed is reported. Exit 1: an error. Before a session ran, or for a
 start taken as no session, nothing is recorded and what the replay made is
 removed. After a session ran, the clone and the version's repo are kept. A clone
 index that is not a regular file, or that the replay cannot copy or list with
-git (it reads a split index with its shared index), ends the replay with one
-line on standard error and nothing recorded. A row that cannot be written, after the version was
+git, ends the replay with one line on standard error and nothing recorded. Git
+lists a split index with its shared index and a sparse index with the trees
+in the clone's objects. A listing that exits 0 but writes to standard error,
+as git does when it cannot read such a tree, counts as one git cannot list.
+A row that cannot be written, after the version was
 recorded, ends it with one line that says the version is recorded without its
 row and names the command that writes the row from the session's log,
 python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl, and
@@ -237,8 +243,10 @@ def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> 
 def tracked(store: Path, clone: Path) -> list[bytes]:
     """The paths the clone's index lists, as the bytes git holds them. Empty when the clone has no index file. The
     index must be a regular file, which is copied as data into a private git folder with the shared indexes beside it
-    that a split index reads, and listed there; the version's repo is not touched. An index the replay will not read
-    with certainty, or that git cannot list, raises ReplayError."""
+    that a split index reads, and listed there; the version's repo is not touched. The private folder reads objects
+    from the clone's .git/objects, where git finds the trees a sparse index names. An index the replay will not read
+    with certainty raises ReplayError: one git cannot list, or whose listing prints anything on standard error, which
+    is how git reports a tree it could not read while it still exits 0."""
     index = clone / ".git" / "index"
 
     def unreadable(why: str) -> ReplayError:
@@ -251,22 +259,30 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
         raise unreadable(error.strerror) from None
     if not stat.S_ISREG(info.st_mode):  # a link or a folder: native git follows some, the replay reads none
         raise unreadable("not a regular file")
-    with tempfile.TemporaryDirectory(dir=store.parent, ignore_cleanup_errors=True) as private:
-        meta = Path(private)
-        git(meta, "init", "-q", "--bare", ".")
-        try:
+    try:  # every step of making, filling and listing the private folder ends, if it fails, in the index's one line
+        with tempfile.TemporaryDirectory(dir=store.parent, ignore_cleanup_errors=True) as private:
+            meta = Path(private)
+            made = run("git", "init", "-q", "--bare", private, env=plain())
+            if made.returncode:
+                raise unreadable(f"git init exited {made.returncode}")
             shutil.copyfile(index, meta / "index")
             for shared in sorted(index.parent.glob("sharedindex.*")):  # one of these is what a split index reads
                 if shared.is_file() and not shared.is_symlink():
                     with contextlib.suppress(OSError):  # one the index does not name may be unreadable; git
                         shutil.copyfile(shared, meta / shared.name)  # fails below when the named one is missing
-            listed = subprocess.run(["git", "-C", str(clone), "ls-files", "-z"], stdin=subprocess.DEVNULL,
-                                    capture_output=True, env={**trusted(store, clone), "GIT_DIR": str(meta),
-                                                              "GIT_INDEX_FILE": str(meta / "index")})
-        except OSError as error:
-            raise unreadable(error.strerror) from None
+            # A link with a name of the replay's own, so the alternates file holds no path of the caller's.
+            (meta / "clone-objects").symlink_to(index.parent / "objects")
+            (meta / "objects" / "info" / "alternates").write_text("../clone-objects\n")
+            listed = subprocess.run(["git", "-c", "advice.sparseIndexExpanded=false", "-C", str(clone), "ls-files",
+                                     "-z"], stdin=subprocess.DEVNULL, capture_output=True,
+                                    env={**trusted(store, clone), "GIT_DIR": str(meta),
+                                         "GIT_INDEX_FILE": str(meta / "index")})
+    except OSError as error:
+        raise unreadable(error.strerror or type(error).__name__) from None
     if listed.returncode:
         raise unreadable(f"git ls-files exited {listed.returncode}")
+    if listed.stderr:  # git exits 0 when it cannot read a tree of a sparse index, and leaves that tree's files out
+        raise unreadable("git ls-files reported an error")
     paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path]
     # Each path must name a file or link in the clone itself: not under .git/, and not reached through a link
     # or as a folder, which a forced add would take whole, ignored files and all.

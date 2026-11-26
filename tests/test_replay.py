@@ -18,6 +18,7 @@ import os
 import shlex
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -551,10 +552,13 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(self.world.names(version["commit"]), self.BASE_FILES)
 
     def test_an_index_that_is_not_one_regular_file_git_can_list_is_refused_not_read_as_empty(self) -> None:
-        # Each state, with an ignored tracked file the clone's own index lists.
+        # The session first tracks and commits an ignored file. Each preparation then truncates, replaces or breaks
+        # the index, so most of the resulting indexes list nothing at all.
         states = {
             "a zero-byte file": (": > .git/index", "git ls-files exited 128"),
-            "a zero-byte file of mode 000": (": > .git/index && chmod 000 .git/index", "Permission denied"),
+            # root reads a file whatever its mode, and then git refuses the zero bytes
+            "a zero-byte file of mode 000": (": > .git/index && chmod 000 .git/index",
+                                             "git ls-files exited 128" if os.geteuid() == 0 else "Permission denied"),
             "a folder": ("rm .git/index && mkdir .git/index", "not a regular file"),
             "a link to an index": ("mv .git/index .git/other && ln -s other .git/index", "not a regular file"),
             "a git file naming another folder": ("mv .git ../moved && echo 'gitdir: ../moved' > .git",
@@ -572,25 +576,92 @@ class ReplayTest(unittest.TestCase):
                 self.assert_index_refused(result, why)
 
     def test_a_shared_index_the_clone_no_longer_uses_does_not_stop_the_replay(self) -> None:
-        # Git leaves the retired shared index of a split index that was turned off; it may be unreadable.
+        # Git leaves the retired shared index of a split index that was turned off; it may be unreadable. A step that
+        # fails makes the stand-in exit 1, which the recorded exit status shows.
         prepare = ("git update-index --split-index && git update-index --no-split-index && "
-                   'for f in .git/sharedindex.*; do [ -e "$f" ] && chmod 000 "$f"; done; true')
+                   "chmod 000 .git/sharedindex.*")
         result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         [version] = self.world.versions()
+        self.assertEqual(version["exit_status"], 0)
+        retired = list((self.world.clone / ".git").glob("sharedindex.*"))
+        self.assertNotEqual(retired, [])
+        for shared in retired:
+            self.assertTrue(stat.S_ISREG(shared.lstat().st_mode), shared)
+            self.assertEqual(shared.lstat().st_mode & 0o777, 0, shared)
         self.assertEqual(self.world.names(version["commit"]), [*self.BASE_FILES, b"dep.lock"])
 
-    def test_a_listing_that_cannot_start_ends_in_one_line(self) -> None:
-        body = ("real = subprocess.run\n"
-                "def run(args, *rest, **options):\n"
-                "    if 'ls-files' in args:\n"
-                "        raise OSError(24, 'Too many open files')\n"
-                "    return real(args, *rest, **options)\n"
-                "subprocess.run = run")
-        result = self.wrapped(body)
+    # Fails the nth call of subprocess.run whose arguments hold sys.argv[1], as `how` says.
+    FAIL_NTH_RUN = ("real, calls, word, nth = subprocess.run, [], sys.argv[1], int(sys.argv[2])\n"
+                    "def run(args, *rest, **options):\n"
+                    "    if word in args:\n"
+                    "        calls.append(1)\n"
+                    "        if len(calls) == nth:\n"
+                    "            {how}\n"
+                    "    return real(args, *rest, **options)\n"
+                    "subprocess.run = run")
+
+    def test_a_listing_that_cannot_start_after_the_session_ends_in_one_line_and_keeps_both(self) -> None:
+        body = self.FAIL_NTH_RUN.format(how="raise OSError(24, 'Too many open files')")
+        self.assert_index_refused(self.wrapped(body, "ls-files", "2"), "Too many open files")
+
+    def test_a_listing_that_cannot_start_before_the_session_ends_in_one_line_and_removes_both(self) -> None:
+        body = self.FAIL_NTH_RUN.format(how="raise OSError(24, 'Too many open files')")
+        result = self.wrapped(body, "ls-files", "1")
         index = self.world.clone / ".git" / "index"
         self.assertEqual((result.returncode, result.stderr),
                          (1, f"replay: the clone's index {str(index)!r} cannot be read (Too many open files).\n"))
+        self.assertEqual((self.world.starts_made(), self.world.versions()), ([], []))
+        self.assertFalse(self.world.clone.exists())
+        self.assertFalse(self.world.store.exists())
+
+    def test_a_private_folder_for_the_index_that_cannot_be_made_ends_in_one_line_and_keeps_both(self) -> None:
+        # cut() makes the first temporary folder and the first git init; each listing makes one more of each, so the
+        # third of either belongs to the listing after the session.
+        no_space = ("import tempfile\nreal, calls = tempfile.mkdtemp, []\n"
+                    "def full(*args, **options):\n"
+                    "    calls.append(1)\n"
+                    "    if len(calls) == 3:\n"
+                    "        raise OSError(28, 'No space left on device')\n"
+                    "    return real(*args, **options)\n"
+                    "tempfile.mkdtemp = full")
+        init_fails = self.FAIL_NTH_RUN.format(how="return subprocess.CompletedProcess(args, 7, '', '')")
+        for failure, body, argv, why in (("no space", no_space, (), "No space left on device"),
+                                          ("git init exits 7", init_fails, ("init", "3"), "git init exited 7")):
+            with self.subTest(failure=failure):
+                shutil.rmtree(self.world.clone, ignore_errors=True)
+                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.assert_index_refused(self.wrapped(body, *argv), why)
+
+    @unittest.skipIf(os.geteuid() == 0, "root writes in a folder whatever its mode")
+    def test_a_folder_of_replays_the_session_made_read_only_ends_in_one_line_and_keeps_both(self) -> None:
+        replays = self.world.clone.parent
+        self.addCleanup(lambda: replays.chmod(0o755))
+        result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE="chmod 500 ..")
+        replays.chmod(0o755)
+        self.assert_index_refused(result, "Permission denied")
+
+    def test_a_sparse_index_keeps_a_tracked_file_under_a_folder_the_session_made(self) -> None:
+        # The session moves the ignored tracked file into a new folder, commits, and turns on a sparse index whose
+        # cone leaves that folder out; the index then holds the folder as one entry, a tree only the clone has.
+        # The file is written back after that, so it is in the working tree.
+        prepare = ("mkdir pins && git mv dep.lock pins/ && git commit -q -m move && "
+                   "git sparse-checkout set --sparse-index elsewhere && git ls-files --sparse | grep -qx pins/ && "
+                   "mkdir pins && echo pinned > pins/dep.lock")
+        result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        [version] = self.world.versions()
+        self.assertEqual(version["exit_status"], 0)
+        self.assertIn(b"pins/dep.lock", self.world.names(version["commit"]))
+
+    def test_a_sparse_index_whose_tree_cannot_be_read_is_refused_not_read_as_fewer_paths(self) -> None:
+        # Git expands the sparse folder entry from its tree and exits 0 when that tree is gone.
+        prepare = ("mkdir pins && git mv dep.lock pins/ && git commit -q -m move && "
+                   "git sparse-checkout set --sparse-index elsewhere && git ls-files --sparse | grep -qx pins/ && "
+                   't=$(git rev-parse HEAD:pins) && rm ".git/objects/$(echo $t | cut -c1-2)/$(echo $t | cut -c3-)" && '
+                   "mkdir pins && echo pinned > pins/dep.lock")
+        self.assert_index_refused(self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare),
+                                  "git ls-files reported an error")
 
     def test_a_folder_at_the_name_the_old_copy_used_does_not_stop_the_replay(self) -> None:
         self.world.write("repos.json", [{"repo": REPO, "check": "true",
@@ -754,20 +825,26 @@ class ReplayTest(unittest.TestCase):
                       "def watched(*args, **options):\n"
                       "    snapshots.append(1)\n"
                       "    if len(snapshots) == 2:  # the working tree is about to be committed\n"
-                      "        pid = int(open(os.environ['STANDIN_WATCH']).read())\n"
-                      "        time.sleep(0.1)  # all the grace a killed process gets to be reaped\n"
+                      "        pid, group = int(open(os.environ['STANDIN_WATCH']).read()), bool(stopped)\n"
                       "        try:\n"
                       "            os.kill(pid, 0)\n"
-                      "            print('process running at the second snapshot')\n"
+                      "            running = True\n"
                       "        except ProcessLookupError:\n"
-                      "            print('process gone at the second snapshot')\n"
-                      "        print('group stopped' if stopped else 'group not stopped')\n"
+                      "            running = False\n"
+                      "        if running:  # a killed process stays a zombie until it is reaped, and nothing kills it now\n"
+                      "            state = subprocess.run(['ps', '-o', 'stat=', '-p', str(pid)], capture_output=True,\n"
+                      "                                   text=True).stdout.strip()\n"
+                      "            running = not state.startswith('Z') and state != ''\n"
+                      "        print('process running at the second snapshot' if running\n"
+                      "              else 'process gone at the second snapshot')\n"
+                      "        print('group stopped' if group else 'group not stopped')\n"
                       "    return snapshot(*args, **options)\n"
                       "replay.snapshot = watched")
 
     def test_what_setup_started_is_gone_when_the_working_tree_is_committed(self) -> None:
-        # The second snapshot commits the tree. It is observed as it starts, and then not delayed; the process must
-        # already be gone, and the group stopped. That the process is gone once the replay has exited is checked apart.
+        # The second snapshot commits the tree. As it is entered, before any wait, the process must already be killed
+        # (gone, or a zombie not yet reaped) and the group stopped. That the process is gone once the replay has
+        # exited is checked apart.
         result = self.wrapped(self.SNAPSHOT_WATCH)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[:2],
@@ -939,15 +1016,36 @@ class ReplayTest(unittest.TestCase):
              "files (~/.gitconfig and $XDG_CONFIG_HOME/git/config); a config file that a repo's own config names with "
              "include.path is still read.")
     HELP_PHRASES = {  # each in its own section of the help, so that one behaviour cannot stand in for another
-        ("2. Runs", "3. Starts"): ("in a process group made for the replay",
-                                   "stopped once the session has ended, before step 4 commits the working tree",
+        ("2. Runs", "3. Starts"): ("process group made for the replay", "runs on through the session",
+                                   "stopped once the session has ended, before step 4 commits", "a setup that fails",
+                                   "a start that is refused", "an error,", "Ctrl-C", "SIGTERM",
                                    "SIGKILL to the replay leaves it running",
-                                   "a process that starts its own group or session is not followed"),
-        ("4. Commits", "5. Scans"): ("reads each name in the index as the bytes git holds it, in any locale",),
-        ("Exit 0:", None): ("is not a regular file", "ends the replay with one line on standard error and nothing "
-                                                     "recorded", "recorded without its row",
+                                   "starts its own group or session is not followed"),
+        ("4. Commits", "5. Scans"): ("as the bytes git holds it, in any locale", "The version's repo records the tree",
+                                     "lists a copy of the clone's index"),
+        ("Exit 0:", None): ("not a regular file", "cannot copy or list with git",
+                            "one line on standard error and nothing recorded",
+                            "exits 0 but writes to standard error",
+                            "one line that says the version is recorded without its row",
                             "python3 scripts/scan.py SESSION", "stays in versions.jsonl"),
     }
+    # What the help must say, one behaviour each, as the help words it. The doctoring test removes each in turn, so a
+    # behaviour that HELP_PHRASES leaves unchecked fails that test.
+    BEHAVIOURS = (
+        "in a process group made for the replay", "What setup starts runs on through the session.",
+        "It is stopped once the session has ended, before step 4 commits the working tree", "a setup that fails",
+        "a start that is refused", "an error,", "Ctrl-C", "SIGTERM", "SIGKILL to the replay leaves it running",
+        "a process that starts its own group or session is not followed",
+        "The replay reads each name in the index as the bytes git holds it, in any locale.",
+        "The version's repo records the tree.", "lists a copy of the clone's index",
+        "A clone index that is not a regular file", "or that the replay cannot copy or list with git",
+        "ends the replay with one line on standard error and nothing recorded",
+        "A listing that exits 0 but writes to standard error, as git does when it cannot read such a tree, counts as "
+        "one git cannot list.",
+        "ends it with one line that says the version is recorded without its row",
+        "names the command that writes the row from the session's log, python3 scripts/scan.py SESSION",
+        "the version's line stays in versions.jsonl",
+    )
 
     def assert_help_states(self, text: str) -> None:
         """Whole text of the help, whitespace joined: the step-4 sentence whole, and each behaviour's outcome."""
@@ -967,6 +1065,11 @@ class ReplayTest(unittest.TestCase):
                 with self.subTest(dropped=phrase):
                     with self.assertRaises(AssertionError):
                         self.assert_help_states(text.replace(phrase, "x"))
+        for behaviour in self.BEHAVIOURS:
+            with self.subTest(behaviour=behaviour):
+                self.assertIn(behaviour, text)
+                with self.assertRaises(AssertionError):
+                    self.assert_help_states(text.replace(behaviour, "x"))
         with self.assertRaises(AssertionError):
             self.assert_help_states(text.replace(self.STEP4, "x"))
 

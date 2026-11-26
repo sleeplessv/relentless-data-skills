@@ -27,24 +27,23 @@ TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool
 # Why a version of a ticket is left out of every figure, as the report counts it.
 NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
                                        "judged at a commit the version does not record")
-# Warning sign 2: generation one's steps and the words that name each. A helper states its role before its subject,
-# so the step whose words come first in its text is its step, and the order here only breaks a tie. A bare "fix" names
-# no step, since a ticket's own title may hold it: a fix is "fix" or "address" with a finding, comment or review in
-# the same clause, or a fix round, worker or brief. A re-check is worded as the repo's measurements count one
-# (docs/research/orchestrated-run-measurements.md): a re-check, a re-verify, a follow-up check or a fix head.
+# Warning sign 2: generation one's steps and the words that name each, as named() reads them. A bare "fix" names no
+# step, since a ticket's own title may hold it. "Read" names none, since a brief opens its instructions with it.
 STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, words in (
-    ("re-check", r"re-?check|re-?verif|follow-?up (?:review|check|verif)|fix head"),
+    ("re-check", r"re-?check|re-?verif|fix head\b"),
     ("closing verification", r"verif(?:y|ier|ication)\b"),
-    ("fix", r"(?:fix|address)(?:es|ing)?\b[^.:;\n]{0,60}\b(?:finding|comment|review)|fix(?:es)? (?:round|worker|brief)"
+    ("fix", r"(?:fix|address)(?:es|ing)?\b[^.:;\n]*\b(?:finding|comment|review)|fix(?:es)? (?:round|worker|brief)"
             r"|(?:late|class) fix"),
     ("review", r"review|ponytail|audit"),
     ("implement", r"implement|build|integrat"),
     ("publish", r"publish|ready\b|pr body|merge|push|(?:start|stop) comment|tracker|claim"),
-    ("explore", r"explor|research|find|search|investigat|locate|survey|look up|reads?\b"),
+    ("explore", r"explor|research|find|search|investigat|locate|survey|look up"),
 ))
 CUT = ("closing verification", "fix", "re-check")  # the steps the small cut takes out
-# A generation-one skill's name names the whole run, every step at once, so the sort reads the text without it.
-SKILL_NAME = re.compile("|".join(map(re.escape, draw.GENERATION_ONE)), re.IGNORECASE)
+# Text that names no role of its own, so named() reads the text without it: a generation-one skill's name names the
+# whole run, every step at once, and a ticket's title after its number ("#12: Verify CSV headers") names its subject.
+NO_ROLE = re.compile("|".join([*map(re.escape, draw.GENERATION_ONE), r"#\d+:[^.\n]*"]), re.IGNORECASE)
+AGAIN = re.compile(r"\b(?:follow-?up|round \d|fix(?:es)? round)", re.IGNORECASE)  # words that make a review a re-check
 
 
 def table_line(tickets: int) -> str:
@@ -59,19 +58,29 @@ def listed(items: list) -> str:
 
 
 def named(text: str | None) -> str | None:
-    """The step whose words come first in the text, once the names of generation-one skills are taken out; on a tie,
-    the first in STEPS. None when the text names no step."""
-    text = SKILL_NAME.sub(" ", text or "")
-    found = [(match.start(), at, name) for at, (name, words) in enumerate(STEPS) if (match := words.search(text))]
-    return min(found)[2] if found else None
+    """The step a text names, read without NO_ROLE: the step whose words come first, on a tie the first in STEPS,
+    except that a review that also names a re-check or AGAIN's words is a re-check, a review of a fix. None when the
+    text names no step.
+
+    Taking the first step named assumes a helper's text names its own role before any other step. Where it does not,
+    the sort is wrong: "Verify CSV headers", a ticket's title with no number, describing the helper that implements
+    it, is sorted as closing verification."""
+    text = NO_ROLE.sub(" ", text or "")
+    found = sorted((match.start(), at, name) for at, (name, words) in enumerate(STEPS) if (match := words.search(text)))
+    first = found[0][2] if found else None
+    if first == "review" and ("re-check" in (name for *_, name in found) or AGAIN.search(text)):
+        return "re-check"
+    return first
 
 
 def step(description: str | None, brief_head: str | None) -> str | None:
     """The step of generation one a helper took: the one its description names or, when its description names none,
-    the one the head of its brief names. A review whose brief names a re-check is a re-check: the description names
-    the reviewer, the brief says which pass it makes. None when neither names a step."""
-    told, briefed = named(description), named(brief_head)
-    return briefed if told is None or (told, briefed) == ("review", "re-check") else told
+    the one the head of its brief names. A description that names a review and a brief that names a re-check make a
+    re-check: the description names the reviewer, the brief the pass it makes. None when neither names a step."""
+    description_step, brief_step = named(description), named(brief_head)
+    if description_step is None or (description_step, brief_step) == ("review", "re-check"):
+        return brief_step
+    return description_step
 
 
 HELP = f"""\
@@ -129,14 +138,12 @@ sides, and counted, when it lacks either version judged or either version
 has a blank total_tokens. The figures cover the tickets left; the verdict
 waits, as for warning sign 1, until every ticket has both versions judged.
 
-Each helper the rows list is sorted into a step of generation one: the step
-whose words come first in its description or, when its description names
-none, in the head of its brief. A helper states its role before its subject,
-so a ticket's title later in the text does not decide. A description that
-names a review gives way to a brief that names a re-check. The words of each
-step, and the reasons for them, are STEPS in scripts/report.py; the names of
-the generation-one skills (SKILL_NAME there) name the whole run and are no
-step's words. The steps:
+Each helper the rows list is sorted into a step of generation one by the
+words of its description or, when its description names none, of the head
+of its brief. The words, the rules, what the sort assumes about how a helper
+words its text and where that fails are STEPS, named() and step() in
+scripts/report.py. A helper sorted into the wrong step can move the cut
+either way. The steps:
 
   {listed([name for name, _ in STEPS])}.
 
@@ -370,8 +377,8 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
                      f"blank token count. Left out of the active minutes: "
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
-    judged = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
-    return [*lines, "", *sign_one(judged, len(tickets)), "", *sign_two(judged, len(tickets))]
+    judged_pairs = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
+    return [*lines, "", *sign_one(judged_pairs, len(tickets)), "", *sign_two(judged_pairs, len(tickets))]
 
 
 def unjudged(judged: list[tuple[dict, dict]], total: int) -> str:
@@ -404,7 +411,7 @@ def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
         return ["Warning sign 2: no verdict. No ticket has both versions judged and both token counts.", left]
     spend, ownless = dict.fromkeys([*(name for name, _ in STEPS), None], 0), 0
     for first, _ in counted:
-        for helper in first["helpers"] or []:  # a row with no list of helpers: all its tokens are the session's own
+        for helper in first["helpers"] or []:
             spend[step(helper["description"], helper["brief_head"])] += helper["total_tokens"] or 0
             ownless += helper["total_tokens"] is None
     first, second = (sum(pair[side]["tokens"] for pair in counted) for side in (0, 1))

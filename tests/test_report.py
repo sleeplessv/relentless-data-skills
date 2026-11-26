@@ -15,7 +15,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
@@ -103,7 +103,7 @@ class World:
                               "review": {"passed": right, "reason": None},
                               "right_first_time": right})
 
-    def scan(self, name: str, tokens: int | None, minutes: float | None, helpers: list[dict] | None = ()) -> None:
+    def scan(self, name: str, tokens: int | None, minutes: float | None, helpers: Sequence[dict] | None = ()) -> None:
         self.rows.append({"session": name, "input_tokens": None if tokens is None else 1,
                           "output_tokens": None if tokens is None else 1, "cache_write_tokens": None,
                           "cache_read_tokens": None, "total_tokens": tokens, "active_minutes": minutes,
@@ -111,7 +111,7 @@ class World:
                           "skills": [], "helpers": None if helpers is None else list(helpers)})
 
     def run(self, version: str, ticket: dict, right: bool | None, tokens: int | None = 100,
-            minutes: float | None = 10.0, helpers: list[dict] | None = ()) -> None:
+            minutes: float | None = 10.0, helpers: Sequence[dict] | None = ()) -> None:
         """A version of a ticket replayed where it is not generation one's, judged and scanned."""
         name = ticket["session"] if version == "generation-one" else self.replay(ticket, version)["session"]
         self.judge(ticket, version, right)
@@ -147,7 +147,7 @@ def tree(folder: Path) -> dict[str, tuple]:
 
 # One helper of each of generation one's steps, with tokens of 2**n each so that every step's sum tells which
 # helpers it took, then helpers sorted by the head of the brief, one sorted into no step, and one with no tokens of
-# its own. Each re-check, fix and review also names a step later in its text.
+# its own. The re-check and the fix also name a step later in their text.
 EVERY_STEP = [
     helper("Re-check fix round 1", "This is a re-check after one fix round. Read the review skill.", 10),
     helper("Closing verification on the final head", "You are the closing verifier for ticket #12.", 20),
@@ -261,8 +261,10 @@ class TestReport(unittest.TestCase):
             "With it counted as cut, the cut is 32250 tokens. The sign appears.",
             "The two verdicts differ: the spend not sorted decides the sign."])
 
-    def test_a_helper_is_sorted_by_the_step_its_text_names_first(self) -> None:
-        # Each case has a mirror: the same words in a helper that is the step they name.
+    def test_a_helper_is_sorted_by_its_description_then_by_its_brief(self) -> None:
+        # The step a text names first decides, except that a description that names a review and a brief that names a
+        # re-check make a re-check. Each shape fix round 1 closed sits beside a helper whose step its words name, but
+        # for "Re-verify the fixed head", which has none.
         lines = self.two([
             helper("Follow-up review of the fix head", "Confirm the accepted findings are closed.", 1),
             helper("Standards review of the change", "You are a Standards reviewer.", 2),
@@ -278,6 +280,51 @@ class TestReport(unittest.TestCase):
         self.assertEqual(lines[2], "  generation-one's helpers by step: re-check 30870, closing verification 19200, "
                                    "fix 7680, review 300, implement 1440, publish 1920, explore 0. 0 helpers have no "
                                    "tokens of their own.")
+
+    def test_each_probe_text_lands_on_its_step_beside_the_same_words_in_another_step(self) -> None:
+        # The texts two reviews probed the sort with, each followed by its mirror: the same words in a helper whose
+        # step is another. None is a helper sorted into no step.
+        for description, brief, its_step in [
+            ("Fix header parsing", "Implement the parser change for ticket #12.", "implement"),
+            ("Review the fix head", "Confirm the accepted findings are closed.", "re-check"),
+            ("Follow-up check on required CI", "Poll the PR checks and mark the PR ready when green.", "publish"),
+            ("Follow-up review on required CI", "Confirm the accepted findings are closed.", "re-check"),
+            ("Ticket worker", "Read the closing verification brief and run its checks on the final commit.",
+             "closing verification"),
+            ("Ticket worker", "Read the issue and find where the parser lives.", "explore"),
+            ("Review the fix round 1 diff", "Confirm that each accepted finding is closed.", "re-check"),
+            ("Fix round 1 worker", "Address each accepted review finding.", "fix"),
+            ("Standards review", "Ticket #12: Re-check cached credentials. Review the implementation against the "
+                                 "coding standards.", "review"),
+            ("Standards review", "Ticket #12: Cache credentials. Re-check the accepted findings.", "re-check"),
+            ("Standards review: follow-up on the fix head", "Confirm the accepted findings are closed.", "re-check"),
+            ("Standards review: the header fix", "Review the diff against the standards.", "review"),
+            ("Standards review", "You are the Standards reviewer. Re-check the accepted findings on the fixed "
+                                 "commit.", "re-check"),
+            ("Standards review", "You are the Standards reviewer. Review the implementation on the final commit.",
+             "review"),
+            ("Ticket #12: Verify CSV headers", "# Implementing brief. Implement CSV header validation.", "implement"),
+            ("Ticket #12: Verify CSV headers", "Run the closing verification on the final commit.",
+             "closing verification"),
+            ("Standards review, round 2", None, "re-check"),
+            ("Fix round 2", None, "fix"),
+            ("Apply the late fix", None, "fix"),
+            ("Apply the lint fixes", None, None),
+            ("Address the two discrepancies in the cached-token accounting the final reviewer identified", None,
+             "fix"),
+            ("Final review: address the cached-token accounting", None, "review"),
+        ]:
+            with self.subTest(description=description, brief=brief):
+                self.setUp()
+                lines = self.two([helper(description, brief, 800)], 1000, 200)
+                self.assertEqual(lines[2], "  generation-one's helpers by step: " + ", ".join(
+                    f"{name} {24000 if name == its_step else 0}" for name in (
+                        "re-check", "closing verification", "fix", "review", "implement", "publish", "explore"))
+                                 + ". 0 helpers have no tokens of their own.")
+                self.assertEqual(lines[4], f"  Not sorted into a step: {30000 if its_step is None else 6000} tokens, "
+                                           f"{100 if its_step is None else 20}.0% of generation-one's: "
+                                           f"{24000 if its_step is None else 0} in helpers that name no step, 6000 "
+                                           f"the sessions' own, in no helper.")
 
     def test_a_fix_names_its_finding_and_a_skill_name_names_no_step(self) -> None:
         lines = self.two([helper("Fix the Standards finding on the total", None, 1),
@@ -553,16 +600,18 @@ class TestReport(unittest.TestCase):
 
     def test_the_verdict_waits_for_both_versions_on_every_ticket(self) -> None:
         self.world.baseline(20, 10)
+        for at, row in enumerate(self.world.rows):  # ticket n: generation one spends 990 + 10n, direct 99 + n
+            row["total_tokens"] = 1000 + 10 * (at // 2) if at % 2 == 0 else 100 + at // 2
         self.world.verdicts = [line for line in self.world.verdicts
                                if (line["version"], line["ticket"]) not in (("direct", 1), ("generation-one", 2))]
         self.world.verdicts[-1]["right_first_time"] = None
         lines = self.lines()
         self.assertEqual(section(lines, 1), ["Warning sign 1: no verdict. Tickets without both generation-one and "
                                              "direct judged: 3 of 30."])
-        self.assertEqual(section(lines, 2), [
-            "Warning sign 2: on 27 of 30 tickets, generation-one spent 2700 tokens and direct 2700, an extra cost of "
-            "0.",
-            *no_helpers(2700, unjudged=3),
+        self.assertEqual(section(lines, 2), [  # tickets 3 to 29
+            "Warning sign 2: on 27 of 30 tickets, generation-one spent 31050 tokens and direct 3105, an extra cost of "
+            "27945.",
+            *no_helpers(31050, unjudged=3),
             "No verdict: tickets without both generation-one and direct judged: 3 of 30."])
 
     def test_a_second_set_not_yet_judged_holds_back_the_verdict(self) -> None:

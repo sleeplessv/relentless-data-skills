@@ -44,7 +44,8 @@ STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, wor
 CUT = ("closing verification", "fix", "re-check")  # the steps the small cut takes out
 # Text that names no role of its own, so named() reads the text without it: a generation-one skill's name names the
 # whole run, every step at once, a ticket's title after its number ("#12: Verify CSV headers") names its subject, and
-# the words after "by" name who acted, not the helper ("the errors flagged by the reviewer").
+# the words after "by" are read past, since they often name who acted, not the helper ("the errors flagged by the
+# reviewer"), though not always ("Start by implementing").
 NO_ROLE = re.compile("|".join([*map(re.escape, draw.GENERATION_ONE), r"#\d+:[^.\n]*", r"\bby\b[^.,;:\n]*"]),
                      re.IGNORECASE)
 AGAIN = re.compile(r"\b(?:follow-?up|round \d|fix(?:es)? round)", re.IGNORECASE)  # words that make a review a re-check
@@ -64,15 +65,15 @@ def listed(items: list) -> str:
 def named(text: str | None) -> list[str]:
     """The steps a text names, read without NO_ROLE, in the order their words come, on a tie in the order of STEPS.
     Words inside another step's words are that step's: "address what the final reviewer identified" is a fix, not a
-    review. A text whose first step is a review and that also names a re-check or AGAIN's words names a re-check
-    first, a review of a fix."""
+    review. A text whose first step is a review and that holds AGAIN's words names a re-check first, and a text that
+    names a re-check names no review: a re-check is a review of a fix, so its review words are the re-check's."""
     text = NO_ROLE.sub(" ", text or "")
     found = [(match.start(), at, match.end(), name)
              for at, (name, words) in enumerate(STEPS) if (match := words.search(text))]
     found = [name for start, _, _, name in sorted(found) if not any(other < start < end for other, _, end, _ in found)]
-    if found[:1] == ["review"] and ("re-check" in found or AGAIN.search(text)):
-        return ["re-check", *found[1:]]
-    return found
+    if found[:1] == ["review"] and AGAIN.search(text):
+        found[0] = "re-check"
+    return [name for name in found if name != "review"] if "re-check" in found else found
 
 
 def step(description: str | None, brief_head: str | None) -> str | None:
@@ -82,10 +83,12 @@ def step(description: str | None, brief_head: str | None) -> str | None:
     naming a step ("# Publish brief") is read by that heading alone, and a description that names a review with a
     brief that names a re-check make a re-check: the description names the reviewer, the brief the pass it makes.
 
-    The sort can still be wrong in two ways. Between two steps on one side of the cut it takes the first named, which
-    may be a step the text only mentions; that changes no verdict. And when every step a helper's texts name is one
-    it only mentions, on the other side of the cut from its own, it is sorted across the cut: "Correct the errors
-    the reviewer flagged", a fix, is sorted as a review."""
+    The sort can still be wrong, in ways these are examples of. Between two steps on one side of the cut it takes
+    the first named, which may be a step the text only mentions; that changes no verdict. When every step a helper's
+    texts name is one it only mentions, on the other side of the cut from its own, it is sorted across the cut:
+    "Correct the errors the reviewer flagged", a fix, is sorted as a review. And a word rule can misread a text: a
+    brief opening "#12 passed closing verification" is read by that "heading" alone, and "Start by implementing"
+    is read past as if it named who acted."""
     heading = re.match(r"#[^.:\n]*", brief_head or "")
     texts = [named(description), heading and named(heading[0]) or named(brief_head)]
     texts = [steps for steps in texts if len({name in CUT for name in steps}) == 1]

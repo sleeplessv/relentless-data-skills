@@ -397,6 +397,22 @@ class TestReport(unittest.TestCase):
             "  Not sorted into a step: 27420 tokens, 91.4% of generation-one's: 5070 in helpers that name no step, "
             "22350 the sessions' own, in no helper."])
 
+    def test_a_text_that_names_a_re_check_and_a_review_names_a_re_check(self) -> None:
+        # A re-check is a review of a fix, so a brief that names one and says "review" later names one role.
+        lines = self.two([
+            helper("Review the parser", "Re-check the accepted findings. The review covers only the fixed diff.", 1),
+            helper("Standards review", "You are a re-check reviewer. Review one fix commit range, read-only, and "
+                                       "write one report file.", 2),
+            helper("Spec review", "Re-check: confirm each accepted finding of the Spec review is closed.", 4),
+            helper("Ticket worker", "Re-check the accepted findings of the first review on the fixed commit.", 8),
+        ], 1000, 900)
+        self.assertEqual(lines[2:5], [
+            "  generation-one's helpers by step: re-check 450, closing verification 0, fix 0, review 0, implement 0, "
+            "publish 0, explore 0. 0 helpers have no tokens of their own.",
+            "  The cut, closing verification, fix and re-check: 450 tokens, 1.5% of generation-one's.",
+            "  Not sorted into a step: 29550 tokens, 98.5% of generation-one's: 0 in helpers that name no step, "
+            "29550 the sessions' own, in no helper."])
+
     def test_a_fix_names_its_finding_and_a_skill_name_names_no_step(self) -> None:
         lines = self.two([helper("Fix the Standards finding on the total", None, 1),
                           helper("Address the spec review's one comment", None, 2),

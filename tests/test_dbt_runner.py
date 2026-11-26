@@ -258,6 +258,7 @@ class PackagesCheckTests(unittest.TestCase):
             manifest = root / "dependencies.yml"
             for value, expected in [
                 ("projects:\n  - name: upstream", preflight.SKIP),
+                ("  projects:\n    - name: upstream\n      packages: [nested]", preflight.SKIP),
                 ("packages: [ ] # no packages", preflight.SKIP),
                 ("packages:  # installed by dbt deps\n- local: ../dep", preflight.FAIL),
                 ("packages: [{local: ../dep}]", preflight.FAIL),
@@ -280,6 +281,14 @@ class PackagesCheckTests(unittest.TestCase):
             self.assertIn("vendor packages", msg)
             (root / "vendor packages" / "dep").mkdir(parents=True)
             self.assertEqual(preflight.check_packages(root)[0], preflight.OK)
+
+    def test_unsupported_yaml_requests_verification(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "packages.yml").write_text("{packages: [{local: ../dep}]}")
+            status, msg = preflight.check_packages(root)
+            self.assertEqual(status, preflight.FAIL)
+            self.assertIn("Verify the package declarations", msg)
 
     def test_templated_package_directory_requires_manual_verification(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -539,6 +548,27 @@ class MainOutputTests(unittest.TestCase):
         for check in ("env:", "key:", "packages:", "profile:", "runner:"):
             self.assertIn(check, out)
         self.assertIn("OK   runner: `uv run dbt --version` reports v2", out)
+
+    def test_indented_dependency_uses_indented_root_install_path(self):
+        with contextlib.ExitStack() as stack:
+            project = TempProject(stack)
+            key = stack.enter_context(tempfile.NamedTemporaryFile(suffix=".p8"))
+            stack.enter_context(mock.patch.dict(os.environ, dict(
+                self.ENV, SNOWFLAKE_PRIVATE_KEY_PATH=key.name
+            )))
+            (project.root / "packages.yml").write_text(
+                "---\n# local dependency\n  packages:\n    - local: ../dep\n"
+            )
+            (project.root / "dbt_project.yml").write_text(
+                "  name: local\n  packages-install-path: vendor\n  version: '1.0'\n"
+            )
+            code, out = run_main(project.root)
+            self.assertEqual(code, 1)
+            self.assertIn("FAIL packages: vendor/ is missing", out)
+            (project.root / "vendor").mkdir()
+            code, out = run_main(project.root)
+            self.assertEqual(code, 0)
+            self.assertIn("OK   packages: vendor/ present", out)
 
     def test_runner_mismatch_fails_preflight(self):
         self.run.return_value = types.SimpleNamespace(

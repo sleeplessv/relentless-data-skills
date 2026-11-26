@@ -18,7 +18,7 @@ looks like a model bug. It usually isn't:
    model is **not in the build selection**, dbt v2 cannot infer the input's
    schema and throws `invalid identifier` on any column the model selects
    from it. Discriminate: does the same test pass when the upstream is
-   included in the selection (`<runner> build <connection> --select <upstream>+<model>`)?
+   included in the selection (`<runner> build <connection> --select <upstream> <model>`)?
    If yes, this is the inference gap, not a regression.
    Fixes, best first:
    - add the referenced columns (even with null values) to the fixture's

@@ -198,24 +198,30 @@ def check_private_key(context: dict) -> tuple:
 
 
 def top_level_setting(path: Path, key: str) -> str:
-    """Read a literal root setting, including block lists, without loading dbt."""
+    """Read a literal block-mapping setting. Flag unsupported root syntax."""
     if not path.is_file():
         return ""
-    lines = iter(path.read_text(encoding="utf-8").splitlines())
-    for line in lines:
-        name, colon, value = line.partition(":")
-        if not colon or name.rstrip().strip("'\"") != key:
+    root_indent = None
+    parts = None
+    for raw in path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or line.split(" #", 1)[0] in ("---", "..."):
             continue
-        parts = [value]
-        for continuation in lines:
-            if not continuation.strip() or continuation.lstrip().startswith("#"):
-                continue
-            if not continuation.startswith((" ", "\t", "- ")):
-                break
-            parts.append(continuation)
-        return " ".join(strip_inline_comment(part) for part in parts
-                        if part.strip() and not part.lstrip().startswith("#")).strip()
-    return ""
+        indent = len(raw) - len(raw.lstrip())
+        if root_indent is None:
+            root_indent = indent
+        if indent > root_indent or line.startswith("- "):
+            if parts is not None:
+                parts.append(line)
+            continue
+        if parts is not None:
+            break
+        name, colon, value = line.partition(":")
+        if not colon or not re.fullmatch(r"""([\w-]+|'[\w-]+'|"[\w-]+")""", name.rstrip()):
+            raise ValueError(f"cannot read {key} from {path.name} as a literal YAML setting")
+        if name.rstrip().strip("'\"") == key:
+            parts = [value] if value.strip() and not value.lstrip().startswith("#") else []
+    return " ".join(strip_inline_comment(part) for part in parts or []).strip()
 
 
 def check_packages(project_root: Path, runner: str = "") -> tuple:
@@ -241,9 +247,12 @@ def check_packages(project_root: Path, runner: str = "") -> tuple:
         else:
             lock_note = " and package-lock.yml clean"
     manifests = (project_root / "packages.yml", project_root / "dependencies.yml", lockfile)
-    if not any(top_level_setting(path, "packages").strip("[] \t") for path in manifests):
-        return SKIP, "project declares no dbt packages"
-    install_path = top_level_setting(project_root / "dbt_project.yml", "packages-install-path")
+    try:
+        if not any(top_level_setting(path, "packages").strip("[] \t") for path in manifests):
+            return SKIP, "project declares no dbt packages"
+        install_path = top_level_setting(project_root / "dbt_project.yml", "packages-install-path")
+    except ValueError as error:
+        return FAIL, f"{error}. Verify the package declarations and install directory manually."
     install_path = install_path or "dbt_packages"
     if "{{" in install_path or "{%" in install_path:
         return SKIP, "templated packages-install-path; verify the resolved directory before running dbt"

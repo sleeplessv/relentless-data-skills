@@ -1045,7 +1045,7 @@ class TestScan(unittest.TestCase):
                 "A skill that a successful Skill call loaded takes the name the call gives, less everything up to "
                 "its last colon.",
                 "The line that gives that load's folder names the call in sourceToolUseID and adds no second entry, "
-                "and a load of the same folder with no call takes the call's name too.",
+                "and any other load of the same folder takes the call's name too.",
                 "A skill with no such call, as one the user typed, takes its folder's last name.",
                 "A call that failed, has no result or gives no name adds no entry.",
                 "So two skills of one name from two plugins are one entry: a typed skill leaves no prefix to recover.",

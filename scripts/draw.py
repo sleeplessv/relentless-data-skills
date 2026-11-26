@@ -76,6 +76,7 @@ OPENS = re.compile(rf"[<>]|`{{3}}|~{{3}}|#{{1,6}}(?:[ \t]|$)|(?:{SETEXT.pattern}
 # Kind 7: one whole open or closing tag alone on its line.
 TAG_LINE = re.compile(r"(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t\"'=<>`]+|'[^']*'"
                       r"|\"[^\"]*\"))?)*[ \t]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*")
+HEADING = re.compile(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*")  # an ATX heading: its level and its text
 
 
 def one_of(items: list[str]) -> str:
@@ -177,13 +178,21 @@ headings of level three and deeper, breaks such as * * *, and code and HTML
 blocks. Any other line in the section is one the draw cannot read with
 certainty: inside an item, a quote, code, a fence, HTML, a heading, a break or
 a second paragraph; an item with no text, or with a task box and no text; an
-item that opens another block on its marker line; a quote; an underline below
-a line of text; and a marker numbered other than 1 that would start a list
-right after a line of text. So is any line of the body that opens a fence or
-an HTML block on an item's marker line, and any line indented less than the
-first line of the fence or HTML block it falls in. The items of the list are
-the ticket's requirements, in the order written, and the draw stores them in
-its entry of the set.
+item whose text starts with < or >, three backticks or three tildes, the one
+to six # of a heading, another marker, or more than four spaces, or is a break
+or a line of = or -; a quote; an underline below a line of text; and, right
+after a line of text, a marker numbered other than 1 with no list open or
+indented at least to the text of the last open item. Anywhere in the body, so
+is a "## " criteria heading indented 1 to 3 spaces after a line that starts,
+at most 3 spaces in, with a list marker, as it may stand inside that item; a
+line indented at most 3 spaces that holds one HTML tag alone and starts none
+of the HTML blocks above, which may be text or an HTML block; and a non-blank
+line indented less than the first line of the fence or HTML block it falls in.
+Outside the criteria sections such a line refuses the body only when it or a
+line after it is a "## " criteria heading indented at most 3 spaces; otherwise
+the list is the items read before it. The items of the list are the ticket's
+requirements, in the order written, and the draw stores them in its entry of
+the set.
 
 A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
@@ -264,10 +273,11 @@ session can still put that PR's ticket in the pool through another call that
 opened it.
 
 After the count of vetoed PRs and before the count per bucket, the draw prints
-how many tickets of the listed repos it left out because it cannot read their
-list with certainty. A ticket with no list under the headings is not counted.
-That count is taken before the rules on a ticket's other PRs and earlier sets,
-so it is the most tickets the reader can have cost the pool.
+how many tickets of the listed repos it left out because it refused their body
+as above. A body with no line that is a "## " criteria heading indented at
+most 3 spaces is never refused. That count is taken before the rules on a
+ticket's other PRs and earlier sets, so it is the most tickets the reader can
+have cost the pool.
 
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
@@ -519,88 +529,94 @@ def parent_model(main: list[dict], helpers: list[dict]) -> str | None:
 
 
 def opens(line: str) -> bool:
-    """True when the line, its indent taken off, may start a block other than a paragraph, so the reader does not
-    take it as an item's text. It also holds for lines that CommonMark reads as text, such as one that starts with <."""
+    """True when an item's text, or a line inside an item, starts with what HELP says the reader refuses there."""
     return bool(OPENS.match(line) or MARKER.match(line))
 
 
-def hides(line: str) -> bool:
-    """True when the line, its indent taken off, opens a code fence or an HTML block."""
-    return bool(re.match(r"`{3,}(?!.*`)|~{3,}", line) or any(begin.match(line) for begin, _ in HTML_BLOCKS)
-                or TAG_LINE.fullmatch(line))
+def criteria(text: str) -> bool:
+    """True when the line is what HELP calls a "## " criteria heading indented at most 3 spaces."""
+    heading = HEADING.fullmatch(text.lstrip(" "))
+    return bool(heading and len(text) - len(text.lstrip(" ")) < 4 and heading.group(1) == "##"
+                and (heading.group(2) or "").lower() in {name.lower() for name in CRITERIA_HEADINGS})
 
 
 def requirements(body: str | None) -> list[str]:
     """The text of each item of a list under a "## " heading among the CRITERIA_HEADINGS, in the order written.
     Unreadable names the first line the reader cannot read with certainty. HELP says which lists it reads."""
-    headings = {heading.lower() for heading in CRITERIA_HEADINGS}
+    # CommonMark ends a line only at \n, \r or both; str.splitlines also ends one at \v, \f, \x85 and others.
+    lines = re.split(r"\r\n|\r|\n", (body or "").expandtabs(4))
     found: list[str] = []
     columns: list[int] = []  # the text column of each open item of the section, outermost first
     under = paragraph = False  # paragraph: the line before is text that a line of text continues
+    after_item = False  # a line that starts with a list marker came before: an item may still be open
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
-    opened = 0  # the indent of the open fence or HTML block's first line
-    # CommonMark ends a line only at \n, \r or both; str.splitlines also ends one at \v, \f, \x85 and others.
-    for number, text in enumerate(re.split(r"\r\n|\r|\n", (body or "").expandtabs(4)), 1):
-        if (fence or html) and text.strip(" \t") and len(text) - len(text.lstrip(" ")) < opened:
-            # Inside an item the block ends with the item, and at the top level it does not: no telling which.
-            raise Unreadable(number, text)
-        if fence:  # a fence ends at a line of at least as many of its own character
-            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
-                fence = ""
-            continue
-        if html:
-            if html.search(text):
-                html = None
-            continue
-        line = text.lstrip(" ")
-        indent = len(text) - len(line)
-        if not line:
-            paragraph = False
-            continue
-        depth = sum(column <= indent for column in columns)  # the open items the line is indented into
-        marker = MARKER.match(line) if indent - (columns[depth - 1] if depth else 0) < 4 else None
-        marker = None if BREAK.fullmatch(line) else marker  # * * * is a break, not an item
-        rest = line
-        while (inner := MARKER.match(rest)) and not BREAK.fullmatch(rest):
-            rest = rest[inner.end():].lstrip(" ")
-        if marker and hides(rest):  # a fence or HTML block opened on an item's marker line ends with the item
-            raise Unreadable(number, text)
-        if under and (depth or marker or line.startswith(">") or paragraph and SETEXT.fullmatch(line)):
-            content = line[marker.end():] if marker else ""
-            if marker and content.strip() and not content.startswith(" ") and not opens(content) and not (
-                    depth == len(columns) and paragraph and int(marker.group(1) or 1) != 1):
-                del columns[depth:]
-                columns.append(indent + marker.end())
-                found.append(re.sub(r"\A\[[ xX]\](?:[ \t]+|\Z)", "", content.strip()).strip())
-                if not found[-1]:  # a task box with no text
-                    raise Unreadable(number, text)
-                paragraph = True
-            elif depth and paragraph and not opens(line):
-                found[-1] += " " + line.strip()
-            else:
+    block_indent = 0  # the indent of the open fence or HTML block's first line
+    try:
+        for number, text in enumerate(lines, 1):
+            if (fence or html) and text.strip(" \t") and len(text) - len(text.lstrip(" ")) < block_indent:
+                # Inside an item the block ends with the item, and at the top level it does not: no telling which.
                 raise Unreadable(number, text)
-            continue
-        start = indent < 4 and (next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
-                                or ((None, BLANK) if not paragraph and TAG_LINE.fullmatch(line) else None))
-        if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
-            fence, opened = opening.group(), indent
-        elif start:
-            begin, end = start
-            html = None if begin and end is not BLANK and end.search(line, begin.match(line).end()) else end
-            opened = indent
-        elif indent < 4 and (heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line)):
-            if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
-                under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
-        elif not (indent < 4 and (BREAK.fullmatch(line) or paragraph and SETEXT.fullmatch(line))):
-            # Text: it continues the paragraph above, or starts one; indented, after no paragraph, it is code.
-            if paragraph and columns:
-                found[-1] += " " + line.strip()
-            elif not paragraph:
-                columns.clear()
-            paragraph = paragraph or indent < 4
-            continue
-        columns.clear()  # any other block ends the list and the paragraph
-        paragraph = False
+            if fence:  # a fence ends at a line of at least as many of its own character
+                if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
+                    fence = ""
+                continue
+            if html:
+                if html.search(text):
+                    html = None
+                continue
+            line = text.lstrip(" ")
+            indent = len(text) - len(line)
+            if not line:
+                paragraph = False
+                continue
+            depth = sum(column <= indent for column in columns)  # the open items the line is indented into
+            marker = MARKER.match(line) if indent - (columns[depth - 1] if depth else 0) < 4 else None
+            marker = None if BREAK.fullmatch(line) else marker  # * * * is a break, not an item
+            after_item = after_item or bool(indent < 4 and MARKER.match(line) and not BREAK.fullmatch(line))
+            if under and (depth or marker or line.startswith(">") or paragraph and SETEXT.fullmatch(line)):
+                content = line[marker.end():].rstrip(" \t") if marker else ""
+                if marker and content and not content.startswith(" ") and not opens(content) and not (
+                        depth == len(columns) and paragraph and int(marker.group(1) or 1) != 1):
+                    del columns[depth:]
+                    columns.append(indent + marker.end())
+                    found.append(re.sub(r"\A\[[ xX]\](?:[ \t]+|\Z)", "", content))
+                    if not found[-1]:  # a task box with no text
+                        raise Unreadable(number, text)
+                    paragraph = True
+                elif depth and paragraph and not opens(line):
+                    found[-1] += " " + line.rstrip(" \t")
+                else:
+                    raise Unreadable(number, text)
+                continue
+            start = indent < 4 and next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
+            if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
+                fence, block_indent = opening.group(), indent
+            elif start:
+                begin, end = start
+                html = None if end is not BLANK and end.search(line, begin.match(line).end()) else end
+                block_indent = indent
+            elif indent < 4 and TAG_LINE.fullmatch(line):  # an HTML block, or a paragraph's text: the line above says
+                raise Unreadable(number, text)
+            elif indent < 4 and (heading := HEADING.fullmatch(line)):
+                if indent and after_item and criteria(text):  # it may stand inside an item
+                    raise Unreadable(number, text)
+                if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
+                    under = criteria(text)
+            elif not (indent < 4 and (BREAK.fullmatch(line) or paragraph and SETEXT.fullmatch(line))):
+                # Text: it continues the paragraph above, or starts one; indented, after no paragraph, it is code.
+                if paragraph and columns:
+                    found[-1] += " " + line.rstrip(" \t")
+                elif not paragraph:
+                    columns.clear()
+                paragraph = paragraph or indent < 4
+                continue
+            columns.clear()  # any other block ends the list and the paragraph
+            paragraph = False
+    except Unreadable as refusal:
+        # Outside every criteria section, a line the reader cannot be sure of costs the list only when a criteria
+        # heading may come at or after it; the items read before it stand.
+        if under or any(criteria(text) for text in lines[refusal.number - 1:]):
+            raise
     return found
 
 

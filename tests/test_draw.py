@@ -372,12 +372,6 @@ def vetoed(result: subprocess.CompletedProcess[str]) -> int:
     return int(found[0].split()[1])
 
 
-def refused(result: subprocess.CompletedProcess[str]) -> int:
-    """How many tickets of the listed repos a draw printed that it left out for a list it cannot read."""
-    found = [line for line in result.stdout.splitlines() if line.startswith("Refused ")]
-    return int(found[0].split()[1])
-
-
 def counts(result: subprocess.CompletedProcess[str]) -> tuple[int, int, int]:
     """The 0-50 pool, the 51-300 pool and the count of skipped logs a draw printed."""
     printed = result.stdout.splitlines()
@@ -958,13 +952,25 @@ class TestDraw(unittest.TestCase):
                 self.assertEqual(result.returncode, 3, result.stderr)
                 self.assertEqual(counts(result), (pool, 0, 0))
 
+    def test_an_entry_holds_the_items_of_every_criteria_section_in_the_order_written(self) -> None:
+        criteria = ("## Acceptance criteria\n\n- Count rows,\n  blank ones too.\n\n## Notes\n\n- Not a requirement.\n\n"
+                    "## Done when\n\n1. Print the total.\n2. Save it.")
+        world = self.world(full_pool(criteria=criteria))
+        result = world.draw()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([entry["requirements"] for entry in world.set_file()["tickets"]],
+                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * 30)
+
     def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
         cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
-        # Ticket 1 has a list and ticket 2 none. The draw cannot read the lists of tickets 3, 4 and 5, of ticket
-        # 300, which two PRs close, and of ticket 7, which an earlier set holds. Ticket 8's repo is not listed and
-        # ticket 9's PR is not merged, so their bodies are never read.
+        notes = "## Notes\n\n- ```sh\n  true\n  ```\n\nMore notes."  # More notes. falls left of the fence
+        # Ticket 1 has a list and tickets 2, 10 and 11 none: the draw stops reading 10 and 11 at a line outside
+        # every criteria section with no criteria heading after it. The draw cannot read the lists of tickets 3, 4
+        # and 5, of ticket 300, which two PRs close, and of ticket 7, which an earlier set holds. Ticket 8's repo is
+        # not listed and ticket 9's PR is not merged, so their bodies are never read.
         world = self.world([
-            Ticket(1, 20), Ticket(2, 20, criteria="## Acceptance\n\nNone yet."), Ticket(3, 20, criteria=cannot),
+            Ticket(1, 20), Ticket(2, 20, criteria="## Acceptance\n\nNone yet."), Ticket(10, 20, criteria=notes),
+            Ticket(11, 20, criteria=f"## Acceptance\n\nNothing yet.\n\n{notes}"), Ticket(3, 20, criteria=cannot),
             Ticket(4, 100, criteria=cannot), Ticket(5, 20, criteria=cannot.replace("Count rows.", "- [ ]")),
             Ticket(21, 20, issue=300, criteria=cannot), Ticket(22, 100, issue=300, criteria=cannot),
             Ticket(7, 20, criteria=cannot), Ticket(8, 20, repo=BETA, criteria=cannot),
@@ -996,18 +1002,25 @@ class TestDraw(unittest.TestCase):
             "HTML blocks.",
             "Any other line in the section is one the draw cannot read with certainty: inside an item, a quote, code, "
             "a fence, HTML, a heading, a break or a second paragraph; an item with no text, or with a task box and no "
-            "text; an item that opens another block on its marker line; a quote; an underline below a line of text; "
-            "and a marker numbered other than 1 that would start a list right after a line of text.",
-            "So is any line of the body that opens a fence or an HTML block on an item's marker line, and any line "
-            "indented less than the first line of the fence or HTML block it falls in.",
+            "text; an item whose text starts with < or >, three backticks or three tildes, the one to six # of a "
+            "heading, another marker, or more than four spaces, or is a break or a line of = or -; a quote; an "
+            "underline below a line of text; and, right after a line of text, a marker numbered other than 1 with no "
+            "list open or indented at least to the text of the last open item.",
+            "Anywhere in the body, so is a \"## \" criteria heading indented 1 to 3 spaces after a line that starts, "
+            "at most 3 spaces in, with a list marker, as it may stand inside that item; a line indented at most 3 "
+            "spaces that holds one HTML tag alone and starts none of the HTML blocks above, which may be text or an "
+            "HTML block; and a non-blank line indented less than the first line of the fence or HTML block it falls "
+            "in.",
+            "Outside the criteria sections such a line refuses the body only when it or a line after it is a \"## \" "
+            "criteria heading indented at most 3 spaces; otherwise the list is the items read before it.",
             "The items of the list are the ticket's requirements, in the order written, and the draw stores them in "
             "its entry of the set.",
             "A ticket entry holds label, ticket, bucket, size, title, body, requirements, base_commit, ready_commit, "
             "model, pr, session, log and check_output.",
             "Its requirements are a list of strings.",
             "After the count of vetoed PRs and before the count per bucket, the draw prints how many tickets of the "
-            "listed repos it left out because it cannot read their list with certainty.",
-            "A ticket with no list under the headings is not counted.",
+            "listed repos it left out because it refused their body as above.",
+            "A body with no line that is a \"## \" criteria heading indented at most 3 spaces is never refused.",
             "That count is taken before the rules on a ticket's other PRs and earlier sets, so it is the most tickets "
             "the reader can have cost the pool."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
@@ -1018,11 +1031,13 @@ class TestDraw(unittest.TestCase):
         sys.path.insert(0, str(SCRIPTS))
         self.addCleanup(sys.path.remove, str(SCRIPTS))
         draw = importlib.import_module("draw")
-        for function in (draw.requirements, draw.opens, draw.hides):
+        for function in (draw.requirements, draw.opens, draw.criteria):
             flat = " ".join((function.__doc__ or "").split())
             with self.subTest(function=function.__name__):
+                self.assertIn("HELP", flat)
                 for gone in ("starts a block that is not a paragraph's text", "end the list", "marker numbered",
-                             "with its text on its marker line", "CommonMark's blocks"):
+                             "with its text on its marker line", "CommonMark's blocks", "opens a code fence",
+                             "may start a block other than a paragraph"):
                     self.assertNotIn(gone, flat)
 
     def read_or_refuse(self, cases: dict[str, list[str] | str]) -> None:
@@ -1045,6 +1060,7 @@ class TestDraw(unittest.TestCase):
         read = {  # the section under the heading: its requirements
             "- [ ] One.\n- [x] Two.\n": ["One.", "Two."],
             "1. The report prints\n   the total.\n2) Count.\n": ["The report prints the total.", "Count."],
+            "- One.\n2. Two.\n": ["One.", "Two."],  # two lists, the second from 2
             "- Count every\nrow.\n- Show the total.\n": ["Count every row.", "Show the total."],
             "- One.\n\n- Two.\n": ["One.", "Two."],
             "- Check the totals.\n    - Count blank rows.\n": ["Check the totals.", "Count blank rows."],
@@ -1087,8 +1103,9 @@ class TestDraw(unittest.TestCase):
         # the reader refuses the body at.
         self.read_or_refuse({
             # 1. Another section's item opens a fence on its marker line; its closing fence hid the second section.
+            # The reader takes that closing fence for an opener, and the heading falls left of it.
             "## Acceptance criteria\n\n- One.\n\n## Notes\n\n- ```text\n  example\n  ```\n\n## Done when\n\n- Two.\n"
-            "- Three.\n": "- ```text",
+            "- Three.\n": "## Done when",
             # 2. Another section's item holds an HTML block, which ends with the item; it hid the heading after it.
             "## Acceptance criteria\n\n- One.\n\n## Notes\n\n- A note.\n  <div>\n## Done when\n\n- Two.\n":
                 "## Done when",
@@ -1127,6 +1144,50 @@ class TestDraw(unittest.TestCase):
             "## Steps\n\n1. Run:\n\n   ```sh\n   ## Acceptance\n   ```\n\n## Acceptance\n\n- One.\n": ["One."],
             "## Steps\n\n1. Run:\n\n   ```sh\n   make\n```\n\n## Acceptance\n\n- One.\n": "```",
             "## Steps\n\n- Note.\n  <!--\nhidden\n  -->\n\n## Acceptance\n\n- One.\n": "hidden",
+            "  ```\n\n  ```\n\n## Acceptance\n\n- One.\n": ["One."],  # a blank line falls left of no block
+        })
+
+    def test_a_line_that_may_stand_inside_another_section_s_item_is_never_taken_as_a_criteria_heading(self) -> None:
+        # In each body CommonMark holds the indented criteria heading inside a block of a Notes or Steps item. The
+        # reader does not follow items outside a criteria section, so it refuses the body at that heading or at the
+        # tag line before it.
+        self.read_or_refuse({
+            "## Notes\n- Note.\n    <!--\n  ## Acceptance\n  - fake\n## Done when\n- real": "  ## Acceptance",
+            "## Acceptance\n- One\n## Notes\n- Note\n    <div>\n  ## Done when\n\n- Outside": "  ## Done when",
+            "## Acceptance\n\n- One.\n\n## Notes\n\n- Note.\n    ```\n  ## Done when\n\n- Notes only.\n":
+                "  ## Done when",
+            "## Steps\n\n- Run:\n\n    ```\n  ## Acceptance criteria\n    ```\n\n- Not a requirement.\n":
+                "  ## Acceptance criteria",
+            # An empty item, then a tag alone: CommonMark opens an HTML block that holds the heading.
+            "## Acceptance\n\n- One.\n\n## Notes\n\n-\n<custom-tag>\n## Done when\n\n- Notes only.\n": "<custom-tag>",
+            "## Acceptance\n\n<my-note>\n- inside a custom element\n</my-note>": "<my-note>",
+            # With no item before it, an indented heading is at the top level; indented code at the top level hides.
+            "Intro.\n\n  ## Acceptance\n\n- One.\n": ["One."],
+            "## Acceptance\n\n    <!--\n\n- yes": ["yes"],
+            # A fence after five spaces on a marker line is code in that item, which ends before the heading.
+            "## Notes\n-      ```literal\n## Done when\n- Second": ["Second"],
+        })
+
+    def test_a_line_the_reader_cannot_be_sure_of_after_the_last_criteria_section_costs_no_list(self) -> None:
+        notes = "## Notes\n\n- ```sh\n  true\n  ```\n\nMore notes.\n"  # More notes. falls left of the fence
+        self.read_or_refuse({
+            notes: [],
+            f"## Acceptance\n\nNothing yet.\n\n{notes}": [],
+            f"## Acceptance\n\n- One.\n- Two.\n\n{notes}": ["One.", "Two."],
+            f"{notes}\n## Acceptance\n\n- One.\n": "More notes.",
+            f"## Acceptance\n\n- One.\n\n{notes}\n## Done when\n\n- Two.\n": "More notes.",
+            f"{notes}\n```\n## Acceptance\n```\n": "More notes.",  # a criteria heading's line, even in a fence
+        })
+
+    def test_an_item_s_text_loses_only_the_spaces_and_tabs_around_it(self) -> None:
+        # CommonMark strips spaces and tabs from a paragraph's lines; U+2028 and its kind are text.
+        self.read_or_refuse({
+            "## Acceptance\n\n- Keep A\u2028\n  before B.\n": ["Keep A\u2028 before B."],
+            "## Acceptance\n\n- Keep A\n  \u2028before B.\n": ["Keep A \u2028before B."],
+            "## Acceptance\n\n- Keep A\n\u2028before B.\n": ["Keep A \u2028before B."],
+            "## Acceptance\n\n- \u2028[ ] Save.\n": ["\u2028[ ] Save."],
+            "## Acceptance\n\n- [x] \u2028Save.\t\n": ["\u2028Save."],
+            "## Acceptance\u2028\n\n- Not under a criteria heading.\n": [],
         })
 
     def test_the_model_is_a_name_from_the_session_s_own_responses_or_a_helper_s_copy_of_one(self) -> None:

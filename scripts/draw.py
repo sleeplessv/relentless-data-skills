@@ -37,17 +37,24 @@ MODEL_NAME = re.compile(r"[A-Za-z][\w.:@/-]*")
 # The commands an opening call may run besides gh pr create. Each is a program, or the builtin cd, that cannot end
 # the shell or skip what follows it.
 OTHERS = ("cd", "git", "cat", "tail")
+# The longest opening call, in bytes of UTF-8. No piece of a call expands to more than its text, so this bounds the
+# arguments of each command in it.
+LONGEST = 64 * 1024
 # The pieces an opening call is made of, tried in turn at each point. A call with any other text has no opening form.
-PIECE = re.compile(r"""
+# APART and AFTER hold a redirection to a word of its own.
+APART = r"(?<![^ \t\n;|&])"
+AFTER = r"(?=[ \t\n;|&]|\Z)"
+PIECE = re.compile(rf"""
     (?P<blank>[ \t]+|(?<=[ \t])\\\n)
   | (?P<op>&&|\|(?![|&])|;(?!;)|\n)
-  | (?P<errors>(?<![^ \t\n;|&])2>&1(?=[ \t\n;|&]|\Z))
-  | (?P<to>(?<![^ \t\n;|&])>>?(?![>|&]))
-  | (?P<here>(?<![^ \t\n;|&])<<'(?P<delimiter>[A-Za-z_]\w*)'(?=[ \t\n;|&]|\Z))
-  | (?P<body>"\$\(cat\ <<'(?P<inner>[A-Za-z_]\w*)'\n(?P<lines>(?:.*\n)*?)(?P=inner)\n\)")
+  | (?P<errors>{APART}2>&1{AFTER})
+  | (?P<to>{APART}>>?{AFTER})
+  | (?P<here>{APART}<<'(?P<delimiter>\w+)'{AFTER})
+  | (?P<body>"\$\(cat\ <<'(?P<inner>\w+)'\n(?P<lines>(?:.*\n)*?)(?P=inner)\n\)")
   | (?P<plain>[A-Za-z0-9_./,:=@%+-]+)
-  | (?P<quoted>'[^']*'|"(?:[^"\\$`]|\\[\s\S])*"|\\[^\n])
+  | (?P<quoted>'[^']*'|"[^"\\$`]*"|\\[^\n])
 """, re.X | re.A)
+TAIL = re.compile(r"-[0-9]+|-n [0-9]+")  # what a tail that reads gh's pipe may take: a count of lines and no file
 # CommonMark's HTML blocks of kinds 1 to 6: what starts one and what ends it; a blank line ends kinds 6 and 7.
 BLANK = re.compile(r"\A[ \t]*\Z")
 HTML_BLOCKS = [
@@ -88,44 +95,52 @@ The pool is every ticket that meets all of these:
   result, give or take {CLOCK_SLACK.seconds // 60} minute. No other session opened or may have opened
   the PR, and the session opened or may have opened no other PR.
 - A call runs `gh pr create` for certain when it exited 0 and has this form,
-  which shows that bash started that command:
-  - The call is commands joined by &&, |, ; and new lines. A new line may
-    also follow && or |.
-  - One command is gh pr create, with its three words unquoted and nothing
-    before them, as in
+  which shows that the shell started that command:
+  - The call is commands joined by &&, |, ; and new lines. More new lines
+    may start the call or follow any of these, and a ; may end it. The call
+    is at most {LONGEST // 1024} KiB in UTF-8.
+  - One command is gh pr create, its three words unquoted, with nothing
+    before them and no redirection between them, as in
       gh pr create --title "t" --body "b"
   - That command comes after the last ; or new line that ends a command, and
-    first in its pipeline. It may feed a pipe and send its errors to its
-    output, as in
+    first in its pipeline. After its three words it may send its errors to
+    its output with 2>&1, and it may feed a pipe that ends in one tail -N or
+    tail -n N, as in
       cd repo && gh pr create --fill 2>&1 | tail -1
-  - Every other command is cd, git, cat or tail. It may write its output to
-    a file with > or >>, send its errors to its output with 2>&1, and read a
-    here-document whose delimiter is in single quotes, as in
+  - Every other command is {one_of(list(OTHERS))}. After its name it may
+    write its output to a file with > or >>, send its errors to its output
+    with 2>&1, and read a here-document whose delimiter is letters, digits
+    and _ in single quotes, as in
       cat > body.md <<'EOF'
       Body text.
       EOF
       git push -u origin b && gh pr create --body-file body.md
+  - Each of those redirections is a word of its own, with a blank before it
+    and a blank, an operator or the end of the call after it.
   - Each word is made of letters, digits and _ . / , : = @ % + -, of text in
-    single quotes, of text in double quotes with no $ or `, of characters
-    after a backslash, and of a body in this form, whose lines are text and
-    never commands, and none of which starts with the delimiter:
+    single quotes, of text in double quotes with no $, ` or \\, of a backslash
+    and the character after it, and of a body in this form, with a delimiter
+    of letters, digits and _ in place of EOF, whose lines are text and never
+    commands, and none of which starts with the delimiter:
       --body "$(cat <<'EOF'
       Body text.
       EOF
       )"
     A backslash that ends a line, after a blank, joins the next line to it.
-  The draw takes for granted that the call ran in bash 5.2 or later, with
-  its default options; that no alias, function, variable or option set
-  before the call changes what a name in it runs; and that gh names the
-  GitHub CLI and cd, git, cat and tail the commands of those names, wherever
-  the call runs them.
-  Any other call whose text holds the words gh, pr and create, in any order,
-  case or quoting, may have opened the PR its result names, if GitHub's
-  time falls in its span. A call whose text does not hold the three words
-  does not count. So a command that builds the words when it runs, or a
-  script or program that runs gh pr create, leaves no evidence. A call may
-  also have opened the PR when its line or its result's line has a time
-  that is missing, has no zone or is at an end of the calendar. A PR in a
+  The draw takes for granted that the call ran in bash 5.2 or later, or in
+  zsh 5.9 or later, with its default options; that no alias, function,
+  variable or option set before the call changes what a name in it runs;
+  that gh names the GitHub CLI and {one_of(list(OTHERS)).replace(" or ", " and ")} the commands
+  of those names, wherever the call runs them; and that the system can
+  start a command whose arguments total {LONGEST // 1024} KiB.
+  Any other call whose text holds gh, pr and create, in any order or case,
+  with any text beside each, once its quotes, backslashes and
+  backslash-new lines are taken out, may have opened the PR its result
+  names, if GitHub's time falls in its span. A call whose text does not hold
+  the three words does not count. So a command that builds the words when it
+  runs, or a script or program that runs gh pr create, leaves no evidence. A
+  call may also have opened the PR when its line or its result's line has a
+  time that is missing, has no zone or is at an end of the calendar. A PR in a
   repo outside repos.json counts on the command alone: opened or may have
   opened. Lines in the session's log or a helper's that carry another
   session's id, as lines a resumed session copied do, are left out of this
@@ -204,8 +219,12 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
   draw-work/            Clones and checkouts, removed when the draw ends.
 
 Output names projects by label only. Before the count per bucket, the draw
-prints how many PRs of the listed repos a call may have opened. None of
-them is in the pool. A session log and its helpers' logs are
+prints how many PRs of the listed repos the first rule leaves out only
+because a call may have opened a PR: a PR is counted when one session that
+meets the second and third rules, with every log of it read, opened or may
+have opened it, any other session only may have opened it, and that session
+only may have opened any other PR. The other rules are not applied to the
+PRs it counts. A session log and its helpers' logs are
 read as a session only when the text of one of them holds github.com or a \\u
 escape, as one must that holds a PR's URL. A log adds one, once, to the count
 of skipped logs when an error arises while finding or reading its helpers'
@@ -297,28 +316,39 @@ def result_text(part: dict) -> str:
 
 def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
     """Whether a Bash call ran `gh pr create`: "opens" when it exited 0 and has an opening form, "maybe" when its
-    text holds the three words otherwise, None when it does not. --help gives the forms and what they take for
+    text could spell the three words otherwise, None when it cannot. --help gives the forms and what they take for
     granted."""
-    words = re.sub(r"\\\n|[\\'\"]", "", command)  # a backslash that ends a line joins it to the next
-    if not all(re.search(rf"\b{word}\b", words, re.I | re.A) for word in ("gh", "pr", "create")):
+    # With every quote, backslash and backslash-newline taken out, text bash may join is joined. A word is matched
+    # with any text on either side, since an expansion or a quote beside it may still leave it whole when bash runs.
+    letters = re.sub(r"\\\n|[\\'\"]", "", command).lower()
+    if not all(word in letters for word in ("gh", "pr", "create")):
         return None
     return "opens" if exited_zero and opening_form(command) else "maybe"
 
 
 def opening_form(command: str) -> bool:
     """Whether a call has the form --help gives for one whose exit of 0 shows bash started `gh pr create`."""
-    commands: list[dict] = []  # each with its words, redirections, list and place in its pipeline
-    current: dict = {"words": [], "redirects": [], "list": 0, "first": True}
+    if len(command.encode()) > LONGEST:
+        return False
+
+    def new(first: bool) -> dict:
+        """A command: its words, each None unless plain; its redirections, each after how many words; its list;
+        and whether it is first in its pipeline."""
+        return {"words": [], "redirects": [], "list": lists, "first": first}
+    lists = 0  # the lists a ; or new line has ended so far
+    commands: list[dict] = []
+    current = new(True)
     word: list[tuple[str, str]] = []  # the pieces of the word being read
     target = False  # a > or >> waits for its file's word
     here: list[str] = []  # the delimiters of here-documents whose bodies follow the next new line
-    after, lists, at = "\n", 0, 0  # after: the operator that ended the last command; lists: those ended so far
+    after, at = "\n", 0  # after: the operator that ended the last command
 
     def end_word() -> None:
         nonlocal word, target
         if word:
             text = "".join(piece for _, piece in word) if all(kind == "plain" for kind, _ in word) else None
-            current["redirects" if target else "words"].append(text)
+            if not target:
+                current["words"].append(text)
             word, target = [], False
 
     while at < len(command):
@@ -337,17 +367,15 @@ def opening_form(command: str) -> bool:
             continue
         if target or kind != "op" and not current["words"]:  # > waits for its file; a name comes before redirections
             return False
-        if kind == "errors":
-            current["redirects"].append(text)
-        elif kind == "to":
-            target = True
-        elif kind == "here":
-            current["redirects"].append("<<")
-            here.append(found["delimiter"])
+        if kind in ("errors", "to", "here"):
+            current["redirects"].append((len(current["words"]), text if kind == "errors" else kind))
+            target = kind == "to"
+            if kind == "here":
+                here.append(found["delimiter"])
         elif current["words"]:
             commands.append(current)
             lists += text in ";\n"
-            current = {"words": [], "redirects": [], "list": lists, "first": text != "|"}
+            current = new(text != "|")
             after = text
         elif text != "\n":
             return False
@@ -366,10 +394,19 @@ def opening_form(command: str) -> bool:
         return False
     if current["words"]:
         commands.append(current)
-    gh = [found for found in commands if found["words"][:3] == ["gh", "pr", "create"]]
-    return (len(gh) == 1 and gh[0]["first"] and gh[0]["list"] == commands[-1]["list"]
-            and set(gh[0]["redirects"]) <= {"2>&1"}
-            and all(found["words"][0] in OTHERS for found in commands if found is not gh[0]))
+    gh = [number for number, found in enumerate(commands) if found["words"][:3] == ["gh", "pr", "create"]]
+    if len(gh) != 1:
+        return False
+    number = gh[0]
+    opener, piped = commands[number], commands[number + 1:number + 3]
+    if piped and not piped[0]["first"]:  # gh feeds a pipe: to one tail that reads only it and ends the pipeline
+        reader = piped[0]
+        if (reader["words"][0] != "tail" or reader["redirects"] or len(piped) > 1 and not piped[1]["first"]
+                or None in reader["words"] or not TAIL.fullmatch(" ".join(reader["words"][1:]))):
+            return False
+    return (opener["first"] and opener["list"] == commands[-1]["list"]
+            and all(words >= 3 and redirect == "2>&1" for words, redirect in opener["redirects"])
+            and all(found["words"][0] in OTHERS for found in commands if found is not opener))
 
 
 Run = tuple[datetime | None, datetime | None, bool]
@@ -718,13 +755,21 @@ class Draw:
                     touched.setdefault(key, []).append(session)
         if unreadable:
             print(f"Skipped {unreadable} session logs that could not be read.")
-        vetoed = sum(repo in repos and any(session["opened"][(repo, pr)] == "maybe" for session in found)
-                     for (repo, pr), found in touched.items())
-        print(f"Vetoed {vetoed} PRs of the listed repos: a call may have opened each, so none is in the pool.")
+
+        def alone(key: tuple[str, int], found: list[dict], maybe: tuple[str, ...]) -> bool:
+            """Whether one eligible session opened the PR, or has a state in `maybe` for it, while every other
+            session's state for the PR, and that session's state for each other PR, is in `maybe`."""
+            return any(session["eligible"] and session["opened"][key] in ("opened", *maybe)
+                       and all(other["opened"][key] in maybe for other in found if other is not session)
+                       and all(state in maybe for each, state in session["opened"].items() if each != key)
+                       for session in found)
+        vetoed = sum(key[0] in repos and alone(key, found, ("maybe",)) and not alone(key, found, ())
+                     for key, found in touched.items())
+        print(f"Vetoed {vetoed} PRs of the listed repos: a call that may have opened each, or another PR of the "
+              f"session that opened it, keeps it out of the pool.")
         tickets: dict[tuple[str, int], dict | None] = {}
         for (repo, pr), found in sorted(touched.items()):
-            if repo not in repos or len(found) != 1 or not found[0]["eligible"] \
-                    or found[0]["opened"] != {(repo, pr): "opened"}:
+            if repo not in repos or not alone((repo, pr), found, ()):
                 continue
             try:
                 candidate = self.candidate(repos[repo], labels[repo], pr, views[(repo, pr)], found[0])

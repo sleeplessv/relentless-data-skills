@@ -812,10 +812,11 @@ class SmartGitCommitTests(unittest.TestCase):
         self.sb = Sandbox(self)
         self.origin = self.sb.origin_with_default_branch()
         self.work = self.sb.clone(self.origin, "work")
-        text = SMART_COMMIT_SKILL.read_text(encoding="utf-8")
         self.commit = doc_block(SMART_COMMIT_SKILL, "Step 4: Commit each group", "git commit")
-        push_blocks = fenced_blocks(section(text, "Step 5: Push when asked"))
-        self.push, self.push_upstream = (split_commands(b) for b in push_blocks)
+        pushes = [block for block in fenced_blocks(section(SMART_COMMIT_SKILL.read_text(),
+                                                           "Step 5: Push when asked"))
+                  if block.startswith("git push")]
+        self.push, self.push_upstream = map(split_commands, pushes)
 
     def test_commit_block_creates_one_local_commit_and_does_not_push(self):
         (self.work / "a.txt").write_text("a\n", encoding="utf-8")
@@ -839,18 +840,113 @@ class SmartGitCommitTests(unittest.TestCase):
         self.assertTrue(run.completed, run)
         self.assertEqual(self.sb.remote_sha(self.origin, "refs/heads/main"), sha)
 
-    def test_no_upstream_needs_documented_fallback(self):
-        self.assertEqual(self.push_upstream, ["git push -u origin HEAD"])
-        self.sb.git(self.work, "checkout", "-q", "-b", "feat/new")
+    def preview(self, mode="tracked"):
+        command = doc_block(SMART_COMMIT_SKILL, "Step 5: Push when asked", "preview-push.sh")
+        return self.sb.run(self.work, [command], {"mode": mode, "skill_dir": str(SMART_COMMIT_SKILL.parent)})
+
+    def record_push_hooks(self):
+        log = self.sb.root / "hooks.log"
+        hook = self.work / ".git/hooks/pre-push"
+        hook.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$2\" >> {_q(log)}\n")
+        hook.chmod(0o755)
+        return log
+
+    def test_preview_checks_only_changed_branches_and_runs_no_hook(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "init", "-q", "--bare", str(mirror))
+        self.sb.git(self.work, "push", "-q", str(mirror), "HEAD:refs/heads/unchanged")
+        self.sb.git(self.work, "remote", "add", "publish", str(self.origin))
+        self.sb.git(self.work, "remote", "set-url", "--push", "publish", str(mirror))
+        self.sb.git(self.work, "config", "branch.main.pushRemote", "publish")
+        self.sb.git(self.work, "branch", "stable")
+        self.sb.git(self.work, "config", "--add", "remote.publish.push", "stable:refs/heads/unchanged")
+        self.sb.git(self.work, "config", "--add", "remote.publish.push", "main:refs/heads/release")
+        hooks = self.record_push_hooks()
+        for name in ("new", "fast-forward"):
+            with self.subTest(name=name):
+                sha = self.sb.commit_file(self.work, "c.txt", name, "feat: change")
+                run = self.preview()
+                self.assertTrue(run.completed, run)
+                self.assertEqual(run.steps[0].out.splitlines(), [f"{mirror}\trelease"])
+                self.assertFalse(hooks.exists())
+                self.assertNotEqual(self.sb.remote_sha(mirror, "refs/heads/release"), sha)
+                self.assertTrue(self.sb.run(self.work, self.push).completed)
+                self.assertEqual(hooks.read_text().splitlines(), [str(mirror)])
+                hooks.unlink()
+                self.assertEqual(self.sb.remote_sha(mirror, "refs/heads/release"), sha)
+
+    def test_force_and_delete_refspecs_stop_the_tracked_push(self):
+        branch = "refs/heads/release"
+        self.sb.git(self.work, "push", "-q", "origin", f"HEAD:{branch}")
+        previous = self.sb.remote_sha(self.origin, branch)
+        hooks = self.record_push_hooks()
+        for spec in (f"+main:{branch}", f":{branch}"):
+            with self.subTest(refspec=spec):
+                self.sb.git(self.work, "config", "remote.origin.push", spec)
+                run = self.preview()
+                self.assertFalse(run.completed, run)
+                self.assertIn(spec, run.steps[0].err)
+                self.assertEqual(self.sb.remote_sha(self.origin, branch), previous)
+                self.assertFalse(hooks.exists())
+
+    def test_no_upstream_checks_all_push_urls_and_overrides_configured_refspecs(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "clone", "-q", "--bare", str(self.origin), str(mirror))
+        self.sb.git(self.work, "remote", "set-url", "--add", "--push", "origin", str(self.origin))
+        self.sb.git(self.work, "remote", "set-url", "--add", "--push", "origin", str(mirror))
+        self.sb.git(self.work, "config", "--add", "remote.origin.push", ":refs/heads/main")
+        self.sb.git(self.work, "config", "--add", "remote.origin.push", "+main:refs/heads/other")
+        self.sb.git(self.work, "checkout", "-qb", "feat/new")
         sha = self.sb.commit_file(self.work, "d.txt", "d\n", "feat: d")
-        plain = self.sb.run(self.work, self.push)
-        self.assertFalse(plain.completed)
-        self.assertIn("no upstream", plain.steps[0].err)
-        run = self.sb.run(self.work, self.push_upstream)
+        self.sb.git(self.work, "tag", "feat/new")  # short ref names are ambiguous
+        hooks = self.record_push_hooks()
+        run = self.preview("new")
         self.assertTrue(run.completed, run)
-        self.assertEqual(self.sb.remote_sha(self.origin, "refs/heads/feat/new"), sha)
-        again = self.sb.run(self.work, self.push)
-        self.assertTrue(again.completed, again)
+        self.assertEqual(run.steps[0].out.splitlines(),
+                         [f"{self.origin}\tfeat/new", f"{mirror}\tfeat/new"])
+        self.assertFalse(hooks.exists())
+        previous = self.sb.remote_sha(self.origin, "refs/heads/main")
+        pushed = self.sb.run(self.work, self.push_upstream, {"local_branch": "feat/new"})
+        self.assertTrue(pushed.completed, pushed)
+        self.assertEqual(hooks.read_text().splitlines(), [str(self.origin), str(mirror)])
+        for remote in (self.origin, mirror):
+            self.assertEqual(self.sb.remote_sha(remote, "refs/heads/feat/new"), sha)
+            self.assertEqual(self.sb.remote_sha(remote, "refs/heads/main"), previous)
+            self.assertIsNone(self.sb.remote_sha(remote, "refs/heads/other"))
+        self.assertEqual(self.sb.git(self.work, "rev-parse", "--abbrev-ref", "@{u}"), "origin/feat/new")
+
+    def test_rejected_second_url_prevents_publication_to_the_first(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "clone", "-q", "--bare", str(self.origin), str(mirror))
+        other = self.sb.clone(mirror, "other")
+        self.sb.commit_file(other, "conflict", "remote", "other change")
+        self.sb.git(other, "push", "origin", "HEAD:refs/heads/feat/new")
+        for remote in (self.origin, mirror):
+            self.sb.git(self.work, "remote", "set-url", "--add", "--push", "origin", str(remote))
+        self.sb.git(self.work, "checkout", "-qb", "feat/new")
+        self.sb.commit_file(self.work, "conflict", "local", "local change")
+        hooks = self.record_push_hooks()
+        run = self.preview("new")
+        self.assertFalse(run.completed, run)
+        self.assertEqual(run.steps[0].out, "")
+        self.assertIsNone(self.sb.remote_sha(self.origin, "refs/heads/feat/new"))
+        self.assertFalse(hooks.exists())
+
+    def test_unrecognized_or_unsafe_preview_row_discards_earlier_destinations(self):
+        fake_git = self.sb.root / "git"
+        fake_git.write_text(f"""#!/bin/sh
+if [ "$1" = push ]; then cat "$fixture"; else exec {_q(Path(GIT))} "$@"; fi
+""")
+        fake_git.chmod(0o755)
+        fixture = self.sb.root / "preview"
+        self.sb.env.update(PATH=str(self.sb.root) + os.pathsep + self.sb.env["PATH"], fixture=str(fixture))
+        for flag in ("+", "-", "!", "?"):
+            with self.subTest(flag=flag):
+                fixture.write_text("To /remote\n*\tHEAD:refs/heads/new\t[new branch]\n"
+                                   f"{flag}\tmain:refs/heads/release\tstatus\nDone\n")
+                run = self.preview("new")
+                self.assertFalse(run.completed, run)
+                self.assertEqual(run.steps[0].out, "")
 
     def test_rejected_non_fast_forward_push(self):
         other = self.sb.clone(self.origin, "other")

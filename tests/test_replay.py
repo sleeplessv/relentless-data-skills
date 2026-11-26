@@ -238,8 +238,11 @@ class World:
         return [name for name in listed.split(b"\0") if name]
 
     def start(self, *args: str, **extra: str) -> subprocess.Popen[str]:
-        """The replay, running, for a test that signals it."""
-        return subprocess.Popen([sys.executable, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
+        """The replay, running, for a test that signals it. A background job starts with SIGINT ignored, and
+        Python then raises no KeyboardInterrupt, so the replay gets Python's handler back first."""
+        launcher = ("import runpy, signal, sys\nsignal.signal(signal.SIGINT, signal.default_int_handler)\n"
+                    "sys.argv = sys.argv[1:]\nrunpy.run_path(sys.argv[0], run_name='__main__')")
+        return subprocess.Popen([sys.executable, "-c", launcher, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
                                 env=self.env(**extra), text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
 

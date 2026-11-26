@@ -88,16 +88,34 @@ After all commits are created, confirm `git status` is clean, so no changed file
 
 Push only when the request asked for it: the user said "push" ("commit and push", "push it"), or a calling skill's workflow includes the push. A plain "commit" ends here, with the commits local.
 
-To push to an existing upstream, first check its PR: if `gh pr list --head "$(git branch --show-current)" --state merged --json number --jq length` prints more than `0`, the branch was already merged; stop and report instead of pushing.
+Set `skill_dir` to the directory containing this SKILL.md and `local_branch` to the nonempty output of `git branch --show-current`. Stop on failure. Set `mode=tracked` for an existing upstream, or `mode=new` to publish the local branch at the same name on origin. Preview that push:
+
+```bash
+bash "$skill_dir/scripts/preview-push.sh" "$mode"
+```
+
+Stop on nonzero exit. The helper runs `git push --dry-run --porcelain --no-verify` to keep pre-push hooks from publishing during inspection. It rejects force, deletion, rejected updates and unknown output. Each tab-separated output row gives one push URL and one new or updated destination branch. Check every row across all push URLs. Unchanged refs need no review lookup.
+
+- On GitHub, take `host` and the push repository from the row’s URL and `branch` from its destination branch. Use `gh api --hostname "$host" "repos/<push-owner>/<push-repo>" --jq '{full_name, fork, parent: .parent.full_name}'` to get the canonical source (`source` = `full_name`). Set `target` to that source, then repeat for its upstream PR target when it is a fork (normally `parent`). Keep the same source and branch in both lookups.
+
+  ```bash
+  gh api --hostname "$host" -X GET "repos/$target/pulls" --paginate -f state=closed -f head="${source%/*}:$branch" --jq 'map({number, source: .head.repo.full_name, head: .head.ref, merged_at})'
+  ```
+
+  A PR counts only when its source and head match `source` and `branch` exactly and `merged_at` has a timestamp. A lookup clears only after exit 0 and every page shows no matching merge.
+- On another forge, check its merged requests for the same source project and branch using its CLI or web interface. For example, look for merged merge requests on GitLab. A plain Git remote with no review service needs only the Git preview.
+- If a merge is found, a review target is unknown, or a required lookup fails or returns incomplete data, keep the commits local and report why. After every destination clears its check, use the command for the previewed mode. Repeat the preview and lookups if the branch or push configuration changes.
+
+For `tracked`:
 
 ```bash
 git push
 ```
 
-If the branch has no upstream yet:
+For `new`, set the upstream with the same explicit refspec used in the preview:
 
 ```bash
-git push -u origin HEAD
+git push -u origin "HEAD:refs/heads/$local_branch"
 ```
 
 **Run the push outside the sandbox.** `git push` needs network access to reach the remote; a sandboxed shell blocks it, and the failure surfaces as a DNS/connection error that looks like an auth or remote problem. If the push fails with a connection error, suspect the sandbox first.
@@ -109,6 +127,6 @@ git push -u origin HEAD
 These hold on every run; each one is either unrecoverable or moves a problem onto someone else:
 
 - Don't amend commits that have already been pushed; rewriting shared history breaks every other checkout of the branch.
-- Don't force-push to `main` or `master`, and don't skip hooks (`--no-verify`); the hooks are the repo's gate, not an obstacle.
+- Keep hooks enabled on commits and on the actual push.
 - Don't commit files that likely contain secrets (`.env`, credentials, tokens); a pushed secret is compromised even after it is removed.
-- If `git push` is rejected (non-fast-forward), stop and tell the user rather than force-pushing.
+- Stop and report any rejected push. Never force a branch update.

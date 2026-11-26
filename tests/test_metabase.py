@@ -4,18 +4,19 @@ Standard library only, like the script itself. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-Nothing here ever talks to a Metabase instance: every test targets the pure
-functions — the read-only SQL check, config/env parsing, the JSON walkers, and
-the mutable/restorable field-set invariant. `api()` is never called.
+Tests cover the read-only SQL check, config/env parsing, JSON walkers, dependency
+discovery and restore points. The dependency test uses a local API fixture.
 """
 from __future__ import annotations
 
 import contextlib
 import io
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT / "skills" / "metabase" / "scripts"))
@@ -202,6 +203,41 @@ class SourceCards(unittest.TestCase):
         q = {"stages": [{"source-card": 12},
                         {"joins": [{"source-table": "card__34"}]}]}
         self.assertEqual(sorted(mb._find_source_cards(q, set())), [12, 34])
+
+    def test_finds_multiple_native_card_tags_alongside_mbql_sources(self):
+        tags = [
+            {"type": "card", "name": "#1-orders", "card-id": 42},
+            {"type": "card", "name": "#55-returns", "card-id": 55},
+            {"type": "snippet", "name": "snippet:filter", "snippet-id": 8},
+        ]
+        tag_map = {tag["name"]: tag for tag in tags}
+        for query in [
+            {"native": {"query": "SELECT ...", "template-tags": tag_map}},
+            {"stages": [{"native": "SELECT ...", "template-tags": tags}]},
+        ]:
+            with self.subTest(query=query):
+                self.assertEqual(mb._find_source_cards(query, set()), {42, 55})
+        query = {"stages": [{"template-tags": tag_map}, {"joins": [{"source-card": 7}]}]}
+        self.assertEqual(mb._find_source_cards(query, set()), {7, 42, 55})
+
+    def test_deep_deps_separates_native_dependents_from_frozen_copies(self):
+        sql = "SELECT " + ", ".join(f"column_{i}" for i in range(40)) + " FROM orders"
+        def card(card_id, query):
+            return {"id": card_id, "name": str(card_id), "dataset_query": {"stages": [query]}}
+
+        source = card(10, {"native": sql})
+        direct = card(20, {"native": sql.replace("FROM orders", "FROM {{#10}}"),
+                           "template-tags": {"#10": {"type": "card", "card-id": 10}}})
+        cards = [source, direct, card(30, {"source-card": 20}), card(40, {"native": sql})]
+        responses = {"/card/10/dashboards": [], "/card": cards, "/card/10": source}
+        with patch.object(mb, "api", side_effect=lambda method, path: responses[path]), \
+             patch.object(sys, "argv", ["mb", "deps", "10", "--deep"]), \
+             contextlib.redirect_stdout(io.StringIO()) as output:
+            mb.main()
+        result = json.loads(output.getvalue())
+        self.assertEqual([c["id"] for c in result["sourced_by_cards"]], [20])
+        self.assertEqual([c["id"] for c in result["transitive_dependents"]], [20, 30])
+        self.assertEqual([c["id"] for c in result["possible_frozen_copies"]], [40])
 
     def test_ignores_plain_table_ids(self):
         self.assertEqual(mb._find_source_cards({"source-table": 1003}, set()), set())

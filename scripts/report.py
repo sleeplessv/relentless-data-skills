@@ -29,18 +29,21 @@ NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
                                        "judged at a commit the version does not record")
 # Warning sign 2: generation one's steps and the words that name each, in the order a helper is sorted. A re-check
 # names the fix it checks, and a fix names the review whose findings it fixes, so each comes before the step whose
-# words it borrows. A bare "fix" names no step: a ticket's own title may hold it.
+# words it borrows. A bare "fix" names no step, since a ticket's own title may hold it: a fix is "fix" or "address"
+# with a finding, comment or review in the same clause, or a fix round, worker or brief.
 STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, words in (
     ("re-check", r"re-?check"),
     ("closing verification", r"verif(?:y|ier|ication)\b"),
-    ("fix", r"fix(?:es)? (?:round|worker|brief|the findings|findings|review)|(?:late|class) fix|address(?:es|ing)? "
-            r"(?:the )?(?:review|findings)"),
+    ("fix", r"(?:fix|address)(?:es|ing)?\b[^.:;\n]{0,60}\b(?:finding|comment|review)|fix(?:es)? (?:round|worker|brief)"
+            r"|(?:late|class) fix"),
     ("review", r"review|ponytail|audit"),
     ("implement", r"implement|build|integrat"),
     ("publish", r"publish|ready\b|pr body|merge|push|(?:start|stop) comment|tracker|claim"),
     ("explore", r"explor|research|find|search|investigat|locate|survey|look up|reads?\b"),
 ))
 CUT = ("closing verification", "fix", "re-check")  # the steps the small cut takes out
+# A generation-one skill's name names the whole run, every step at once, so the sort reads the text without it.
+SKILL_NAME = re.compile("|".join(map(re.escape, draw.GENERATION_ONE)), re.IGNORECASE)
 
 
 def table_line(tickets: int) -> str:
@@ -56,10 +59,11 @@ def listed(items: list) -> str:
 
 def step(description: str | None, brief_head: str | None) -> str | None:
     """The step of generation one a helper took: the first in STEPS whose words its description holds, or, when its
-    description holds none, the first whose words the head of its brief holds. None when neither holds any."""
+    description holds none, the first whose words the head of its brief holds. None when neither holds any. The name
+    of a generation-one skill is no step's words."""
     for text in (description, brief_head):
         for name, words in STEPS:
-            if text and words.search(text):
+            if text and words.search(SKILL_NAME.sub(" ", text)):
                 return name
     return None
 
@@ -123,7 +127,15 @@ Each helper the rows list is sorted into a step of generation one, by the
 words of its description or, when its description names no step, by the
 words of the head of its brief. A helper that names two steps takes the
 first; one that names none is not sorted. The words of each step are STEPS
-in scripts/report.py. The steps, in the order a helper is sorted:
+in scripts/report.py. A bare "fix" is no step, since a ticket's title may
+hold it: a fix says "fix" or "address" with a finding, comment or review in
+the same clause, or names a fix round, worker or brief. The name of a
+generation-one skill names the whole run, so it is no step's words: a helper
+that owns a run is not sorted unless other words name a step. The skills:
+
+  {listed(list(draw.GENERATION_ONE))}.
+
+The steps, in the order a helper is sorted:
 
   {listed([name for name, _ in STEPS])}.
 

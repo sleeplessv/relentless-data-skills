@@ -259,6 +259,21 @@ class TestReport(unittest.TestCase):
             "not appear.",
             "With it counted as cut, the cut is 2250 tokens. The sign does not appear."])
 
+    def test_a_fix_names_its_finding_and_a_skill_name_names_no_step(self) -> None:
+        # A fix or address followed by a finding, comment or review in the same clause is a fix; a bare "fix", as a
+        # ticket's title may hold, is not. A generation-one skill's name is the whole run, not one step.
+        lines = self.two([helper("Fix the Standards finding on the total", None, 1),
+                          helper("Address the spec review's one comment", None, 2),
+                          helper("implement-ticket owner for #12", "Use the implement-ticket skill on #12.", 4),
+                          helper("Run the backlog", "Run plugin:implement-backlog, then orchestrator-mode.", 8),
+                          helper("Implement ticket #12 with implement-ticket", None, 16),
+                          helper("Fix the total", "# Ticket #12: Fix the total. Review it once it is done.", 32),
+                          helper("Fix the total. Then review it", None, 64)], 1000, 900)
+        self.assertEqual(lines[2], "  generation-one's helpers by step: re-check 0, closing verification 0, fix 90, "
+                                   "review 2880, implement 480, publish 0, explore 0. 0 helpers have no tokens of "
+                                   "their own.")
+        self.assertEqual(lines[4], "  Not sorted into a step: 360 tokens, 1.2% of generation-one's.")
+
     def test_sign_two_appears_when_the_cut_is_more_than_half_the_extra_cost(self) -> None:
         # 30 tickets: an extra cost of 6000 tokens, half of it 3000.
         for verification, verdict in ((101, "The sign appears."), (100, "The sign does not appear."),

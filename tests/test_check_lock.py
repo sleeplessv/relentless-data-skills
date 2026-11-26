@@ -41,11 +41,13 @@ DEADLINE = 120  # seconds; a bound on waiting for a file or a process, not a sle
 START_TIME_PATTERN = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file gives it
 
 # What `--help` must state. Each row is a short label and the terms of one fact: regular
-# expressions, matched without case, that must all match in one sentence of the help. Most
-# terms relate a subject to its claim (a pid to the holder that writes it, a status to its
-# condition), so a row catches the edits the probes in this ticket tried, and not every edit
-# of its fact. A term starting with "!" must not match. The table checks relationships among
-# words and does not prove what the help means.
+# expressions, matched without case, that must all match in one sentence of the help, where
+# a sentence ends at a period before a capital letter. The "lock ownership" row (see
+# JOINED_ROWS) may match across two adjacent sentences. A term checks that a word occurs, or
+# that words occur in an order within a few characters, as the holder row's write verb before
+# "process id" or "pid". The holder row does not tie that verb to the holder, which only has
+# to occur in the same sentence. A term starting with "!" must not match. The table checks
+# words and their nearness; it does not prove what the help means.
 HELP_FACTS = {
     "lock scope": (
         r"--fast", r"\bbefore\b[^.]{0,20}\bfirst check\b", r"\bholds?\b[^.]{0,25}\buntil\b[^.]{0,15}\bexits?\b"),

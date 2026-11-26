@@ -649,12 +649,14 @@ class TestReport(unittest.TestCase):
                                  "Replay sets 1 and 2: 29 tickets, of project A.")
 
     def test_three_sets_take_the_line_of_the_sets_together(self) -> None:
-        # 31 tickets: 2/15 of them is 4.13, so 5 rounded up, where rounding to the nearest or down gives 4; one set of
-        # 31 would leave 4 and 5 not decided.
-        verdict = self.verdicts(20, 10, 10, 11)
-        for difference, expected in ((5, "The sign appears."), (4, "The sign does not appear.")):
-            with self.subTest(difference=difference):
-                self.assertEqual(verdict(difference), expected)
+        # 30 tickets: 2/15 of them is 4, where one set of 30 is not decided at 3 and 4. 31 tickets: 2/15 of them is
+        # 62/15, about 4.13, so 5 rounded up, where rounding to the nearest or down gives 4; one set of 31 would leave
+        # 4 and 5 not decided.
+        for sizes, appears in (((10, 10, 10), 4), ((10, 10, 11), 5)):
+            verdict = self.verdicts(20, *sizes)
+            for difference, expected in ((appears, "The sign appears."), (appears - 1, "The sign does not appear.")):
+                with self.subTest(sizes=sizes, difference=difference):
+                    self.assertEqual(verdict(difference), expected)
 
     def test_a_set_with_no_ticket_gives_no_verdict(self) -> None:
         self.world.draw(count=0)
@@ -936,6 +938,7 @@ class TestReport(unittest.TestCase):
                      "Between the two it is not decided, and a second set is needed, the rest of the pool: every "
                      "remaining pool ticket whose check passes, with no limit per bucket.",
                      f"Over two sets or more, taken together, {SETS_TOGETHER}",
+                     "One set of 30 tickets gives 5 and 3; 60 tickets over two sets give 8.",
                      "Sets that hold no ticket give no verdict."):
             with self.subTest(fact=fact):
                 self.assertIn(fact, text)

@@ -14,7 +14,6 @@ Tests wait on a file or on a process's exit, never on a sleep of fixed length.
 """
 from __future__ import annotations
 
-import fcntl
 import os
 import re
 import shutil
@@ -433,9 +432,9 @@ class CheckLockTest(unittest.TestCase):
         del self.env["CHECK_LOCK_FILE"]
         self.lock = self.repo / ".git" / "check.sh.lock"
         self.hold()
-        for where in (self.repo, linked):
-            with self.subTest(cwd=where):
-                rc, out, err = self.run_check(cwd=where, CHECK_LOCK_WAIT="0")
+        for where, env in ((self.repo, {}), (linked, {}), (linked, {"CHECK_LOCK_FILE": ""})):
+            with self.subTest(cwd=where, **env):
+                rc, out, err = self.run_check(cwd=where, CHECK_LOCK_WAIT="0", **env)
                 self.assertEqual(rc, 75)
                 self.assertEqual(out, "check.sh: waiting up to 0 s for another run of scripts/check.sh.\n")
 

@@ -138,7 +138,7 @@ class ShellBlockTests(unittest.TestCase):
                 f"cat <<'EOF'\n{json.dumps(catalog)}\nEOF\n",
             )
             env = dict(os.environ, PATH=f"{bindir}:{os.environ.get('PATH', '')}")
-            env.pop("FAMILY", None)
+            env.pop("WANT", None)
 
             for family, expected in (
                 ("sol", "gpt-6.2-sol"),
@@ -147,26 +147,32 @@ class ShellBlockTests(unittest.TestCase):
                 ("luna", "gpt-6-luna"),
             ):
                 with self.subTest(family=family):
-                    res = run_block(SH_BLOCKS[CODEX_RESOLVER], dict(env, FAMILY=family))
+                    res = run_block(SH_BLOCKS[CODEX_RESOLVER], dict(env, WANT=family))
                     self.assertEqual(res.returncode, 0, msg=res.stderr)
                     self.assertEqual(res.stdout, f"MODEL={expected}\n")
 
-            with self.subTest(family="unknown"):
-                res = run_block(SH_BLOCKS[CODEX_RESOLVER], dict(env, FAMILY="unknown"))
-                self.assertNotEqual(res.returncode, 0)
-                self.assertEqual(res.stdout, "")
+            with self.subTest(want="an exact slug that is not the family's newest"):
+                res = run_block(SH_BLOCKS[CODEX_RESOLVER], dict(env, WANT="gpt-6.1-sol"))
+                self.assertEqual(res.returncode, 0, msg=res.stderr)
+                self.assertEqual(res.stdout, "MODEL=gpt-6.1-sol\n")
+
+            for want in ("unknown", "gpt-6.3-sol", "gpt-7-sol"):
+                with self.subTest(want=want):
+                    res = run_block(SH_BLOCKS[CODEX_RESOLVER], dict(env, WANT=want))
+                    self.assertNotEqual(res.returncode, 0)
+                    self.assertEqual(res.stdout, "")
 
             with self.subTest(family="unset"):
                 res = run_block(SH_BLOCKS[CODEX_RESOLVER], env)
                 self.assertNotEqual(res.returncode, 0)
                 self.assertEqual(res.stdout, "")
-                self.assertIn("FAMILY", res.stderr)
+                self.assertIn("WANT", res.stderr)
 
     def test_codex_resolver_fails_when_codex_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             bindir = Path(tmp)
             make_executable(bindir, "codex", "#!/bin/sh\nexit 7\n")
-            env = dict(os.environ, PATH=f"{bindir}:{os.environ.get('PATH', '')}", FAMILY="sol")
+            env = dict(os.environ, PATH=f"{bindir}:{os.environ.get('PATH', '')}", WANT="sol")
             res = run_block(SH_BLOCKS[CODEX_RESOLVER], env)
             self.assertNotEqual(res.returncode, 0)
             self.assertIn("codex debug models failed: 7", res.stderr)

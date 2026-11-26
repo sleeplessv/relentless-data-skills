@@ -35,10 +35,10 @@ A model's price or reach changes above a threshold. Count the whole prompt, cach
 | --- | --- | --- |
 | Claude Haiku 5.5 | 100,000 prompt tokens | Input 0.50, output 2.50, cache read 0.05. Up to 272,000 tokens `GPT-6 Luna` is then the cheaper `light` pick. |
 | GPT-6.2 Astra, GPT-6.2 Sol, GPT-6.1 Terra, GPT-6 Luna | 272,000 input tokens | Input and cache read double and output is 1.5 times, for the whole request. |
-| GPT-6.2 Astra and GPT-6 Luna, in Codex | 272,000 tokens | Codex's window for these two. Larger input does not fit. |
-| GPT-6.2 Sol and GPT-6.1 Terra, in Codex | 500,000 tokens | Codex's window for these two. Larger input does not fit. |
+| GPT-6.2 Astra and GPT-6 Luna, in Codex | 272,000 tokens | Codex's default window for these two. Larger input fits only in a session whose `model_context_window` is set higher, to 872,000 at most. |
+| GPT-6.2 Sol and GPT-6.1 Terra, in Codex | 500,000 tokens | Codex's default window for these two, with the same setting and the same maximum. |
 
-Every other window is about 1M tokens: 1M on Anthropic's API, 922,000 input tokens on OpenAI's, and 1,048,576 shared between input and output on Google's.
+Every other window is about 1M tokens: 1M on Anthropic's API, 922,000 input tokens on OpenAI's, and 1,048,576 on Google's. The Gemini 4 models share that figure between input and output. `Gemini 3.8 Flash` takes it as input alone, with 65,536 output tokens on top.
 
 ## Dated changes
 
@@ -81,5 +81,5 @@ Apply each from its date:
 - Google prices and dated changes: <https://aistudio.google.com/docs/pricing>
 - Google limits and input kinds: the model pages under <https://aistudio.google.com/docs/models/>
 - Google effort values: <https://aistudio.google.com/docs/thinking>
-- Codex windows and effort values: `codex debug models`, on the as-of date.
+- Codex windows and effort values: `codex debug models`, on the as-of date. The window setting: <https://learn.chatgpt.com/docs/config-file/config-reference>
 - Antigravity and Cortex Code IDs: `agy models` and the Cortex probe in [harnesses.md](harnesses.md), on one account on the as-of date.

@@ -48,19 +48,22 @@ printf '%s\n' "$LIST" | tr ',' '\n' | sed 's/^ *//'
 
 Exit code `0` prints one Cortex ID per line. Exit code `1` means Cortex printed no list: it is signed out, or its error text changed. Then route without a list, pass the Cortex ID, and read the result as the next section says.
 
-### Resolve the newest Codex slug for an OpenAI family
+### Resolve the Codex slug for an OpenAI model
 
-Codex moves point versions within a family. Set `FAMILY` to `astra`, `sol`, `terra` or `luna` on the same command line as the block; it stops when `FAMILY` is unset:
+Codex moves point versions within a family. Set `WANT` on the same command line as the block; it stops when `WANT` is unset:
+
+- A family (`astra`, `sol`, `terra` or `luna`) gives that family's newest slug. Use it for a model the catalog names.
+- An exact slug, as `codex debug models` prints it, gives that slug or fails. Use it when the user named a version the family would not give.
 
 ```sh
-: "${FAMILY:?set FAMILY to astra, sol, terra or luna}"
+: "${WANT:?set WANT to astra, sol, terra, luna or an exact slug}"
 CATALOG=$(codex debug models) || { echo "codex debug models failed: $?" >&2; exit 1; }
-MODEL=$(printf '%s' "$CATALOG" | jq -r --arg suffix "-$FAMILY" '[.models[] | select(.visibility == "list" and (.slug | endswith($suffix)))] | sort_by(.priority) | .[0].slug // empty')
-[ -n "$MODEL" ] || { echo "no visible -$FAMILY model in catalog" >&2; exit 1; }
+MODEL=$(printf '%s' "$CATALOG" | jq -r --arg want "$WANT" '[.models[] | select(.visibility == "list" and (.slug == $want or (.slug | endswith("-" + $want))))] | sort_by(.priority) | .[0].slug // empty')
+[ -n "$MODEL" ] || { echo "no visible $WANT model in catalog" >&2; exit 1; }
 printf 'MODEL=%s\n' "$MODEL"
 ```
 
-Exit code `0` prints `MODEL=<slug>`. A non-zero exit means `FAMILY` is unset, `codex` failed, `jq` is missing, or the account lists no model in that family. Then Codex does not carry the model: take the next harness in step 3.
+Exit code `0` prints `MODEL=<slug>`. A non-zero exit means `WANT` is unset, `codex` failed, `jq` is missing, or the account lists no such model. Then Codex does not carry the model: take the next harness in step 3.
 
 ## An agent of the session's own harness
 
@@ -72,8 +75,8 @@ Exit code `0` prints `MODEL=<slug>`. A non-zero exit means `FAMILY` is unset, `c
 | Cortex Code | `model` on `task` | The Cortex ID from the catalog, or `inherit` for the session's model | None. The agent runs at the session's effort. |
 | Cursor | `model` on the worker | The ID from Cursor's model list. Pass none when you do not have it. | Part of the model ID |
 
-- **Claude Code.** `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the environment overrides the `model` you pass. A fork runs on the session's model and effort.
-- **Codex.** Set `fork_turns: "none"` whenever you set `model` or `reasoning_effort`.
+- **Claude Code.** An agent call takes an alias only, and an alias of the session's own family runs on the session's version. When that is not the version the route names, launch through Herdr with the API ID; without Herdr, Claude Code does not carry the model. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` in the environment overrides the `model` you pass. A fork runs on the session's model and effort.
+- **Codex.** Go by the `spawn_agent` parameters the session shows. Where it takes `fork_turns`, set it to `"none"` whenever you set `model` or `reasoning_effort`. Where it takes no `model`, launch through Herdr; without Herdr, Codex does not carry the model. Where it takes no `reasoning_effort`, record the effort as not applied.
 - **Cortex Code.** An ID Cortex lacks does not fail the call. The agent returns as completed and its result begins `Error: <id> is not authorized or not available`. Read every result for that text, treat it as "does not carry", and take the next harness in step 3. The setting `subagentModelOverrides` and the variable `CORTEX_SUBAGENT_MODEL_OVERRIDES` override the `model` you pass. The aliases `opus`, `sonnet` and `haiku` are rejected like any unknown ID.
 - **Cursor.** A plan limit can replace the model you passed without an error. Ask the agent to state its model in its result.
 
@@ -88,16 +91,17 @@ printf 'DELEGATE=%s\n' "$DELEGATE"
 
 `find` exits `0` whether or not it matches, so the test is whether the line prints a path. `DELEGATE=` with nothing after it means the skill is absent and no other harness is reachable.
 
-`herdr-delegate` owns the launch: the brief, the labels, the tool grants and the wait. Follow it whole, and add only these flags to the program in its "Launch the helper" step, before the brief:
+`herdr-delegate` owns the launch: the brief, the labels, the tool grants and the wait. The session or skill that starts the agent follows it whole. A route adds only these flags to the program in its "Launch the helper" step, directly after the CLI's name and ahead of every other argument:
 
 | CLI | Model flag | Effort flag |
 | --- | --- | --- |
-| `claude` | `--model "$ALIAS"` | `--effort "$EFFORT"` |
+| `claude` | `--model "$NAME"` | `--effort "$EFFORT"` |
 | `codex` | `-m "$MODEL"` | `-c model_reasoning_effort="$EFFORT"` |
 | `agy` | `--model "$ID"` | None. The effort is the end of the ID. |
 | `cortex` | `-m "$ID"` | `--effort "$EFFORT"` |
 
-- `ALIAS` is `fable`, `opus`, `sonnet` or `haiku`.
+- **Placement.** Cortex stops reading flags at `--`, and Antigravity takes the brief as the value of `-i`, so a flag placed just before the brief is lost.
+- `NAME` is `fable`, `opus`, `sonnet` or `haiku`, or the catalog's API ID when the route names a version the alias would not give.
 - `MODEL` is the slug the Codex resolver printed.
 - `ID` is the harness's own ID for the model, from the catalog.
 - `EFFORT` is the route's effort. Leave the effort flag out when the route leaves effort unset.

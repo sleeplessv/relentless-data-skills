@@ -1005,22 +1005,27 @@ class TestDraw(unittest.TestCase):
             "HTML blocks.",
             "Any other line in the section is one the draw cannot read with certainty: inside an item, a quote, code, "
             "a fence, HTML, a heading, a break or a second paragraph; an item with nothing but white space after its "
-            "marker and any task box; an item whose text starts with < or >, three backticks or three tildes, the one "
-            "to six # of a heading, another marker, or more than four spaces, or is a break or a line of = or -; a "
+            "marker and any task box; an item with no task box whose text starts with < or >, three backticks or three "
+            "tildes, the one to six # of a heading, another marker, or more than four spaces, or is a break or a line "
+            "of = or -; a "
             "line indented into an item that wraps its text and starts with < or >, three backticks or three tildes, "
             "or the one to six # of a heading, or is a break or a line of = or -; a quote; an underline below a line "
             "of text; and, right after a line of text, a marker numbered other than 1 with no list open or indented "
             "at least to the text of the last open item.",
-            "Anywhere in the body but inside a fence or an HTML block, so is a line that is a \"## \" criteria "
-            "heading once its indent, the > of any quotes and any list markers are taken off, when it had a > or a "
-            "marker, or when it is indented and a line that starts, at most 3 spaces in, with a list marker came "
-            "before it, as it may stand inside a quote or an item; a line indented at most 3 spaces that holds one "
-            "HTML tag alone and starts none of the HTML blocks above, which may be text or an HTML block; and a "
-            "non-blank line indented less than the first line of the fence or HTML block it falls in.",
-            "Outside the criteria sections, from a line that starts, at most 3 spaces in, with a list marker, that "
-            "line included, to the next heading at the margin that starts with #, so is a line that starts with "
-            "three backticks, three tildes or < once its indent, any > and any list markers are taken off, unless it "
-            "starts at the margin with none of them, as it may open a block inside an item.",
+            "Anywhere in the body but inside a fence or an HTML block the draw holds open, which it opens only at a "
+            "line indented at most 3 spaces, with no > or marker, that starts a fence or one of CommonMark's HTML "
+            "blocks of kinds 1 to 6, and holds until a later line ends it or its first line does past the text that "
+            "opens it, so is a line that is a \"## \" criteria heading once its indent, the > of any quotes and any "
+            "list markers are taken off, when it had a > or a marker, or when it is indented and a line outside such "
+            "a block that starts, at most 3 spaces in, with a list marker came before it, as it may stand inside a "
+            "quote or an item; and a line indented at most 3 spaces that holds one HTML tag alone and starts none of "
+            "those HTML blocks, which may be text or an HTML block.",
+            "Inside such a block, so is a non-blank line indented less than the block's first line.",
+            "Outside the criteria sections, from a line outside such a block that starts, at most 3 spaces in, with a "
+            "list marker, that line included, to the next heading at the margin that starts with #, so is a line "
+            "outside such a block that starts with three backticks, three tildes or < once its indent, any > and any "
+            "list markers are taken off, unless it starts at the margin with none of them, as it may open a block "
+            "inside an item.",
             "Outside the criteria sections such a line refuses the body only when it or a line after it is a \"## \" "
             "criteria heading once its indent, any > and any list markers are taken off; otherwise the list is the "
             "items read before it.",
@@ -1156,7 +1161,7 @@ class TestDraw(unittest.TestCase):
         # the item's text; at the top level neither holds. Outside the criteria sections the reader does not follow
         # items, so after a line that starts with a list marker it refuses each line that may open or close such a
         # block in an item, at that line. The last rows are read: a margin heading ends every item, a fence at the
-        # margin with no marker is at the top level, and with no marker before it a block opened indented is at the
+        # margin with no marker is at the top level, and with no marker before it a fence opened indented is at the
         # top level, which a blank line does not end.
         first = "## Acceptance\n- First\n## Notes\n"
         after = "\n\n  ## Done when\n\n  - Save\n  - Report\n"
@@ -1178,11 +1183,11 @@ class TestDraw(unittest.TestCase):
         })
 
     def test_a_line_that_may_stand_inside_another_section_s_item_is_never_taken_as_a_criteria_heading(self) -> None:
-        # In the first rows CommonMark holds the criteria heading inside a block of a Notes or Steps item, or reads
-        # it after the item, and the reader refuses each at the block's first line or at the tag line. In the rows
-        # after them the heading stands behind a > or a marker, or is indented after a marker, and the reader
-        # refuses each at the heading. The last rows are read: with no marker before it, an indented heading is at
-        # the top level, and indented code at the top level hides what it holds.
+        # In the first rows a block opens that may hold what follows it, and the reader refuses each at the line
+        # that opens the block: its first line, a tag line, or the marker line of code five spaces past the marker.
+        # In the four rows after them the heading stands behind a > or a marker, or is indented after a marker, and
+        # the reader refuses each at the heading. The last rows are read: with no marker before it, an indented
+        # heading is at the top level, and indented code at the top level hides what it holds.
         self.read_or_refuse({
             "## Notes\n- Note.\n    <!--\n  ## Acceptance\n  - fake\n## Done when\n- real": "    <!--",
             "## Acceptance\n- One\n## Notes\n- Note\n    <div>\n  ## Done when\n\n- Outside": "    <div>",
@@ -1216,8 +1221,9 @@ class TestDraw(unittest.TestCase):
         })
 
     def test_a_body_with_no_line_that_may_start_an_item_is_never_refused(self) -> None:
-        # CommonMark starts each item at a list marker, behind nothing but spaces and the > of quotes: without such
-        # a line there is no list, so a line the reader cannot be sure of costs none. With a marker, it is refused.
+        # In CommonMark a line that starts an item, even one that starts several such as - - Two, has a list marker
+        # first once its spaces and the > of any quotes are taken off: without such a line there is no list, so a
+        # line the reader cannot be sure of costs none. With a marker, it is refused.
         self.read_or_refuse({
             "## Acceptance\n\n<widget>\nNothing yet.\n</widget>": [],
             "## Acceptance\n\n  ```sh\ntrue\n  ```": [],

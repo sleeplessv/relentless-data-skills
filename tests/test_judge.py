@@ -315,8 +315,9 @@ class TestJudge(unittest.TestCase):
                 self.assertFalse((self.world.state / "judged").exists())
 
     def test_a_list_the_draw_stores_passes_the_judge_s_check_and_keeps_its_unicode(self) -> None:
-        # One entry through both scripts: the draw's command line stores it and the judge's reads it. An item left
-        # with only white space that is not a space, such as a no-break space, is one the draw refuses.
+        # The draw's command line stores a ticket's list, the test copies that list into the judge's entry A-7, and
+        # the judge's command line passes it and numbers its items with their text as stored. An item left with only
+        # white space that is not a space, such as a no-break space, is one the draw refuses.
         sys.path.insert(0, str(Path(__file__).resolve().parent))
         self.addCleanup(sys.path.remove, str(Path(__file__).resolve().parent))
         drawing = importlib.import_module("test_draw")

@@ -178,31 +178,35 @@ headings of level three and deeper, breaks such as * * *, and code and HTML
 blocks. Any other line in the section is one the draw cannot read with
 certainty: inside an item, a quote, code, a fence, HTML, a heading, a break or
 a second paragraph; an item with nothing but white space after its marker and
-any task box; an item whose text starts with < or >, three backticks or three
-tildes, the one to six # of a heading, another marker, or more than four
-spaces, or is a break or a line of = or -; a line indented into an item that
-wraps its text and starts with < or >, three backticks or three tildes, or the
-one to six # of a heading, or is a break or a line of = or -; a quote; an
-underline below a line of text; and, right after a line of text, a marker
-numbered other than 1 with no list open or indented at least to the text of
-the last open item. Anywhere in the body but inside a fence or an HTML block,
-so is a line that is a "## " criteria heading once its indent, the > of any
-quotes and any list markers are taken off, when it had a > or a marker, or
-when it is indented and a line that starts, at most 3 spaces in, with a list
-marker came before it, as it may stand inside a quote or an item; a line
-indented at most 3 spaces that holds one HTML tag alone and starts none of the
-HTML blocks above, which may be text or an HTML block; and a non-blank line
-indented less than the first line of the fence or HTML block it falls in.
-Outside the criteria sections, from a line that starts, at most 3 spaces in,
-with a list marker, that line included, to the next heading at the margin that
-starts with #, so is a line that starts with three backticks, three tildes or
-< once its indent, any > and any list markers are taken off, unless it starts
-at the margin with none of them, as it may open a block inside an item.
-Outside the criteria sections such a line refuses the body only when it or a
-line after it is a "## " criteria heading once its indent, any > and any list
-markers are taken off; otherwise the list is the items read before it. The
-items of the list are the ticket's requirements, in the order written, and the
-draw stores them in its entry of the set.
+any task box; an item with no task box whose text starts with < or >, three
+backticks or three tildes, the one to six # of a heading, another marker, or
+more than four spaces, or is a break or a line of = or -; a line indented into
+an item that wraps its text and starts with < or >, three backticks or three
+tildes, or the one to six # of a heading, or is a break or a line of = or -; a
+quote; an underline below a line of text; and, right after a line of text, a
+marker numbered other than 1 with no list open or indented at least to the
+text of the last open item. Anywhere in the body but inside a fence or an HTML
+block the draw holds open, which it opens only at a line indented at most 3
+spaces, with no > or marker, that starts a fence or one of CommonMark's HTML
+blocks of kinds 1 to 6, and holds until a later line ends it or its first line
+does past the text that opens it, so is a line that is a "## " criteria
+heading once its indent, the > of any quotes and any list markers are taken
+off, when it had a > or a marker, or when it is indented and a line outside
+such a block that starts, at most 3 spaces in, with a list marker came before
+it, as it may stand inside a quote or an item; and a line indented at most 3
+spaces that holds one HTML tag alone and starts none of those HTML blocks,
+which may be text or an HTML block. Inside such a block, so is a non-blank
+line indented less than the block's first line. Outside the criteria sections,
+from a line outside such a block that starts, at most 3 spaces in, with a list
+marker, that line included, to the next heading at the margin that starts with
+#, so is a line outside such a block that starts with three backticks, three
+tildes or < once its indent, any > and any list markers are taken off, unless
+it starts at the margin with none of them, as it may open a block inside an
+item. Outside the criteria sections such a line refuses the body only when it
+or a line after it is a "## " criteria heading once its indent, any > and any
+list markers are taken off; otherwise the list is the items read before it.
+The items of the list are the ticket's requirements, in the order written, and
+the draw stores them in its entry of the set.
 
 A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.

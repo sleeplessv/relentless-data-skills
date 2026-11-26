@@ -68,8 +68,17 @@ folder.mkdir(parents=True, exist_ok=True)
 base = {"sessionId": session, "cwd": str(cwd), "version": "2.1.332", "userType": "external"}
 lines = [{**base, "type": "user", "uuid": "u1", "timestamp": "2026-01-05T10:00:00.000Z",
           "message": {"role": "user", "content": prompt}}]
+call = os.environ.get("STANDIN_SKILL_CALL")  # a Skill call by this name loads STANDIN_SKILL's folder
+if os.environ.get("STANDIN_SKILL") and call:
+    lines += [{**base, "type": "assistant", "uuid": "c1", "timestamp": "2026-01-05T10:00:20.000Z", "message": {
+                   "role": "assistant", "content": [
+                       {"type": "tool_use", "id": "toolu_skill", "name": "Skill", "input": {"skill": call}}]}},
+              {**base, "type": "user", "uuid": "c2", "timestamp": "2026-01-05T10:00:25.000Z", "message": {
+                   "role": "user", "content": [
+                       {"type": "tool_result", "tool_use_id": "toolu_skill", "content": "Launching skill"}]}}]
 if os.environ.get("STANDIN_SKILL"):
     lines.append({**base, "type": "user", "uuid": "u2", "timestamp": "2026-01-05T10:00:30.000Z", "isMeta": True,
+                  **({"sourceToolUseID": "toolu_skill"} if call else {}),
                   "message": {"role": "user", "content": [{"type": "text", "text":
                       "Base directory for this skill: /skills/" + os.environ["STANDIN_SKILL"] + "\n\n# Body"}]}})
 if os.environ.get("STANDIN_LOG") != "no-usage":
@@ -477,31 +486,8 @@ class ReplayTest(unittest.TestCase):
                     self.assertTrue(result.stdout.endswith(": session exit 0, marked not direct.\n"), result.stdout)
 
     def test_a_session_that_loaded_a_generation_one_skill_through_a_prefixed_call_is_marked_not_direct(self) -> None:
-        # The stand-in loads its skill by a folder line alone. This wrapper puts a plugin's Skill call and its result
-        # before that line and names the call in it, as Claude Code writes a skill that a call loaded.
-        inner = self.world.bin / "claude-folder-only"
-        (self.world.bin / "claude").rename(inner)
-        (self.world.bin / "claude").write_text(f"""#!/usr/bin/env python3
-import json, os, subprocess, sys
-from pathlib import Path
-args = sys.argv[1:]
-status = subprocess.run([{str(inner)!r}, *args]).returncode
-session = args[args.index("--session-id") + 1]
-log = Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / str(Path.cwd()).replace("/", "-") / (session + ".jsonl")
-lines = [json.loads(text) for text in log.read_text().splitlines()]
-base = {{key: lines[1][key] for key in ("sessionId", "cwd", "version", "userType", "timestamp")}}
-call = {{"type": "tool_use", "id": "toolu_skill", "name": "Skill",
-        "input": {{"skill": "example-plugin:implement-ticket"}}}}
-lines[1:1] = [{{**base, "type": "assistant", "uuid": "c1", "message": {{"role": "assistant", "content": [call]}}}},
-              {{**base, "type": "user", "uuid": "c2", "message": {{"role": "user", "content": [
-                  {{"type": "tool_result", "tool_use_id": "toolu_skill", "content": "Launching skill"}}]}}}}]
-lines[3]["sourceToolUseID"] = "toolu_skill"
-log.write_text("".join(json.dumps(line) + "\\n" for line in lines))
-sys.exit(status)
-""")
-        (self.world.bin / "claude").chmod(0o755)
-
-        result = self.replay("A", "7", STANDIN_SKILL="implement-ticket-folder")
+        result = self.replay("A", "7", STANDIN_SKILL="implement-ticket-folder",
+                             STANDIN_SKILL_CALL="example-plugin:implement-ticket")
 
         self.assertEqual(result.returncode, 0, result.stderr)
         [version] = self.world.versions()

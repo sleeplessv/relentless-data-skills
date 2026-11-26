@@ -119,9 +119,9 @@ Exit 0: the version is recorded, whatever the session's exit status; a scan
 that failed is reported. Exit 1: an error. Before a session ran, or for a
 start taken as no session, nothing is recorded and what the replay made is
 removed. After a session ran, the clone and the version's repo are kept. A clone
-index that the replay cannot inspect, copy or list with git (it reads a split
-index with its shared index) ends the replay with one line on standard error
-and nothing recorded. A row that cannot be written, after the version was
+index that is not a regular file, or that the replay cannot copy or list with
+git (it reads a split index with its shared index), ends the replay with one
+line on standard error and nothing recorded. A row that cannot be written, after the version was
 recorded, ends it with one line that says the version is recorded without its
 row and names the command that writes the row from the session's log,
 python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl, and
@@ -235,40 +235,36 @@ def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> 
 
 
 def tracked(store: Path, clone: Path) -> list[bytes]:
-    """The paths the clone's index lists, as the bytes git holds them, read from a copy of the index file as data,
-    with the shared index of a split index copied beside it. Empty when the index is missing, empty, a link or not
-    a file. An index that cannot be inspected, copied or listed raises ReplayError."""
+    """The paths the clone's index lists, as the bytes git holds them. Empty when the clone has no index file. The
+    index must be a regular file, which is copied as data into a private git folder with the shared indexes beside it
+    that a split index reads, and listed there; the version's repo is not touched. An index the replay will not read
+    with certainty, or that git cannot list, raises ReplayError."""
     index = clone / ".git" / "index"
 
     def unreadable(why: str) -> ReplayError:
         return ReplayError(f"the clone's index {str(index)!r} cannot be read ({why}).")
     try:
         info = os.lstat(index)
-    except (FileNotFoundError, NotADirectoryError):
+    except FileNotFoundError:
         return []
-    except OSError as error:
+    except OSError as error:  # an unsearchable .git, or a .git that is a file naming another folder
         raise unreadable(error.strerror) from None
-    if not stat.S_ISREG(info.st_mode) or info.st_size == 0:
-        return []
-    made: list[Path] = []  # the copies this call makes; each name is this call's own
-    try:
+    if not stat.S_ISREG(info.st_mode):  # a link or a folder: native git follows some, the replay reads none
+        raise unreadable("not a regular file")
+    with tempfile.TemporaryDirectory(dir=store.parent, ignore_cleanup_errors=True) as private:
+        meta = Path(private)
+        git(meta, "init", "-q", "--bare", ".")
         try:
-            handle, name = tempfile.mkstemp(dir=store, prefix="replay-clone-index-")
-            os.close(handle)
-            made.append(Path(name))
-            shutil.copyfile(index, name)
-            for shared in sorted(index.parent.glob("sharedindex.*")):  # a split index names one of these
+            shutil.copyfile(index, meta / "index")
+            for shared in sorted(index.parent.glob("sharedindex.*")):  # one of these is what a split index reads
                 if shared.is_file() and not shared.is_symlink():
-                    made.append(store / shared.name)
-                    shutil.copyfile(shared, store / shared.name)
+                    with contextlib.suppress(OSError):  # one the index does not name may be unreadable; git
+                        shutil.copyfile(shared, meta / shared.name)  # fails below when the named one is missing
+            listed = subprocess.run(["git", "-C", str(clone), "ls-files", "-z"], stdin=subprocess.DEVNULL,
+                                    capture_output=True, env={**trusted(store, clone), "GIT_DIR": str(meta),
+                                                              "GIT_INDEX_FILE": str(meta / "index")})
         except OSError as error:
             raise unreadable(error.strerror) from None
-        listed = subprocess.run(["git", "-C", str(clone), "ls-files", "-z"], stdin=subprocess.DEVNULL,
-                                capture_output=True, env=trusted(store, clone, Path(name).name))
-    finally:
-        for path in made:
-            with contextlib.suppress(OSError):  # a failed cleanup must not hide the error that is on its way
-                path.unlink(missing_ok=True)
     if listed.returncode:
         raise unreadable(f"git ls-files exited {listed.returncode}")
     paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path]

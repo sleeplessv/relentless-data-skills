@@ -8,6 +8,7 @@ the network, the real machine directory or a real session.
 """
 from __future__ import annotations
 
+import errno
 import importlib
 import json
 import os
@@ -60,12 +61,12 @@ exec git clone -q "$GH_REMOTES/$3.git" "$4"
 # Records each argument on a line of its own, the prompt it reads, its working folder, what that folder holds
 # and a copy of it, links and modes kept; tries to change the folder, and removes $CLAUDE_BREAK when it is set.
 # Given --session-id, it writes the session's log where Claude Code writes it, under $CLAUDE_CONFIG_DIR/projects
-# (default ~/.claude, a relative one read from its working folder) in a folder named for its working folder: the
-# bytes of the file $CLAUDE_LOG names, then a line with the session's id; with $CLAUDE_LOG_FOLDER set, a folder
-# beside the log as well. It writes no log when $CLAUDE_LOG is empty, when given --no-session-persistence, or when
-# CLAUDE_CODE_SKIP_PROMPT_HISTORY is set, as Claude Code writes none then. It records what it was given as
-# CLAUDE_CONFIG_DIR. With $CLAUDE_SLEEP set it then sleeps that many seconds; it prints the saved answer as Claude
-# Code's JSON result.
+# (default ~/.claude; a relative or empty one read from its working folder) in a folder named for its working folder:
+# the bytes of the file $CLAUDE_LOG names, then a line with the session's id; with $CLAUDE_LOG_FOLDER set, a folder
+# beside the log as well. It writes no log when $CLAUDE_LOG is empty or when given --no-session-persistence. It
+# records what it was given as CLAUDE_CONFIG_DIR and CLAUDE_CODE_SKIP_PROMPT_HISTORY, <unset> for a key it was not
+# given. With $CLAUDE_SLEEP set it then sleeps that many seconds; it prints the saved answer as Claude Code's JSON
+# result.
 CLAUDE = r"""#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDE_ARGS"
 cat > "$CLAUDE_PROMPT"
@@ -77,14 +78,16 @@ if [ -n "$CLAUDE_BREAK" ]; then rm -rf "$CLAUDE_BREAK"; fi
 echo "the reviewer wrote this" > app.txt
 rm -f counter
 printf '%s\n' "${CLAUDE_CONFIG_DIR-<unset>}" > "$CLAUDE_CONFIG"
+printf '%s\n' "${CLAUDE_CODE_SKIP_PROMPT_HISTORY-<unset>}" > "$CLAUDE_SWITCH"
 session= previous=
 for arg in "$@"; do
   [ "$previous" = --session-id ] && session=$arg
   [ "$arg" = --no-session-persistence ] && session= && break
   previous=$arg
 done
-if [ -n "$session" ] && [ -n "$CLAUDE_LOG" ] && [ -z "$CLAUDE_CODE_SKIP_PROMPT_HISTORY" ]; then
-  project="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
+if [ -n "$session" ] && [ -n "$CLAUDE_LOG" ]; then
+  config=${CLAUDE_CONFIG_DIR-$HOME/.claude}
+  project="${config:+$config/}projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
   mkdir -p "$project"
   { cat "$CLAUDE_LOG"; printf '{"sessionId":"%s"}\n' "$session"; } > "$project/$session.jsonl"
   if [ -n "$CLAUDE_LOG_FOLDER" ]; then
@@ -98,6 +101,14 @@ exit "${CLAUDE_EXIT:-0}"
 """
 # A line of the stand-in's session log that appears nowhere else.
 MARKER = '{"type":"user","message":"log marker 5c1e"}\n'
+
+
+def ExitStack_of(*managers):
+    """One context manager that enters each of `managers` in turn."""
+    stack = ExitStack()
+    for manager in managers:
+        stack.enter_context(manager)
+    return stack
 
 
 def module():
@@ -187,8 +198,10 @@ class World:
         self.breaking = ""
         self.log = root / "log"  # the bytes the stand-in's session log starts with; None for no log
         self.log.write_text(MARKER)
-        self.log_folder = self.sleep = self.no_log = ""
+        self.log_folder = self.sleep = ""
         self.config = str(root / "claude")  # CLAUDE_CONFIG_DIR as the judge is given it; None for unset
+        self.no_log: str | None = None  # CLAUDE_CODE_SKIP_PROMPT_HISTORY as the judge is given it; None for unset
+        self.stderr = ""  # what the last judge_here printed on standard error
 
     def answer(self, text: str, exit: int = 0, raw: str | None = None) -> None:
         """The stand-in's next answer: `text` as the result of Claude Code's JSON, or `raw` printed as it is."""
@@ -197,20 +210,20 @@ class World:
         self.exit = exit
 
     def env(self) -> dict[str, str]:
-        """What the judge runs with, in place of the caller's: the stand-ins first on PATH, and a scratch home,
-        machine directory and Claude Code folder. Nothing of the caller's Claude Code folder or switches is kept."""
+        """What the judge runs with: the caller's environment, with the stand-ins first on PATH, a scratch home and
+        machine directory, CLAUDE_CONFIG_DIR and CLAUDE_CODE_SKIP_PROMPT_HISTORY as this world sets them, and the
+        stand-ins' controls."""
         environ = {key: value for key, value in os.environ.items() if key not in (
-            "PYTHONDONTWRITEBYTECODE", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SKIP_PROMPT_HISTORY", "CLAUDE_LOG",
-            "CLAUDE_LOG_FOLDER", "CLAUDE_SLEEP", "CLAUDE_STDERR")}
+            "PYTHONDONTWRITEBYTECODE", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SKIP_PROMPT_HISTORY", "CLAUDE_STDERR")}
         return {**environ, **({} if self.config is None else {"CLAUDE_CONFIG_DIR": self.config}),
-                "CLAUDE_CODE_SKIP_PROMPT_HISTORY": self.no_log,
+                **({} if self.no_log is None else {"CLAUDE_CODE_SKIP_PROMPT_HISTORY": self.no_log}),
                 "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
                 "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GH_LOG": str(self.records / "gh"),
                 "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
                 "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,
                 "CLAUDE_LOG": str(self.log or ""), "CLAUDE_LOG_FOLDER": self.log_folder, "CLAUDE_SLEEP": self.sleep,
                 **{f"CLAUDE_{name.upper()}": str(self.records / name)
-                   for name in ("args", "prompt", "cwd", "git", "files", "copy", "config")}}
+                   for name in ("args", "prompt", "cwd", "git", "files", "copy", "config", "switch")}}
 
     def judge(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run([sys.executable, str(SCRIPTS / "judge.py"), *args], cwd=self.root / "cwd",
@@ -218,14 +231,16 @@ class World:
 
     def judge_here(self, args: list[str], *patches) -> int:
         """Run the judge in this process, from the same folder and with the same environment as `judge`, with
-        `patches` applied to its module: its exit code, or what it raised."""
+        `patches` applied to its module: its exit code, or what it raised. Its standard error is kept in `stderr`."""
         judge = module()
         with ExitStack() as stack:
             stack.enter_context(mock.patch.dict(os.environ, self.env(), clear=True))
             for patch in patches:
                 stack.enter_context(patch(judge))
             stack.enter_context(redirect_stdout(StringIO()))
-            stack.enter_context(redirect_stderr(StringIO()))
+            self.stderr = ""
+            errors = stack.enter_context(redirect_stderr(StringIO()))
+            stack.callback(lambda: setattr(self, "stderr", errors.getvalue()))
             here = os.getcwd()
             os.chdir(self.root / "cwd")
             stack.callback(os.chdir, here)
@@ -376,10 +391,22 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
         self.assertEqual(list(projects.iterdir()), [])  # the stand-in made a folder here for the session
 
+    def test_an_empty_claude_code_folder_is_an_error_before_any_checkout(self) -> None:
+        self.world.config = ""
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, "judge: CLAUDE_CONFIG_DIR is set and empty: unset it, or name the Claude Code "
+                                        "folder.\n")
+        self.assertFalse((self.world.records / "config").exists())  # no session started
+        self.assertFalse((self.world.state / "judged").exists())
+        self.assertFalse((self.world.state / "judge-work").exists())
+
     def test_the_log_is_found_in_the_claude_code_folder_the_caller_named(self) -> None:
         cwd = self.world.root / "cwd"
+        # (CLAUDE_CONFIG_DIR as given, where the log is written, what the session is handed)
         for config, folder, seen in ((None, self.world.root / "home" / ".claude", "<unset>"),
                                      ("claude-config", cwd / "claude-config", str(cwd / "claude-config")),
+                                     ("missing/../ordinary", cwd / "ordinary", str(cwd / "ordinary")),
                                      (str(self.world.root / "claude"), self.world.root / "claude",
                                       str(self.world.root / "claude"))):
             with self.subTest(config=config):
@@ -395,6 +422,7 @@ class TestJudge(unittest.TestCase):
         self.world.no_log = "1"
         result = self.world.judge("A-7", "generation-one")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.world.record("switch"), "<unset>\n")
         [verdict] = self.world.verdicts()
         self.assertEqual((self.world.state / verdict["review"]["log"]).read_bytes(), self.world.written())
 
@@ -431,12 +459,13 @@ class TestJudge(unittest.TestCase):
         help_text = self.world.judge("--help").stdout
         kept = "session.jsonl, the review session's log"
         self.assertEqual(" ".join(help_text.split()).count(kept), 1)
-        # The entry of the attempt's folder, up to the next entry: the log is described there, with where it comes
-        # from and its mode.
-        entry = re.search(r"^  judged/<label>-<ticket>-<version>/<attempt>/\n(.*?)^  \S", help_text, re.M | re.S)
-        self.assertIsNotNone(entry)
-        entry = " ".join(entry.group(1).split())
-        for fact in (kept, "moves its log and folder here from $CLAUDE_CONFIG_DIR/projects",
+        # The files part, one entry per heading: only the attempt's folder names the log, with where it comes from,
+        # the source path whole, and its mode.
+        files = help_text.split(" and writes:\n\n", 1)[1].split("\n\nExit 0:", 1)[0]
+        entries = [" ".join(entry.split()) for entry in re.split(r"\n(?=  \S)", "\n" + files) if entry.strip()]
+        [entry] = [entry for entry in entries if "session.jsonl" in entry]
+        self.assertTrue(entry.startswith("judged/<label>-<ticket>-<version>/<attempt>/ "), entry)
+        for fact in (kept, "moves its log and folder here from $CLAUDE_CONFIG_DIR/projects (default ~/.claude;",
                      "session.jsonl and each file in session/ are mode 0600."):
             self.assertIn(fact, entry)
         self.assertNotIn("no session log is kept", (SCRIPTS / "judge.py").read_text())
@@ -749,7 +778,14 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, "judge: the version's commit or its tree changed during the review.\n")
         self.assertEqual(self.world.verdicts(), verdicts)
-        self.assertEqual({path: text for path, text in self.world.files().items() if path in files}, files)
+        [folder] = self.unnamed()  # the second attempt, kept with the log of its review
+        self.assertEqual(self.outside(folder), files)
+        self.assertEqual((folder / "session.jsonl").read_bytes(), self.world.written())
+
+    def outside(self, *folders: Path) -> dict[str, str]:
+        """Every file the judge saved, by path, but those in `folders`."""
+        return {path: text for path, text in self.world.files().items()
+                if not any((self.world.state / path).is_relative_to(folder) for folder in folders)}
 
     def unnamed(self) -> list[Path]:
         """The attempts' folders that no line names."""
@@ -762,7 +798,8 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(self.world.judge(*version).returncode, 0)
         verdicts, files = self.world.verdicts(), self.world.files()
         self.world.log_folder = "1"
-        running, removing, config = subprocess.run, shutil.rmtree, Path(self.world.config)
+        running, removing, copying = subprocess.run, shutil.rmtree, shutil.copyfileobj
+        config = Path(self.world.config)
 
         def stopped(args, *rest, **kwargs):  # the session is interrupted after it has written its log
             if args[0] != "claude":
@@ -784,40 +821,67 @@ class TestJudge(unittest.TestCase):
             if Path(path).is_relative_to(config):
                 raise KeyboardInterrupt
             return removing(path, *args, **kwargs)
-        failed = OSError("no space left")
-        answered = "R1: met\nR2: met\nR3: met\n"
-        # Each way the judge can end once the session has started: (patch, what it raises, the answer kept).
+
+        def full(suffix):  # the disk fills after 8 bytes of the copy of a file whose name ends in `suffix`
+            def copy(found, kept, *args):
+                if not found.name.endswith(suffix):
+                    return copying(found, kept, *args)
+                kept.write(found.read(8))
+                raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+            return lambda judge: mock.patch.object(judge.shutil, "copyfileobj", copy)
+        run = ["check.txt", "prompt.txt"]
+        answered = [*run, "review.txt"]
+        logged = ["session.jsonl", "session/tool-results/r1.txt"]
+        # How the judge ends once the session has started: (patch, its exit code or what it raises, the files left in
+        # the attempt's folder or None for no folder, whether the log is still where Claude Code wrote it).
         cases = {
             "the session interrupted": (lambda judge: mock.patch.object(judge.subprocess, "run", stopped),
-                                        KeyboardInterrupt, None),
-            "an interrupt as the session ends": (ended, KeyboardInterrupt, None),
-            "a failed copy of the log": (lambda judge: mock.patch.object(judge, "private_copy", side_effect=failed),
-                                         OSError, answered),
+                                        KeyboardInterrupt, [*run, *logged], False),
+            "an interrupt as the session ends": (ended, KeyboardInterrupt, [*run, *logged], False),
+            "an interrupt as the session ends and before the log is copied": (
+                lambda judge: ExitStack_of(ended(judge), mock.patch.object(
+                    judge.shutil, "copyfileobj", side_effect=KeyboardInterrupt)), KeyboardInterrupt, None, True),
+            "a full disk as the log is copied": (full(".jsonl"), 1, answered, True),
+            "a full disk as the log's folder is copied": (full("r1.txt"), 1, [*answered, "session.jsonl"], True),
             "an interrupt as the source is removed": (
-                lambda judge: mock.patch.object(judge.shutil, "rmtree", unremoved), KeyboardInterrupt, answered),
-            "a failed publish": (lambda judge: mock.patch.object(judge, "publish", side_effect=failed), OSError,
-                                 answered),
+                lambda judge: mock.patch.object(judge.shutil, "rmtree", unremoved), KeyboardInterrupt,
+                [*answered, *logged], True),
+            "a failed publish": (lambda judge: mock.patch.object(judge, "publish", side_effect=OSError("no space")),
+                                 OSError, [*answered, *logged], False),
         }
-        for case, (patch, raised, answer) in cases.items():
+        for case, (patch, ending, left, source_left) in cases.items():
+            for folder in self.unnamed():  # what the case before left
+                shutil.rmtree(folder)
+            shutil.rmtree(config / "projects", ignore_errors=True)
             with self.subTest(case=case):
                 self.world.sleep = "60" if case == "the session interrupted" else ""
-                with self.assertRaises(raised):
-                    self.world.judge_here(version, patch)
+                if isinstance(ending, int):
+                    self.assertEqual(self.world.judge_here(version, patch), ending)
+                else:
+                    with self.assertRaises(ending):
+                        self.world.judge_here(version, patch)
+                [source] = [*config.glob("projects/*/*.jsonl")] or [None]
+                if ending == 1:
+                    self.assertEqual(self.world.stderr,
+                                     f"judge: the review session's log could not be kept; it is still at {source}.\n")
                 self.assertEqual(self.world.verdicts(), verdicts)
-                self.assertEqual({path: text for path, text in self.world.files().items() if path in files}, files)
-                [folder] = self.unnamed()
-                kept, source = folder / "session.jsonl", next(config.glob("projects/*/*.jsonl"), None)
-                # The log is whole in one place at least: kept in the attempt's folder, or still where it was written.
-                self.assertIn(self.world.written(), [path.read_bytes() for path in (kept, source) if path and
-                                                     path.is_file()])
-                if answer is not None:
-                    self.assertEqual((folder / "review.txt").read_text(), answer)
-                shutil.rmtree(folder)
-                shutil.rmtree(config / "projects", ignore_errors=True)
+                folders = self.unnamed()
+                self.assertEqual(self.outside(*folders), files)
+                self.assertEqual([sorted(str(path.relative_to(folder)) for path in folder.rglob("*") if path.is_file())
+                                  for folder in folders], [] if left is None else [sorted(left)])
+                for folder in folders:  # each file kept is whole
+                    if (folder / "session.jsonl").exists():
+                        self.assertEqual((folder / "session.jsonl").read_bytes(), self.world.written())
+                    for kept in folder.glob("session/*/*"):
+                        self.assertEqual(kept.read_text(), "a large result\n")
+                self.assertEqual(source is not None, source_left)
+                if source_left:
+                    self.assertEqual(source.read_bytes(), self.world.written())
         help_text = " ".join(self.world.judge("--help").stdout.split())
-        self.assertEqual(help_text.count("An error or an interrupt once the review session has started leaves the "
-                                         "attempt's folder, with the review's answer and log as far as they were "
-                                         "written, and no line names it."), 1)
+        for sentence in ("On an error or an interrupt the judge removes its own attempt's folder when no line names "
+                         "it and it holds neither review.txt nor session.jsonl; otherwise the folder stays.",
+                         "When copying or removing the log fails, the error names where it still is."):
+            self.assertEqual(help_text.count(sentence), 1)
 
     def test_a_text_file_that_is_not_utf8_reaches_the_reviewer(self) -> None:
         clone, legacy = self.world.version("Latin-1 notes", {"legacy.txt": b"caf\xe9\n"})

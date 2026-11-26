@@ -794,6 +794,67 @@ class TestReport(unittest.TestCase):
             f"report: {rows}:8: session is missing or of the wrong type, left out.",
             f"report: {rows}:10: not a JSON object, left out."])
 
+    def test_a_session_whose_row_is_such_a_line_is_counted_as_one_with_no_row(self) -> None:
+        self.world.baseline(20, 15)
+        self.world.save()
+        good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
+        self.write_rows(*good[1:])  # generation one's session of the first ticket has no row
+        without = self.world.report(save=False).stdout.splitlines()
+        self.assertIn("  Left out of the token figures: 1 with a blank token count. Left out of the active minutes: 1 "
+                      "blank.", without)
+        self.write_rows(b"{broken", *good[1:])  # the same row, damaged: a line that names no session
+        result = self.world.report(save=False)
+        rows = self.world.state / "scan-rows.jsonl"
+        self.assertEqual((result.returncode, result.stdout.splitlines(), result.stderr), (0, [
+            without[0], "Left out: scan-rows.jsonl lines that are no scan row: 1.", *without[1:]],
+            f"report: {rows}:1: not a JSON object, left out.\n"))
+
+    def test_a_row_that_names_a_session_stops_the_report_beside_a_line_left_out(self) -> None:
+        self.world.baseline(20, 15)
+        self.world.save()
+        good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
+        wrong = json.dumps({**json.loads(good[2]), "total_tokens": "100"}).encode()
+        self.write_rows(good[0], b"[]", b"", wrong, *good[3:])
+        # The wrong figure is on line 4: the damaged line 2 and the blank line 3 count as lines.
+        result = self.world.report(save=False)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (
+            1, "", f"report: {self.world.state}/scan-rows.jsonl:4: total_tokens is missing or of the wrong type.\n"))
+
+    def test_blank_lines_of_the_rows_file_are_passed_over_and_not_counted(self) -> None:
+        self.world.baseline(20, 15)
+        clean = self.lines()
+        good = (self.world.state / "scan-rows.jsonl").read_bytes().split(b"\n")[:-1]
+        self.write_rows(b"", b"  ", *good, b"\t")
+        result = self.world.report(save=False)
+        self.assertEqual((result.returncode, result.stdout.splitlines(), result.stderr), (0, clean, ""))
+
+    def test_a_damaged_line_of_versions_or_verdicts_still_stops_it_whatever_the_rows_file_holds(self) -> None:
+        for name, damage in (("versions.jsonl", b"{broken"), ("verdicts.jsonl", b"[]"), ("versions.jsonl", b"\xff"),
+                             ("verdicts.jsonl", b"\xff")):
+            with self.subTest(name=name, damage=damage):
+                self.setUp()
+                self.world.baseline(20, 15)
+                self.write_rows(b"{broken", b"[]")
+                path = self.world.state / name
+                path.write_bytes(damage + b"\n" + path.read_bytes())
+                result = self.world.report(save=False)
+                message = (f"{path}:1: not a JSON line." if damage == b"{broken" else
+                           f"{path}:1: not a JSON object." if damage == b"[]" else
+                           f"{path} cannot be read (UnicodeDecodeError).")
+                self.assertEqual((result.returncode, result.stdout, result.stderr),
+                                 (1, "", f"report: {message}\n"))
+
+    def test_help_states_which_lines_of_the_rows_file_are_left_out(self) -> None:
+        text = self.world.report("--help").stdout
+        self.assertIn(
+            "A line of scan-rows.jsonl is no row when the scan would not read it as a JSON\n"
+            "object (json_object in scripts/scan.py says which) or when it is an object whose\n"
+            "session is not text. The scan keeps such a line, and the report leaves it out: it\n"
+            "names the line once on standard error, with the file, the line number and the\n"
+            "reason, and prints on standard output how many lines it left out. A session whose\n"
+            "row was such a line is left out of the token figures and counted, like one with no\n"
+            "row.\n", text + "\n")
+
     def test_help_exits_0_and_bad_usage_exits_2(self) -> None:
         self.world.draw()
         for args in (["--help"], ["-h"]):

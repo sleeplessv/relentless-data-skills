@@ -122,6 +122,14 @@ blank total_tokens. Active minutes are left out the same way. Lines in
 versions.jsonl or verdicts.jsonl for a ticket in no set are left out and
 counted.
 
+A line of scan-rows.jsonl is no row when the scan would not read it as a JSON
+object (json_object in scripts/scan.py says which) or when it is an object whose
+session is not text. The scan keeps such a line, and the report leaves it out: it
+names the line once on standard error, with the file, the line number and the
+reason, and prints on standard output how many lines it left out. A session whose
+row was such a line is left out of the token figures and counted, like one with no
+row.
+
 Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s,
 over every ticket of the sets. It is printed only when every ticket has both
 versions judged; otherwise the report says how many tickets do not. The sign
@@ -178,17 +186,18 @@ Files read, all written by the other scripts:
                         total_tokens of each helper (scripts/scan.py).
 
 A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing
-yet. A folder or file that cannot be read, a line that is not a JSON object,
-a field missing or of the wrong type, a set entry's label the draw would not
-give or bucket it does not use, a version name in versions.jsonl or
-verdicts.jsonl the judge would not take, a total_tokens that is negative,
-infinite or not a number, helpers that hold more tokens than their row's
-total_tokens, or a second line for one ticket and version, one session or one
-ticket of the sets stops the report. The error names the folder or file, and
-the ledger line, helper or set ticket entry that fails a check. A set file
-that is not JSON, or not an object holding a list of tickets, and a ledger
-that is not UTF-8 are named by file alone. It never prints a refused label or
-version name, and nothing else is printed.
+yet. A folder or file that cannot be read, a line of versions.jsonl or
+verdicts.jsonl that is not a JSON object, a field missing or of the wrong type
+(but not the session of a line of scan-rows.jsonl, above), a set entry's label
+the draw would not give or bucket it does not use, a version name in
+versions.jsonl or verdicts.jsonl the judge would not take, a total_tokens that
+is negative, infinite or not a number, helpers that hold more tokens than their
+row's total_tokens, or a second line for one ticket and version, one session or
+one ticket of the sets stops the report. The error names the folder or file, and
+the ledger line, helper or set ticket entry that fails a check. A set file that
+is not JSON, or not an object holding a list of tickets, and a versions.jsonl or
+verdicts.jsonl that is not UTF-8 are named by file alone. It never prints a
+refused label or version name, and nothing else is printed.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:

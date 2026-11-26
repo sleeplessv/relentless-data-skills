@@ -24,14 +24,15 @@ a `severity: warn` test reported as a failure).
 - **Static preflight, once per session.** `scripts/preflight.py` (stdlib
   Python, sandbox-safe, no network unless a `uv run` runner must
   sync its environment) verifies required env vars are set,
-  the private key file exists, `dbt_packages/` is present with a clean
+  the private key file exists, the configured package directory is present with a clean
   `package-lock.yml`, the profile/target resolve in `profiles.yml`, and
   the context file's `runner` reports the recorded engine and version
   (`<runner> --version`). These are the failures that are cheapest to
   detect statically and most expensive to diagnose from a `JWT token is
   invalid` error. A `--connect` flag escalates to a live `<runner> debug`
   when diagnosing.
-- **Invocation rules.** Run outside the sandbox (egress-blocked shells
+- **Invocation rules.** Use the recorded profile, target, and profiles directory.
+  Run outside the sandbox (egress-blocked shells
   produce connection errors that masquerade as auth failures), redirect
   output to a logfile instead of piping, background long builds, and
   verify the selection actually matched models.

@@ -178,7 +178,7 @@ def command(clone: Path, model: str, session: str) -> list[str]:
 
 
 def environment() -> dict[str, str]:
-    """The session's. Its git reads no file under the home folder: the sandbox hides them, and git dies on that."""
+    """The session's. Its git reads no user config, ignore or attributes file, which the sandbox would hide."""
     env = {key: value for key, value in plain().items()
            if not (key.startswith("CLAUDE") and key not in KEPT) and key not in DROPPED}
     return {**env, "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "GIT_CONFIG_COUNT": "2",

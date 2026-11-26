@@ -176,9 +176,11 @@ def no_helpers(spent: int, unjudged: int = 0) -> list[str]:
             "  A helper resumed for a fix round counts under the step it started as."]
 
 
+# The rule over the sets together, as both the not-decided line and --help state it.
+SETS_TOGETHER = ("the sign appears at a difference of at least 2/15 of the tickets judged, rounded up, and does not "
+                 "appear below that.")
 NOT_DECIDED = ("Not decided: a second set is needed, the rest of the pool: every remaining pool ticket whose check "
-               "passes, with no limit per bucket. Over both sets together, the sign appears at a difference of at least "
-               "2/15 of the tickets judged, rounded up, and does not appear below that.")
+               f"passes, with no limit per bucket. Over both sets together, {SETS_TOGETHER}")
 
 
 def section(lines: list[str], sign: int) -> list[str]:
@@ -647,8 +649,10 @@ class TestReport(unittest.TestCase):
                                  "Replay sets 1 and 2: 29 tickets, of project A.")
 
     def test_three_sets_take_the_line_of_the_sets_together(self) -> None:
-        verdict = self.verdicts(20, 10, 10, 10)  # 30 tickets: 2/15 gives 4, where one set of 30 is not decided
-        for difference, expected in ((4, "The sign appears."), (3, "The sign does not appear.")):
+        # 31 tickets: 2/15 of them is 4.13, so 5 rounded up, where rounding to the nearest or down gives 4; one set of
+        # 31 would leave 4 and 5 not decided.
+        verdict = self.verdicts(20, 10, 10, 11)
+        for difference, expected in ((5, "The sign appears."), (4, "The sign does not appear.")):
             with self.subTest(difference=difference):
                 self.assertEqual(verdict(difference), expected)
 
@@ -931,7 +935,7 @@ class TestReport(unittest.TestCase):
                      "does not appear below 1/10 of them.",
                      "Between the two it is not decided, and a second set is needed, the rest of the pool: every "
                      "remaining pool ticket whose check passes, with no limit per bucket.",
-                     "Over two sets or more, taken together, it appears at a difference of at least 2/15 of the tickets",
+                     f"Over two sets or more, taken together, {SETS_TOGETHER}",
                      "Sets that hold no ticket give no verdict."):
             with self.subTest(fact=fact):
                 self.assertIn(fact, text)

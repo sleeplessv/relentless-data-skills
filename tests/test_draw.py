@@ -1834,6 +1834,28 @@ class TestDraw(unittest.TestCase):
                 self.assertEqual((status, stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
                 self.assertFalse((world.state / "draw-work").exists())
 
+    def test_a_signal_as_a_checks_cleanup_begins_still_stops_what_the_check_left_running(self) -> None:
+        marks = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, marks)
+        left = marks / "pid"
+        setup = f"{SETUP} && (sleep 300 & echo $! > {shlex.quote(str(left))})"  # still running when the check passes
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": CHECK, "setup": setup}])
+        # Python the draw runs first: SIGTERM comes as the first check's cleanup holds the signals.
+        prelude = ("import os, signal\nreal_mask = signal.pthread_sigmask\nsent = []\n"
+                   "def mask(how, numbers):\n"
+                   "    if how == signal.SIG_BLOCK and not sent:\n"
+                   "        sent.append(True)\n"
+                   "        os.kill(os.getpid(), signal.SIGTERM)\n"
+                   "    return real_mask(how, numbers)\n"
+                   "signal.pthread_sigmask = mask")
+        result = world.draw("--seed", "1", prelude=prelude)
+        pid = int(left.read_text())
+        self.addCleanup(lambda: self.alive(pid) and os.kill(pid, signal.SIGKILL))
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual((result.returncode, result.stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
+        self.assertTrue(self.wait_for(lambda: not self.alive(pid)), f"what setup left (pid {pid}) is still running")
+        self.assertFalse((world.state / "draw-work").exists())
+
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
         world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]
         self.assertFalse((world.state / "draw-work").exists())

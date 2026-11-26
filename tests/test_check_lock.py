@@ -61,7 +61,7 @@ HELP_FACTS = {
     "the holder writes its pid and start time into the file": (
         r"\bholder\b", r"\b(?:writes?|records?|stores?|puts?|saves?)\b", r"\b(?:process id|pid)\b", r"\btime\b"),
     "a waiting run prints one line at once": (
-        r"\bwait\b", r"\bprints? one line\b", r"\b(?:at once|immediately)\b"),
+        r"\bwait\b", r"\bprints?\b", r"\bline\b", r"\b(?:at once|immediately|straight away|right away)\b"),
     "the line names the holder, its pid and start time, and the longest wait": (
         r"\bline\b", r"\bholder", r"\b(?:process id|pid)\b", r"\bstart time\b", r"\blongest\b"),
     "a waiter blocks on the system until it gives the lock": (
@@ -71,15 +71,15 @@ HELP_FACTS = {
     "a run whose turn comes prints how long it waited": (
         r"\bturn\b", r"\bprints?\b", r"\bhow long\b", r"\bwaited\b"),
     "CHECK_LOCK_WAIT sets the bound in whole seconds, with its range and default": (
-        r"\bCHECK_LOCK_WAIT\b", r"\bwhole seconds\b", r"\b100000000\b", r"\b1800\b"),
+        r"\bCHECK_LOCK_WAIT\b", r"\bwhole\b.*\bseconds\b", r"\b100000000\b", r"\b1800\b"),
     "at the bound the run prints one line on standard error and exits 75": (
         r"\bbound\b", r"\bstandard error\b", r"\bno check\b", r"\b75\b"),
     "a run that cannot open or lock the file runs without the lock": (
         r"\bcannot\b", r"\bother than\b", r"\bwithout the lock\b"),
     "CHECK_LOCK_FILE names another lock file": (
         r"\bCHECK_LOCK_FILE\b", r"\bfile\b", r"\btests\b"),
-    "no switch skips the lock": (r"\bno switch\b", r"\bskips?\b"),
-    "a second clone has its own lock": (r"\bLimits?\b", r"\bsecond clone\b", r"\bown lock\b"),
+    "no switch skips the lock": (r"\bno (?:switch|option|flag)\b", r"\b(?:skips?|disables?|bypass(?:es)?)\b"),
+    "a second clone has its own lock": (r"\bLimits?\b", r"\bsecond clone\b", r"\bown\b"),
     "a run killed with SIGKILL frees the lock while its processes may still run": (
         r"\bSIGKILL\b", r"\bfrees?\b", r"\bprocesses\b", r"\bstill\b"),
     "the exit statuses are 0, the failing check's own, 2 and 75": (

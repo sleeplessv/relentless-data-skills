@@ -1,6 +1,6 @@
 ---
 name: dossier
-description: Produce a dossier, one self-contained HTML document with an answer box, numbered figures and tables, and a fixed house style, checked in a headless browser. Use when the user wants a visual report, an explainer, a writeup, or a diagram of a system, process, findings or decision as one shareable document, not an interactive dashboard or a single chart.
+description: Produce a dossier, one HTML file with an answer box, numbered figures and tables, and a fixed house style, checked in a headless browser. Axis charts and sequence diagrams need network access. Use when the user wants a visual report, an explainer, a writeup, or a diagram of a system, process, findings or decision as one shareable document, not an interactive dashboard or a single chart.
 metadata:
   author: sleeplessv
 ---

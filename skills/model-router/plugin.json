@@ -1,0 +1,22 @@
+{
+  "name": "model-router",
+  "version": "0.1.0",
+  "description": "Route delegated tasks to the right model and effort across Google Gemini 4, OpenAI GPT-6, and Anthropic Claude 5 by task fit and token cost.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/model-router",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "routing",
+    "orchestration",
+    "models",
+    "subagents",
+    "cost",
+    "gemini",
+    "openai",
+    "claude",
+    "multi-agent"
+  ]
+}

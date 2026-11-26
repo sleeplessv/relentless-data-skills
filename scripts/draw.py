@@ -55,6 +55,17 @@ PIECE = re.compile(rf"""
   | (?P<quoted>'[^']*'|"[^"\\$`]*"|\\[^\n])
 """, re.X | re.A)
 TAIL = re.compile(r"-[0-9]+|-n [0-9]+")  # what a tail that reads gh's pipe may take: a count of lines and no file
+# The pieces the names reader reads before gh pr create: none ends a word, a command or a here-document's body where
+# bash or zsh would not. A call with any other text there names nothing.
+EXPANSION = r"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\}|[0-9@*#?$!-])"  # one that runs nothing and holds no quote
+NAMES_PIECE = re.compile(rf"""
+    (?P<blank>[ \t]+)
+  | (?P<here><<(?P<strip>-?)[ \t]*(?:'(?P<single>\w+)'|"(?P<double>\w+)"|(?P<bare>\w+))(?=[ \t\n;&|<>]|\Z))
+  | (?P<redirect>[0-9]*(?:>>|>&|<&|<>|>\||>|<(?!<))(?:[0-9]+-?|-)?)
+  | (?P<op>&&|\|\||\|&?|;|&|\n)
+  | (?P<word>(?:[A-Za-z0-9_./,:=@%+-]+|'[^']*'|\\[\s\S]|{EXPANSION}|"(?:[^"\\$`]|\\[\s\S]|{EXPANSION})*")+)
+""", re.X | re.A)
+PR_CREATE = re.compile(r"[ \t]+pr[ \t]+create(?=[ \t\n;&|<>]|\Z)")  # what follows a plain gh that names it
 # CommonMark's HTML blocks of kinds 1 to 6: what starts one and what ends it; a blank line ends kinds 6 and 7.
 BLANK = re.compile(r"\A[ \t]*\Z")
 HTML_BLOCKS = [
@@ -137,6 +148,22 @@ The pool is every ticket that meets all of these:
   that gh names the GitHub CLI and {one_of(list(OTHERS)).replace(" or ", " and ")} the commands
   of those names, wherever the call runs them; and that the system can
   start a command whose arguments total {LONGEST // 1024} KiB.
+  A call with none of these forms still opened the PR, by time and not by
+  form, when the draw asked GitHub about the PR, the call's result is not an
+  error and holds the PR's URL, GitHub's time falls in the call's span as
+  above, and the call names gh pr create. A call names gh pr create when the
+  three words, plain, unquoted and in that order, start one of its commands
+  after nothing but NAME=value words. Text in a here-document's body or in
+  quotes names nothing. The draw reads the text before the three words only
+  as blanks; the operators &&, ||, |, |&, ;, & and new line, each after a
+  command; redirections; here-documents whose delimiter is letters, digits
+  and _, plain or in quotes, each body skipped to its delimiter line; and
+  words made of letters, digits and _ . / , : = @ % + -, of text in single
+  quotes, of a backslash and the character after it, of a $ before a name,
+  a name in braces or one of 0-9 @ * # ? $ ! -, and of text in double quotes
+  that holds no ` and no other $. A call with any other text before the
+  three words does not name them. This second way takes for granted that no
+  other program opened the PR during that one call.
   Any other call whose text holds gh, pr and create, in any order or case,
   with any text beside each, once its quotes, backslashes, $ signs and
   backslash-new lines are taken out, may have opened the PR its result
@@ -490,20 +517,62 @@ def opening_form(command: str) -> bool:
             and all(found["words"][0] in OTHERS for found in commands if found is not opener))
 
 
-Run = tuple[datetime | None, datetime | None, bool]
+def names_gh_pr_create(command: str) -> bool:
+    """Whether a call names `gh pr create` as --help says: the three words, plain, start one command after nothing
+    but NAME=value words, outside quotes and here-document bodies.
+
+    Invariant: True only when every piece of the call before the three words is a NAMES_PIECE, read in order, with
+    each here-document's body skipped to its delimiter line. Any text it cannot read so gives False: a False may be
+    wrong, a True may not."""
+    start, empty, here, at = True, True, [], 0  # start: no word but NAME=value yet; empty: no piece yet
+    while at < len(command):
+        found = NAMES_PIECE.match(command, at)
+        if not found:
+            return False
+        kind, text, at = found.lastgroup, found.group(), found.end()
+        if kind == "word" and start and text == "gh" and PR_CREATE.match(command, at):
+            return True
+        if kind == "op":
+            if empty and text != "\n":  # an operator with no command before it
+                return False
+            start = empty = True
+            if text == "\n":
+                for strip, delimiter in here:
+                    while (end := command.find("\n", at)) >= 0:
+                        line, at = command[at:end], end + 1
+                        if (line.lstrip("\t") if strip else line) == delimiter:
+                            break
+                    else:
+                        return False
+                here = []
+        elif kind != "blank":
+            if here and "\n" in text:  # where its body starts is not plain
+                return False
+            empty = False
+            start = start and kind == "word" and bool(re.match(r"[A-Za-z_]\w*=", text))
+            if kind == "here":
+                here.append((found["strip"], found["single"] or found["double"] or found["bare"]))
+    return False
+
+
+Run = tuple[datetime | None, datetime | None, str]
 
 
 def opened_prs(lines: list[dict]) -> dict[tuple[str, int], list[Run]]:
     """Each PR whose URL the result of a Bash call that runs or may run `gh pr create` prints, as
-    (owner/name in lower case, number), with each such run as (the call's time, the result's time, whether
-    the call runs it for certain). A time is None when its line has none, or one that cannot be read."""
+    (owner/name in lower case, number), with each such run as (the call's time, the result's time, "opens" when
+    the call runs it for certain, "names" when it names it, else "maybe"). A time is None when its line has none,
+    or one that cannot be read."""
     calls = {}
     for line in lines:
         for part in parts(line) if line.get("type") == "assistant" else []:
             if part.get("type") == "tool_use" and part.get("name") == "Bash":
-                kind = runs_gh_pr_create(str((part.get("input") or {}).get("command")))
+                command = str((part.get("input") or {}).get("command"))
+                kind = runs_gh_pr_create(command)
+                if kind == "maybe" and names_gh_pr_create(command):
+                    kind = "names"
                 if kind:
-                    calls[part.get("id")] = (log_time(line.get("timestamp")), kind == "opens")
+                    calls[part.get("id")] = (log_time(line.get("timestamp")), kind)
     found: dict[tuple[str, int], list[Run]] = {}
     for line in lines:
         for part in parts(line) if line.get("type") == "user" else []:
@@ -519,13 +588,14 @@ def opened(runs: list[Run], created: datetime | None) -> tuple[str | None, bool]
     """Whether a session's runs opened a PR: "opened", "maybe" or None; and whether a run could not be timed.
 
     `created` is GitHub's time for the PR's opening, None for a PR the draw does not ask about, whose
-    runs count on their command alone. A run opened the PR when it ran `gh pr create` for certain and
-    GitHub's time falls between its call and its result, give or take CLOCK_SLACK. A run that may
-    have run it, inside that span, and a run whose times are missing or cannot be read, may have."""
+    runs count on their command's form alone. A run opened the PR when it ran `gh pr create` for certain,
+    or named it, and GitHub's time falls between its call and its result, give or take CLOCK_SLACK. A
+    run that may have run it, inside that span, and a run whose times are missing or cannot be read, may
+    have."""
     found, untimed = set(), False
-    for start, end, certain in runs:
+    for start, end, kind in runs:
         if created is None:
-            found.add("opened" if certain else "maybe")
+            found.add("opened" if kind == "opens" else "maybe")
             continue
         try:
             inside = start - CLOCK_SLACK <= created <= end + CLOCK_SLACK
@@ -534,7 +604,7 @@ def opened(runs: list[Run], created: datetime | None) -> tuple[str | None, bool]
             found.add("maybe")
         else:
             if inside:
-                found.add("opened" if certain else "maybe")
+                found.add("opened" if kind in ("opens", "names") else "maybe")
     return next((state for state in ("opened", "maybe") if state in found), None), untimed
 
 

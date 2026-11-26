@@ -88,7 +88,11 @@ After all commits are created, confirm `git status` is clean, so no changed file
 
 Push only when the request asked for it: the user said "push" ("commit and push", "push it"), or a calling skill's workflow includes the push. A plain "commit" ends here, with the commits local.
 
-To push to an existing upstream, first check its PR: if `gh pr list --head "$(git branch --show-current)" --state merged --json number --jq length` prints more than `0`, the branch was already merged; stop and report instead of pushing.
+For a branch with an existing upstream, run `git push --dry-run --porcelain`. Stop if the preview fails. Read each push URL from its `To` line and each destination branch from the right-hand `refs/heads/...` in its ref updates. This includes push-remote overrides, push URLs, and renamed destination branches.
+
+- On GitHub, set `repo` to the push repository in `HOST/OWNER/REPO` form and `branch` to the destination branch name. Run `gh pr list --repo "$repo" --head "$branch" --state merged --limit 1 --json number --jq length`. Exit 0 and output `0` clear the check. Output `1` means a merged PR exists. For a fork that sends PRs upstream, also check the upstream project for a merged PR from that fork and branch.
+- On another forge, check its merged requests for the same source project and branch using its CLI or web interface. For example, look for merged merge requests on GitLab. A plain Git remote with no review service needs only the Git preview.
+- If a merge is found, the review host is unknown, or a required lookup fails (including missing `gh`, authentication, or unexpected output), keep the commits local and report why. After every destination clears its check, run:
 
 ```bash
 git push

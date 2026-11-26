@@ -16,7 +16,9 @@ remote when asked.
   skill wins on format, always conventional, even in repos that aren't.
 - **Push only when asked.** Pushes after all commits are created when the
   request asks for it ("commit and push", or a calling skill such as `ship`),
-  setting the upstream if the branch doesn't have one yet. A plain "commit"
+  setting the upstream if the branch doesn't have one yet. For an existing
+  upstream, it checks the actual push destination for a previously merged PR
+  or merge request. A match or failed lookup leaves the commits local. A plain "commit"
   leaves the commits local and the close-out says nothing was pushed.
 - **Safety rules.** Never amends pushed commits, never force-pushes
   `main`/`master`, never skips hooks, never commits likely secrets, and stops
@@ -47,5 +49,8 @@ or commit and push.
 ## Requirements
 
 - `git`, with a remote configured if you ask for the push.
+- For an existing upstream on GitHub, an authenticated `gh` that can read
+  the PRs. Other forges use their own CLI or web interface. A plain Git
+  remote needs no review service.
 - Network access to the remote when pushing. `git push` must run outside any
   sandboxed shell, or it fails with a misleading DNS/connection error.

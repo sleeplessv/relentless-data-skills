@@ -735,6 +735,22 @@ class SmartGitCommitTests(unittest.TestCase):
         self.assertTrue(run.completed, run)
         self.assertEqual(self.sb.remote_sha(self.origin, "refs/heads/main"), sha)
 
+    def test_preview_uses_push_remote_url_and_destination_ref(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "init", "-q", "--bare", str(mirror))
+        self.sb.git(self.work, "remote", "add", "publish", str(self.origin))
+        self.sb.git(self.work, "remote", "set-url", "--push", "publish", str(mirror))
+        self.sb.git(self.work, "config", "branch.main.pushRemote", "publish")
+        self.sb.git(self.work, "config", "remote.publish.push", "refs/heads/main:refs/heads/release")
+
+        workflow = section(SMART_COMMIT_SKILL.read_text(), "Step 5: Push when asked")
+        preview, = re.findall(r"`(git push --dry-run[^`]+)`", workflow)
+        run = self.sb.run(self.work, [preview])
+        self.assertTrue(run.completed, run)
+        self.assertIn(f"To {mirror}\n", run.steps[0].out)
+        self.assertIn("\trefs/heads/main:refs/heads/release\t", run.steps[0].out)
+        self.assertIsNone(self.sb.remote_sha(mirror, "refs/heads/release"))
+
     def test_no_upstream_needs_documented_fallback(self):
         self.assertEqual(self.push_upstream, ["git push -u origin HEAD"])
         self.sb.git(self.work, "checkout", "-q", "-b", "feat/new")

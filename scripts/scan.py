@@ -21,15 +21,15 @@ plugin prefix. A skill that a successful Skill call loaded takes the name the
 call gives, less everything up to its last colon. The line that gives that
 load's folder names the call in sourceToolUseID, takes the call's name and adds
 no second entry. Any other load of that folder, as a typed one, takes the name
-of the first call that loaded it. A skill that no such call loaded takes its
-folder's last name. A call that failed, has no result or gives no name adds no
-entry. So two skills of one name from two plugins are one entry: a typed skill
-leaves no prefix to recover.
+of the call the first such line names. A skill that no such call loaded takes
+its folder's last name. A call that failed, has no result or gives no name adds
+no entry. So two skills of one name from two plugins are one entry: a typed
+skill leaves no prefix to recover.
 
 The skills are in the order of first load by time, across the session's log
-and its helpers' logs. A time with no zone is read as UTC. A line with no time
-that reads takes the time of the line before it, or comes first when there is
-none, and loads at one time keep the order of the lines.
+and its helpers' logs. A time with no zone is read as UTC. A line with no
+timestamp, or a null one, takes the time of the line before it, or comes first
+when there is none, and loads at one time keep the order of the lines.
 
 A line whose sessionId is text other than the row's session is a copied line,
 as the lines a resumed session copied from an earlier one are. Copied lines, in
@@ -183,7 +183,7 @@ def tool_calls(lines: list[dict]) -> dict[str, dict]:
 
 
 def when(line: dict, before: float) -> float:
-    """The line's time in seconds, a time with no zone read as UTC; `before` when it has no time that reads."""
+    """The line's time in seconds, to order loads by; `before` when it has no time that reads."""
     try:
         moment = datetime.fromisoformat(line.get("timestamp").replace("Z", "+00:00"))
     except (AttributeError, TypeError, ValueError):
@@ -213,7 +213,7 @@ def skills(lines: list[dict]) -> list[str]:
         given = (calls.get(call_id) or {}).get("input")
         skill = given.get("skill") if isinstance(given, dict) else None
         return skill.split(":")[-1] if isinstance(skill, str) else ""
-    loads.sort(key=lambda load: load[0])  # a stable sort: loads at one time keep the lines' order
+    loads.sort(key=lambda load: load[0])  # stable; the module's docstring gives the order
     call_names = {call_id: call_name(call_id) for _, folder, call_id in loads if folder is None}
     first_call_names: dict[Path, str] = {}
     for _, folder, call_id in loads:
@@ -311,9 +311,10 @@ def scan(session: str, log: Path) -> dict:
     compactions = {line.get("uuid"): (line.get("compactMetadata") or {}).get("trigger")
                    for line in every if line.get("subtype") == "compact_boundary"}
     copied = [isinstance(line.get("sessionId"), str) and line["sessionId"] != row["session"] for line in every]
-    # A line of the session's own carries its response even when it holds no token count.
-    carried = {(line.get("message") or {}).get("id") or line.get("uuid")
-               for line, mark in zip(every, copied) if not mark and line.get("type") == "assistant"}
+    # The module's docstring says which lines carry a response. A key that is a list or an object names none.
+    carried = {key for line, mark in zip(every, copied) if not mark and line.get("type") == "assistant"
+               for key in [(line.get("message") or {}).get("id") or line.get("uuid")]
+               if not isinstance(key, (list, dict))}
     only_copied = usages([line for line, mark in zip(every, copied) if mark]).keys() - carried
     return {**row, **total, "copied_tokens": sum(sum(final[key].values()) for key in only_copied),
             "active_minutes": active_minutes(times),

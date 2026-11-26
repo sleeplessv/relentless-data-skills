@@ -748,6 +748,24 @@ class TestScan(unittest.TestCase):
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
                 self.assertEqual(self.rows(), [whole_row(self.session, (0, output, 0, 0), minutes, copied=copied)])
 
+    def test_an_own_line_whose_response_id_is_a_list_or_an_object_carries_no_response(self) -> None:
+        earlier = str(uuid.uuid4())
+        for number, message_id in enumerate((["msg_listed"], {"id": "msg_listed"})):
+            with self.subTest(message_id=message_id):
+                self.state = self.root / f"state-{number}"
+                log = Log(earlier).user(0, "Go.")
+                log.assistant(1, (0, 100, 0, 0))
+                own = Log(self.session).user(2, "Go on.")
+                own.assistant(3, None)
+                own.lines[-1]["message"]["id"] = message_id
+                own.assistant(3, (0, 10, 0, 0))
+                log.lines += own.lines
+
+                result = self.scan(str(log.write(self.log_path())))
+
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                self.assertEqual(self.rows(), [whole_row(self.session, (0, 110, 0, 0), 3.0, copied=100)])
+
     def test_copied_lines_in_a_helpers_log_count_and_a_response_a_helper_repeats_does_not(self) -> None:
         earlier = str(uuid.uuid4())
         main = Log(earlier).user(0, "Go.")
@@ -1102,7 +1120,8 @@ class TestScan(unittest.TestCase):
                 "its last colon.",
                 "The line that gives that load's folder names the call in sourceToolUseID, takes the call's name and "
                 "adds no second entry.",
-                "Any other load of that folder, as a typed one, takes the name of the first call that loaded it.",
+                "Any other load of that folder, as a typed one, takes the name of the call the first such line "
+                "names.",
                 "A skill that no such call loaded takes its folder's last name.",
                 "A call that failed, has no result or gives no name adds no entry.",
                 "So two skills of one name from two plugins are one entry: a typed skill leaves no prefix to recover.",
@@ -1114,8 +1133,8 @@ class TestScan(unittest.TestCase):
                 "A line carries a response when it holds part of it, with or without token counts.",
                 "The skills are in the order of first load by time, across the session's log and its helpers' logs.",
                 "A time with no zone is read as UTC.",
-                "A line with no time that reads takes the time of the line before it, or comes first when there is "
-                "none, and loads at one time keep the order of the lines."):
+                "A line with no timestamp, or a null one, takes the time of the line before it, or comes first "
+                "when there is none, and loads at one time keep the order of the lines."):
             with self.subTest(sentence=sentence):
                 self.assertIn(sentence, help_text)
 

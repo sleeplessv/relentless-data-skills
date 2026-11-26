@@ -21,6 +21,7 @@ import sys
 import tempfile
 import time
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -1470,21 +1471,54 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
-    def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
+    def draw_signalled_in_a_check(self, number: signal.Signals) -> tuple[World, subprocess.Popen[str], int]:
+        """Signal a draw whose check blocks on a file nobody creates, so only the signal can end it.
+
+        Returns the world, the ended draw and the pid of the check's shell, which the check records when it starts.
+        Every wait is a poll with a bound that only a hung run reaches."""
         marks = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, marks)
-        check = f"{CHECK} && touch {marks}/started && sleep 1 && touch {marks}/late"
+        check = (f"{CHECK} && echo $$ > {marks}/pid.tmp && mv {marks}/pid.tmp {marks}/pid"
+                 f" && until test -e {marks}/never; do sleep 0.05; done")
         world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
         draw = world.start("--seed", "1")
+        self.addCleanup(draw.communicate)  # closes the pipes, after the kill
         self.addCleanup(draw.kill)
-        for _ in range(600):
-            if (marks / "started").exists() or draw.poll() is not None:
-                break
-            subprocess.run(["sleep", "0.05"])
-        draw.send_signal(signal.SIGINT)
+        self.wait_for(lambda: (marks / "pid").exists() or draw.poll() is not None)
+        self.assertTrue((marks / "pid").exists(), "the draw ended before the check started")
+        pid = int((marks / "pid").read_text())
+
+        def stop_check() -> None:  # a draw that leaves the check running must not leave it for the next run
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        self.addCleanup(stop_check)
+        draw.send_signal(number)
         draw.communicate(timeout=60)
-        subprocess.run(["sleep", "1.5"])
-        self.assertEqual(sorted(path.name for path in marks.iterdir()), ["started"])
+        return world, draw, pid
+
+    def wait_for(self, ready: Callable[[], bool]) -> bool:
+        """Poll `ready` until it holds; False after a minute, which only a hung run reaches."""
+        deadline = time.monotonic() + 60
+        while not ready():
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(0.01)
+        return True
+
+    def assert_gone(self, pid: int) -> None:
+        def gone() -> bool:
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                return True
+            return False
+        self.assertTrue(self.wait_for(gone), f"the check (pid {pid}) is still running after the draw ended")
+
+    def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
+        _, _, pid = self.draw_signalled_in_a_check(signal.SIGINT)
+        self.assert_gone(pid)
 
     def test_a_log_that_cannot_be_saved_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))
@@ -1649,20 +1683,8 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(result.stderr.splitlines()[-1], "KeyboardInterrupt")
 
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
-        marks = Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, marks)
-        check = f"{CHECK} && touch {marks}/started && sleep 1 && touch {marks}/late"
-        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
-        draw = world.start("--seed", "1")
-        self.addCleanup(draw.kill)
-        for _ in range(600):
-            if (marks / "started").exists() or draw.poll() is not None:
-                break
-            subprocess.run(["sleep", "0.05"])
-        draw.send_signal(signal.SIGTERM)
-        draw.communicate(timeout=60)
-        subprocess.run(["sleep", "1.5"])
-        self.assertEqual(sorted(path.name for path in marks.iterdir()), ["started"])
+        world, _, pid = self.draw_signalled_in_a_check(signal.SIGTERM)
+        self.assert_gone(pid)
         self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_model_takes_one_vote_per_parent_response_however_many_helpers_copy_it(self) -> None:

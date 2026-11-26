@@ -1,6 +1,6 @@
 ---
 name: model-router
-description: Pick the model, reasoning effort and harness for each task a session hands to another agent, across Anthropic, OpenAI and Google models. Use when a session or another skill delegates work and must choose which model runs it, or when the user asks which model should handle a task.
+description: "Model routing for delegated work. Read it before the first subagent call of any task you split up, fan out or hand off, so each piece runs on the cheapest model that fits (Haiku, Sonnet, Opus, GPT, Gemini) at the right effort and harness. Use when delegating, or when the user asks which model or effort should handle a task or wants a review from another vendor's model."
 argument-hint: "[task or plan to route]"
 ---
 

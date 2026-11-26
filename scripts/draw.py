@@ -312,12 +312,13 @@ class Unreadable(ValueError):
         self.number, self.line = number, line
 
 
-class Terminated(BaseException):
-    """SIGTERM, raised where the draw is so that each cleanup runs; no handler for errors catches it."""
+class Stopped(BaseException):
+    """SIGINT or SIGTERM, whose number it holds, raised where the draw is so that each cleanup runs; no handler for
+    errors catches it."""
 
 
-def terminated(number: int, frame: object) -> None:
-    raise Terminated
+def stopped(number: int, frame: object) -> None:
+    raise Stopped(number)
 
 
 class GhFailed(DrawError):
@@ -1130,12 +1131,14 @@ def main(argv: list[str]) -> int:
     else:
         print(HELP, file=sys.stderr)
         return 2
-    signal.signal(signal.SIGTERM, terminated)
+    for number in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(number, stopped)
     try:
         return Draw(seed).run()
-    except Terminated:
-        print("draw: stopped by SIGTERM; no set written.", file=sys.stderr)
-        return 128 + signal.SIGTERM
+    except Stopped as stop:
+        number = signal.Signals(stop.args[0])
+        print(f"draw: stopped by {number.name}; no set written.", file=sys.stderr)
+        return 128 + number
     except DrawError as error:
         print(f"draw: {error}", file=sys.stderr)
         return 1

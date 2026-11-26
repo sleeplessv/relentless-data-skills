@@ -56,7 +56,7 @@ Done when `MODEL` holds a slug and `REVIEW` names a readable file.
 
 ```sh
 SNAP=$( export GIT_INDEX_FILE="$(mktemp -u)"; trap 'rm -f "$GIT_INDEX_FILE"' EXIT; git -C "$DIR" rev-parse HEAD && git -C "$DIR" read-tree HEAD && git -C "$DIR" add -A && git -C "$DIR" write-tree ) || echo "snapshot failed: $?"
-RESULT="$(mktemp -d)/astra-review.md"
+RESULT="$(cd "$(mktemp -d)" && pwd -P)/astra-review.md"
 ```
 
 `SNAP` is the checkout before Astra starts: its `HEAD`, then the tree
@@ -73,12 +73,21 @@ report, with these inputs:
   session's review. `herdr-delegate` says what to do on `name_taken`.
 - **Folder**: launch with `--cwd "$DIR"` in place of herdr-delegate's
   `--cwd "$PWD"`, so Astra starts in `DIR` whatever folder your shell is in.
-- **Program**: `codex --no-daemon -m "$MODEL" --approve-for-me -c model_reasoning_effort=high "$BRIEF"`.
+- **Program**: `codex --no-daemon -m "$MODEL" --approve-for-me --add-dir "$(dirname "$RESULT")" -c model_reasoning_effort=high "$BRIEF"`.
   `--approve-for-me` runs Astra in the `workspace-write`
   sandbox and sends its approval requests to Codex's automatic reviewer. The
   sandbox blocks Astra's closing `hc send`; the reviewer approves the retry,
   so the report arrives without waiting on the user. Codex refuses `-s`
-  beside this flag.
+  beside this flag. `--add-dir` lets the sandbox write `RESULT`, which sits
+  outside `DIR`.
+- **You are a subagent**: you share the main session's terminal, so an
+  `hc send` to `$HC_TERMINAL_ID` reaches the main session, never you. Take
+  `herdr-delegate`'s subagent path throughout: launch with `--no-notify`,
+  brief Astra to write its report to `RESULT` and end it with
+  `END OF REPORT`, and wait until `RESULT` ends with that line.
+- **Re-check probes**: when a re-check reruns probes from an earlier review,
+  copy them into the current `DIR` and repoint their imports and fakes there;
+  the earlier review's checkout may be gone or out of date.
 - **Result file**: `RESULT`.
 - **Brief**: the four parts `herdr-delegate` asks for, where the scope is
   `DIR` and step 1's commands, read-only (no edits, commits or pushes), plus:

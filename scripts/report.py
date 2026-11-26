@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Print the comparison between versions on the replay set and the verdict on warning sign 1. `--help` gives the
-figures and the files the report reads."""
+"""Print the comparison between versions on the replay set and the verdicts on warning signs 1 and 2. `--help` gives
+the figures and the files the report reads."""
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import statistics
@@ -26,6 +27,23 @@ TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool
 # Why a version of a ticket is left out of every figure, as the report counts it.
 NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
                                        "judged at a commit the version does not record")
+# Warning sign 2: generation one's steps and the words that name each, as named() reads them. A bare "fix" names no
+# step, since a ticket's own title may hold it. "Read" names none, since a brief opens its instructions with it.
+STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, words in (
+    ("re-check", r"re-?check|re-?verif|fix head\b"),
+    ("closing verification", r"verif(?:y|ier|ication)\b"),
+    ("fix", r"(?:fix|address)(?:es|ing)?\b[^.:;\n]*\b(?:finding|comment|review)|fix(?:es)? (?:round|worker|brief)"
+            r"|(?:late|class) fix"),
+    ("review", r"review|ponytail|audit"),
+    ("implement", r"implement|build|integrat"),
+    ("publish", r"publish|ready\b|pr body|merge|push|(?:start|stop) comment|tracker|claim"),
+    ("explore", r"explor|research|find|search|investigat|locate|survey|look up"),
+))
+CUT = ("closing verification", "fix", "re-check")  # the steps the small cut takes out
+# Text that names no role of its own, so named() reads the text without it: a generation-one skill's name names the
+# whole run, every step at once, and a ticket's title after its number ("#12: Verify CSV headers") names its subject.
+NO_ROLE = re.compile("|".join([*map(re.escape, draw.GENERATION_ONE), r"#\d+:[^.\n]*"]), re.IGNORECASE)
+AGAIN = re.compile(r"\b(?:follow-?up|round \d|fix(?:es)? round)", re.IGNORECASE)  # words that make a review a re-check
 
 
 def table_line(tickets: int) -> str:
@@ -39,9 +57,36 @@ def listed(items: list) -> str:
     return " and ".join([", ".join(map(str, items[:-1])), str(items[-1])] if len(items) > 1 else map(str, items))
 
 
+def named(text: str | None) -> str | None:
+    """The step a text names, read without NO_ROLE: the step whose words come first, on a tie the first in STEPS,
+    except that a review that also names a re-check or AGAIN's words is a re-check, a review of a fix. None when the
+    text names no step.
+
+    Taking the first step named assumes a helper's text names its own role before any other step. Where it does not,
+    the sort can be wrong: "Verify CSV headers", a ticket's title with no number, describing the helper that implements
+    it, is sorted as closing verification."""
+    text = NO_ROLE.sub(" ", text or "")
+    found = sorted((match.start(), at, name) for at, (name, words) in enumerate(STEPS) if (match := words.search(text)))
+    first = found[0][2] if found else None
+    if first == "review" and ("re-check" in (name for *_, name in found) or AGAIN.search(text)):
+        return "re-check"
+    return first
+
+
+def step(description: str | None, brief_head: str | None) -> str | None:
+    """The step of generation one a helper took: the one its description names or, when its description names none,
+    the one the head of its brief names. A description that names a review and a brief that names a re-check make a
+    re-check: the description names the reviewer, the brief the pass it makes. None when neither names a step."""
+    description_step, brief_step = named(description), named(brief_head)
+    if description_step is None or (description_step, brief_step) == ("review", "re-check"):
+        return brief_step
+    return description_step
+
+
 HELP = f"""\
-Print the comparison between versions on the replay set and the verdict on
-warning sign 1: one agent alone makes more mistakes.
+Print the comparison between versions on the replay set and the verdicts on
+warning sign 1, one agent alone makes more mistakes, and warning sign 2, a
+small cut fixes the cost.
 
 Usage: python3 scripts/report.py
 
@@ -49,8 +94,8 @@ The report reads the machine directory, $DELIVER_STATE_DIR (default
 ~/.local/state/deliver), and writes nothing: it makes no folder and takes no
 lock, and reads each file once, as it stands. It covers every ticket of every
 replay-set-<n>.json there, the sets taken together. It names each project by
-the label the draw gave it, and prints counts and medians only, with no
-ticket, session or commit and no figure per project.
+the label the draw gave it, and prints counts, medians and sums only, with no
+ticket, session, commit or helper and no figure per project.
 
 A version is a name and a commit. {GENERATION_ONE}'s commit is the ready_commit its
 set records, and its session the set's session. {DIRECT} has its commit and
@@ -86,6 +131,39 @@ appear, by the difference:
 
 Any other number of tickets gives no verdict.
 
+Warning sign 2 is answered from the scan rows of {GENERATION_ONE}'s sessions,
+over every ticket of the sets. The extra cost is the total_tokens
+{GENERATION_ONE} spent minus those {DIRECT} spent. A ticket is left out of both
+sides, and counted, when it lacks either version judged or either version
+has a blank total_tokens. The figures cover the tickets left; the verdict
+waits, as for warning sign 1, until every ticket has both versions judged.
+
+The report reads each helper's description and the head of its brief, and
+puts the helper in a step of generation one or leaves it not sorted. How it
+chooses, and where it can sort wrong, are in step() and named() in
+scripts/report.py, with each step's words in STEPS. A helper sorted into
+the wrong step can move the cut either way. The steps:
+
+  {listed([name for name, _ in STEPS])}.
+
+The cut is the helpers' tokens in {listed(list(CUT))}.
+Not sorted are the tokens of helpers that name no step and the sessions' own
+tokens, in no helper: a session's own turns serve every step, and the rows
+cannot split them. A row with no list of helpers (null) counts all its
+tokens as the session's own. The sign appears when the cut is more than half
+the extra cost, and not at half or below. The report gives the verdict
+without the tokens not sorted, and with them counted as cut, and says when
+the two differ. With no extra cost, or no ticket left, it gives none.
+
+A row lists a helper once, under the description and brief it started with,
+so a helper resumed for a fix round counts under the step it started as, and
+the cut can be smaller than generation one's real spend on those steps. A
+helper with a blank total_tokens has no tokens of its own: its responses are
+in another helper's or the session's, and it adds nothing to a step; the
+report prints how many there are. A share of tokens is not a count of
+tickets, so the report gives it as a percent of {GENERATION_ONE}'s tokens at
+any number of tickets.
+
 Files read, all written by the other scripts:
 
   replay-set-<n>.json   label, ticket, bucket, session and ready_commit of
@@ -94,19 +172,22 @@ Files read, all written by the other scripts:
                         not_direct of each line (scripts/replay.py).
   verdicts.jsonl        label, ticket, version, commit and right_first_time
                         of each line (scripts/judge.py).
-  scan-rows.jsonl       session, total_tokens and active_minutes of each row
-                        (scripts/scan.py).
+  scan-rows.jsonl       session, total_tokens, active_minutes and helpers of
+                        each row, and description, brief_head and
+                        total_tokens of each helper (scripts/scan.py).
 
 A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing
 yet. A folder or file that cannot be read, a line that is not a JSON object,
 a field missing or of the wrong type, a set entry's label the draw would not
 give or bucket it does not use, a version name in versions.jsonl or
-verdicts.jsonl the judge would not take, or a second line for one ticket and
-version, one session or one ticket of the sets stops the report. The error
-names the folder or file, and the ledger line or set ticket entry that fails
-a check. A set file that is not JSON, or not an object holding a list of
-tickets, and a ledger that is not UTF-8 are named by file alone. It never
-prints a refused label or version name, and nothing else is printed.
+verdicts.jsonl the judge would not take, a total_tokens that is negative,
+infinite or not a number, helpers that hold more tokens than their row's
+total_tokens, or a second line for one ticket and version, one session or one
+ticket of the sets stops the report. The error names the folder or file, and
+the ledger line, helper or set ticket entry that fails a check. A set file
+that is not JSON, or not an object holding a list of tickets, and a ledger
+that is not UTF-8 are named by file alone. It never prints a refused label or
+version name, and nothing else is printed.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:
@@ -201,12 +282,31 @@ def load_verdicts(state: Path) -> dict[tuple[str, int, str], dict]:
                    for where, line in json_lines(state / "verdicts.jsonl")], "label", "ticket", "version")
 
 
+def tokens_of(where: str, line: dict) -> int | float | None:
+    """The line's total_tokens, once it is blank or a count: a negative or infinite figure, or NaN, is none."""
+    value = line["total_tokens"]
+    if value is not None and not 0 <= value < math.inf:
+        raise Unreadable(f"{where}: total_tokens is not a count of tokens.")
+    return value
+
+
+def scan_row(where: str, line: object) -> dict:
+    """The row, once its figures and each helper's description, brief head and tokens can be read with certainty."""
+    figure, text = (int, float, type(None)), (str, type(None))
+    row = checked(where, line, session=TEXT, total_tokens=figure, active_minutes=figure, helpers=(list, type(None)))
+    total, held = tokens_of(where, row), 0
+    for number, helper in enumerate(row["helpers"] or [], 1):
+        at = f"{where}: helper {number}"
+        held += tokens_of(at, checked(at, helper, description=text, brief_head=text, total_tokens=figure)) or 0
+    if total is not None and held > total:  # scan.py gives each response to one helper or to the session
+        raise Unreadable(f"{where}: its helpers hold more tokens than its total_tokens.")
+    return row
+
+
 def load_rows(state: Path) -> dict[str, dict]:
     """Each scan row, whole, by session."""
-    figure = (int, float, type(None))
     return {key[0]: row for key, row in by_key(
-        [(where, checked(where, line, session=TEXT, total_tokens=figure, active_minutes=figure))
-         for where, line in json_lines(state / "scan-rows.jsonl")], "session").items()}
+        [(where, scan_row(where, line)) for where, line in json_lines(state / "scan-rows.jsonl")], "session").items()}
 
 
 def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: dict) -> str | dict:
@@ -227,16 +327,20 @@ def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: di
         return OTHER_COMMIT
     row = rows.get(session, {})
     return {"right": verdict["right_first_time"], "tokens": row.get("total_tokens"),
-            "minutes": row.get("active_minutes")}
+            "minutes": row.get("active_minutes"), "helpers": row.get("helpers")}
 
 
 def count(part: int, whole: int) -> str:
     return f"{part} of {whole}" + (f" ({part / whole:.0%})" if whole >= RATE_FLOOR else "")
 
 
+def number(value: int | float) -> str:
+    """A whole number as it is, any other to at most three decimal places; --help states where that is exact."""
+    return str(value) if isinstance(value, int) else f"{value:.3f}".rstrip("0").rstrip(".")
+
+
 def median(values: list) -> str:
-    """The median to at most three decimal places, or none; --help states where that is exact."""
-    return f"{statistics.median(values):.3f}".rstrip("0").rstrip(".") if values else "none"
+    return number(statistics.median(values)) if values else "none"
 
 
 def figures(results: list[str | dict]) -> str:
@@ -271,16 +375,20 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
         lines.append(f"  Left out of the token figures: {sum(result['tokens'] is None for result in judged)} with a "
                      f"blank token count. Left out of the active minutes: "
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
-    return [*lines, "", *sign_one(results, len(tickets))]
-
-
-def sign_one(results: dict[str, dict], total: int) -> list[str]:
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
-    missing = sum(not (isinstance(first, dict) and isinstance(second, dict)) for first, second in pairs)
-    if missing:
-        return [f"Warning sign 1: no verdict. Tickets without both {GENERATION_ONE} and {DIRECT} judged: "
-                f"{missing} of {total}."]
-    first, second = (sum(pair[side]["right"] for pair in pairs) for side in (0, 1))
+    judged_pairs = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
+    return [*lines, "", *sign_one(judged_pairs, len(tickets)), "", *sign_two(judged_pairs, len(tickets))]
+
+
+def unjudged(judged: list[tuple[dict, dict]], total: int) -> str:
+    return f"without both {GENERATION_ONE} and {DIRECT} judged: {total - len(judged)} of {total}."
+
+
+def sign_one(judged: list[tuple[dict, dict]], total: int) -> list[str]:
+    """Warning sign 1 over the tickets with both versions judged; a verdict only when that is every ticket."""
+    if len(judged) < total:
+        return [f"Warning sign 1: no verdict. Tickets {unjudged(judged, total)}"]
+    first, second = (sum(pair[side]["right"] for pair in judged) for side in (0, 1))
     difference = first - second
     lines = [f"Warning sign 1: {GENERATION_ONE} was right first time on {count(first, total)} tickets, {DIRECT} on "
              f"{count(second, total)}, a difference of {difference}."]
@@ -290,6 +398,48 @@ def sign_one(results: dict[str, dict], total: int) -> list[str]:
     appears, below = SIGN_ONE[total]
     return [*lines, "The sign appears." if difference >= appears else "The sign does not appear." if difference < below
             else f"Not decided: a second set of {SET_SIZE} is needed, and {DECIDING} tickets decide."]
+
+
+def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
+    """Warning sign 2 over the tickets with both versions judged and both token counts; a verdict only when every
+    ticket has both versions judged."""
+    counted = [pair for pair in judged if pair[0]["tokens"] is not None and pair[1]["tokens"] is not None]
+    left = (f"  Left out of both sides: {total - len(judged)} without both versions judged, "
+            f"{len(judged) - len(counted)} with a blank token count.")
+    if not counted:
+        return ["Warning sign 2: no verdict. No ticket has both versions judged and both token counts.", left]
+    spend, ownless = dict.fromkeys([*(name for name, _ in STEPS), None], 0), 0
+    for first, _ in counted:
+        for helper in first["helpers"] or []:
+            spend[step(helper["description"], helper["brief_head"])] += helper["total_tokens"] or 0
+            ownless += helper["total_tokens"] is None
+    first, second = (sum(pair[side]["tokens"] for pair in counted) for side in (0, 1))
+    own = first - sum(spend.values())
+    extra, cut, unsorted = first - second, sum(spend[name] for name in CUT), spend[None] + own
+
+    def share(part: int | float) -> str:
+        return f"{number(part)} tokens, {part / first:.1%} of {GENERATION_ONE}'s" if first else f"{number(part)} tokens"
+
+    lines = [f"Warning sign 2: on {len(counted)} of {total} tickets, {GENERATION_ONE} spent {number(first)} tokens "
+             f"and {DIRECT} {number(second)}, an extra cost of {number(extra)}.", left,
+             f"  {GENERATION_ONE}'s helpers by step: " + ", ".join(f"{name} {number(spend[name])}" for name, _ in STEPS)
+             + f". {ownless} helpers have no tokens of their own.",
+             f"  The cut, {listed(list(CUT))}: {share(cut)}.",
+             f"  Not sorted into a step: {share(unsorted)}: {number(spend[None])} in helpers that name no step, "
+             f"{number(own)} the sessions' own, in no helper.",
+             "  A helper resumed for a fix round counts under the step it started as."]
+    if len(judged) < total:
+        return [*lines, f"No verdict: tickets {unjudged(judged, total)}"]
+    if extra <= 0:
+        return [*lines, f"No verdict: {GENERATION_ONE} cost no more than {DIRECT}, so there is no extra cost to cut."]
+    verdict_without_unsorted, verdict_with_unsorted = (
+        "The sign appears." if 2 * part > extra else "The sign does not appear." for part in (cut, cut + unsorted))
+    lines += [f"Without the spend not sorted, the cut is {number(cut)} tokens against half the extra cost, "
+              f"{number(extra / 2)}. {verdict_without_unsorted}",
+              f"With it counted as cut, the cut is {number(cut + unsorted)} tokens. {verdict_with_unsorted}"]
+    if verdict_without_unsorted == verdict_with_unsorted:
+        return lines
+    return [*lines, "The two verdicts differ: the spend not sorted decides the sign."]
 
 
 def main(argv: list[str]) -> int:

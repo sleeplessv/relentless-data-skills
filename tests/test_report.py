@@ -239,14 +239,14 @@ class TestReport(unittest.TestCase):
         self.world.replay(tickets[0])
         self.world.judge(tickets[0], "direct", True, at=commit(78))  # not the replay's commit
         self.world.judge(tickets[1], "direct", True, at=commit(79))  # no replay recorded
-        lines = self.lines()
+        lines = self.lines()  # tickets[2] has neither version judged
         for version, judged in (("generation-one", 1), ("direct", 0)):
             start = lines.index(version)
             self.assertEqual(lines[start + 4:start + 6], [
                 f"  All: {judged} of 3 judged, {judged} of {judged} right first time, median total tokens "
                 f"{100 if judged else 'none'}, median active minutes {'10.0' if judged else 'none'}.",
-                f"  Left out of every figure: 0 not direct, {3 - judged - (2 - judged)} with no verdict, "
-                f"{2 - judged} judged at a commit the version does not record."])
+                f"  Left out of every figure: 0 not direct, 1 with no verdict, {2 - judged} judged at a commit the "
+                "version does not record."])
 
     def test_projects_appear_as_labels_only(self) -> None:
         self.world.baseline(20, 20)
@@ -302,14 +302,14 @@ class TestReport(unittest.TestCase):
         self.world.verdicts = [line for line in self.world.verdicts
                                if (line["version"], line["ticket"]) not in (("direct", 1), ("generation-one", 2))]
         self.world.verdicts[-1]["right_first_time"] = None
-        self.assertEqual(self.lines()[-1], "Warning sign 1: no verdict. 3 of 30 tickets do not have both "
-                                           "generation-one and direct judged.")
+        self.assertEqual(self.lines()[-1],
+                         "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 3 of 30.")
 
     def test_a_second_set_not_yet_judged_holds_back_the_verdict(self) -> None:
         self.world.baseline(20, 10)
         self.world.draw()
-        self.assertEqual(self.lines()[-1], "Warning sign 1: no verdict. 30 of 60 tickets do not have both "
-                                           "generation-one and direct judged.")
+        self.assertEqual(self.lines()[-1],
+                         "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 60.")
 
     def test_lines_for_a_ticket_in_no_set_are_left_out_and_counted(self) -> None:
         self.world.baseline(20, 15)
@@ -338,8 +338,8 @@ class TestReport(unittest.TestCase):
         self.world.draw()
         result = self.world.report(save=False)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stdout.splitlines()[-1], "Warning sign 1: no verdict. 30 of 30 tickets do not have "
-                                                         "both generation-one and direct judged.")
+        self.assertEqual(result.stdout.splitlines()[-1],
+                         "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 30.")
 
     def test_input_it_cannot_read_with_certainty_stops_it_with_nothing_printed(self) -> None:
         def field(name: str, value: object) -> Callable[[list[str]], None]:

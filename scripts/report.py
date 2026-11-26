@@ -235,8 +235,8 @@ def sign_one(results: dict[str, dict], total: int) -> list[str]:
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
     missing = sum(not (isinstance(first, dict) and isinstance(second, dict)) for first, second in pairs)
     if missing:
-        return [f"Warning sign 1: no verdict. {missing} of {total} tickets do not have both {GENERATION_ONE} and "
-                f"{DIRECT} judged."]
+        return [f"Warning sign 1: no verdict. Tickets without both {GENERATION_ONE} and {DIRECT} judged: "
+                f"{missing} of {total}."]
     first, second = (sum(pair[side]["right"] for pair in pairs) for side in (0, 1))
     difference = first - second
     lines = [f"Warning sign 1: {GENERATION_ONE} was right first time on {count(first, total)} tickets, {DIRECT} on "

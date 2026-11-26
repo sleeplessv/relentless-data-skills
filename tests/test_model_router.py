@@ -212,6 +212,15 @@ class ModelRouterCatalogTests(unittest.TestCase):
         self.assertEqual(classes, {"apex", "strong", "standard", "light"})
         self.assertEqual(vendors, {"Google", "OpenAI", "Anthropic"})
 
+        by_model = {
+            row.strip("|").split("|")[2].strip(): row.strip("|").split("|")[0].strip().strip("`")
+            for row in rows
+        }
+        self.assertEqual(by_model["Claude Opus 5.5"], "apex")
+        self.assertEqual(by_model["Claude Fable 5.2"], "apex")
+        self.assertEqual(by_model["Claude Sonnet 5.5"], "strong")
+        self.assertEqual(by_model["GPT-6.2 Sol"], "strong")
+
     def test_avoids_glossary_banned_phrase_model_tier(self) -> None:
         for path in (SKILL_MD, CATALOG_MD, DISPATCH_MD, SKILL_DIR / "README.md"):
             with self.subTest(path=path.name):

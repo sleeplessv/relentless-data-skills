@@ -8,9 +8,9 @@ argument-hint: "[task or plan to route]"
 
 Assign each delegated task to the cheapest model class and vendor that fits its modality, reasoning demand, and failure cost. Four model classes span Google Gemini 4, OpenAI GPT-6, and Anthropic Claude 5:
 
-- **Apex.** Maximum reasoning depth for formal proofs, stuck architecture, whole-repo grounding, and escalation (`Gemini 4 Carbon`, `GPT-6.2 Astra`, `Claude Fable 5.2`).
-- **Strong.** Heavy workhorse for autonomous coding, multi-file refactors, reviews, and synthesis (`Gemini 4 Neon`, `GPT-6.2 Sol`, `Claude Opus 5.5`).
-- **Standard.** Fast production execution for scoped edits, visual or GUI tasks, and worker fan-outs (`Gemini 4 Hydrogen`, `GPT-6.1 Terra`, `Claude Sonnet 5.5`).
+- **Apex.** Maximum reasoning depth and frontier autonomy for formal proofs, stuck architecture, multi-hour refactors, whole-repo grounding, and escalation (`Gemini 4 Carbon`, `GPT-6.2 Astra`, `Claude Fable 5.2`, `Claude Opus 5.5`).
+- **Strong.** High-capability daily engineering workhorses for feature coding, scoped refactors, reviews, and synthesis (`Gemini 4 Neon`, `GPT-6.2 Sol`, `Claude Sonnet 5.5`).
+- **Standard.** Fast, low-cost execution for routine edits, visual or GUI tasks, and worker fan-outs (`Gemini 4 Hydrogen`, `GPT-6.1 Terra`, or `Claude Sonnet 5.5` at `low` effort in Claude-only sessions).
 - **Light.** High-volume extraction, classification, file location, and routing (`Gemini 3.5 Flash-Lite`, `GPT-6 Luna`, `Claude Haiku 5.5`).
 
 ## 1. Check what the session can reach
@@ -44,14 +44,14 @@ cache rates, or multi-model pairing stacks.
 | Task shape | Class | First pick (in, out USD) | Same-class alternatives | Why it wins |
 | --- | --- | --- | --- | --- |
 | Formal math, strict proofs, scientific code, rigid constraints | `apex` | `GPT-6.2 Astra` (10.00, 50.00) | `Gemini 4 Carbon` (4.00, 20.00), `Claude Fable 5.2` (8.00, 40.00) | Highest ceiling on formal logic, FrontierMath, ARC-AGI, and strict rules. |
-| Ambiguous migrations, fuzzy specs, stuck design decisions | `apex` | `Claude Fable 5.2` (8.00, 40.00) | `Gemini 4 Carbon` (4.00, 20.00), `GPT-6.2 Astra` (10.00, 50.00) | Strongest architectural judgment when under-specified work stalls `Opus 5.5`. |
-| Whole-repo audits, cyber defense, grounded long-context work | `apex` | `Gemini 4 Carbon` (4.00, 20.00) | `Claude Fable 5.2` (8.00, 40.00), `GPT-6.2 Astra` (10.00, 50.00) | Unified 1M multimodal window, lowest fabrication rate, half rival `apex` cost (`Argon` saves thinking tokens). |
-| Multi-hour autonomous coding, messy refactors, nuanced prose | `strong` | `Claude Opus 5.5` (4.00, 20.00) | `GPT-6.2 Sol` (2.00, 10.00), `Gemini 4 Neon` (3.00, 15.00) | Sustains design judgment and autonomous debugging across sprawling diffs. |
-| Scoped feature coding, test suites, multi-source synthesis | `strong` or `standard` | `GPT-6.2 Sol` (2.00, 10.00) or `Claude Sonnet 5.5` (2.00, 10.00) | `Gemini 4 Neon` (3.00, 15.00) | Reaches 95 percent of `apex` coding quality at 2.00 input and 10.00 output USD. |
-| Independent defect or requirements review of a change | `strong` or `apex` | Cross-vendor `strong` or `apex` | Fresh same-vendor `strong` helper | A second model family catches defects same-model review misses. Keep weaker models read-only. |
-| Invoices, forms, CAD drawings, screenshots, GUI automation | `standard` | `GPT-6.1 Terra` (1.00, 5.00) | `Claude Opus 5.5` (4.00, 20.00), `Gemini 4 Neon` (3.00, 15.00) | Matches `Astra` on visual agentic exams at 1.00 input and 5.00 output USD; pick `Opus 5.5` for novel desktop recovery. |
+| Ambiguous migrations, fuzzy specs, stuck design decisions | `apex` | `Claude Fable 5.2` (8.00, 40.00) | `Claude Opus 5.5` (4.00, 20.00), `Gemini 4 Carbon` (4.00, 20.00), `GPT-6.2 Astra` (10.00, 50.00) | Highest Claude reasoning ceiling when an escalation or advisor pass is needed above `Opus 5.5`. |
+| Multi-hour autonomous coding, messy refactors, nuanced prose | `apex` | `Claude Opus 5.5` (4.00, 20.00) | `Gemini 4 Carbon` (4.00, 20.00), `Claude Fable 5.2` (8.00, 40.00) | Sustains frontier design judgment and autonomous debugging across sprawling diffs at half `Fable 5.2` cost. |
+| Whole-repo audits, cyber defense, grounded long-context work | `apex` | `Gemini 4 Carbon` (4.00, 20.00) | `Claude Opus 5.5` (4.00, 20.00), `GPT-6.2 Astra` (10.00, 50.00) | Unified 1M multimodal window, lowest fabrication rate, and `4.00, 20.00` USD pricing (`Argon` saves thinking tokens). |
+| Scoped feature coding, test suites, multi-source synthesis | `strong` | `GPT-6.2 Sol` (2.00, 10.00) or `Claude Sonnet 5.5` (2.00, 10.00) | `Gemini 4 Neon` (3.00, 15.00) | Reaches 95 percent of `apex` coding quality at 2.00 input and 10.00 output USD. |
+| Independent defect or requirements review of a change | `strong` or `apex` | Cross-vendor `strong` or `apex` | Fresh same-vendor `strong` or `apex` helper | A second model family catches defects same-model review misses. Keep weaker models read-only. |
+| Invoices, forms, CAD drawings, screenshots, GUI automation | `standard` | `GPT-6.1 Terra` (1.00, 5.00) | `Gemini 4 Hydrogen` (1.50, 7.50); escalate novel desktop recovery to `Claude Opus 5.5` (4.00, 20.00) | Matches `Astra` on visual agentic exams at 1.00 input and 5.00 output USD. |
 | Native video, audio, or mixed PDF and media repositories | `standard` or `strong` | `Gemini 4 Hydrogen` (1.50, 7.50) or `Gemini 4 Neon` (3.00, 15.00) | `Gemini 3.5 Flash-Lite` (0.30, 2.50) for bulk media triage | Native audio and video across a unified 1M window with 95 percent cache discounts. |
-| Fast routine code edits, CI helpers, wide worker fan-outs | `standard` | `Gemini 4 Hydrogen` (1.50, 7.50) | `Claude Sonnet 5.5` (2.00, 10.00), `GPT-6.1 Terra` (1.00, 5.00) | High-speed Gemini 4 execution for worker handoffs, with 0.075 USD cached reads. |
+| Fast routine code edits, CI helpers, wide worker fan-outs | `standard` | `Gemini 4 Hydrogen` (1.50, 7.50) | `GPT-6.1 Terra` (1.00, 5.00), or `Claude Sonnet 5.5` at `low` effort (2.00, 10.00) | High-speed Gemini 4 execution for worker handoffs, with 0.075 USD cached reads. |
 | File location, log triage, classification, JSON extraction | `light` | `GPT-6 Luna` (0.10, 0.50) or `Claude Haiku 5.5` (0.10, 0.50) | `Gemini 3.5 Flash-Lite` (0.30, 2.50) | Costs 0.10 input and 0.50 output USD; `Luna` fits bulk ETL, `Haiku 5.5` fits live routing and sub-agent skims. |
 
 Done when every task in the plan records one target model, its model class, its dispatch channel, and its fallback model.

@@ -22,9 +22,9 @@ Or combine it with [`orchestrator-mode`](../orchestrator-mode/) and
 
 | Class | Google | OpenAI | Anthropic | Input USD per 1M | Output USD per 1M |
 | --- | --- | --- | --- | --- | --- |
-| `apex` | Gemini 4 Carbon, Argon | GPT-6.2 Astra | Claude Fable 5.2 | 4.00 to 10.00 | 20.00 to 50.00 |
-| `strong` | Gemini 4 Neon | GPT-6.2 Sol | Claude Opus 5.5 | 2.00 to 4.00 | 10.00 to 20.00 |
-| `standard` | Gemini 4 Hydrogen | GPT-6.1 Terra | Claude Sonnet 5.5 | 1.00 to 2.00 | 5.00 to 10.00 |
+| `apex` | Gemini 4 Carbon, Argon | GPT-6.2 Astra | Claude Fable 5.2, Opus 5.5 | 4.00 to 10.00 | 20.00 to 50.00 |
+| `strong` | Gemini 4 Neon | GPT-6.2 Sol | Claude Sonnet 5.5 | 2.00 to 3.00 | 10.00 to 15.00 |
+| `standard` | Gemini 4 Hydrogen | GPT-6.1 Terra | Claude Sonnet 5.5 (`low` effort) | 1.00 to 2.00 | 5.00 to 10.00 |
 | `light` | Gemini 3.5 Flash-Lite | GPT-6 Luna | Claude Haiku 5.5 | 0.10 to 0.30 | 0.50 to 2.50 |
 
 Full capability notes, prompt-cache discounts, and multi-model pairing stacks

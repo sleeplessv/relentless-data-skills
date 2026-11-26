@@ -30,7 +30,7 @@ Read the printed `=yes` and `=no` lines:
 
 | Harness | Parameter | `apex` | `strong` | `standard` | `light` | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| Claude Code | `model` alias on subagent call | `fable` | `opus` | `sonnet` | `haiku` | Forks inherit the parent model and effort. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` blocks per-call overrides. |
+| Claude Code | `model` alias on subagent call | `opus` (`fable` on escalation) | `sonnet` | `sonnet` (`effort: low`) | `haiku` | Forks inherit parent model and effort. `CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1` blocks overrides. |
 | Codex | `model` on `spawn_agent` | `gpt-6.2-astra` | `gpt-6.2-sol` | `gpt-6.1-terra` | `gpt-6-luna` | Takes exact catalog slugs, never aliases. Set `fork_turns: "none"` whenever setting `model` or `reasoning_effort`. |
 | Antigravity | `Model` on `invoke_subagent` | `pro` (or `inherit` on Carbon) | `pro` or `inherit` | `flash` | `flash_lite` | `browser` subagents default to `flash`. `inherit` reuses the coordinator's Gemini model. |
 | Cursor | `model` on worker or launch | Exact catalog ID | Exact catalog ID | Exact catalog ID | Exact catalog ID | Plan limits can fall back silently to another model. |

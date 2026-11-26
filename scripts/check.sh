@@ -21,16 +21,19 @@
 # presence and content decide nothing, so a killed run, even one killed with
 # SIGKILL, blocks no later run. The script's own process holds the lock and the
 # checks it starts do not, so a process that a check leaves running cannot keep
-# it. The holder writes its process id and start time into the file, and only
-# the waiting line reads them.
+# it. The holder writes its process id and the time its run started into the
+# file, and only the waiting line reads them.
 #
 # A run that has to wait prints one line at once. The line names the holder's
 # process id and start time where the file gives them, and the longest the run
-# will wait. When its turn comes the run prints how long it waited.
-# CHECK_LOCK_WAIT sets that bound in whole seconds from 0 to 86400 (default
-# 1800). At the bound the run prints one line on standard error, runs no check,
-# and exits 75. A run that cannot open or lock the file for any reason other
-# than another holder prints one line and runs without the lock.
+# will wait. The run then asks the system for the lock and blocks until the
+# system gives it. When several runs wait, the system picks the next holder in
+# no fixed order, so the first to wait is not always the first served. When its
+# turn comes the run prints how long it waited. CHECK_LOCK_WAIT sets that bound
+# in whole seconds from 0 to 100000000 (default 1800). At the bound the run
+# prints one line on standard error, saying how long it waited and that no
+# check was run, and exits 75. A run that cannot open or lock the file for any
+# reason other than another holder prints one line and runs without the lock.
 # CHECK_LOCK_FILE names another lock file, for the tests or for one deliberate
 # run beside another. No switch skips the lock.
 #
@@ -40,6 +43,7 @@
 # Exit status: 0 when every check passes, the failing check's own status, 2 for
 # bad usage or a bad CHECK_LOCK_WAIT, 75 when the wait ran out.
 set -euo pipefail
+started="$(date '+%Y-%m-%d %H:%M:%S')"
 
 cd "$(git rev-parse --show-toplevel)"
 
@@ -60,7 +64,7 @@ while [ $# -gt 0 ]; do
       ;;
     --base=*) base="${1#--base=}" ;;
     -h | --help)
-      sed -n '2,41p' "$0" | sed 's/^# \{0,1\}//'
+      awk 'NR > 1 && !/^#/ { exit } NR > 1' "$0" | sed 's/^# \{0,1\}//'
       exit 0
       ;;
     *)
@@ -76,12 +80,12 @@ if [ -z "$base" ]; then
 fi
 
 if [ "$fast" -eq 0 ]; then
-  # This process holds the lock on fd 9 until it exits; run() closes fd 9 for
-  # each check, so nothing a check leaves running keeps the lock.
+  # This process holds the lock on fd 9 until it exits. run() starts each check
+  # in a subshell that closes fd 9 first, so nothing a check starts holds it.
   lock_file="${CHECK_LOCK_FILE:-$(git rev-parse --path-format=absolute --git-common-dir)/check.sh.lock}"
   if { exec 9>>"$lock_file"; } 2>/dev/null; then
     lock_rc=0
-    python3 scripts/check_lock.py 9 "$lock_file" "$$" || lock_rc=$?
+    python3 scripts/check_lock.py 9 "$lock_file" "$$" "$started" || lock_rc=$?
     case "$lock_rc" in
       0) ;;
       3) exec 9>&- ;;
@@ -97,7 +101,9 @@ run() {
   shift
   echo "==> $name"
   local rc=0
-  "$@" 9>&- || rc=$?
+  # A redirection (`"$@" 9>&-`) is not enough: bash 3.2 runs a shell function
+  # with a saved copy of fd 9 open, which the programs it starts inherit.
+  (exec 9>&-; "$@") || rc=$?
   if [ "$rc" -eq 0 ]; then
     echo "PASS: $name"
   else

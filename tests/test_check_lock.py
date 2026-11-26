@@ -11,6 +11,8 @@ never run here. Every run uses a lock file of its own: CHECK_LOCK_FILE in the
 test's temporary folder, or the throwaway repository's own git directory.
 
 Tests wait on a file or on a process's exit, never on a sleep of fixed length.
+Where how long a run waited is what a test checks, the test waits for the clock
+to pass a bound it then asserts against.
 """
 from __future__ import annotations
 
@@ -30,56 +32,15 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BASH = shutil.which("bash")
 GIT = shutil.which("git")
 DEADLINE = 120  # seconds; a bound on waiting for a file or a process, not a sleep
+TIME = "[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}"  # as the lock file and the waiting line give it
 
-HELP = """\
-Run the repo's local checks; stop at the first failure.
-
-Usage: scripts/check.sh [--fast] [--network] [--browser] [--base <commit-or-ref>]
-  --fast     skip the unit test suite (used by the pre-commit hook)
-  --network  also run scripts/check_doc_urls.py (needs network access)
-  --browser  also run the dossier tests with Playwright and Chromium, via uv
-             (needs uv and network access); a skipped test fails the run
-  --base     baseline for skill_versions.py; also settable via CHECK_BASE.
-             Default: git merge-base HEAD origin/main, falling back to main.
-
-One full run at a time: a run without --fast takes a lock before its first
-check and holds it until it exits, so it waits while another run of this
-clone holds the lock. A run with --fast, --help or a usage error takes no
-lock and never waits.
-
-The lock is fcntl.flock on one file, taken through python3 by
-scripts/check_lock.py. The file is check.sh.lock in the clone's shared git
-directory (git rev-parse --git-common-dir), so every worktree of the clone
-uses the same lock. Only the system says whether the lock is held. The file's
-presence and content decide nothing, so a killed run, even one killed with
-SIGKILL, blocks no later run. The script's own process holds the lock and the
-checks it starts do not, so a process that a check leaves running cannot keep
-it. The holder writes its process id and start time into the file, and only
-the waiting line reads them.
-
-A run that has to wait prints one line at once. The line names the holder's
-process id and start time where the file gives them, and the longest the run
-will wait. When its turn comes the run prints how long it waited.
-CHECK_LOCK_WAIT sets that bound in whole seconds from 0 to 86400 (default
-1800). At the bound the run prints one line on standard error, runs no check,
-and exits 75. A run that cannot open or lock the file for any reason other
-than another holder prints one line and runs without the lock.
-CHECK_LOCK_FILE names another lock file, for the tests or for one deliberate
-run beside another. No switch skips the lock.
-
-Limits: a second clone on this machine has its own lock. A run killed with
-SIGKILL frees the lock while processes it started may still be finishing.
-
-Exit status: 0 when every check passes, the failing check's own status, 2 for
-bad usage or a bad CHECK_LOCK_WAIT, 75 when the wait ran out.
-"""
 README_SENTENCE = (
     "A run without `--fast` waits its turn behind any other such run of this clone"
     " and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) explains."
 )
 AGENTS_SENTENCE = (
     "A full run waits its turn behind any other full run of this clone and needs no guard before it,"
-    " as `scripts/check.sh --help` explains."
+    " as [`scripts/check.sh --help`](scripts/check.sh) explains."
 )
 
 # The first check, scripts/lint_skill.py, is the stand-in body. STANDIN_DIR and
@@ -88,10 +49,15 @@ STANDIN_BODY = textwrap.dedent('''\
     import os, sys, time
     from pathlib import Path
 
+    def publish(path, text):
+        """Write the file whole, so a reader never finds it empty."""
+        part = path.with_name(path.name + ".part")
+        part.write_text(text)
+        os.replace(part, path)
+
     name = os.environ.get("STANDIN_NAME")
     if name:
         state = Path(os.environ["STANDIN_DIR"])
-        (state / f"{name}.pid").write_text(str(os.getpid()))
         try:
             os.close(os.open(state / "running", os.O_CREAT | os.O_EXCL))
         except FileExistsError:
@@ -100,12 +66,11 @@ STANDIN_BODY = textwrap.dedent('''\
         with open(state / "log", "a") as log:
             log.write(f"start {name}\\n")
         if os.environ.get("STANDIN_LEAVE"):
-            if os.fork() == 0:
-                os.setsid()
+            if os.fork() == 0:  # stays in the run's process group, which the test's cleanup kills
                 null = os.open(os.devnull, os.O_RDWR)
                 for fd in (0, 1, 2):
                     os.dup2(null, fd)
-                (state / f"{name}.leftover").write_text(str(os.getpid()))
+                publish(state / f"{name}.leftover", str(os.getpid()))
                 while True:
                     time.sleep(60)
         if os.environ.get("STANDIN_HOLD"):
@@ -116,6 +81,37 @@ STANDIN_BODY = textwrap.dedent('''\
             log.write(f"end {name}\\n")
         sys.exit(int(os.environ.get("STANDIN_EXIT", "0")))
 ''')
+
+# The last check, `claude plugin validate`, holds until STANDIN_DIR/claude.go
+# exists when STANDIN_CLAUDE_HOLD is set.
+FAKE_CLAUDE = textwrap.dedent('''\
+    #!/bin/sh
+    if [ -n "$STANDIN_CLAUDE_HOLD" ]; then
+      : > "$STANDIN_DIR/claude.started"
+      until [ -e "$STANDIN_DIR/claude.go" ]; do sleep 0.02; done
+    fi
+    exit 0
+''')
+
+# `--browser` runs its tests through `uv` from the shell function browser_tests,
+# inside a command substitution. With STANDIN_UV_LEAVE set, that call leaves a
+# process running.
+FAKE_UV = textwrap.dedent('''\
+    #!/bin/sh
+    case "$*" in
+      *unittest*)
+        if [ -n "$STANDIN_UV_LEAVE" ]; then
+          sh -c 'echo $$ > "$STANDIN_DIR/uv.part"; mv "$STANDIN_DIR/uv.part" "$STANDIN_DIR/uv.leftover"; exec sleep 600' \\
+            < /dev/null > /dev/null 2>&1 &
+        fi
+        echo "test_page (tests.test_dossier.T.test_page) ... ok" ;;
+    esac
+    exit 0
+''')
+
+
+def now() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def wait_until(predicate, what: str) -> None:
@@ -190,8 +186,9 @@ class CheckLockTest(unittest.TestCase):
         )
         bin_dir = self.tmp / "bin"
         bin_dir.mkdir()
-        (bin_dir / "claude").write_text("#!/bin/sh\nexit 0\n")
-        (bin_dir / "claude").chmod(0o755)
+        for name, body in (("claude", FAKE_CLAUDE), ("uv", FAKE_UV)):
+            (bin_dir / name).write_text(body)
+            (bin_dir / name).chmod(0o755)
         self.env = {k: v for k, v in os.environ.items() if not k.startswith(("CHECK_", "STANDIN_", "GIT_"))}
         self.env.update(
             PATH=f"{bin_dir}{os.pathsep}{os.environ['PATH']}",
@@ -215,8 +212,11 @@ class CheckLockTest(unittest.TestCase):
         self.addCleanup(holder.release)
         return holder
 
-    def start(self, *args: str, name: str = "", cwd: Path | None = None, **env: str) -> subprocess.Popen:
-        """Start check.sh in the background, its output going to files under state/."""
+    def start(self, *args: str, name: str = "", cwd: Path | None = None, preexec=None, **env: str) -> subprocess.Popen:
+        """Start check.sh in the background, its output going to files under state/.
+
+        preexec runs in the child before bash starts, to set what the run inherits.
+        """
         run_env = dict(self.env, **env)
         if name:
             run_env["STANDIN_NAME"] = name
@@ -227,7 +227,7 @@ class CheckLockTest(unittest.TestCase):
         self.addCleanup(err.close)
         proc = subprocess.Popen(
             [BASH, "scripts/check.sh", *args], cwd=cwd or self.repo, env=run_env,
-            stdout=out, stderr=err, start_new_session=True,
+            stdout=out, stderr=err, start_new_session=True, preexec_fn=preexec,
         )
         proc.tag = tag
         self.addCleanup(self.stop, proc)
@@ -260,17 +260,31 @@ class CheckLockTest(unittest.TestCase):
         path = self.state / "log"
         return path.read_text().splitlines() if path.exists() else []
 
+    def written_start(self, proc: subprocess.Popen) -> str:
+        """The start time the lock file gives for `proc`, which must be its only content."""
+        found = re.fullmatch(rf"{proc.pid} ({TIME})\n", self.lock.read_text())
+        self.assertIsNotNone(found, self.lock.read_text())
+        return found[1]
+
     # -- tests ------------------------------------------------------------
 
     def test_a_full_run_waits_then_gives_up_with_75_and_runs_no_check(self) -> None:
         self.hold()
+        asked = time.monotonic()
         rc, out, err = self.run_check(name="late", CHECK_LOCK_WAIT="1")
+        self.assertGreaterEqual(time.monotonic() - asked, 1)
         self.assertEqual(out.splitlines(), ["check.sh: waiting up to 1 s for another run of scripts/check.sh."])
         self.assertEqual(
             err.splitlines(),
             ["check.sh: gave up after waiting 1 s for another run of scripts/check.sh; no check was run."],
         )
         self.assertEqual(rc, 75)
+        self.assertEqual(self.log(), [])
+
+    def test_a_run_started_with_sigalrm_blocked_still_gives_up_at_its_bound(self) -> None:
+        self.hold()
+        proc = self.start(CHECK_LOCK_WAIT="1", preexec=lambda: signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM}))
+        self.assertEqual(proc.wait(timeout=DEADLINE), 75)
         self.assertEqual(self.log(), [])
 
     def test_a_fast_run_starts_its_checks_at_once_while_the_lock_is_held(self) -> None:
@@ -283,11 +297,13 @@ class CheckLockTest(unittest.TestCase):
                 self.assertEqual(out.splitlines()[-1], "All checks passed.")
                 self.assertEqual((rc, err), (0, ""))
 
-    def test_help_and_a_usage_error_never_wait(self) -> None:
+    def test_help_prints_the_whole_header_and_help_and_a_usage_error_never_wait(self) -> None:
         self.hold()
         rc, out, err = self.run_check("--help", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, err), (0, ""))
-        self.assertEqual(out, HELP)
+        lines = (self.repo / "scripts" / "check.sh").read_text().splitlines()
+        header = [re.sub(r"\A# ?", "", line) for line in lines[1:lines.index("set -euo pipefail")]]
+        self.assertEqual(out.splitlines(), header)
         rc, out, err = self.run_check("--bogus", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, out, err), (2, "", "check.sh: unknown argument: --bogus\n"))
         self.assertEqual(self.log(), [])
@@ -314,10 +330,39 @@ class CheckLockTest(unittest.TestCase):
 
     def test_the_holder_writes_its_pid_and_start_time(self) -> None:
         self.assertFalse(self.lock.exists())
+        before = now()
         proc = self.start(name="first", STANDIN_HOLD="1")
         wait_until(lambda: "start first" in self.log(), "the body to start")
-        self.assertRegex(self.lock.read_text(), rf"\A{proc.pid} [0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}} [0-9]{{2}}:[0-9]{{2}}:[0-9]{{2}}\n\Z")
+        written = self.written_start(proc)
+        self.assertTrue(before <= written <= now(), written)
         (self.state / "first.go").touch()
+        self.assertEqual(proc.wait(timeout=DEADLINE), 0)
+
+    def test_a_run_that_waited_writes_when_it_started_and_says_how_long_it_waited(self) -> None:
+        holder = self.hold()
+        before = now()
+        proc = self.start(name="queued", STANDIN_HOLD="1")
+        wait_until(lambda: self.out(proc).startswith("check.sh: waiting"), "the run to wait")
+        waiting, seen = now(), time.monotonic()
+        wait_until(lambda: time.monotonic() >= seen + 2, "two seconds of waiting")
+        holder.release()
+        wait_until(lambda: "start queued" in self.log(), "the body to start")
+        written = self.written_start(proc)
+        self.assertTrue(before <= written <= waiting, f"{written} is not between {before} and {waiting}")
+        waited = re.fullmatch(r"check\.sh: waited ([0-9]+) s for the lock\.", self.out(proc).splitlines()[1])
+        self.assertIsNotNone(waited, self.out(proc))
+        self.assertGreaterEqual(int(waited[1]), 2)
+        (self.state / "queued.go").touch()
+        self.assertEqual(proc.wait(timeout=DEADLINE), 0)
+
+    def test_the_lock_is_held_until_the_run_exits(self) -> None:
+        proc = self.start(STANDIN_CLAUDE_HOLD="1")
+        wait_until((self.state / "claude.started").exists, "the last check to start")
+        rc, out, err = self.run_check(CHECK_LOCK_WAIT="0")
+        self.assertEqual(
+            (rc, out), (75, f"check.sh: waiting up to 0 s for another run of scripts/check.sh (pid {proc.pid}, started {self.written_start(proc)}).\n")
+        )
+        (self.state / "claude.go").touch()
         self.assertEqual(proc.wait(timeout=DEADLINE), 0)
 
     def test_three_waiters_each_get_a_turn_and_no_two_bodies_run_at_once(self) -> None:
@@ -357,26 +402,33 @@ class CheckLockTest(unittest.TestCase):
                 self.assertEqual(out.splitlines()[0], "==> skill lint")
                 self.assertEqual((rc, self.notices(err)), (0, []))
                 (self.state / f"{name}.go").touch()  # the killed holder's body is still running; let it end
-                body = int((self.state / f"{name}.pid").read_text())
-                wait_until(lambda: not alive(body), "the orphaned body to end")
-                (self.state / "running").unlink(missing_ok=True)
+                wait_until(lambda: f"end {name}" in self.log(), "the orphaned body to end")
 
     def test_a_holder_whose_check_fails_frees_the_lock(self) -> None:
-        rc, out, err = self.run_check(name="failing", STANDIN_EXIT="1")
-        self.assertEqual((rc, self.notices(err)), (1, ["FAIL: skill lint (exit 1)"]))
+        proc = self.start(name="failing", STANDIN_EXIT="1", STANDIN_HOLD="1")
+        wait_until(lambda: "start failing" in self.log(), "the failing body to start")
+        self.assertEqual(self.run_check(CHECK_LOCK_WAIT="0")[0], 75)
+        (self.state / "failing.go").touch()
+        self.assertEqual((proc.wait(timeout=DEADLINE), self.notices(self.err(proc))), (1, ["FAIL: skill lint (exit 1)"]))
         rc, out, err = self.run_check(CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, out.splitlines()[-1], self.notices(err)), (0, "All checks passed.", []))
 
-    def test_a_process_a_body_leaves_running_does_not_hold_the_lock(self) -> None:
-        rc, out, err = self.run_check(name="leaver", STANDIN_LEAVE="1")
-        self.assertEqual(rc, 0)
-        leftover = self.state / "leaver.leftover"
-        wait_until(leftover.exists, "the leftover process to start")
-        pid = int(leftover.read_text())
-        self.addCleanup(kill, pid)
-        self.assertTrue(alive(pid))
-        rc, out, err = self.run_check(CHECK_LOCK_WAIT="0")
-        self.assertEqual((rc, out.splitlines()[0], self.notices(err)), (0, "==> skill lint", []))
+    def test_a_process_a_check_leaves_running_does_not_hold_the_lock(self) -> None:
+        shapes = {
+            "a program": ((), {"name": "leaver", "STANDIN_LEAVE": "1"}, "leaver.leftover"),
+            "a program started by a shell function": (("--browser",), {"STANDIN_UV_LEAVE": "1"}, "uv.leftover"),
+        }
+        for shape, (args, env, mark) in shapes.items():
+            with self.subTest(check=shape):
+                rc, out, err = self.run_check(*args, **env)
+                self.assertEqual((rc, out.splitlines()[-1]), (0, "All checks passed."))
+                leftover = self.state / mark
+                wait_until(leftover.exists, "the leftover process to start")
+                pid = int(leftover.read_text())
+                self.addCleanup(kill, pid)
+                self.assertTrue(alive(pid))
+                rc, out, err = self.run_check(CHECK_LOCK_WAIT="0")
+                self.assertEqual((rc, out.splitlines()[0], self.notices(err)), (0, "==> skill lint", []))
 
     def test_a_lock_file_that_cannot_be_opened_runs_without_the_lock(self) -> None:
         read_only = self.tmp / "read-only.lock"
@@ -393,38 +445,60 @@ class CheckLockTest(unittest.TestCase):
 
     def test_a_lock_the_system_refuses_runs_without_the_lock(self) -> None:
         # fd 9 is not open in the helper, so flock fails with EBADF: a refusal other than another holder.
+        line = f"check.sh: cannot lock {self.lock} (Bad file descriptor); running without the lock."
         result = subprocess.run(
-            [sys.executable, str(self.repo / "scripts" / "check_lock.py"), "9", str(self.lock), "4242"],
+            [sys.executable, str(self.repo / "scripts" / "check_lock.py"), "9", str(self.lock), "4242", now()],
             capture_output=True, text=True, env=self.env, timeout=DEADLINE,
         )
-        self.assertEqual(
-            (result.returncode, result.stdout, result.stderr),
-            (3, "", f"check.sh: cannot lock {self.lock} (Bad file descriptor); running without the lock.\n"),
-        )
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (3, "", line + "\n"))
+        # Given that status from the helper, the script runs every check.
+        (self.repo / "scripts" / "check_lock.py").write_text(f"import sys\nprint({line!r}, file=sys.stderr)\nsys.exit(3)\n")
+        rc, out, err = self.run_check()
+        self.assertEqual((rc, out.splitlines()[0], out.splitlines()[-1]), (0, "==> skill lint", "All checks passed."))
+        self.assertEqual(self.notices(err), [line])
 
     def test_a_bad_check_lock_wait_is_a_usage_error(self) -> None:
-        for value in ("abc", "-5", "1.5", "86401", " 5"):
-            with self.subTest(CHECK_LOCK_WAIT=value):
+        for value in ("abc", "-5", "1.5", " 5", "100000001", "9" * 5000):
+            with self.subTest(CHECK_LOCK_WAIT=value[:12]):
                 rc, out, err = self.run_check(CHECK_LOCK_WAIT=value)
                 self.assertEqual((rc, out), (2, ""))
                 self.assertEqual(
-                    err, f"check.sh: CHECK_LOCK_WAIT must be a whole number of seconds from 0 to 86400, not {value!r}.\n"
+                    err, f"check.sh: CHECK_LOCK_WAIT must be a whole number of seconds from 0 to 100000000, not {value!r}.\n"
                 )
         self.assertEqual(self.log(), [])
+
+    def test_a_long_check_lock_wait_is_served(self) -> None:
+        holder = self.hold()
+        proc = self.start(CHECK_LOCK_WAIT="100000000")
+        wait_until(lambda: self.out(proc).startswith("check.sh: waiting up to 100000000 s"), "the waiting line")
+        holder.release()
+        self.assertEqual(proc.wait(timeout=DEADLINE), 0)
+        self.hold()
+        rc, out, err = self.run_check(CHECK_LOCK_WAIT="0" * 5000 + "1")
+        self.assertEqual((rc, out), (75, "check.sh: waiting up to 1 s for another run of scripts/check.sh.\n"))
 
     def test_an_interrupted_waiter_ends_without_running_a_check(self) -> None:
         self.hold()
         for value in (None, ""):
             with self.subTest(CHECK_LOCK_WAIT=value):
                 env = {} if value is None else {"CHECK_LOCK_WAIT": value}
-                proc = self.start(**env)
+                proc = self.start(preexec=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL), **env)
                 line = "check.sh: waiting up to 1800 s for another run of scripts/check.sh.\n"
                 wait_until(lambda: self.out(proc) == line, "the waiting line")
                 os.killpg(proc.pid, signal.SIGINT)
-                # bash dies by SIGINT, or exits 130 where it was started with SIGINT ignored
+                # bash dies by SIGINT, or exits 130 when it saw its child die by SIGINT first
                 self.assertIn(proc.wait(timeout=DEADLINE), (-signal.SIGINT, 128 + signal.SIGINT))
                 self.assertEqual((self.out(proc), self.err(proc)), (line, ""))
         self.assertEqual(self.log(), [])
+
+    def test_a_waiter_whose_caller_ignored_sigint_keeps_waiting(self) -> None:
+        holder = self.hold()
+        proc = self.start(preexec=lambda: signal.signal(signal.SIGINT, signal.SIG_IGN))
+        wait_until(lambda: self.out(proc).startswith("check.sh: waiting"), "the waiting line")
+        os.killpg(proc.pid, signal.SIGINT)
+        holder.release()
+        self.assertEqual(proc.wait(timeout=DEADLINE), 0)
+        self.assertEqual(self.out(proc).splitlines()[-1], "All checks passed.")
 
     def test_the_main_checkout_and_a_linked_worktree_share_one_lock(self) -> None:
         linked = self.tmp / "linked"
@@ -441,8 +515,11 @@ class CheckLockTest(unittest.TestCase):
 
 class CheckLockDocsTest(unittest.TestCase):
     def test_the_readme_and_agents_md_point_to_the_help(self) -> None:
-        readme = " ".join((REPO_ROOT / "README.md").read_text().split())
-        self.assertRegex(readme, rf"(?:\A|\. ){re.escape(README_SENTENCE)}(?: |\Z)")
+        paragraph = next(
+            part for part in (REPO_ROOT / "README.md").read_text().split("\n\n")
+            if part.startswith("Run `scripts/check.sh` before committing.")
+        )
+        self.assertRegex(" ".join(paragraph.split()), rf"\. {re.escape(README_SENTENCE)}(?: |\Z)")
         checks = next(line for line in (REPO_ROOT / "AGENTS.md").read_text().splitlines() if line.startswith("- **Checks.**"))
         self.assertTrue(checks.endswith(" " + AGENTS_SENTENCE), checks)
 

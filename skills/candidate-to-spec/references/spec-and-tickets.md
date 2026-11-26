@@ -224,8 +224,7 @@ and that comment.
    printf '%s\n' "$TICKET_URL"
    ```
 
-   With the recorded `TICKET_N`, set the parent first, then the blockers. Record each
-   successful edit before running the next block.
+   With the recorded `TICKET_N`, set the parent and record its success before adding blockers.
 
    ```bash
    set -euo pipefail
@@ -237,9 +236,26 @@ and that comment.
    ```bash
    set -euo pipefail
    if [ "$EDGES" = native ] && [ -n "$BLOCKED_BY" ]; then
-     gh issue edit "$TICKET_N" --add-blocked-by "$BLOCKED_BY"
+     host=${TICKET_URL#*://}
+     existing=$(gh api graphql --paginate --hostname "${host%%/*}" \
+       -F owner='{owner}' -F name='{repo}' -F n="$TICKET_N" \
+       -f 'query=query($owner:String!, $name:String!, $n:Int!, $endCursor:String) {
+         repository(owner:$owner, name:$name) { issue(number:$n) {
+           blockedBy(first:100, after:$endCursor) { nodes { url } pageInfo { hasNextPage endCursor } }
+         } }
+       }' --jq '.data.repository.issue.blockedBy.nodes[].url')
+     IFS=, read -ra blockers <<< "$BLOCKED_BY"
+     for blocker in "${blockers[@]}"; do
+       if ! grep -Fxq -- "${TICKET_URL%/*}/$blocker" <<< "$existing"; then
+         gh issue edit "$TICKET_N" --add-blocked-by "$blocker"
+       fi
+     done
    fi
    ```
+
+   Resume an interrupted or failed blocker edit by rerunning this entire block against the
+   recorded ticket, including when a human runs it. It reads every page before writing and
+   adds only missing blockers. A failed read stops the block before any edit.
 
    An error explicitly identifying issue dependencies as unsupported switches `EDGES` to
    `parent`. One identifying sub-issues as unsupported switches it to `body`. This also applies
@@ -263,7 +279,9 @@ and that comment.
    ```
 
    Check the returned label against `TICKET_LABEL`, parent against `SPEC_N`, and blocker
-   numbers against `BLOCKED_BY`. Use the returned body's corresponding section for each
+   URLs in `blockedBy.nodes` against the same-repository issues in `BLOCKED_BY`. If the
+   node count is below `blockedBy.totalCount`, use the paginated `gh api` read above to
+   verify the full list. Use the returned body's corresponding section for each
    relationship the server lacks. Report a mismatch with the ticket URL. When all tickets
    match, post the final breakdown (title, blocked by, what it delivers, URL) on the spec:
 

@@ -17,6 +17,7 @@ quoted heredoc that workers.md prescribes.
 """
 from __future__ import annotations
 
+import json
 import os
 import re
 import shlex
@@ -63,15 +64,45 @@ for a in "$@"; do
   prev="$a"
 done
 case "$1 $2" in
+  "api graphql")
+    if [[ ",${GH_MISSING_FIELDS:-}," == *,blockedBy,* ]]; then
+      echo "GraphQL: Field 'blockedBy' doesn't exist on type 'Issue'" >&2; exit 1
+    fi
+    for arg in "$@"; do
+      if [[ "$arg" == n=* ]]; then
+        edges="$GH_COUNTER.${arg#n=}.blockers"
+        if [ -f "$edges" ]; then cat "$edges"; fi
+      fi
+    done ;;
   "issue create")
     n=$(cat "$GH_COUNTER"); n=$((n + 1)); echo "$n" > "$GH_COUNTER"
     echo "${GH_CREATE_URL-https://github.com/o/r/issues/$n}" ;;
   "issue comment"|"issue edit"|"issue view"|"issue close")
     [[ "$3" =~ ^[0-9]+$ ]] || { echo "invalid issue: '$3'" >&2; exit 1; }
     case "$*" in
+      *"--add-blocked-by "*)
+        IFS=, read -ra blockers <<< "$5"
+        rc=0
+        for n in "${blockers[@]}"; do
+          if [ "$n" = "${GH_FAIL_BLOCKER:-}" ]; then
+            echo "gh: addBlockedBy failed for #$n" >&2; rc=1
+          else
+            echo "https://github.com/o/r/issues/$n" >> "$GH_COUNTER.$3.blockers"
+          fi
+        done
+        exit "$rc" ;;
       *"--json url"*) echo "https://github.com/o/r/issues/$3" ;;
       *"--json labels,parent,blockedBy"*)
-        echo '{"labels":[{"name":"ready-for-agent"}],"parent":{"number":42},"blockedBy":[]}' ;;
+        python3 - "$GH_COUNTER.$3.blockers" <<'PY'
+import json, sys
+from pathlib import Path
+path = Path(sys.argv[1])
+nodes = [{"number": int(url.rsplit("/", 1)[1]), "url": url}
+         for url in (path.read_text().splitlines() if path.exists() else [])]
+print(json.dumps({"labels": [{"name": "ready-for-agent"}], "parent": {"number": 17},
+                  "blockedBy": {"nodes": nodes, "totalCount": len(nodes)}}))
+PY
+        ;;
       *"--json labels,parent,body"*)
         echo '{"labels":[{"name":"ready-for-agent"}],"parent":{"number":17},"body":"## Blocked by\n#40\n#41"}' ;;
       *"--json labels,body"*)
@@ -367,11 +398,17 @@ class GhSequenceTests(unittest.TestCase):
         run = self.publish_ticket({"SPEC_N": "17", "BLOCKED_BY": "40,41"})
         self.assertEqual(run.rc, 0, run)
         self.ticket_create(run)
-        self.assertEqual(run.calls[1:], [
-            ["issue", "edit", "42", "--parent", "17"],
-            ["issue", "edit", "42", "--add-blocked-by", "40,41"],
+        self.assertEqual(run.calls[1], ["issue", "edit", "42", "--parent", "17"])
+        self.assertEqual(run.calls[2][:3], ["api", "graphql", "--paginate"])
+        self.assertIn("n=42", run.calls[2])
+        self.assertEqual(run.calls[3:], [
+            ["issue", "edit", "42", "--add-blocked-by", "40"],
+            ["issue", "edit", "42", "--add-blocked-by", "41"],
             ["issue", "view", "42", "--json", "labels,parent,blockedBy"],
         ])
+        observed = json.loads(run.out.splitlines()[-1])["blockedBy"]
+        self.assertEqual(observed["totalCount"], 2)
+        self.assertEqual([node["number"] for node in observed["nodes"]], [40, 41])
 
     def test_ticket_publish_carries_the_human_label(self):
         run = self.publish_ticket({"SPEC_N": "17", "TICKET_LABEL": "needs-triage"})
@@ -391,7 +428,9 @@ class GhSequenceTests(unittest.TestCase):
             "EDGES": "native", "TICKET_TITLE": "Expand", "TICKET_LABEL": "ready-for-agent",
             "TICKET_BODY": self.files["TICKET_BODY"], "SPEC_N": "17", "BLOCKED_BY": "40,41"})
         self.assertEqual(run.rc, 0, run)
-        self.assertEqual(run.calls[2], ["issue", "edit", "42", "--add-blocked-by", "40,41"])
+        self.assertEqual(run.calls[3:5], [
+            ["issue", "edit", "42", "--add-blocked-by", "40"],
+            ["issue", "edit", "42", "--add-blocked-by", "41"]])
 
     @unittest.skipUnless(ZSH, "zsh is required")
     def test_spec_publish_from_zsh_survives_an_empty_deferred_directory(self):
@@ -433,6 +472,14 @@ class GhSequenceTests(unittest.TestCase):
         self.assertEqual(resumed.calls, prior_calls + [
             ["issue", "view", "42", "--json", "labels,parent,body"]])
 
+    def test_unavailable_native_blocker_query_stops_before_the_blocker_edit(self):
+        run = self.publish_ticket({"SPEC_N": "17", "BLOCKED_BY": "40,41",
+                                   "GH_MISSING_FIELDS": "blockedBy"})
+        self.assertNotEqual(run.rc, 0)
+        self.assertIn("Field 'blockedBy'", run.err)
+        self.assertEqual(run.out.strip(), "https://github.com/o/r/issues/42")
+        self.assertEqual(run.subcommands(), ["issue create", "issue edit", "api graphql"])
+
     def test_ticket_publish_rejects_an_unknown_edges_value_before_creating(self):
         run = self.publish_ticket({"SPEC_N": "17", "EDGES": "api"})
         self.assertNotEqual(run.rc, 0, run)
@@ -451,16 +498,22 @@ class GhSequenceTests(unittest.TestCase):
         self.assertIn("https://github.com/o/r/issues/42", run.out)
         self.assertIn("gh: issue edit failed on request", run.err)
 
-    def test_failed_blocker_edit_retries_without_repeating_the_parent_or_create(self):
+    def test_partial_blocker_edit_retries_only_the_missing_edge_on_the_created_ticket(self):
         block = doc_block(SPEC_TICKETS, "Tickets", "--add-blocked-by")
-        env = {"TICKET_N": "42", "EDGES": "native", "BLOCKED_BY": "40,41"}
-        failed = self.run_script(block, {**env, "GH_FAIL": "issue edit"})
+        env = {"SPEC_N": "17", "BLOCKED_BY": "40,41"}
+        failed = self.publish_ticket({**env, "GH_FAIL_BLOCKER": "41"})
         self.assertNotEqual(failed.rc, 0)
-        self.assertIn("issue edit failed", failed.err)
-        resumed = self.run_script(block, env)
+        self.assertIn("addBlockedBy failed for #41", failed.err)
+        ticket = failed.out.strip()
+        self.assertEqual(ticket, "https://github.com/o/r/issues/42")
+        applied = self.sb.root / "counter.42.blockers"
+        self.assertEqual(applied.read_text().splitlines(), ["https://github.com/o/r/issues/40"])
+        resumed = self.run_script(block, {**env, "TICKET_N": "42", "TICKET_URL": ticket})
         self.assertEqual(resumed.rc, 0, resumed)
-        self.assertEqual(resumed.calls, [
-            ["issue", "edit", "42", "--add-blocked-by", "40,41"]] * 2)
+        self.assertEqual(resumed.calls[len(failed.calls):], [
+            failed.calls[2], ["issue", "edit", "42", "--add-blocked-by", "41"]])
+        self.assertEqual(applied.read_text().splitlines(),
+                         ["https://github.com/o/r/issues/40", "https://github.com/o/r/issues/41"])
 
     def test_breakdown_comment_lands_on_the_spec(self):
         run = self.run_block("Tickets", "BREAKDOWN", {"SPEC_N": "42"})

@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import draw  # noqa: E402  (a sibling script, not an installed package)
 import judge  # noqa: E402
 import replay  # noqa: E402
+import scan  # noqa: E402
 
 GENERATION_ONE, DIRECT = judge.GENERATION_ONE, replay.VERSION
 RATE_FLOOR = 20  # a count out of fewer tickets than this is never given as a rate
@@ -121,6 +122,16 @@ blank total_tokens. Active minutes are left out the same way. Lines in
 versions.jsonl or verdicts.jsonl for a ticket in no set are left out and
 counted.
 
+A nonblank line of scan-rows.jsonl is no row when the scan would not read it as a
+JSON object (json_object in scripts/scan.py says which) or when it is an object
+whose session is not text. The scan keeps such a line, and the report leaves it
+out: it names the line once on standard error, with the file, the line number and
+the reason, as it reads the file, and prints on standard output how many lines it
+left out when it prints the report. A line of nothing but whitespace is blank,
+and is passed over and not counted. A session whose row was such a line is left
+out of the token figures and counted, like one with no row.
+
+
 Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s,
 over every ticket of the sets. It is printed only when every ticket has both
 versions judged; otherwise the report says how many tickets do not. The sign
@@ -177,17 +188,19 @@ Files read, all written by the other scripts:
                         total_tokens of each helper (scripts/scan.py).
 
 A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing
-yet. A folder or file that cannot be read, a line that is not a JSON object,
-a field missing or of the wrong type, a set entry's label the draw would not
-give or bucket it does not use, a version name in versions.jsonl or
-verdicts.jsonl the judge would not take, a total_tokens that is negative,
-infinite or not a number, helpers that hold more tokens than their row's
-total_tokens, or a second line for one ticket and version, one session or one
-ticket of the sets stops the report. The error names the folder or file, and
-the ledger line, helper or set ticket entry that fails a check. A set file
-that is not JSON, or not an object holding a list of tickets, and a ledger
-that is not UTF-8 are named by file alone. It never prints a refused label or
-version name, and nothing else is printed.
+yet. A folder or file that cannot be read, a line of versions.jsonl or
+verdicts.jsonl that is not a JSON object, a field missing or of the wrong type
+(but not the session of a line of scan-rows.jsonl, above), a set entry's label
+the draw would not give or bucket it does not use, a version name in
+versions.jsonl or verdicts.jsonl the judge would not take, a total_tokens that
+is negative, infinite or not a number, helpers that hold more tokens than their
+row's total_tokens, or a second line for one ticket and version, one session or
+one ticket of the sets stops the report. The error goes on standard error and
+names the folder or file, and the ledger line, helper or set ticket entry that
+fails a check. A set file that is not JSON, or not an object holding a list of
+tickets, and a versions.jsonl or verdicts.jsonl that is not UTF-8 are named by
+file alone. It never prints a refused label or version name, and prints nothing
+on standard output.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:
@@ -195,7 +208,8 @@ bad usage."""
 
 
 class Unreadable(Exception):
-    """Ends the report with exit 1 and nothing printed."""
+    """Ends the report with exit 1: the error goes to standard error and nothing to standard output. Lines of
+    scan-rows.jsonl already named on standard error stay named."""
 
 
 def checked(where: str, line: object, **wanted: tuple) -> dict:
@@ -224,6 +238,35 @@ def json_lines(path: Path) -> list[tuple[str, object]]:
             except ValueError:
                 raise Unreadable(f"{path}:{number}: not a JSON line.")
     return lines
+
+
+def blank(line: bytes) -> bool:
+    """A line of nothing but whitespace, as str.strip() reads it; bytes that are not UTF-8 are not blank."""
+    try:
+        return not line.decode().strip()
+    except UnicodeDecodeError:
+        return False
+
+
+def row_lines(path: Path) -> tuple[list[tuple[str, dict]], int]:
+    """The lines of scan-rows.jsonl that can be rows, each with where it is, and how many nonblank lines are left out;
+    none of either for a file that does not exist."""
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:  # any other OSError reaches main()
+        return [], 0
+    rows, skipped = [], 0
+    for number, line in enumerate(data.split(b"\n"), 1):  # as the scan splits it
+        if blank(line):
+            continue
+        where, row = f"{path}:{number}", scan.json_object(line)
+        if row is not None and type(row.get("session")) in TEXT:
+            rows.append((where, row))
+            continue
+        why = "not a JSON object" if row is None else "session is missing or of the wrong type"
+        print(f"report: {where}: {why}, left out.", file=sys.stderr)
+        skipped += 1
+    return rows, skipped
 
 
 def by_key(lines: list[tuple[str, dict]], *key: str) -> dict[tuple, dict]:
@@ -293,7 +336,7 @@ def tokens_of(where: str, line: dict) -> int | float | None:
 def scan_row(where: str, line: object) -> dict:
     """The row, once its figures and each helper's description, brief head and tokens can be read with certainty."""
     figure, text = (int, float, type(None)), (str, type(None))
-    row = checked(where, line, session=TEXT, total_tokens=figure, active_minutes=figure, helpers=(list, type(None)))
+    row = checked(where, line, total_tokens=figure, active_minutes=figure, helpers=(list, type(None)))
     total, held = tokens_of(where, row), 0
     for number, helper in enumerate(row["helpers"] or [], 1):
         at = f"{where}: helper {number}"
@@ -303,10 +346,11 @@ def scan_row(where: str, line: object) -> dict:
     return row
 
 
-def load_rows(state: Path) -> dict[str, dict]:
-    """Each scan row, whole, by session."""
-    return {key[0]: row for key, row in by_key(
-        [(where, scan_row(where, line)) for where, line in json_lines(state / "scan-rows.jsonl")], "session").items()}
+def load_rows(state: Path) -> tuple[dict[str, dict], int]:
+    """Each scan row, whole, by session, and how many lines of scan-rows.jsonl were left out."""
+    lines, skipped = row_lines(state / "scan-rows.jsonl")
+    return {key[0]: row for key, row in by_key([(where, scan_row(where, line)) for where, line in lines],
+                                               "session").items()}, skipped
 
 
 def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: dict) -> str | dict:
@@ -352,7 +396,7 @@ def figures(results: list[str | dict]) -> str:
             f"median total tokens {median(tokens)}, median active minutes {median(minutes)}.")
 
 
-def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict) -> list[str]:
+def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict, skipped_scan_lines: int = 0) -> list[str]:
     names = [GENERATION_ONE, DIRECT, *sorted({key[2] for key in [*versions, *verdicts] if key[:2] in tickets}
                                             - {GENERATION_ONE, DIRECT})]
     results = {name: {key: outcome(ticket, name, versions, verdicts, rows) for key, ticket in tickets.items()}
@@ -363,6 +407,8 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
     outside = sum(key[:2] not in tickets for key in [*versions, *verdicts])
     if outside:
         lines.append(f"Left out: {outside} lines of versions.jsonl and verdicts.jsonl name a ticket in no set.")
+    if skipped_scan_lines:
+        lines.append(f"Left out: scan-rows.jsonl lines that are no scan row: {skipped_scan_lines}.")
     for name in names:
         found = list(results[name].values())
         judged = [result for result in found if isinstance(result, dict)]
@@ -456,7 +502,9 @@ def main(argv: list[str]) -> int:
         # Verdicts first, so a replay recorded before its verdict was saved has its line in the versions.jsonl read
         # here; read the other way, one recorded and judged between the two reads would count as having no line.
         verdicts = load_verdicts(state)
-        lines = report(sets, tickets, load_versions(state), verdicts, load_rows(state))
+        versions = load_versions(state)
+        rows, skipped = load_rows(state)
+        lines = report(sets, tickets, versions, verdicts, rows, skipped)
     except Unreadable as error:
         print(f"report: {error}", file=sys.stderr)
         return 1

@@ -547,6 +547,27 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(tree["stamp.txt"][1], b"$Format:%an %s$\n")
         self.assertEqual(tree["run.sh"][0], "100755")
 
+    def test_a_link_that_leads_inside_through_a_later_link_reaches_the_reviewer(self) -> None:
+        clone = self.world.root / "linked"
+        git(self.world.root, "clone", "-q", str(self.world.replay_clone), str(clone))
+        git(clone, "checkout", "-q", "--detach", self.world.replay)
+        (clone / "sub" / "deep").mkdir(parents=True)
+        (clone / "sub" / "deep" / "kept.txt").write_text("deep\n")
+        # z-link sorts after the links that go through it. Read as a plain folder, z-link/../.. is outside the copy;
+        # through the link it is the copy's root.
+        (clone / "z-link").symlink_to("sub/deep")
+        (clone / "a-link").symlink_to("z-link/../../report.txt")
+        (clone / "b-link").symlink_to("z-link/../../../outside")
+        linked = commit(clone, "Links", ("Replay Author", "replay@example.com"), {})
+        result = self.world.judge("A-7", "direct", "--commit", linked, "--from", str(clone))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        copy = self.world.records / "copy"
+        self.assertEqual({name: os.readlink(copy / name) for name in ("a-link", "z-link")},
+                         {"a-link": "z-link/../../report.txt", "z-link": "sub/deep"})
+        self.assertEqual((copy / "a-link").read_text(), "rows\ntotal from replay\n")
+        for gone in ("b-link", "outside-link"):
+            self.assertFalse((copy / gone).is_symlink(), gone)
+
     def set_requirements(self, *value: object) -> None:
         """Give the set entry `value` as its requirements, or no requirements field when no value is given."""
         path = self.world.state / "replay-set-1.json"
@@ -679,6 +700,49 @@ class TestJudge(unittest.TestCase):
             {"finding": "F2", "file": "report.txt", "line": 1, "what": "Terse.", "evidence": "none",
              "requirements": [], "proven": False}])
 
+    def test_a_finding_in_a_file_whose_name_holds_a_colon_is_read(self) -> None:
+        self.world.answer("R1: not met\nR2: met\nR3: met\nF1: jobs/report:daily.sql:17: wrong join Evidence: breaks "
+                          "R1: drops rows")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.world.verdicts()[0]["review"]["findings"], [
+            {"finding": "F1", "file": "jobs/report:daily.sql", "line": 17, "what": "wrong join",
+             "evidence": "breaks R1: drops rows", "requirements": ["R1"], "proven": True}])
+
+    def test_a_file_name_ends_at_its_first_line_number_even_when_the_rest_then_does_not_fit(self) -> None:
+        for finding in ("F1: jobs/x:2:y:17: wrong join Evidence: breaks R1: drops rows",
+                        "F1: app.py:17:  R42 at helper.py:3: wrong total Evidence: fails R1: two rows -> none"):
+            with self.subTest(finding=finding):
+                self.world.answer(f"R1: not met\nR2: met\nR3: met\n{finding}")
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 3, result.stderr)
+                [verdict] = self.world.verdicts()
+                self.assertEqual((verdict["right_first_time"], verdict["review"]["reason"]),
+                                 (None, "the answer is not in the fixed lines"))
+
+    def test_a_label_like_r42_in_the_evidence_names_no_requirement(self) -> None:
+        self.set_requirements(["The report prints the total."])
+        self.world.answer("R1: not met\nF1: report.txt:2: wrong total Evidence: fails R1: give the row labelled R42 "
+                          "-> the total is wrong")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [verdict] = self.world.verdicts()
+        self.assertEqual((verdict["review"]["requirements"], verdict["review"]["passed"]), ({"R1": "not met"}, False))
+        self.assertEqual(verdict["review"]["findings"], [
+            {"finding": "F1", "file": "report.txt", "line": 2, "what": "wrong total",
+             "evidence": "fails R1: give the row labelled R42 -> the total is wrong", "requirements": ["R1"],
+             "proven": True}])
+
+    def test_the_help_says_where_a_file_name_ends_and_which_r_n_name_a_requirement(self) -> None:
+        # The prompt gives the same rules: test_the_help_and_the_prompt_state_the_same_rules.
+        help_text = " ".join(self.world.judge("--help").stdout.split())
+        for sentence in ("<file> may hold a colon: it ends at the first colon that is followed by digits and a colon. "
+                         "Those digits are <line>, a line number from 1 with no leading zero.",
+                         'A finding names a requirement by its R<n> in <what is wrong> or right after "breaks" or '
+                         '"fails". An R<n> later in the evidence, such as a label in what to give, names none.'):
+            with self.subTest(sentence=sentence):
+                self.assertIn(sentence, help_text)
+
     def test_a_finding_names_each_requirement_its_line_holds(self) -> None:
         self.world.answer("R1: not met\nR2: met\nR3: not met\nF1: report.txt:1: R1 and R3 lack the total; R2D2 is "
                           "no word. Evidence: fails: a two-row file -> printed no total.")
@@ -729,6 +793,9 @@ class TestJudge(unittest.TestCase):
             "answer is not in the fixed lines",
             "R1: met\nR2: met\nR3: met\nF1: report.txt:2: Extra. Evidence: breaks R4: no such.": "the answer is not in "
             "the fixed lines",
+            # A requirement not met whose label is only in the body of the evidence, as a row label, is not shown.
+            "R1: not met\nR2: met\nR3: met\nF1: report.txt:2: total missing Evidence: fails: give the R1 row -> "
+            "zero": "the answer is not in the fixed lines",
         }
         for answer, reason in cases.items():
             with self.subTest(answer=answer):
@@ -949,6 +1016,105 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(result.stderr, f'judge: {path} must be a list of {{"repo": "owner/name", "check": "...", '
                                         '"setup": "..."} objects, with setup optional.\n')
         self.assertFalse((self.world.state / "verdicts.jsonl").exists())
+
+    def test_a_ledger_line_that_is_not_json_is_an_error_before_any_checkout(self) -> None:
+        path = self.world.state / "verdicts.jsonl"
+        path.write_text('{"label": "A", "ticket": 7, "version": "direct"}\n\nnot json\n')
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: {path} line 3 cannot be read as a JSON object.\n")
+        self.assertFalse((self.world.records / "gh").exists())
+        self.assertFalse((self.world.records / "args").exists())
+        self.assertFalse((self.world.state / "judged").exists())
+        self.assertFalse((self.world.state / "judge-work").exists())
+        self.assertEqual(path.read_text(), '{"label": "A", "ticket": 7, "version": "direct"}\n\nnot json\n')
+
+    def test_a_ledger_that_breaks_during_the_review_is_one_error_and_the_reviewed_attempt_stays(self) -> None:
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        verdicts, files = self.world.verdicts(), self.world.files()
+        # The stand-in adds a line that is not JSON to the ledger before it answers.
+        path = self.world.state / "verdicts.jsonl"
+        stand_in = self.world.bin / "claude"
+        shebang, rest = stand_in.read_text().split("\n", 1)
+        stand_in.write_text(f"{shebang}\necho 'not json' >> \"$DELIVER_STATE_DIR/verdicts.jsonl\"\n{rest}")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: {path} line 2 cannot be read as a JSON object.\n")
+        self.assertTrue((self.world.records / "args").exists())
+        [line, broken] = path.read_text().splitlines()
+        self.assertEqual(([json.loads(line)], broken), (verdicts, "not json"))
+        # The files of the line on record are as they were; the attempt's folder stays with its answer and log.
+        [earlier] = [(self.world.state / line["check"]["output"]).parent for line in verdicts]
+        [folder] = [folder for folder in earlier.parent.iterdir() if folder != earlier]
+        self.assertEqual(self.outside(folder), files)
+        self.assertTrue((folder / "review.txt").is_file() and (folder / "session.jsonl").is_file())
+
+    def test_a_ledger_saved_with_a_byte_order_mark_or_as_utf16_is_an_error_before_any_checkout(self) -> None:
+        path = self.world.state / "verdicts.jsonl"
+        for encoding in ("utf-8-sig", "utf-16"):
+            with self.subTest(encoding=encoding):
+                path.write_text('{"label": "A", "ticket": 7, "version": "direct"}\n', encoding=encoding)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr, f"judge: {path} line 1 cannot be read as a JSON object.\n")
+                self.assertFalse((self.world.records / "gh").exists())
+                self.assertFalse((self.world.state / "judged").exists())
+
+    def test_a_ledger_line_of_unicode_spaces_is_blank(self) -> None:
+        (self.world.state / "verdicts.jsonl").write_text('{"label": "A", "ticket": 9, "version": "direct"}\n'
+                                                         ' 　 \n')
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual([(line["ticket"], line["version"]) for line in self.world.verdicts()],
+                         [(9, "direct"), (7, "generation-one")])
+
+    def test_a_ledger_line_that_names_no_attempt_folder_is_replaced(self) -> None:
+        (self.world.state / "verdicts.jsonl").write_text('{"label": "A", "ticket": 7, "version": "generation-one", '
+                                                         '"check": null}\n')
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [verdict] = self.world.verdicts()
+        self.assertTrue((self.world.state / verdict["check"]["output"]).is_file())
+        self.assertEqual(len(list((self.world.state / "judged" / "A-7-generation-one").iterdir())), 1)
+
+    def test_a_ledger_that_breaks_during_the_review_after_a_line_with_no_check_is_one_error(self) -> None:
+        # The stand-in writes a line whose check is null, then one that is not JSON, before it answers.
+        path = self.world.state / "verdicts.jsonl"
+        stand_in = self.world.bin / "claude"
+        shebang, rest = stand_in.read_text().split("\n", 1)
+        stand_in.write_text(f"{shebang}\nprintf '%s\\nbad\\n' '{{\"check\": null}}' > \"$DELIVER_STATE_DIR/"
+                            f"verdicts.jsonl\"\n{rest}")
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 1)
+        self.assertEqual(result.stderr, f"judge: {path} line 2 cannot be read as a JSON object.\n")
+        self.assertEqual(path.read_text(), '{"check": null}\nbad\n')
+        [folder] = (self.world.state / "judged" / "A-7-generation-one").iterdir()  # it holds a review, so it stays
+        self.assertTrue((folder / "review.txt").is_file() and (folder / "session.jsonl").is_file())
+
+    def test_a_ledger_that_breaks_before_an_interrupted_review_names_no_attempt(self) -> None:
+        # The stand-in writes a line whose check is null, then one that is not JSON, and is interrupted before it
+        # answers or leaves a log: the attempt's folder holds no review, and no line the judge can read names it.
+        path = self.world.state / "verdicts.jsonl"
+        stand_in = self.world.bin / "claude"
+        shebang, rest = stand_in.read_text().split("\n", 1)
+        stand_in.write_text(f"{shebang}\nprintf '%s\\nbad\\n' '{{\"check\": null}}' > \"$DELIVER_STATE_DIR/"
+                            f"verdicts.jsonl\"\n{rest}")
+        self.world.log, self.world.sleep = None, "60"
+        running = subprocess.run
+
+        def stopped(args, *rest, **kwargs):
+            if args[0] != "claude":
+                return running(args, *rest, **kwargs)
+            try:
+                return running(args, *rest, **{**kwargs, "timeout": 2})
+            except subprocess.TimeoutExpired:
+                raise KeyboardInterrupt
+        with self.assertRaises(KeyboardInterrupt):
+            self.world.judge_here(["A-7", "generation-one"], lambda judge: mock.patch.object(judge.subprocess, "run",
+                                                                                            stopped))
+        self.assertEqual(self.world.stderr, "")
+        self.assertEqual(path.read_text(), '{"check": null}\nbad\n')
+        self.assertEqual(list((self.world.state / "judged" / "A-7-generation-one").iterdir()), [])
 
     def test_bad_usage_exits_2_with_the_help(self) -> None:
         for args in ([], ["A-7"], ["a-7", "generation-one"], ["A-07", "generation-one"], ["A-7", "Direct"],

@@ -26,7 +26,7 @@ import scan  # noqa: E402  (a sibling script, not an installed package)
 GENERATION_ONE = ("orchestrator-mode", "implement-ticket", "implement-feature", "implement-backlog")
 CRITERIA_HEADINGS = ("Acceptance criteria", "Acceptance", "Done when")
 BUCKETS = {f"{low}-{high}": range(low, high + 1) for low, high in ((0, 50), (51, 300), (301, 1500))}
-PER_BUCKET = 10
+PER_BUCKET = 5
 CHECK_TIMEOUT = 3600  # seconds, for each of setup and check
 CLOCK_SLACK = timedelta(minutes=1)  # between the machine's clock in the log and GitHub's
 EXIT_SHORT = 3
@@ -84,7 +84,7 @@ def one_of(items: list[str]) -> str:
 
 
 HELP = f"""\
-Draw the replay set: {PER_BUCKET * len(BUCKETS)} tickets generation one finished, {PER_BUCKET} per size bucket.
+Draw the replay set: up to {PER_BUCKET * len(BUCKETS)} tickets generation one finished, up to {PER_BUCKET} per size bucket.
 
 Usage: python3 scripts/draw.py [--seed N]
 
@@ -213,9 +213,12 @@ A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
 Each bucket's pool is sorted by repo and ticket number, then shuffled by
 random.Random seeded with "<seed>:<bucket>". The draw tries the tickets in that
-order until {PER_BUCKET} pass. A try runs the repo's setup command, where it has one,
-and then its check command, each with sh, in a clean checkout of the commit
-before the merged PR: the first parent of the PR's merge commit. A step that
+order until {PER_BUCKET} pass or the bucket's pool is used up, whatever the other
+buckets hold. A bucket in which fewer than {PER_BUCKET} pass gives all that pass, and
+a bucket in which none passes means no set is written (exit {EXIT_SHORT}). A try runs
+the repo's setup command, where it has one, and then its check command, each
+with sh, in a clean checkout of the commit before the merged PR: the first
+parent of the PR's merge commit. A step that
 runs for more than {CHECK_TIMEOUT // 60} minutes is stopped. Setup and check run in one process
 group, made for the try, so what setup starts runs on through the check. When
 the try ends, whether it passes, fails, runs too long, or the draw gets Ctrl-C
@@ -299,8 +302,9 @@ ticket's other PRs and earlier sets, so it is the most tickets the reader can
 have cost the pool.
 
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
-usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
-tickets are set aside; no set was written, and the count per bucket is printed."""
+usage. Exit {EXIT_SHORT}: a bucket holds no ticket that passes, because its pool is
+empty or every ticket in it is set aside; no set was written, and the count per
+bucket is printed."""
 
 
 class DrawError(Exception):
@@ -330,6 +334,20 @@ class GhFailed(DrawError):
     def __init__(self, message: str, output: str) -> None:
         super().__init__(message)
         self.output = output
+
+
+def remove(path: Path) -> None:
+    """Remove a tree a try may have left, first giving its owner write access to each folder in it, as a check
+    can leave a folder read-only; what still cannot be removed stays."""
+    for folder, names, _ in os.walk(path):
+        for name in names:
+            inner = os.path.join(folder, name)
+            if not os.path.islink(inner):
+                try:
+                    os.chmod(inner, os.lstat(inner).st_mode & 0o7777 | 0o700)
+                except OSError:
+                    pass
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def label_name(number: int) -> str:
@@ -901,7 +919,7 @@ class Draw:
         label, repo = candidate["label"], candidate["repo"]["repo"]
         if label not in self.clones:
             target = self.work / label
-            shutil.rmtree(target, ignore_errors=True)  # what an earlier failed clone left would make this one fail
+            remove(target)  # what an earlier failed clone left would make this one fail
             result = subprocess.run(["gh", "repo", "clone", repo, str(target)], text=True, capture_output=True)
             if result.returncode:  # the repo's next ticket tries again
                 return target, (f"$ gh repo clone {repo} {target}\n{result.stdout}{result.stderr}".rstrip("\n")
@@ -981,6 +999,7 @@ class Draw:
             try:
                 stop()
                 self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
+                remove(tree)  # what git leaves, such as a folder the check made read-only
                 self.git("-C", str(clone), "worktree", "prune")
             finally:
                 signal.pthread_sigmask(signal.SIG_SETMASK, held)
@@ -1086,28 +1105,27 @@ class Draw:
             buckets = self.pool(repos, self.labels(repos))
             kept: list[dict] = []
             aside: list[dict] = []
-            if all(len(found) >= PER_BUCKET for found in buckets.values()):
-                shutil.rmtree(self.work, ignore_errors=True)
-                self.work.mkdir()
-                try:
-                    for name, found in buckets.items():
-                        order = list(found)
-                        random.Random(f"{self.seed}:{name}").shuffle(order)
-                        for candidate in order:
-                            if sum(entry["bucket"] == name for entry in kept) == PER_BUCKET:
-                                break
-                            reason = self.try_ticket(candidate)
-                            if reason:
-                                aside.append({**candidate, "reason": reason})
-                            else:
-                                kept.append(candidate)
-                finally:
-                    shutil.rmtree(self.work, ignore_errors=True)
+            remove(self.work)
+            self.work.mkdir()
+            try:
+                for name, found in buckets.items():
+                    order = list(found)
+                    random.Random(f"{self.seed}:{name}").shuffle(order)
+                    for candidate in order:
+                        if sum(entry["bucket"] == name for entry in kept) == PER_BUCKET:
+                            break
+                        reason = self.try_ticket(candidate)
+                        if reason:
+                            aside.append({**candidate, "reason": reason})
+                        else:
+                            kept.append(candidate)
+            finally:
+                remove(self.work)
             for name, found in buckets.items():
                 print(f"{name}: pool {len(found)}, set aside {sum(entry['bucket'] == name for entry in aside)}, "
                       f"kept {sum(entry['bucket'] == name for entry in kept)}.")
-            if len(kept) < PER_BUCKET * len(BUCKETS):
-                print(f"No set written: a bucket cannot reach {PER_BUCKET} tickets.")
+            if {entry["bucket"] for entry in kept} != set(BUCKETS):
+                print("No set written: a bucket holds no ticket that passes.")
                 return EXIT_SHORT
             for candidate in kept:
                 candidate["log"] = self.save_log(candidate)

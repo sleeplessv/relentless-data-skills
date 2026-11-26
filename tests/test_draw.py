@@ -326,6 +326,14 @@ def sized(start: int, count: int, size: int, **fields: object) -> list[Ticket]:
     return [Ticket(number, size, **fields) for number in range(start, start + count)]
 
 
+def writable(root: Path) -> None:
+    """Give the owner write access to each folder under `root`, so that a folder a check made read-only can go."""
+    for folder, names, _ in os.walk(root):
+        for name in names:
+            if not os.path.islink(os.path.join(folder, name)):
+                os.chmod(os.path.join(folder, name), 0o700)
+
+
 def full_pool(per_bucket: int = 12, **fields: object) -> list[Ticket]:
     """`per_bucket` tickets of 20, 100 and 800 changed lines, numbered from 1, 101 and 201."""
     return sized(1, per_bucket, 20, **fields) + sized(101, per_bucket, 100, **fields) + sized(201, per_bucket, 800, **fields)
@@ -604,13 +612,13 @@ class TestOneDraw(unittest.TestCase):
         return {str(path): path.read_bytes() for folder in cls.outside if folder.exists()
                 for path in sorted(folder.rglob("*")) if path.is_file()}
 
-    def test_the_draw_writes_ten_tickets_per_bucket_with_each_entrys_fields(self) -> None:
+    def test_the_draw_writes_five_tickets_per_bucket_with_each_entrys_fields(self) -> None:
         world = self.world
         self.assertEqual(self.result.returncode, 0, self.result.stderr)
         drawn = world.set_file()
         self.assertEqual(drawn["seed"], 7)
         buckets = [entry["bucket"] for entry in drawn["tickets"]]
-        self.assertEqual(buckets, ["0-50"] * 10 + ["51-300"] * 10 + ["301-1500"] * 10)
+        self.assertEqual(buckets, ["0-50"] * 5 + ["51-300"] * 5 + ["301-1500"] * 5)
         for entry in drawn["tickets"]:
             ticket = world.tickets[entry["ticket"]]
             self.assertEqual(entry, {
@@ -621,6 +629,8 @@ class TestOneDraw(unittest.TestCase):
                 "ready_commit": ticket.commit("a"), "model": MODEL,
                 "pr": ticket.pr, "session": ticket.session, "log": f"logs/{ticket.session}.jsonl",
                 "check_output": f"checks/A-{ticket.number}.txt"})
+        self.assertEqual(sorted(f"checks/{path.name}" for path in (world.state / "checks").iterdir()),
+                         sorted(entry["check_output"] for entry in drawn["tickets"]))  # no try after the fifth pass
         self.assertEqual(json.loads((world.state / "project-labels.json").read_text()), {"A": ALPHA})
 
     def test_the_draw_copies_and_scans_each_kept_session_log_with_its_helpers(self) -> None:
@@ -650,8 +660,8 @@ class TestOneDraw(unittest.TestCase):
             "opened it, keeps it out of the pool.",
             "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
             "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 10.",
-            "51-300: pool 12, set aside 0, kept 10.", "301-1500: pool 12, set aside 0, kept 10.",
+            "0-50: pool 12, set aside 0, kept 5.",
+            "51-300: pool 12, set aside 0, kept 5.", "301-1500: pool 12, set aside 0, kept 5.",
             f"Wrote {state / 'replay-set-1.json'}."])
         self.assertEqual(self.result.stderr, "")
         self.assertEqual(oct((state / "replay-set-1.json").stat().st_mode & 0o777), oct(0o600))
@@ -667,8 +677,35 @@ class TestDraw(unittest.TestCase):
         result = self.world([]).draw("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[:3], [
-            "Draw the replay set: 30 tickets generation one finished, 10 per size bucket.", "",
+            "Draw the replay set: up to 15 tickets generation one finished, up to 5 per size bucket.", "",
             "Usage: python3 scripts/draw.py [--seed N]"])
+
+    def test_help_states_the_up_to_five_rule_the_short_and_empty_bucket_rules_and_no_old_figure(self) -> None:
+        sentences = [
+            "The draw tries the tickets in that order until 5 pass or the bucket's pool is used up, whatever the "
+            "other buckets hold.",
+            "A bucket in which fewer than 5 pass gives all that pass, and a bucket in which none passes means no set "
+            "is written (exit 3).",
+            "Exit 3: a bucket holds no ticket that passes, because its pool is empty or every ticket in it is set "
+            "aside; no set was written, and the count per bucket is printed."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+        self.assertEqual(re.findall(r"\b(?:10|30)\b", help_text), [])
+
+    def test_help_takes_its_figures_from_the_per_bucket_limit(self) -> None:
+        world = self.world([])
+        script = world.source / "draw.py"
+        source = script.read_text()
+        self.assertEqual(source.count("\nPER_BUCKET = 5\n"), 1)
+        script.write_text(source.replace("\nPER_BUCKET = 5\n", "\nPER_BUCKET = 7\n"))
+        help_text = " ".join(world.draw("--help").stdout.split())
+        for sentence in ["Draw the replay set: up to 21 tickets generation one finished, up to 7 per size bucket.",
+                         "until 7 pass or the bucket's pool is used up",
+                         "A bucket in which fewer than 7 pass gives all that pass"]:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
 
     def test_help_gives_the_opening_forms_the_veto_the_limit_and_what_it_takes_for_granted_each_once(self) -> None:
         sentences = [
@@ -777,13 +814,17 @@ class TestDraw(unittest.TestCase):
         # And one whose line holds a message that is not an object, which it counts.
         write_lines(projects / "00000000-0000-4000-d000-000000000003.jsonl", [
             line("00000000-0000-4000-d000-000000000003", "assistant", 4, message=[f"https://github.com/{ALPHA}/pull/599"])])
-        result = world.draw("--seed", "1")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[1], "Skipped 2 session logs that could not be read.")
-        self.assertEqual(sorted(entry["ticket"] for entry in world.set_file()["tickets"]),
-                         [ticket.number for ticket in kept])
-        self.assertEqual(world.set_file()["set_aside"], [])
-        for entry in world.set_file()["tickets"]:
+        drawn = []
+        for number, pool in ((1, 10), (2, 5)):  # a set holds 5 of each bucket's 10; the second draw takes the rest
+            result = world.draw("--seed", "1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines()[1], "Skipped 2 session logs that could not be read.")
+            self.assertEqual([text for text in result.stdout.splitlines() if ": pool " in text], [
+                f"{bucket}: pool {pool}, set aside 0, kept 5." for bucket in ("0-50", "51-300", "301-1500")])
+            self.assertEqual(world.set_file(number)["set_aside"], [])
+            drawn += world.set_file(number)["tickets"]
+        self.assertEqual(sorted(entry["ticket"] for entry in drawn), [ticket.number for ticket in kept])
+        for entry in drawn:
             ticket = world.tickets[entry["ticket"]]
             self.assertEqual((entry["ready_commit"], entry["model"]), (ticket.commit("b" if ticket.draft else "a"), MODEL),
                              ticket.number)
@@ -968,8 +1009,10 @@ class TestDraw(unittest.TestCase):
         world = self.world(full_pool(criteria=criteria))
         result = world.draw()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([entry["requirements"] for entry in world.set_file()["tickets"]],
-                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * 30)
+        tickets = world.set_file()["tickets"]
+        self.assertNotEqual(tickets, [])
+        self.assertEqual([entry["requirements"] for entry in tickets],
+                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * len(tickets))
 
     def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
         cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
@@ -1389,51 +1432,124 @@ class TestDraw(unittest.TestCase):
         result = world.draw("--seed", "5")
         self.assertEqual(result.returncode, 0, result.stderr)
         drawn = [entry["ticket"] for entry in world.set_file()["tickets"] if entry["bucket"] == "0-50"]
-        self.assertEqual(drawn[:9], [number for number in first if number != failed])
-        self.assertNotIn(drawn[9], first)
+        self.assertEqual(drawn[:4], [number for number in first if number != failed])
+        self.assertNotIn(drawn[4], first)
+        self.assertEqual((first, failed, drawn), ([1, 6, 4, 9, 11], 9, [1, 6, 4, 11, 3]))  # 3 is next in seed 5's order
         self.assertEqual(world.set_file()["set_aside"], [{"label": "A", "ticket": failed, "bucket": "0-50",
                                                            "reason": "check exited 1",
                                                            "check_output": f"checks/A-{failed}.txt"}])
-        self.assertEqual(result.stdout.splitlines()[3:6], ["0-50: pool 12, set aside 1, kept 10.",
-                                                            "51-300: pool 12, set aside 0, kept 10.",
-                                                            "301-1500: pool 12, set aside 0, kept 10."])
+        self.assertEqual(result.stdout.splitlines()[3:6], ["0-50: pool 12, set aside 1, kept 5.",
+                                                            "51-300: pool 12, set aside 0, kept 5.",
+                                                            "301-1500: pool 12, set aside 0, kept 5."])
         self.assertEqual((world.state / f"checks/A-{failed}.txt").read_text(),
                          f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 1\n")
         self.assertEqual((world.state / f"checks/A-{drawn[0]}.txt").read_text(),
                          f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 0\n")
 
-    def test_a_bucket_whose_pool_holds_fewer_than_ten_writes_no_set_and_runs_no_check(self) -> None:
-        world = self.world(sized(1, 12, 20) + sized(101, 9, 100) + sized(201, 12, 800))
+    def test_a_bucket_with_fewer_than_five_tickets_that_pass_gives_all_of_them_to_the_set(self) -> None:
+        # The 301-1500 pool holds four tickets, and the check fails for ticket 202.
+        short = [Ticket(201, 800), Ticket(202, 800, passes=False), Ticket(203, 800), Ticket(204, 800)]
+        world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + short)
         result = world.draw("--seed", "2")
-        self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 9, set aside 0, kept 0.",
-            "301-1500: pool 12, set aside 0, kept 0.", "No set written: a bucket cannot reach 10 tickets."])
-        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
-                         ["draw.lock", "project-labels.json", "repos.json"])
-        self.assertNotIn("repo clone", world.gh_log.read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+            "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
+            "301-1500: pool 4, set aside 1, kept 3.", f"Wrote {world.state / 'replay-set-1.json'}."])
+        self.assertEqual(result.stderr, "")
+        drawn = world.set_file()
+        self.assertEqual((drawn["set"], drawn["seed"]), (1, 2))
+        self.assertEqual([entry["bucket"] for entry in drawn["tickets"]], ["0-50"] * 5 + ["51-300"] * 5 + ["301-1500"] * 3)
+        self.assertEqual([entry["ticket"] for entry in drawn["tickets"] if entry["bucket"] == "301-1500"],
+                         [203, 201, 204])  # seed 2's order is 202, 203, 201, 204
+        self.assertEqual(drawn["set_aside"], [{"label": "A", "ticket": 202, "bucket": "301-1500",
+                                               "reason": "check exited 1", "check_output": "checks/A-202.txt"}])
+        self.assertEqual(sorted(path.name for path in (world.state / "logs").iterdir()),
+                         sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
 
-    def test_a_bucket_that_cannot_reach_ten_once_tickets_are_set_aside_writes_no_set(self) -> None:
-        world = self.world(sized(1, 12, 20) + sized(101, 12, 100)
-                           + sized(201, 9, 800) + sized(210, 2, 800, passes=False))
+    def test_a_middle_bucket_that_falls_to_one_pass_gives_it_and_to_none_writes_no_set(self) -> None:
+        # Pools of 2, 6 and 2. Seed 2 tries the middle pool as 103, 102, 106, 105, 104, 101; only 101 can pass.
+        for passes in (True, False):
+            with self.subTest(passes=passes):
+                middle = [Ticket(number, 100, passes=passes and number == 101) for number in range(101, 107)]
+                world = self.world(sized(1, 2, 20) + middle + sized(201, 2, 800))
+                result = world.draw("--seed", "2")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(sorted(path.name for path in (world.state / "checks").iterdir()),
+                                 ["A-1.txt", "A-101.txt", "A-102.txt", "A-103.txt", "A-104.txt", "A-105.txt",
+                                  "A-106.txt", "A-2.txt", "A-201.txt", "A-202.txt"])
+                self.assertFalse((world.state / "draw-work").exists())
+                if passes:
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+                        "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 5, kept 1.",
+                        "301-1500: pool 2, set aside 0, kept 2.", f"Wrote {world.state / 'replay-set-1.json'}."])
+                    drawn = world.set_file()
+                    self.assertEqual([entry["ticket"] for entry in drawn["tickets"]], [2, 1, 101, 201, 202])
+                    self.assertEqual([(entry["ticket"], entry["reason"]) for entry in drawn["set_aside"]],
+                                     [(number, "check exited 1") for number in (103, 102, 106, 105, 104)])
+                    self.assertEqual(sorted(path.name for path in (world.state / "logs").iterdir()),
+                                     sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
+                else:
+                    self.assertEqual(result.returncode, 3)
+                    self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+                        "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 6, kept 0.",
+                        "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
+                    self.assertEqual(list(world.state.glob("replay-set-*")), [])
+                    self.assertFalse((world.state / "logs").exists())
+
+    def test_a_bucket_whose_pool_is_empty_writes_no_set_while_the_other_buckets_are_tried(self) -> None:
+        world = self.world(sized(1, 2, 20) + sized(201, 2, 800))
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
-            "301-1500: pool 11, set aside 2, kept 9.", "No set written: a bucket cannot reach 10 tickets."])
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+            "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 0, set aside 0, kept 0.",
+            "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
+                         ["checks", "draw.lock", "project-labels.json", "repos.json"])
+        self.assertEqual(sorted(path.name for path in (world.state / "checks").iterdir()),
+                         ["A-1.txt", "A-2.txt", "A-201.txt", "A-202.txt"])
+
+    def test_a_bucket_whose_every_ticket_is_set_aside_writes_no_set(self) -> None:
+        world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + sized(201, 2, 800, passes=False))
+        result = world.draw("--seed", "2")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+            "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
+            "301-1500: pool 2, set aside 2, kept 0.", "No set written: a bucket holds no ticket that passes."])
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
+                         ["checks", "draw.lock", "project-labels.json", "repos.json"])
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
         self.assertFalse((world.state / "logs").exists())
         self.assertFalse((world.state / "draw-work").exists())
+
+    def test_a_folder_a_check_left_read_only_does_not_stop_the_next_draw(self) -> None:
+        # Pools 6, 1, 6 leave 1, 0, 1 for the second draw, which writes no set; pools 6, 6, 6 leave one in each.
+        check = CHECK + " && mkdir fixture && touch fixture/input && chmod 555 fixture"
+        for middle, second in ((1, ["0-50: pool 1, set aside 0, kept 1.", "51-300: pool 0, set aside 0, kept 0.",
+                                    "301-1500: pool 1, set aside 0, kept 1.",
+                                    "No set written: a bucket holds no ticket that passes."]),
+                               (6, ["0-50: pool 1, set aside 0, kept 1.", "51-300: pool 1, set aside 0, kept 1.",
+                                    "301-1500: pool 1, set aside 0, kept 1."])):
+            with self.subTest(middle=middle):
+                world = self.world(sized(1, 6, 20) + sized(101, middle, 100) + sized(201, 6, 800),
+                                   repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
+                self.addCleanup(writable, world.root)  # runs before the folder's own removal
+                leftover = world.state / "draw-work" / "A-999" / "fixture"  # as a stopped draw could leave it
+                leftover.mkdir(parents=True)
+                (leftover / "input").touch()
+                leftover.chmod(0o555)
+                first = world.draw("--seed", "2")
+                self.assertEqual((first.returncode, first.stderr), (0, ""))
+                self.assertFalse((world.state / "draw-work").exists())
+                result = world.draw("--seed", "2")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(result.returncode, 0 if middle == 6 else 3)
+                written = [f"Wrote {world.state / 'replay-set-2.json'}."] if middle == 6 else []
+                self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:],
+                                 ["Seed 2.", *second, *written])
+                self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_same_seed_on_the_same_pool_and_check_results_gives_the_same_set(self) -> None:
         world = self.world(full_pool(13) + [Ticket(14, 20, passes=False), Ticket(114, 100, passes=False)])
@@ -1441,12 +1557,12 @@ class TestDraw(unittest.TestCase):
         world.write_repos([{"repo": ALPHA, "check": CHECK, "setup": SETUP}])
         shutil.copytree(world.state, other)
         for state in (world.state, other):
-            self.assertEqual(world.draw("--seed", "11", state=state).returncode, 0)
+            self.assertEqual(world.draw("--seed", "6", state=state).returncode, 0)  # its order tries 14 and 114
         first, again = world.set_file(state=world.state), world.set_file(state=other)
         self.assertNotEqual(first["set_aside"], [])
         self.assertEqual((first["tickets"], first["set_aside"]), (again["tickets"], again["set_aside"]))
 
-    def test_a_second_call_draws_thirty_more_with_no_ticket_kept_or_set_aside_before(self) -> None:
+    def test_a_second_call_draws_fifteen_more_with_no_ticket_kept_or_set_aside_before(self) -> None:
         world = self.world([Ticket(ticket.number, ticket.size, passes=ticket.number % 100 > 3)
                             for ticket in full_pool(26)])
         self.assertEqual(world.draw("--seed", "1").returncode, 0)
@@ -1454,7 +1570,7 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         first, second = world.set_file(1), world.set_file(2)
         self.assertNotEqual(first["set_aside"], [])
-        self.assertEqual((second["set"], len(second["tickets"])), (2, 30))
+        self.assertEqual((second["set"], len(second["tickets"])), (2, 15))
         earlier = {entry["ticket"] for entry in first["tickets"] + first["set_aside"]}
         self.assertEqual(earlier & {entry["ticket"] for entry in second["tickets"] + second["set_aside"]}, set())
 
@@ -1464,7 +1580,7 @@ class TestDraw(unittest.TestCase):
         world = self.world(full_pool(10) + cannot + [Ticket(16, 20, repo=BETA)],
                            repos=[{"repo": ALPHA, "check": CHECK, "setup": SETUP}, {"repo": BETA, "check": CHECK, "setup": SETUP}])
         (world.remotes / f"{BETA}.fail-once").touch()  # the first clone fails, the next works
-        result = world.draw("--seed", "1")  # its order tries 11 to 17, and 14 before 16
+        result = world.draw("--seed", "49")  # its order tries 11 to 17, and 14 before 16
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(16, [entry["ticket"] for entry in world.set_file()["tickets"]])
         self.assertEqual(world.gh_log.read_text().count(f"repo clone {BETA} "), 2)
@@ -1485,7 +1601,7 @@ class TestDraw(unittest.TestCase):
                                        "stand-in gh: the clone failed", "clone exit 1"])
         self.assertEqual(outputs[17][1:], [f"stand-in gh: no saved answer for api repos/{ALPHA}/activity?ref=refs/heads/"
                                            "ticket-17&per_page=100", "gh exit 1"])
-        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 17, set aside 6, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 17, set aside 6, kept 5.")
 
     def test_the_seed_gives_the_same_tickets_whatever_the_order_of_the_repo_list(self) -> None:
         alpha = full_pool(6)
@@ -1518,15 +1634,15 @@ class TestDraw(unittest.TestCase):
 
     def test_a_gh_answer_that_fails_or_cannot_be_read_sets_its_ticket_aside_with_what_gh_printed(self) -> None:
         bad = [Ticket(11, 20), Ticket(12, 20), Ticket(13, 20, draft=True)]
-        world = self.world(full_pool(10) + bad)  # seed 2 tries all three before the last good ticket
+        world = self.world(full_pool(10) + bad)  # seed 34 tries all three before the last good ticket
         timeline = f"api repos/{ALPHA}/issues/511/timeline"
         world.answers[timeline + ".fails"] = '{"message": "Server Error"}'
         world.answers[f"api repos/{ALPHA}/activity?ref=refs/heads/ticket-12&per_page=100"] = "["
         world.answers[f"api repos/{ALPHA}/issues/513/timeline"] = json.dumps(
             [{"event": "ready_for_review", "created_at": 17}])
-        result = world.draw("--seed", "2")
+        result = world.draw("--seed", "34")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 13, set aside 3, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 13, set aside 3, kept 5.")
         aside = {entry["ticket"]: entry for entry in world.set_file()["set_aside"]}
         self.assertEqual({number: entry["reason"] for number, entry in aside.items()}, dict.fromkeys(
             (11, 12, 13), "GitHub's record of the PR's history or of the pushes to its branch could not be read"))
@@ -1777,7 +1893,10 @@ class TestDraw(unittest.TestCase):
         (world.state / "scan-rows.jsonl").write_text("[]\n")
         result = world.draw("--seed", "1")
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n" * 30)
+        tickets = world.set_file()["tickets"]
+        self.assertNotEqual(tickets, [])
+        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n"
+                         * len(tickets))
         self.assertEqual((world.state / "scan-rows.jsonl").read_text().split("\n")[0], "[]")
         self.assertEqual([path.name for path in world.state.glob("replay-set-*")], ["replay-set-1.json"])
 

@@ -123,19 +123,19 @@ finishes first:
   [Independent review](#independent-review) and [Final review](#final-review) name `base_sha`,
   so the reviewed diff holds the branch's work without the commits the target gained.
 - **Before closing verification**, after the last fix round. The coordinator resumes the
-  implementing worker, which first waits for the PRs about to merge; the head it returns is
+  implementing worker, which merges `TARGET_TIP` as it stands now; the head it returns is
   `final_sha`, and an edit makes the merge a [late fix](#fix-rounds).
 
-The PRs about to merge are the open PRs into `pr_base` that are not drafts, are not this run's
-own, and change a path the branch changes. The worker lists them from the main checkout:
+The worker never waits for other PRs to land: on a shared machine they belong to runs that may
+themselves be waiting, so a wait can stall both. It lists the open PRs into `pr_base` that are
+not this run's own and change a path the branch changes, from the main checkout:
 
 ```sh
 gh pr list --base <pr_base> --state open --limit 200 --json number,isDraft,files   # exit 0 = listed; [] = none open
 ```
 
-It repeats the listing until none remains or ten minutes have passed, then merges, so the
-verification runs once, on the result. Its return names each PR still open, the PR body's
-Evidence lists them, and the verifier's drift check covers a merge that lands later.
+Its return names each one, the PR body's Evidence lists them, and the verifier's drift check
+covers one that merges later.
 
 A message mid-run that asks for nothing, such as news that the target moved, is information:
 whoever receives it notes it and carries on with its work, including waiting on its own

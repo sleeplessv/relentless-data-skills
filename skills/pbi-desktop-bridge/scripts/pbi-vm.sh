@@ -84,12 +84,17 @@ get_status() {
   echo "$st"
 }
 pick_pid() {  # $1 = status JSON, $2 = optional pid
-  if [[ -n "${2:-}" ]]; then
-    [[ "$2" =~ ^[0-9]+$ ]] || die 2 "--pid takes a number, got: $2"
-    echo "$2"; return
+  local requested="${2:-}" instances pids unavailable
+  [[ -z "$requested" || "$requested" =~ ^[0-9]+$ ]] || die 2 "--pid takes a number, got: $requested"
+  instances="$(jq -c --arg pid "$requested" '[.instances[] | select($pid == "" or (.pid | tostring) == $pid)]' <<<"$1")"
+  pids="$(jq -r '.[] | select((.bridgeStatus // "connected") == "connected" and (.currentFilePath // "") != "") | .pid' <<<"$instances")"
+  if [[ -z "$pids" ]]; then
+    unavailable="$(jq -r '.[] | select(.bridgeStatus == "not_connected" or .bridgeStatus == "error") |
+      "pid \(.pid) \(.bridgeStatus): \(.unavailableReason // .error // "see status")"' <<<"$instances")"
+    [[ -z "$unavailable" ]] || die 5 "$unavailable. Check Desktop Bridge access under Security in Power BI Desktop."
+    die 4 "no matching Desktop instance with a file open. Run 'pbi-vm.sh status' and open the project in a connected instance."
   fi
-  local pids; pids="$(jq -r '.instances[] | select(.currentFilePath != "" and .currentFilePath != null) | .pid' <<<"$1")"
-  [[ -n "$pids" && "$pids" != *$'\n'* ]] || die 4 "expected exactly one Desktop instance with a file open, found: ${pids:-none}. Pass --pid."
+  [[ "$pids" != *$'\n'* ]] || die 4 "several Desktop instances have a file open: $pids. Pass --pid."
   echo "$pids"
 }
 field()    { jq -r --argjson p "$2" --arg f "$3" '.instances[] | select(.pid == $p) | .[$f]' <<<"$1"; }

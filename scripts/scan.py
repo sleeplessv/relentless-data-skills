@@ -5,7 +5,8 @@ Usage: python3 scripts/scan.py SESSION
 
 SESSION is a session id or the path of its .jsonl log. An id is looked up as
 $CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl (default ~/.claude). An argument that
-starts with "-" and does not end in .jsonl is bad usage. Helpers' logs are read
+starts with "-" and does not end in .jsonl is bad usage, except -h or --help as
+the only argument, which prints this help. Helpers' logs are read
 from <log without .jsonl>/subagents/ and every folder below it; a folder there
 that cannot be listed stops the scan with an error.
 

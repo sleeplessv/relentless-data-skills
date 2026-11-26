@@ -48,11 +48,14 @@ class World:
         self.versions: list[dict] = []
         self.verdicts: list[dict] = []
         self.rows: list[dict] = []
+        self.ids: dict[str, int] = {}  # each version's own number, for its commits and sessions
 
-    def draw(self, per_bucket: int = 10) -> list[dict]:
-        """A new set of per_bucket tickets in each bucket, written at once, as the draw writes it."""
+    def draw(self, per_bucket: int = 10, labels: str = "A") -> list[dict]:
+        """A new set of per_bucket tickets in each bucket, from the projects labelled in turn, written at once, as
+        the draw writes it."""
         start = 1 + sum(map(len, self.sets))
-        tickets = [{"label": "A", "ticket": start + at, "bucket": BUCKETS[at % 3], "size": 10, "title": TITLE,
+        tickets = [{"label": labels[at % len(labels)], "ticket": start + at, "bucket": BUCKETS[at % 3], "size": 10,
+                    "title": TITLE,
                     "body": "## Acceptance criteria\n\n- [ ] The total.", "base_commit": commit(1),
                     "ready_commit": commit(1000 + start + at), "model": "claude-test-model", "pr": 500 + start + at,
                     "session": session(start + at), "log": f"logs/{session(start + at)}.jsonl",
@@ -65,11 +68,12 @@ class World:
         return tickets
 
     def replay(self, ticket: dict, version: str = "direct", not_direct: bool = False) -> dict:
+        number = 100000 * self.ids.setdefault(version, len(self.ids) + 1)
         found = {"label": ticket["label"], "ticket": ticket["ticket"], "version": version,
-                 "commit": commit(5000 + ticket["ticket"] + 100000 * len(version)),
+                 "commit": commit(5000 + ticket["ticket"] + number),
                  "repo": f"replays/A-{ticket['ticket']}-{version}.git", "base_commit": ticket["base_commit"],
                  "clone": f"replays/A-{ticket['ticket']}-{version}", "exit_status": 0,
-                 "session": session(9000 + ticket["ticket"] + 100000 * len(version)), "skills": [],
+                 "session": session(9000 + ticket["ticket"] + number), "skills": [],
                  "not_direct": not_direct}
         self.versions.append(found)
         return found
@@ -152,23 +156,22 @@ class TestReport(unittest.TestCase):
             self.world.run("generation-one", ticket, at != 1, tokens=1000 * (at + 1), minutes=10.0 * (at + 1))
             self.world.run("direct", ticket, at in (0, 2), tokens=100 * (at + 1), minutes=1.25 * (at + 1))
         self.assertEqual(self.lines(), [
-            "Replay set 1: 6 tickets.",
+            "Replay set 1: 6 tickets, of project A.",
             "",
             "generation-one",
-            "  0-50: 2 of 2 judged, 2 of 2 right first time, median total tokens 2500, median active minutes 25.0.",
-            "  51-300: 2 of 2 judged, 1 of 2 right first time, median total tokens 3500, median active minutes 35.0.",
-            "  301-1500: 2 of 2 judged, 2 of 2 right first time, median total tokens 4500, median active minutes "
-            "45.0.",
-            "  All: 6 of 6 judged, 5 of 6 right first time, median total tokens 3500, median active minutes 35.0.",
+            "  0-50: 2 judged, 2 of 2 right first time, median total tokens 2500, median active minutes 25.",
+            "  51-300: 2 judged, 1 of 2 right first time, median total tokens 3500, median active minutes 35.",
+            "  301-1500: 2 judged, 2 of 2 right first time, median total tokens 4500, median active minutes 45.",
+            "  All: 6 judged, 5 of 6 right first time, median total tokens 3500, median active minutes 35.",
             "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
             "record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank.",
             "",
             "direct",
-            "  0-50: 2 of 2 judged, 1 of 2 right first time, median total tokens 250, median active minutes 3.1.",
-            "  51-300: 2 of 2 judged, 0 of 2 right first time, median total tokens 350, median active minutes 4.4.",
-            "  301-1500: 2 of 2 judged, 1 of 2 right first time, median total tokens 450, median active minutes 5.6.",
-            "  All: 6 of 6 judged, 2 of 6 right first time, median total tokens 350, median active minutes 4.4.",
+            "  0-50: 2 judged, 1 of 2 right first time, median total tokens 250, median active minutes 3.125.",
+            "  51-300: 2 judged, 0 of 2 right first time, median total tokens 350, median active minutes 4.375.",
+            "  301-1500: 2 judged, 1 of 2 right first time, median total tokens 450, median active minutes 5.625.",
+            "  All: 6 judged, 2 of 6 right first time, median total tokens 350, median active minutes 4.375.",
             "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
             "record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank.",
@@ -180,10 +183,10 @@ class TestReport(unittest.TestCase):
     def test_a_count_out_of_fewer_than_20_is_never_a_rate(self) -> None:
         self.world.baseline(17, 14)
         lines = self.lines()
-        self.assertIn("  0-50: 10 of 10 judged, 6 of 10 right first time, median total tokens 100, median active "
-                      "minutes 10.0.", lines)
-        self.assertIn("  All: 30 of 30 (100%) judged, 17 of 30 (57%) right first time, median total tokens 100, "
-                      "median active minutes 10.0.", lines)
+        self.assertIn("  0-50: 10 judged, 6 of 10 right first time, median total tokens 100, median active "
+                      "minutes 10.", lines)
+        self.assertIn("  All: 30 judged, 17 of 30 (57%) right first time, median total tokens 100, "
+                      "median active minutes 10.", lines)
 
     def test_a_rate_starts_at_20_tickets(self) -> None:
         tickets = self.world.draw(per_bucket=7)[:20]  # 20 tickets judged of 21, then 19 of 21
@@ -192,10 +195,10 @@ class TestReport(unittest.TestCase):
         for ticket in tickets[:19]:
             self.world.run("direct", ticket, True)
         lines = self.lines()
-        self.assertIn("  All: 20 of 21 (95%) judged, 20 of 20 (100%) right first time, median total tokens 100, "
-                      "median active minutes 10.0.", lines)
-        self.assertIn("  All: 19 of 21 (90%) judged, 19 of 19 right first time, median total tokens 100, "
-                      "median active minutes 10.0.", lines)
+        self.assertIn("  All: 20 judged, 20 of 20 (100%) right first time, median total tokens 100, "
+                      "median active minutes 10.", lines)
+        self.assertIn("  All: 19 judged, 19 of 19 right first time, median total tokens 100, "
+                      "median active minutes 10.", lines)
 
     def test_a_blank_token_count_is_left_out_of_the_token_figures_and_counted(self) -> None:
         tickets = self.world.draw(per_bucket=1)
@@ -205,11 +208,11 @@ class TestReport(unittest.TestCase):
         lines = self.lines()
         self.assertEqual(lines[2:9], [
             "generation-one",
-            "  0-50: 1 of 1 judged, 1 of 1 right first time, median total tokens none, median active minutes none.",
-            "  51-300: 1 of 1 judged, 1 of 1 right first time, median total tokens 300, median active minutes none.",
-            "  301-1500: 1 of 1 judged, 0 of 1 right first time, median total tokens none, median active minutes "
+            "  0-50: 1 judged, 1 of 1 right first time, median total tokens none, median active minutes none.",
+            "  51-300: 1 judged, 1 of 1 right first time, median total tokens 300, median active minutes none.",
+            "  301-1500: 1 judged, 0 of 1 right first time, median total tokens none, median active minutes "
             "none.",
-            "  All: 3 of 3 judged, 2 of 3 right first time, median total tokens 300, median active minutes none.",
+            "  All: 3 judged, 2 of 3 right first time, median total tokens 300, median active minutes none.",
             "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
             "record.",
             "  Left out of the token figures: 2 with a blank token count. Left out of the active minutes: 3 blank."])
@@ -227,32 +230,59 @@ class TestReport(unittest.TestCase):
         lines = self.lines()  # tickets[5] has no replay at all
         start = lines.index("direct")
         self.assertEqual(lines[start + 4:start + 7], [
-            "  All: 2 of 6 judged, 1 of 2 right first time, median total tokens 200, median active minutes 10.0.",
+            "  All: 2 judged, 1 of 2 right first time, median total tokens 200, median active minutes 10.",
             "  Left out of every figure: 1 not direct, 3 with no verdict, 0 judged at a commit the version does not "
             "record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank."])
 
-    def test_a_verdict_on_another_commit_is_left_out_of_every_figure(self) -> None:
-        tickets = self.world.draw(per_bucket=1)
+    def test_a_verdict_on_another_commit_than_the_one_recorded_is_left_out_of_every_figure(self) -> None:
+        tickets = self.world.draw(per_bucket=1)  # tickets[2] has neither version judged
         self.world.judge(tickets[0], "generation-one", True, at=commit(77))  # not the ready commit
         self.world.run("generation-one", tickets[1], True)
         self.world.replay(tickets[0])
         self.world.judge(tickets[0], "direct", True, at=commit(78))  # not the replay's commit
-        self.world.judge(tickets[1], "direct", True, at=commit(79))  # no replay recorded
-        lines = self.lines()  # tickets[2] has neither version judged
-        for version, judged in (("generation-one", 1), ("direct", 0)):
+        self.world.judge(tickets[1], "direct", False, at=commit(79))  # no replay recorded, so the judge's commit
+        lines = self.lines()
+        for version, right, tokens, minutes in (("generation-one", 1, 100, 10), ("direct", 0, "none", "none")):
             start = lines.index(version)
-            self.assertEqual(lines[start + 4:start + 6], [
-                f"  All: {judged} of 3 judged, {judged} of {judged} right first time, median total tokens "
-                f"{100 if judged else 'none'}, median active minutes {'10.0' if judged else 'none'}.",
-                f"  Left out of every figure: 0 not direct, 1 with no verdict, {2 - judged} judged at a commit the "
-                "version does not record."])
+            self.assertEqual(lines[start + 4:start + 7], [
+                f"  All: 1 judged, {right} of 1 right first time, median total tokens {tokens}, median active minutes "
+                f"{minutes}.",
+                "  Left out of every figure: 0 not direct, 1 with no verdict, 1 judged at a commit the version does "
+                "not record.",
+                f"  Left out of the token figures: {1 - right} with a blank token count. Left out of the active "
+                f"minutes: {1 - right} blank."])
+
+    def test_a_version_judged_with_no_replay_record_counts_with_blank_figures(self) -> None:
+        tickets = self.world.draw(per_bucket=1)
+        for at, ticket in enumerate(tickets):  # judged at a commit the judge was given, with no versions.jsonl line
+            self.world.judge(ticket, "fan-out", at != 1, at=commit(70 + at))
+        lines = self.lines()
+        start = lines.index("fan-out")
+        self.assertEqual(lines[start + 4:start + 7], [
+            "  All: 3 judged, 2 of 3 right first time, median total tokens none, median active minutes none.",
+            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
+            "record.",
+            "  Left out of the token figures: 3 with a blank token count. Left out of the active minutes: 3 blank."])
+
+    def test_the_medians_keep_their_fractions(self) -> None:
+        tickets = self.world.draw(per_bucket=2)  # tickets 0 and 3 are both in 0-50
+        self.world.run("generation-one", tickets[0], True, tokens=100, minutes=1.01)
+        self.world.run("generation-one", tickets[3], False, tokens=101, minutes=1.02)
+        lines = self.lines()
+        self.assertEqual(lines[3], "  0-50: 2 judged, 1 of 2 right first time, median total tokens 100.5, median "
+                                   "active minutes 1.015.")
+        self.assertEqual(lines[6], "  All: 2 judged, 1 of 2 right first time, median total tokens 100.5, median "
+                                   "active minutes 1.015.")
 
     def test_projects_appear_as_labels_only(self) -> None:
-        self.world.baseline(20, 20)
-        output = self.world.report().stdout
+        self.world.draw(labels="BA")
+        self.world.draw(labels="C")
+        self.world.run("generation-one", self.world.sets[0][0], True)
+        result = self.world.report()
+        self.assertEqual(result.stdout.splitlines()[0], "Replay sets 1 and 2: 60 tickets, of projects A, B and C.")
         for secret in (REPO, "alpha", TITLE, session(1), commit(1001)):
-            self.assertNotIn(secret, output)
+            self.assertNotIn(secret, result.stdout)
 
     def test_a_third_version_is_printed_beside_the_other_two(self) -> None:
         tickets = self.world.draw(per_bucket=1)
@@ -264,8 +294,8 @@ class TestReport(unittest.TestCase):
         self.assertEqual([line for line in lines if line and not line.startswith(" ")][1:4],
                          ["generation-one", "direct", "fan-out"])
         start = lines.index("fan-out")
-        self.assertEqual(lines[start + 4], "  All: 3 of 3 judged, 1 of 3 right first time, median total tokens 40, "
-                                           "median active minutes 4.0.")
+        self.assertEqual(lines[start + 4], "  All: 3 judged, 1 of 3 right first time, median total tokens 40, "
+                                           "median active minutes 4.")
 
     def test_on_30_tickets_5_or_more_the_sign_appears(self) -> None:
         self.assertEqual(self.sign(20, 15), [
@@ -295,7 +325,8 @@ class TestReport(unittest.TestCase):
                 self.setUp()
                 lines = self.sign(40, second, sets=2)
                 self.assertEqual(lines[1], verdict)
-                self.assertEqual(self.world.report().stdout.splitlines()[0], "Replay sets 1 and 2: 60 tickets.")
+                self.assertEqual(self.world.report().stdout.splitlines()[0],
+                                 "Replay sets 1 and 2: 60 tickets, of project A.")
 
     def test_the_verdict_waits_for_both_versions_on_every_ticket(self) -> None:
         self.world.baseline(20, 10)
@@ -317,7 +348,7 @@ class TestReport(unittest.TestCase):
         self.world.run("generation-one", stray, False)
         self.world.run("direct", stray, True)
         lines = self.lines()
-        self.assertEqual(lines[:2], ["Replay set 1: 30 tickets.",
+        self.assertEqual(lines[:2], ["Replay set 1: 30 tickets, of project A.",
                                      "Left out: 3 lines of versions.jsonl and verdicts.jsonl name a ticket in no set."])
         self.assertEqual(lines[-1], "The sign appears.")
 
@@ -333,6 +364,13 @@ class TestReport(unittest.TestCase):
         self.error(f"no replay set in {self.world.state}.")
         self.assertFalse(self.world.state.exists())
         self.assertFalse((self.world.source / "__pycache__").exists())
+
+    def test_a_machine_directory_it_cannot_list_is_an_error(self) -> None:
+        self.world.baseline(20, 15)
+        self.world.save()
+        self.world.state.chmod(0o100)  # searchable, not readable
+        self.addCleanup(self.world.state.chmod, 0o700)
+        self.error(f"{self.world.state} cannot be read (PermissionError).")
 
     def test_missing_versions_verdicts_and_rows_are_nothing_judged_yet(self) -> None:
         self.world.draw()
@@ -371,6 +409,10 @@ class TestReport(unittest.TestCase):
             ("replay-set-1.json", entry("session", None), "replay-set-1.json: ticket entry 2: session is missing or of "
                                                           "the wrong type."),
             ("replay-set-1.json", "{", "replay-set-1.json cannot be read as JSON (JSONDecodeError)."),
+            ("replay-set-1.json", entry("label", REPO), "replay-set-1.json: ticket entry 2: label is not a label the "
+                                                        "draw gives."),
+            ("verdicts.jsonl", field("version", REPO), "verdicts.jsonl:2: version is not a version name."),
+            ("versions.jsonl", field("version", REPO), "versions.jsonl:2: version is not a version name."),
             ("replay-set-2.json", "copy", "replay-set-2.json: ticket entry 1: a second line for the same label, "
                                           "ticket."),
         ]
@@ -401,6 +443,9 @@ class TestReport(unittest.TestCase):
             self.assertEqual(result.returncode, 0)
             self.assertEqual(result.stdout.splitlines()[0], "Print the comparison between versions on the replay set "
                                                             "and the verdict on")
+            self.assertIn("  30 tickets: appears at 5 or more, not decided at 3 to 4, not at 2 or fewer.",
+                          result.stdout.splitlines())
+            self.assertIn("  60 tickets: appears at 8 or more, not at 7 or fewer.", result.stdout.splitlines())
         for args in (["--set", "1"], ["extra"], ["--help", "extra"]):
             with self.subTest(args=args):
                 result = self.world.report(*args)

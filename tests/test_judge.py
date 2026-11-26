@@ -13,6 +13,7 @@ import json
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -55,8 +56,11 @@ printf '%s\n' "$*" >> "$GH_LOG"
 exec git clone -q "$GH_REMOTES/$3.git" "$4"
 """
 # Records each argument on a line of its own, the prompt it reads, its working folder, what that folder holds
-# and a copy of it, links and modes kept; tries to change the folder, and removes $CLAUDE_BREAK when it is set;
-# then prints the saved answer as Claude Code's JSON result.
+# and a copy of it, links and modes kept; tries to change the folder, and removes $CLAUDE_BREAK when it is set.
+# Given --session-id, it writes the session's log where Claude Code writes it, under $CLAUDE_CONFIG_DIR/projects
+# (default ~/.claude) in a folder named for its working folder: the bytes of $CLAUDE_LOG, unless that is empty,
+# then a line with the session's id; with $CLAUDE_LOG_FOLDER set, a folder beside the log as well. With
+# $CLAUDE_SLEEP set it then sleeps that many seconds; it prints the saved answer as Claude Code's JSON result.
 CLAUDE = r"""#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDE_ARGS"
 cat > "$CLAUDE_PROMPT"
@@ -67,10 +71,23 @@ rm -rf "$CLAUDE_COPY" && cp -pRP . "$CLAUDE_COPY"
 if [ -n "$CLAUDE_BREAK" ]; then rm -rf "$CLAUDE_BREAK"; fi
 echo "the reviewer wrote this" > app.txt
 rm -f counter
+session= previous=
+for arg in "$@"; do [ "$previous" = --session-id ] && session=$arg; previous=$arg; done
+if [ -n "$session" ] && [ -n "$CLAUDE_LOG" ]; then
+  project="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
+  mkdir -p "$project"
+  { cat "$CLAUDE_LOG"; printf '{"sessionId":"%s"}\n' "$session"; } > "$project/$session.jsonl"
+  if [ -n "$CLAUDE_LOG_FOLDER" ]; then
+    mkdir -p "$project/$session/tool-results" && printf 'a large result\n' > "$project/$session/tool-results/r1.txt"
+  fi
+fi
+if [ -n "$CLAUDE_SLEEP" ]; then exec sleep "$CLAUDE_SLEEP"; fi
 if [ -n "$CLAUDE_STDERR" ]; then echo "$CLAUDE_STDERR" >&2; fi
 cat "$CLAUDE_ANSWER"
 exit "${CLAUDE_EXIT:-0}"
 """
+# A line of the stand-in's session log that appears nowhere else.
+MARKER = '{"type":"user","message":"log marker 5c1e"}\n'
 
 
 def git(cwd: Path, *args: str, env: dict | None = None) -> str:
@@ -150,6 +167,9 @@ class World:
                          "pr": 8, "session": "s-1", "log": "logs/s-1.jsonl", "check_output": "checks/A-7.txt"}]}))
         self.answer("R1: met\nR2: met\nR3: met\n")
         self.breaking = ""
+        self.log = root / "log"  # the bytes the stand-in's session log starts with; None for no log
+        self.log.write_text(MARKER)
+        self.log_folder = self.sleep = ""
 
     def answer(self, text: str, exit: int = 0, raw: str | None = None) -> None:
         """The stand-in's next answer: `text` as the result of Claude Code's JSON, or `raw` printed as it is."""
@@ -157,16 +177,26 @@ class World:
         (self.root / "answer").write_text(json.dumps(result) if raw is None else raw)
         self.exit = exit
 
+    def env(self) -> dict[str, str]:
+        """What the judge runs with: the stand-ins first on PATH, and a scratch home and machine directory."""
+        return {"HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
+                "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GH_LOG": str(self.records / "gh"),
+                "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
+                "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,
+                "CLAUDE_LOG": str(self.log or ""), "CLAUDE_LOG_FOLDER": self.log_folder, "CLAUDE_SLEEP": self.sleep,
+                **{f"CLAUDE_{name.upper()}": str(self.records / name)
+                   for name in ("args", "prompt", "cwd", "git", "files", "copy")}}
+
     def judge(self, *args: str) -> subprocess.CompletedProcess[str]:
-        env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
-        env.update({"HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
-                    "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GH_LOG": str(self.records / "gh"),
-                    "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
-                    "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,
-                    **{f"CLAUDE_{name.upper()}": str(self.records / name)
-                       for name in ("args", "prompt", "cwd", "git", "files", "copy")}})
-        return subprocess.run([sys.executable, str(SCRIPTS / "judge.py"), *args], cwd=self.root / "cwd", env=env,
-                              text=True, capture_output=True)
+        env = {key: value for key, value in os.environ.items()
+               if key not in ("PYTHONDONTWRITEBYTECODE", "CLAUDE_CONFIG_DIR")}
+        return subprocess.run([sys.executable, str(SCRIPTS / "judge.py"), *args], cwd=self.root / "cwd",
+                              env={**env, **self.env()}, text=True, capture_output=True)
+
+    def written(self) -> bytes:
+        """The bytes the stand-in wrote as its last session's log."""
+        session = self.record("args").splitlines()
+        return self.log.read_bytes() + b'{"sessionId":"%s"}\n' % session[session.index("--session-id") + 1].encode()
 
     def record(self, name: str) -> str:
         return (self.records / name).read_text()
@@ -221,7 +251,8 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(verdict["check"], {"passed": True, "reason": None, "output": f"{folder}/check.txt"})
         self.assertEqual(verdict["review"], {
             "passed": True, "reason": None, "requirements": {"R1": "met", "R2": "met", "R3": "met"}, "findings": [],
-            "proven": 0, "lines": f"{folder}/review.txt", "prompt": f"{folder}/prompt.txt"})
+            "proven": 0, "lines": f"{folder}/review.txt", "prompt": f"{folder}/prompt.txt",
+            "log": f"{folder}/session.jsonl"})
         self.assertIs(verdict["right_first_time"], True)
         self.assertEqual(result.stdout.splitlines(), [
             f"Test 1, the check: passed. Output in {self.world.state / folder / 'check.txt'}.",
@@ -231,12 +262,23 @@ class TestJudge(unittest.TestCase):
         self.assertFalse((self.world.records / "gh").exists())  # its repo is on this machine; GitHub is not asked
         self.assertEqual(list((self.world.state / "judge-work").iterdir()), [])
 
+    def test_the_review_session_s_log_is_kept_with_its_attempt_and_named_by_its_line(self) -> None:
+        result = self.world.judge("A-7", "generation-one")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        [verdict] = self.world.verdicts()
+        folder = verdict["check"]["output"].removesuffix("/check.txt")
+        self.assertEqual(verdict["review"]["log"], f"{folder}/session.jsonl")
+        log = self.world.state / verdict["review"]["log"]
+        self.assertEqual(log.read_bytes(), self.world.written())
+        self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+
     def test_the_review_starts_headless_on_opus_at_medium_effort_with_read_tools_only(self) -> None:
         self.world.judge("A-7", "generation-one")
-        self.assertEqual(self.world.record("args").splitlines(), [
+        *args, session = self.world.record("args").splitlines()
+        self.assertEqual(args, [
             "-p", "--model", "opus", "--effort", "medium", "--output-format", "json", "--safe-mode",
-            "--strict-mcp-config", "--tools", "Read,Grep,Glob", "--permission-prompts", "none",
-            "--no-session-persistence"])
+            "--strict-mcp-config", "--tools", "Read,Grep,Glob", "--permission-prompts", "none", "--session-id"])
+        self.assertRegex(session, r"\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\Z")
 
     def test_the_reviewer_is_given_the_ticket_and_the_diff_and_nothing_that_names_the_version(self) -> None:
         for version, args in (("generation-one", ()),
@@ -531,10 +573,10 @@ class TestJudge(unittest.TestCase):
         verdicts = self.world.verdicts()
         self.assertEqual([(verdict["version"], verdict["review"]["passed"]) for verdict in verdicts],
                          [("direct", True), ("generation-one", False)])
-        # Only the files the two lines name are kept.
+        # Only the files the two lines name are kept: the replaced attempt's log goes with its folder.
         self.assertEqual(list(self.world.files()), sorted(
-            path for verdict in verdicts
-            for path in (verdict["check"]["output"], verdict["review"]["lines"], verdict["review"]["prompt"])))
+            path for verdict in verdicts for path in (verdict["check"]["output"], verdict["review"]["lines"],
+                                                      verdict["review"]["prompt"], verdict["review"]["log"])))
 
     def test_a_failed_attempt_leaves_the_earlier_verdict_and_its_files_as_they_were(self) -> None:
         self.assertEqual(self.world.judge("A-7", "direct", "--commit", self.world.replay, "--from",

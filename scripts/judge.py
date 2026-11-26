@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -23,10 +24,10 @@ EXIT_NO_VERDICT = 3
 REVIEW_TIMEOUT = draw.CHECK_TIMEOUT
 # One requirements review on the strong class, headless, that can read the version's files and change nothing.
 # --safe-mode loads no CLAUDE.md, skill, plugin, hook, MCP server or auto memory; --tools leaves only the
-# read tools; --permission-prompts none denies whatever would ask; no session log is kept.
+# read tools; --permission-prompts none denies whatever would ask. review() adds --session-id, and Claude Code
+# writes the session's log under its projects folder, from where keep_log moves it into the attempt's folder.
 CLAUDE = ["claude", "-p", "--model", "opus", "--effort", "medium", "--output-format", "json", "--safe-mode",
-          "--strict-mcp-config", "--tools", "Read,Grep,Glob", "--permission-prompts", "none",
-          "--no-session-persistence"]
+          "--strict-mcp-config", "--tools", "Read,Grep,Glob", "--permission-prompts", "none"]
 # Output that is not UTF-8, such as a diff of a Latin-1 file, is kept with its odd bytes written as \xe9.
 TEXT = {"encoding": "utf-8", "errors": "backslashreplace"}
 
@@ -293,10 +294,12 @@ def read_answer(text: str, count: int) -> dict | None:
     return {"requirements": answers, "findings": findings, "proven": proven, "passed": proven == 0}
 
 
-def review(prompt: str, folder: Path) -> tuple[str, str | None]:
-    """Run the review in `folder`: the answer as it came, and why it gives no verdict when it fails."""
+def review(prompt: str, folder: Path, session: str) -> tuple[str, str | None]:
+    """Run the review in `folder` as session `session`: the answer as it came, and why it gives no verdict when it
+    fails."""
     try:
-        done = subprocess.run(CLAUDE, input=prompt, cwd=folder, capture_output=True, timeout=REVIEW_TIMEOUT, **TEXT)
+        done = subprocess.run([*CLAUDE, "--session-id", session], input=prompt, cwd=folder, capture_output=True,
+                              timeout=REVIEW_TIMEOUT, **TEXT)
     except subprocess.TimeoutExpired:
         return "", f"the review ran for more than {REVIEW_TIMEOUT} seconds"
     try:
@@ -315,6 +318,33 @@ def review(prompt: str, folder: Path) -> tuple[str, str | None]:
     if reason:
         return f"{done.stdout}{done.stderr}".rstrip("\n") + f"\nclaude exit {done.returncode}\n", reason
     return text, None
+
+
+def private_copy(source: str | Path, target: str | Path) -> None:
+    """Copy a file's bytes to a new file only its owner can read."""
+    with open(source, "rb") as found, os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+                                                "wb") as kept:
+        os.fchmod(kept.fileno(), 0o600)  # whatever the umask
+        shutil.copyfileobj(found, kept)
+
+
+def keep_log(session: str, saved: Path) -> Path | None:
+    """Move the session's log from where Claude Code wrote it into `saved` as session.jsonl, with the folder Claude
+    Code keeps beside a log as session/, each file private; remove the project folder it leaves empty. The kept log,
+    or None when the session left none."""
+    _, log = scan.resolve(session)
+    if not log.is_file():
+        return None
+    private_copy(log, saved / "session.jsonl")
+    if log.with_suffix("").is_dir():
+        shutil.copytree(log.with_suffix(""), saved / "session", copy_function=private_copy)
+        shutil.rmtree(log.with_suffix(""))
+    log.unlink()
+    try:
+        log.parent.rmdir()  # the folder Claude Code made for the review's working folder, once empty
+    except OSError:
+        pass
+    return saved / "session.jsonl"
 
 
 def attempt(state: Path, label: str, number: int, version: str, commit: str | None, source: Path | None,
@@ -351,8 +381,11 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
         prompt = PROMPT.format(title=entry.get("title", ""), body=(entry.get("body") or "").strip(), diff=diff.stdout,
                                requirements="\n".join(f"R{at}: {text}" for at, text in enumerate(required, 1)))
         scan.write_private(saved / "prompt.txt", prompt)
-        answer, reason = review(prompt, folder)
+        session = str(uuid.uuid4())
+        answer, reason = review(prompt, folder, session)
         scan.write_private(saved / "review.txt", answer)
+        log = keep_log(session, saved)
+        reason = reason or (None if log else "the review session left no log")
         reading = None if reason else read_answer(answer, len(required))
         if reading is None and not reason:
             reason = "the answer is not in the fixed lines"
@@ -369,7 +402,8 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
             "review": {"passed": None if reading is None else reading["passed"], "reason": reason,
                        **({"requirements": None, "findings": None, "proven": None} if reading is None else
                           {key: reading[key] for key in ("requirements", "findings", "proven")}),
-                       "lines": path("review.txt"), "prompt": path("prompt.txt")},
+                       "lines": path("review.txt"), "prompt": path("prompt.txt"),
+                       "log": path("session.jsonl") if log else None},
             "right_first_time": None if reading is None else failed is None and reading["passed"]}
 
 

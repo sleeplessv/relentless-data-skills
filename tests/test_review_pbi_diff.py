@@ -4,15 +4,18 @@ Standard library only. Run from the repo root:
 
     python3 -m unittest discover -s tests -v
 
-Nothing here talks to git: the overlap computation works on the per-page
-visual summaries the extractor builds, so the tests feed it those dicts
-directly. The `overlaps` shape ({a, b, pct_of_smaller}) is asserted
+Range tests run the extractor against a disposable local repository. Overlap
+tests feed it the per-page visual summaries directly.
+The `overlaps` shape ({a, b, pct_of_smaller}) is asserted
 deliberately: SKILL.md check 9 reads it, so it is an interface. The artifact
 check reads the markers references/artifact.md defines, another interface.
 """
 from __future__ import annotations
 
+import json
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -21,6 +24,51 @@ sys.path.insert(0, str(REPO_ROOT / "skills" / "review-pbi-diff" / "scripts"))
 
 import check_artifact  # noqa: E402
 import extract_changes  # noqa: E402
+
+
+class TestDefaultRange(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.repo = Path(tmp.name) / "repo"
+        self.repo.mkdir()
+        self.out = Path(tmp.name) / "out"
+        self.git("init", "-b", "trunk")
+        self.git("commit", "--allow-empty", "-m", "base")
+        self.base = self.git("rev-parse", "HEAD")
+        self.git("switch", "-c", "feature")
+        self.git("commit", "--allow-empty", "-m", "feature")
+
+    def git(self, *args):
+        return subprocess.run(
+            ["git", "-c", "commit.gpgsign=false", "-c", "user.name=Tester",
+             "-c", "user.email=test@example.invalid", *args],
+            cwd=self.repo, capture_output=True, text=True, check=True,
+        ).stdout.strip()
+
+    def extract(self, *args):
+        return subprocess.run(
+            [sys.executable, extract_changes.__file__, "--repo", str(self.repo),
+             "--out", str(self.out), *args], capture_output=True, text=True,
+        )
+
+    def test_uses_remote_default_on_a_non_main_feature_branch(self):
+        self.git("update-ref", "refs/remotes/origin/trunk", self.base)
+        self.git("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
+        result = self.extract()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        model = json.loads((self.out / "change_model.json").read_text())
+        self.assertEqual(model["base"], self.base)
+        self.assertEqual(model["head"], self.git("rev-parse", "HEAD"))
+        self.assertEqual(len(model["commits"]), 1)
+
+    def test_unknown_default_requests_a_range_and_accepts_an_explicit_one(self):
+        result = self.extract()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("explicit range", result.stderr)
+        self.assertFalse(self.out.exists())
+        result = self.extract("trunk...HEAD")
+        self.assertEqual(result.returncode, 0, result.stderr)
 
 
 def visual(name, x, y, w, h, **extra):

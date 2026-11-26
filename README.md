@@ -13,7 +13,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`astra-review`](skills/astra-review/) | Get a ponytail review of a change from Astra, the Codex CLI on an Astra model, in a Herdr tab, then fix the findings that hold up. |
 | [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
-| [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Workbench and Relentless Data conventions. |
+| [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Harness and Relentless Data conventions. |
 | [`dossier`](skills/dossier/) | Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
 | [`gh-weekly-report`](skills/gh-weekly-report/) | Create interactive weekly reports of a GitHub user's activity across repositories. |
@@ -192,7 +192,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 ## Repo layout
 
 - `skills/<skill>/`: each skill has `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`. Workflow skills can depend on companion skills.
-- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `scan.py`, which reads one Claude Code session from its log, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, and `statusline_screenshots.py`, which renders the statusline README's screenshots.
+- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `scan.py`, which reads one Claude Code session from its log, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `report.py`, which prints the comparison between versions on the replay set and the verdict on warning sign 1, and `statusline_screenshots.py`, which renders the statusline README's screenshots.
 - `.claude-plugin/marketplace.json`: declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
 ## Maintenance and CI

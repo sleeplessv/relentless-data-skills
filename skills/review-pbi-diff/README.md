@@ -74,7 +74,9 @@ npx skills add sleeplessv/relentless-data-skills/skills/review-pbi-diff
 ```
 
 It activates when you ask to review a Power BI branch/diff/PR or to summarize
-Power BI work; it takes an optional git ref range (default `main...HEAD`).
+Power BI work. By default the extractor compares HEAD with its merge base with
+the default branch recorded in `origin/HEAD`. Supply an explicit range for
+another comparison or when this clone has no usable default ref.
 
 ## Files
 

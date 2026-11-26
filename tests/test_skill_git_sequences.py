@@ -236,14 +236,14 @@ class Sandbox:
         self.git(repo, "commit", "-q", "-m", message)
         return self.git(repo, "rev-parse", "HEAD")
 
-    def origin_with_main(self) -> Path:
-        """A bare `origin.git` whose `main` holds one commit."""
+    def origin_with_default_branch(self, branch: str = "main") -> Path:
+        """A bare `origin.git` whose default branch holds one commit."""
         origin = self.root / "origin.git"
-        self.git(self.root, "init", "-q", "--bare", "-b", "main", str(origin))
+        self.git(self.root, "init", "-q", "--bare", "-b", branch, str(origin))
         seed = self.root / "seed"
         self.git(self.root, "clone", "-q", str(origin), str(seed))
         self.commit_file(seed, "README.md", "seed\n", "chore: seed")
-        self.git(seed, "push", "-q", "origin", "HEAD:refs/heads/main")
+        self.git(seed, "push", "-q", "origin", f"HEAD:refs/heads/{branch}")
         return origin
 
     def clone(self, origin: Path, name: str) -> Path:
@@ -352,7 +352,7 @@ class ImplementFeatureIntegrationTests(unittest.TestCase):
 
     def setUp(self):
         self.sb = Sandbox(self)
-        self.origin = self.sb.origin_with_main()
+        self.origin = self.sb.origin_with_default_branch()
         # Integration checkout: INT created locally from the pinned base, never pushed yet.
         self.ic = self.sb.clone(self.origin, "integration")
         self.base_sha = self.sb.git(self.ic, "rev-parse", "HEAD")
@@ -584,10 +584,26 @@ def land_block(heading: str, marker: str, values: Optional[Dict[str, str]] = Non
 @unittest.skipUnless(GIT and BASH, "git and bash are required")
 class ShipTests(unittest.TestCase):
 
+    default_branch = "main"
+
     def setUp(self):
         self.sb = Sandbox(self)
-        self.origin = self.sb.origin_with_main()
+        self.origin = self.sb.origin_with_default_branch(self.default_branch)
         self.work = self.sb.clone(self.origin, "work")
+        self.variables = {"default_branch": self.default_branch}
+
+    def test_preflight_counts_commits_against_updated_default_branch(self):
+        cmds = land_block("Step 0: Preflight", "git log --oneline")
+        upstream = self.sb.clone(self.origin, "upstream")
+        commit = self.sb.commit_file(self.work, "work.txt", "work\n", "feat: local work")
+        self.sb.git(self.work, "push", "-q", "origin", "HEAD:refs/heads/feat/shared")
+        self.sb.git(upstream, "fetch", "-q", "origin")
+        self.sb.git(upstream, "merge", "-q", "--ff-only", "origin/feat/shared")
+        self.sb.git(upstream, "push", "-q", "origin", "HEAD")
+        run = self.sb.run(self.work, cmds, self.variables)
+        self.assertTrue(run.completed, run)
+        self.assertEqual(run.step("git log").out, "")
+        self.assertEqual(self.sb.git(self.work, "rev-parse", f"origin/{self.default_branch}"), commit)
 
     def inline_fresh_branch(self) -> str:
         text = section(LAND_SKILL.read_text(encoding="utf-8"), "Step 2: Pick the branch")
@@ -596,37 +612,55 @@ class ShipTests(unittest.TestCase):
         return m.group(1)
 
     def test_merged_detection(self):
-        cmds = land_block("Step 2: Pick the branch", "ancestor-merged")
-        self.assertEqual(cmds, ["git fetch origin main",
-                                "git merge-base --is-ancestor HEAD origin/main && echo ancestor-merged"])
+        cmds = [doc_block(LAND_SKILL, "Step 2: Pick the branch", "ancestor-merged").splitlines()[0]]
+        self.assertEqual(len(cmds), 1, cmds)
         self.sb.git(self.work, "checkout", "-q", "-b", "feat/old")
-        merged = self.sb.run(self.work, cmds)
+        merged = self.sb.run(self.work, cmds, self.variables)
         self.assertEqual(merged.steps[-1].out.strip(), "ancestor-merged")
 
         self.sb.commit_file(self.work, "new.txt", "new\n", "feat: new")
-        live = self.sb.run(self.work, cmds, allow={"ancestor-merged": {0, 1}})
+        live = self.sb.run(self.work, cmds, self.variables, allow={"ancestor-merged": {0, 1}})
         self.assertEqual(live.steps[-1].rc, 1)
         self.assertEqual(live.steps[-1].out, "")
 
     def test_fresh_branch_carries_uncommitted_changes(self):
         cmd = self.inline_fresh_branch().replace("<branch>", "feat/carry")
         upstream = self.sb.clone(self.origin, "upstream")
-        advanced = self.sb.commit_file(upstream, "up.txt", "up\n", "chore: advance main")
-        self.sb.git(upstream, "push", "-q", "origin", "HEAD:main")
+        advanced = self.sb.commit_file(upstream, "up.txt", "up\n", "chore: advance default branch")
+        self.sb.git(upstream, "push", "-q", "origin", f"HEAD:{self.default_branch}")
+        private = self.sb.commit_file(self.work, "private.txt", "private\n", "chore: local only")
         self.sb.git(self.work, "checkout", "-q", "-b", "fix/stale")
         (self.work / "README.md").write_text("edited\n", encoding="utf-8")
-        run = self.sb.run(self.work, split_commands(cmd))
+        preflight = land_block("Step 0: Preflight", "git log --oneline")
+        self.assertTrue(self.sb.run(self.work, preflight, self.variables).completed)
+        run = self.sb.run(self.work, split_commands(cmd), self.variables)
         self.assertTrue(run.completed, run)
         self.assertEqual(self.sb.git(self.work, "branch", "--show-current"), "feat/carry")
         self.assertEqual(self.sb.git(self.work, "rev-parse", "HEAD"), advanced)
+        self.assertEqual(self.sb.git(self.work, "rev-parse", self.default_branch), private)
         self.assertIn("README.md", self.sb.git(self.work, "status", "--porcelain"))
+
+    def test_dirty_ahead_default_stops_before_creating_a_branch(self):
+        private = self.sb.commit_file(self.work, "private.txt", "private\n", "chore: local only")
+        (self.work / "README.md").write_text("edited\n", encoding="utf-8")
+        before = self.sb.git(self.work, "status", "--porcelain")
+        preflight = land_block("Step 0: Preflight", "git log --oneline")
+        create = self.inline_fresh_branch().replace("<branch>", "feat/carry")
+        run = self.sb.run(self.work, preflight + [create], self.variables)
+        self.assertFalse(run.completed, run)
+        self.assertEqual(run.step("merge-base --is-ancestor").rc, 1)
+        self.assertIn("chore: local only", run.step("git log").out)
+        self.assertFalse(run.ran(create))
+        self.assertEqual(self.sb.git(self.work, "branch", "--show-current"), self.default_branch)
+        self.assertEqual(self.sb.git(self.work, "rev-parse", "HEAD"), private)
+        self.assertEqual(self.sb.git(self.work, "status", "--porcelain"), before)
 
     def test_push_sets_upstream(self):
         cmds = split_commands(doc_block(LAND_SKILL, "Step 3: Commit", "git push"))
         self.assertEqual(cmds, ["git push -u origin HEAD"])
         self.sb.git(self.work, "checkout", "-q", "-b", "feat/x")
         sha = self.sb.commit_file(self.work, "x.txt", "x\n", "feat: x")
-        run = self.sb.run(self.work, cmds)
+        run = self.sb.run(self.work, cmds, self.variables)
         self.assertTrue(run.completed, run)
         self.assertEqual(self.sb.remote_sha(self.origin, "refs/heads/feat/x"), sha)
         self.assertEqual(self.sb.git(self.work, "rev-parse", "--abbrev-ref", "@{u}"), "origin/feat/x")
@@ -663,38 +697,108 @@ class ShipTests(unittest.TestCase):
         step = self.ci_detect(sha).steps[0]
         self.assertEqual((step.rc, step.out), (1, ""), step)
 
-    def test_finish_on_main_confirms_merged_and_flags_leftover_branch(self):
+    def test_lookup_distinguishes_wrong_base_from_a_matching_open_pr(self):
+        branch = "feat/shared"
+        sha = self.sb.git(self.work, "rev-parse", "HEAD")
+        variables = self.land_variables(branch, sha)
+        lookup = doc_block(LAND_SKILL, "Step 2: Pick the branch", "lookup-pr.sh").splitlines()[-1]
+        match = f"acme/repo\t{branch}\t{self.default_branch}\topen\t7\t{sha}\tfalse"
+        fork = match.replace("acme/repo", "acme/fork").replace(self.default_branch, "other")
+        wrong = match.replace(self.default_branch, "other")
+        for rows, expected in [([match, fork], f"open 7 {sha}"), ([fork], "none"),
+                               ([wrong], None), ([match, wrong], None)]:
+            with self.subTest(rows=rows):
+                self.rows.write_text("\n".join(rows) + "\n")
+                run = self.sb.run(self.work, [lookup], variables)
+                self.assertEqual(run.completed, expected is not None, run)
+                if expected:
+                    self.assertEqual(run.steps[0].out.strip(), expected)
+                else:
+                    self.assertIn("targets other", run.steps[0].err)
+
+    def land_variables(self, branch, sha):
+        gh = self.sb.root / "gh"
+        self.rows = self.sb.root / "rows"
+        self.calls = self.sb.root / "merge.log"
+        gh.write_text("""#!/bin/sh
+case "$1 $2" in
+  'api --hostname')
+    case "$*" in *' base='*) exit 2 ;; esac
+    cat "$rows" ;;
+  'pr merge') printf '%s\\n' "$*" >> "$calls" ;;
+  *) exit 2 ;;
+esac
+""")
+        gh.chmod(0o755)
+        return dict(self.variables, host="example.test", repo="acme/repo", number="7",
+                    branch=branch, sha=sha, land_dir=str(LAND_SKILL.parent),
+                    PATH=str(self.sb.root) + os.pathsep + self.sb.env["PATH"],
+                    calls=str(self.calls), rows=str(self.rows))
+
+    def test_plain_and_auto_merge_require_local_pinned_and_fresh_heads(self):
+        branch = "feat/shared"
+        self.sb.git(self.work, "checkout", "-qb", branch)
+        sha = self.sb.git(self.work, "rev-parse", "HEAD")
+        variables = self.land_variables(branch, sha)
+        merge = doc_block(LAND_SKILL, "Step 5: Merge and clean up", "merge-head.sh").splitlines()[0]
+        fresh = f"open\tacme/repo\t{branch}\t{self.default_branch}\t"
+        for option in ("", " --auto"):
+            command = merge + option
+            self.rows.write_text(fresh + sha)
+            run = self.sb.run(self.work, [command], variables)
+            self.assertTrue(run.completed, run)
+            self.assertEqual(self.calls.read_text().strip(),
+                             f"pr merge 7 --repo example.test/acme/repo --squash --match-head-commit {sha}{option}")
+            self.calls.unlink()
+            self.rows.write_text(fresh + "1" * 40)
+            self.assertFalse(self.sb.run(self.work, [command], variables).completed)
+            self.assertFalse(self.calls.exists())
+        self.rows.write_text(fresh + sha)
+        ahead = self.sb.commit_file(self.work, "local", "keep", "local only")
+        for option in ("", " --auto"):
+            run = self.sb.run(self.work, [merge + option], variables)
+            self.assertFalse(run.completed)
+            self.assertIn(ahead, run.steps[0].err)
+            self.assertFalse(self.calls.exists())
+        self.assertEqual(self.sb.git(self.work, "rev-parse", branch), ahead)
+
+    def test_cleanup_preserves_occupied_or_moved_branch_and_removes_matching_tips(self):
         branch = "feat/done"
-        self.sb.git(self.work, "checkout", "-q", "-b", branch)
-        self.sb.commit_file(self.work, "done.txt", "done\n", "feat: done")
-        self.sb.git(self.work, "push", "-q", "-u", "origin", "HEAD")
-        # Simulate GitHub's squash merge on the server side.
+        self.sb.git(self.work, "checkout", "-qb", branch)
+        sha = self.sb.commit_file(self.work, "done.txt", "done\n", "feat: done")
+        self.sb.git(self.work, "push", "-qu", "origin", "HEAD")
         server = self.sb.clone(self.origin, "server")
         self.sb.git(server, "merge", "-q", "--squash", f"origin/{branch}")
-        self.sb.git(server, "commit", "-q", "-m", "feat: done (#1)")
-        merge_oid = self.sb.git(server, "rev-parse", "HEAD")
-        self.sb.git(server, "push", "-q", "origin", "HEAD:main")
+        self.sb.git(server, "commit", "-qm", "feat: done (#1)")
+        merge_commit = self.sb.git(server, "rev-parse", "HEAD")
+        self.sb.git(server, "push", "-q", "origin", "HEAD")
+        variables = dict(self.variables, branch=branch, sha=sha, merge_commit=merge_commit,
+                         land_dir=str(LAND_SKILL.parent))
+        commands = land_block("Step 5: Merge and clean up", "cleanup.sh")
+        self.assertTrue(self.sb.run(self.work, commands[:1], variables).completed)
+        occupied = self.sb.root / "occupied"
+        self.sb.git(self.work, "worktree", "add", str(occupied), branch)
+        run = self.sb.run(self.work, commands[1:], variables)
+        self.assertFalse(run.completed)
+        self.assertIn("checked out", run.steps[0].err)
+        self.assertEqual(self.sb.remote_sha(self.origin, f"refs/heads/{branch}"), sha)
+        self.sb.git(occupied, "switch", "--detach")
+        self.sb.git(self.work, "branch", "-f", branch, merge_commit)
+        self.assertFalse(self.sb.run(self.work, commands[1:], variables).completed)
+        self.assertEqual(self.sb.git(self.work, "rev-parse", branch), merge_commit)
+        self.sb.git(self.work, "branch", "-f", branch, sha)
+        self.sb.git(server, "push", "origin", f"HEAD:refs/heads/{branch}", "--force")
+        self.assertFalse(self.sb.run(self.work, commands[1:], variables).completed)
+        self.assertEqual(self.sb.remote_sha(self.origin, f"refs/heads/{branch}"), merge_commit)
+        self.sb.git(server, "push", "origin", f"{sha}:refs/heads/{branch}", "--force")
+        run = self.sb.run(self.work, commands, variables, allow={"ls-remote": {2}, "rev-parse": {1}})
+        self.assertTrue(run.completed, run)
+        self.assertIsNone(self.sb.remote_sha(self.origin, f"refs/heads/{branch}"))
+        self.assertIsNone(self.sb.remote_sha(self.work, f"refs/heads/{branch}"))
 
-        cmds = land_block("Step 5: Merge and clean up", "git checkout main && git pull",
-                          {"<mergeCommit.oid>": merge_oid, "<branch>": branch})
-        self.assertEqual(len(cmds), 4, cmds)
-        allow = {"ls-remote": {0, 2}, "rev-parse --verify": {0, 1}}
 
-        # Cleanup incomplete: remote and local branch still exist.
-        partial = self.sb.run(self.work, cmds, allow=allow)
-        self.assertTrue(partial.completed, partial)
-        self.assertEqual(self.sb.git(self.work, "branch", "--show-current"), "main")
-        self.assertEqual(partial.step("ls-remote").rc, 0)
-        self.assertEqual(partial.step("rev-parse --verify").rc, 0)
-
-        # gh's --delete-branch removes both; all three confirmations now pass.
-        self.sb.git(server, "push", "-q", "origin", "--delete", branch)
-        self.sb.git(self.work, "branch", "-q", "-D", branch)
-        done = self.sb.run(self.work, cmds, allow=allow)
-        self.assertTrue(done.completed, done)
-        self.assertEqual(done.step("merge-base").rc, 0)
-        self.assertEqual(done.step("ls-remote").rc, 2)
-        self.assertNotEqual(done.step("rev-parse --verify").rc, 0)
+class ShipOnTrunkTests(ShipTests):
+    default_branch = "trunk"
 
 
 # --------------------------------------------------------------------------
@@ -706,12 +810,13 @@ class SmartGitCommitTests(unittest.TestCase):
 
     def setUp(self):
         self.sb = Sandbox(self)
-        self.origin = self.sb.origin_with_main()
+        self.origin = self.sb.origin_with_default_branch()
         self.work = self.sb.clone(self.origin, "work")
-        text = SMART_COMMIT_SKILL.read_text(encoding="utf-8")
         self.commit = doc_block(SMART_COMMIT_SKILL, "Step 4: Commit each group", "git commit")
-        push_blocks = fenced_blocks(section(text, "Step 5: Push when asked"))
-        self.push, self.push_upstream = (split_commands(b) for b in push_blocks)
+        pushes = [block for block in fenced_blocks(section(SMART_COMMIT_SKILL.read_text(),
+                                                           "Step 5: Push when asked"))
+                  if block.startswith("git push")]
+        self.push, self.push_upstream = map(split_commands, pushes)
 
     def test_commit_block_creates_one_local_commit_and_does_not_push(self):
         (self.work / "a.txt").write_text("a\n", encoding="utf-8")
@@ -735,18 +840,113 @@ class SmartGitCommitTests(unittest.TestCase):
         self.assertTrue(run.completed, run)
         self.assertEqual(self.sb.remote_sha(self.origin, "refs/heads/main"), sha)
 
-    def test_no_upstream_needs_documented_fallback(self):
-        self.assertEqual(self.push_upstream, ["git push -u origin HEAD"])
-        self.sb.git(self.work, "checkout", "-q", "-b", "feat/new")
+    def preview(self, mode="tracked"):
+        command = doc_block(SMART_COMMIT_SKILL, "Step 5: Push when asked", "preview-push.sh")
+        return self.sb.run(self.work, [command], {"mode": mode, "skill_dir": str(SMART_COMMIT_SKILL.parent)})
+
+    def record_push_hooks(self):
+        log = self.sb.root / "hooks.log"
+        hook = self.work / ".git/hooks/pre-push"
+        hook.write_text(f"#!/bin/sh\nprintf '%s\\n' \"$2\" >> {_q(log)}\n")
+        hook.chmod(0o755)
+        return log
+
+    def test_preview_checks_only_changed_branches_and_runs_no_hook(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "init", "-q", "--bare", str(mirror))
+        self.sb.git(self.work, "push", "-q", str(mirror), "HEAD:refs/heads/unchanged")
+        self.sb.git(self.work, "remote", "add", "publish", str(self.origin))
+        self.sb.git(self.work, "remote", "set-url", "--push", "publish", str(mirror))
+        self.sb.git(self.work, "config", "branch.main.pushRemote", "publish")
+        self.sb.git(self.work, "branch", "stable")
+        self.sb.git(self.work, "config", "--add", "remote.publish.push", "stable:refs/heads/unchanged")
+        self.sb.git(self.work, "config", "--add", "remote.publish.push", "main:refs/heads/release")
+        hooks = self.record_push_hooks()
+        for name in ("new", "fast-forward"):
+            with self.subTest(name=name):
+                sha = self.sb.commit_file(self.work, "c.txt", name, "feat: change")
+                run = self.preview()
+                self.assertTrue(run.completed, run)
+                self.assertEqual(run.steps[0].out.splitlines(), [f"{mirror}\trelease"])
+                self.assertFalse(hooks.exists())
+                self.assertNotEqual(self.sb.remote_sha(mirror, "refs/heads/release"), sha)
+                self.assertTrue(self.sb.run(self.work, self.push).completed)
+                self.assertEqual(hooks.read_text().splitlines(), [str(mirror)])
+                hooks.unlink()
+                self.assertEqual(self.sb.remote_sha(mirror, "refs/heads/release"), sha)
+
+    def test_force_and_delete_refspecs_stop_the_tracked_push(self):
+        branch = "refs/heads/release"
+        self.sb.git(self.work, "push", "-q", "origin", f"HEAD:{branch}")
+        previous = self.sb.remote_sha(self.origin, branch)
+        hooks = self.record_push_hooks()
+        for spec in (f"+main:{branch}", f":{branch}"):
+            with self.subTest(refspec=spec):
+                self.sb.git(self.work, "config", "remote.origin.push", spec)
+                run = self.preview()
+                self.assertFalse(run.completed, run)
+                self.assertIn(spec, run.steps[0].err)
+                self.assertEqual(self.sb.remote_sha(self.origin, branch), previous)
+                self.assertFalse(hooks.exists())
+
+    def test_no_upstream_checks_all_push_urls_and_overrides_configured_refspecs(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "clone", "-q", "--bare", str(self.origin), str(mirror))
+        self.sb.git(self.work, "remote", "set-url", "--add", "--push", "origin", str(self.origin))
+        self.sb.git(self.work, "remote", "set-url", "--add", "--push", "origin", str(mirror))
+        self.sb.git(self.work, "config", "--add", "remote.origin.push", ":refs/heads/main")
+        self.sb.git(self.work, "config", "--add", "remote.origin.push", "+main:refs/heads/other")
+        self.sb.git(self.work, "checkout", "-qb", "feat/new")
         sha = self.sb.commit_file(self.work, "d.txt", "d\n", "feat: d")
-        plain = self.sb.run(self.work, self.push)
-        self.assertFalse(plain.completed)
-        self.assertIn("no upstream", plain.steps[0].err)
-        run = self.sb.run(self.work, self.push_upstream)
+        self.sb.git(self.work, "tag", "feat/new")  # short ref names are ambiguous
+        hooks = self.record_push_hooks()
+        run = self.preview("new")
         self.assertTrue(run.completed, run)
-        self.assertEqual(self.sb.remote_sha(self.origin, "refs/heads/feat/new"), sha)
-        again = self.sb.run(self.work, self.push)
-        self.assertTrue(again.completed, again)
+        self.assertEqual(run.steps[0].out.splitlines(),
+                         [f"{self.origin}\tfeat/new", f"{mirror}\tfeat/new"])
+        self.assertFalse(hooks.exists())
+        previous = self.sb.remote_sha(self.origin, "refs/heads/main")
+        pushed = self.sb.run(self.work, self.push_upstream, {"local_branch": "feat/new"})
+        self.assertTrue(pushed.completed, pushed)
+        self.assertEqual(hooks.read_text().splitlines(), [str(self.origin), str(mirror)])
+        for remote in (self.origin, mirror):
+            self.assertEqual(self.sb.remote_sha(remote, "refs/heads/feat/new"), sha)
+            self.assertEqual(self.sb.remote_sha(remote, "refs/heads/main"), previous)
+            self.assertIsNone(self.sb.remote_sha(remote, "refs/heads/other"))
+        self.assertEqual(self.sb.git(self.work, "rev-parse", "--abbrev-ref", "@{u}"), "origin/feat/new")
+
+    def test_rejected_second_url_prevents_publication_to_the_first(self):
+        mirror = self.sb.root / "mirror.git"
+        self.sb.git(self.sb.root, "clone", "-q", "--bare", str(self.origin), str(mirror))
+        other = self.sb.clone(mirror, "other")
+        self.sb.commit_file(other, "conflict", "remote", "other change")
+        self.sb.git(other, "push", "origin", "HEAD:refs/heads/feat/new")
+        for remote in (self.origin, mirror):
+            self.sb.git(self.work, "remote", "set-url", "--add", "--push", "origin", str(remote))
+        self.sb.git(self.work, "checkout", "-qb", "feat/new")
+        self.sb.commit_file(self.work, "conflict", "local", "local change")
+        hooks = self.record_push_hooks()
+        run = self.preview("new")
+        self.assertFalse(run.completed, run)
+        self.assertEqual(run.steps[0].out, "")
+        self.assertIsNone(self.sb.remote_sha(self.origin, "refs/heads/feat/new"))
+        self.assertFalse(hooks.exists())
+
+    def test_unrecognized_or_unsafe_preview_row_discards_earlier_destinations(self):
+        fake_git = self.sb.root / "git"
+        fake_git.write_text(f"""#!/bin/sh
+if [ "$1" = push ]; then cat "$fixture"; else exec {_q(Path(GIT))} "$@"; fi
+""")
+        fake_git.chmod(0o755)
+        fixture = self.sb.root / "preview"
+        self.sb.env.update(PATH=str(self.sb.root) + os.pathsep + self.sb.env["PATH"], fixture=str(fixture))
+        for flag in ("+", "-", "!", "?"):
+            with self.subTest(flag=flag):
+                fixture.write_text("To /remote\n*\tHEAD:refs/heads/new\t[new branch]\n"
+                                   f"{flag}\tmain:refs/heads/release\tstatus\nDone\n")
+                run = self.preview("new")
+                self.assertFalse(run.completed, run)
+                self.assertEqual(run.steps[0].out, "")
 
     def test_rejected_non_fast_forward_push(self):
         other = self.sb.clone(self.origin, "other")
@@ -768,7 +968,7 @@ class ReviewWorkspaceTests(unittest.TestCase):
 
     def setUp(self):
         self.sb = Sandbox(self)
-        self.repo = self.sb.clone(self.sb.origin_with_main(), "repo")
+        self.repo = self.sb.clone(self.sb.origin_with_default_branch(), "repo")
         self.sha = self.sb.git(self.repo, "rev-parse", "HEAD")
         run_dir = self.sb.root / "run-dir"
         run_dir.mkdir()
@@ -820,7 +1020,7 @@ class ClosingVerificationDriftTests(unittest.TestCase):
 
     def setUp(self):
         self.sb = Sandbox(self)
-        self.origin = self.sb.origin_with_main()
+        self.origin = self.sb.origin_with_default_branch()
         self.repo = self.sb.clone(self.origin, "repo")
         self.sb.commit_file(self.repo, "version.txt", "1\n", "chore: version 1")
         self.sb.git(self.repo, "push", "-q", "origin", "HEAD:refs/heads/main")

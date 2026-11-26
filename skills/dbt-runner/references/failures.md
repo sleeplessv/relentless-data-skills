@@ -3,7 +3,7 @@
 Keyed by the **verbatim string to grep for in the logfile**. Within each
 entry, causes are ordered by how often they're the real culprit. Check
 them in order and stop at the first hit. `<runner>` is the context file's
-`runner` (SKILL.md invocation rule 1). Engine-agnostic; for
+`runner`. Expand `<connection>` from [invocation rule 1](../SKILL.md#invocation-rules-every-dbt-command). For
 `engine: v2` (legacy: `fusion`) projects also see [dbt-v2.md](dbt-v2.md).
 
 ## `Env var required but not provided`
@@ -36,7 +36,7 @@ Key-pair auth failed. In order:
    Suspect and rule this out before debugging credentials, proxies, or
    account URLs.
 2. Genuinely wrong account identifier/host, only after (1) is excluded.
-   Discriminate with `--connect` (live `<runner> debug`) outside the sandbox.
+   Discriminate with `--connect` (live `<runner> debug <connection>`) outside the sandbox.
 
 ## `Object does not exist or not authorized`
 
@@ -44,7 +44,7 @@ Snowflake deliberately doesn't say which. In order:
 
 1. **Upstream not built in your dev schema.** The ref'd model/source was
    never materialized in this target's schema. Fix: build upstream first
-   (`<runner> build --select +<model>`), or seed/stage before facts.
+   (`<runner> build <connection> --select +<model>`), or seed/stage before facts.
 2. **Role lacks grants.** Expired or insufficient on the source schema.
    Discriminate: can you `select 1 from <object>` via your SQL tool with
    the same role? Fix: grants, not dbt.
@@ -63,7 +63,7 @@ In order:
    call and record it in Project lore.
 2. **Schema is read-only for you by design** (a shared DEV reporting
    schema). Build into your workspace schema or target, or prove the SQL
-   read-only with `<runner> show --inline` and report the grant gap.
+   read-only with `<runner> show <connection> --inline` and report the grant gap.
    Grants are account-side: report, don't request or retry.
 
 ## Hang while acquiring a warehouse, or `is suspended` / resource-monitor errors
@@ -75,7 +75,7 @@ In order:
 
 ## `dbt_utils` undefined · `is undefined` on a packaged macro · `generate_surrogate_key` not found
 
-1. **`<runner> deps` never ran** in this checkout: `dbt_packages/` missing.
+1. **`<runner> deps` never ran** in this checkout: the configured package directory is missing.
    The preflight `packages` check catches this; run `<runner> deps`.
 2. **Stale/dirtied `package-lock.yml`.** Versions drifted (subagents
    running `<runner> deps` are a known offender). `git diff package-lock.yml`;
@@ -90,7 +90,7 @@ against the model SQL in your branch. In order:
 1. **Upstream not rebuilt since the column was added.** The column is new
    in this branch and the input or expected-output model was last built
    before it. Fix: refresh the relation's shape without rows,
-   `<runner> run --empty --select <upstream models>`, then re-run the
+   `<runner> run <connection> --empty --select <upstream models>`, then re-run the
    unit test. Including the upstream in the test's selection also works,
    at the price of a real build.
 2. **Input is a source or model that does not exist in this target.**
@@ -105,7 +105,7 @@ against the model SQL in your branch. In order:
 **This exits 0 and looks like success while doing nothing.**
 
 1. Typo'd `--select`: model name, selector syntax, or path. Fix: verify
-   with `<runner> ls --select <sel>` before re-running the build.
+   with `<runner> ls <connection> --select <sel>` before re-running the build.
 2. Selector excluded everything (tags/state filters). Same verification.
 
 ## `isolated in the worktree … Refusing to run it` (harness guard; dbt never started)
@@ -116,11 +116,11 @@ prove git-free. The exit is the guard's, not dbt's. Triggers seen:
 as `--warn-error-options '{…}'`, and anything chained after the dbt call.
 
 1. Fix the command shape. One dbt call per Bash command:
-   `cd <worktree>/dbt_project && <runner> <cmd> > <log> 2>&1`, nothing
+   `cd <worktree>/dbt_project && <runner> build <connection> --select <sel> > <log> 2>&1`, nothing
    after it; read the log in the next call. Load env with
    `uv run --env-file <abs .env> dbt …` (see `Env var required` above).
    Drop the JSON `--warn-error-options`; prove the selection with
-   `<runner> ls -s <sel>` instead.
+   `<runner> ls <connection> -s <sel>` instead.
 2. `uv` prints `VIRTUAL_ENV=… does not match the project environment
    path … will be ignored` on the first worktree call and builds
    `<worktree>/.venv` from its cache in seconds. Noise, not a failure.
@@ -142,9 +142,8 @@ as `--warn-error-options '{…}'`, and anything chained after the dbt call.
 
 ## Non-zero exit but every model shows `OK created`
 
-Not a build problem. Classify run-error vs test-failure vs warning from the
-summary line; see SKILL.md "Reading the result". Triage notes for the
-test-failure case specifically:
+Check the first error and skipped resources as described in
+[Reading the result](../SKILL.md#reading-the-result). If a data test failed:
 
 - `relationships` orphans usually mean build order (fact built before its
   dim/seed).

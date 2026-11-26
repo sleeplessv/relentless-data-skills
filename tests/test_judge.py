@@ -18,6 +18,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from unittest import mock
 
@@ -271,6 +273,128 @@ class TestJudge(unittest.TestCase):
         log = self.world.state / verdict["review"]["log"]
         self.assertEqual(log.read_bytes(), self.world.written())
         self.assertEqual(stat.S_IMODE(log.stat().st_mode), 0o600)
+
+    def test_every_review_that_ran_keeps_its_log(self) -> None:
+        cases = [("R1: met\nR2: met\nR3: met", 0, 0, None),
+                 ("R1: met\nR2: not met\nR3: met", 0, 3, "the answer is not in the fixed lines"),
+                 ("R1: met\nR2: met\nR3: met", 1, 3, "the review session failed with exit 1")]
+        for answer, exit, code, reason in cases:
+            with self.subTest(reason=reason):
+                self.world.answer(answer, exit)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, code, result.stderr)
+                [verdict] = self.world.verdicts()
+                self.assertEqual(verdict["review"]["reason"], reason)
+                folder = verdict["check"]["output"].removesuffix("/check.txt")
+                self.assertEqual(verdict["review"]["log"], f"{folder}/session.jsonl")
+                self.assertEqual((self.world.state / verdict["review"]["log"]).read_bytes(), self.world.written())
+
+    def test_a_review_with_no_log_gives_no_verdict(self) -> None:
+        self.world.log = None
+        for exit, reason in ((0, "the review session left no log"), (1, "the review session failed with exit 1")):
+            with self.subTest(exit=exit):
+                self.world.answer("R1: met\nR2: met\nR3: met", exit)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, 3, result.stderr)
+                [verdict] = self.world.verdicts()
+                self.assertEqual((verdict["right_first_time"], verdict["review"]["passed"],
+                                  verdict["review"]["reason"], verdict["review"]["log"]), (None, None, reason, None))
+                folder = (self.world.state / verdict["check"]["output"]).parent
+                self.assertEqual(sorted(path.name for path in folder.iterdir()),
+                                 ["check.txt", "prompt.txt", "review.txt"])
+                self.assertEqual(result.stdout.splitlines()[1:], [
+                    f"Test 2, the review: no verdict, {reason}. Answer in {folder / 'review.txt'}.",
+                    "No verdict for A-7 generation-one."])
+
+    def test_a_review_stopped_at_its_timeout_keeps_its_partial_log(self) -> None:
+        self.world.sleep = "60"  # the stand-in writes its log, then outlasts the timeout
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        with mock.patch.object(sys, "dont_write_bytecode", True):  # no scripts/__pycache__ in the checkout
+            judge = importlib.import_module("judge")
+        environ = {key: value for key, value in os.environ.items() if key != "CLAUDE_CONFIG_DIR"}
+        with (mock.patch.dict(os.environ, {**environ, **self.world.env()}, clear=True),
+              mock.patch.object(judge, "REVIEW_TIMEOUT", 2), redirect_stdout(StringIO()), redirect_stderr(StringIO())):
+            code = judge.main(["A-7", "generation-one"])
+        self.assertEqual(code, 3)
+        [verdict] = self.world.verdicts()
+        self.assertEqual(verdict["review"]["reason"], "the review ran for more than 2 seconds")
+        folder = verdict["check"]["output"].removesuffix("/check.txt")
+        self.assertEqual(verdict["review"]["log"], f"{folder}/session.jsonl")
+        self.assertEqual((self.world.state / verdict["review"]["log"]).read_bytes(), self.world.written())
+
+    def test_the_kept_log_is_the_bytes_the_session_wrote(self) -> None:
+        self.world.log.write_bytes(b"caf\xe9 \xff\xfe not UTF-8\n" + bytes(range(256)) * 4096)  # and 1 MiB more
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        [verdict] = self.world.verdicts()
+        self.assertEqual((self.world.state / verdict["review"]["log"]).read_bytes(), self.world.written())
+
+    def test_the_log_s_folder_is_kept_beside_it(self) -> None:
+        self.world.log_folder = "1"
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        [verdict] = self.world.verdicts()
+        folder = (self.world.state / verdict["review"]["log"]).with_suffix("")
+        kept = folder / "tool-results" / "r1.txt"
+        self.assertEqual([path for path in folder.rglob("*") if path.is_file()], [kept])
+        self.assertEqual(kept.read_text(), "a large result\n")
+        self.assertEqual(stat.S_IMODE(kept.stat().st_mode), 0o600)
+
+    def test_the_review_s_log_is_moved_out_of_claude_code_s_projects(self) -> None:
+        self.world.log_folder = "1"
+        projects = self.world.root / "home" / ".claude" / "projects"
+        self.assertFalse(projects.exists())
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        self.assertEqual(list(projects.iterdir()), [])  # the stand-in made a folder here for the session
+
+    def test_a_run_for_another_version_or_ticket_leaves_the_first_log_as_it_was(self) -> None:
+        path = self.world.state / "replay-set-1.json"
+        listed = json.loads(path.read_text())
+        listed["tickets"].append({**listed["tickets"][0], "ticket": 8})
+        path.write_text(json.dumps(listed))
+        self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+        [first] = self.world.verdicts()
+        log = self.world.state / first["review"]["log"]
+        written = log.read_bytes()
+        self.assertEqual(written, self.world.written())
+        direct = ("--commit", self.world.replay, "--from", str(self.world.replay_clone))
+        for args in (("A-7", "direct", *direct), ("A-8", "generation-one"), ("A-7", "direct", *direct)):
+            with self.subTest(args=args[:2]):
+                self.assertEqual(self.world.judge(*args).returncode, 0)
+                self.assertEqual(log.read_bytes(), written)
+                self.assertEqual(self.world.verdicts()[0]["review"]["log"], first["review"]["log"])
+        self.assertEqual(len({verdict["review"]["log"] for verdict in self.world.verdicts()}), 3)
+
+    def test_nothing_of_the_log_is_printed_or_written_to_the_line(self) -> None:
+        for answer, exit, code in (("R1: met\nR2: met\nR3: met", 0, 0), ("Not the lines.", 0, 3),
+                                   ("R1: met\nR2: met\nR3: met", 1, 3)):
+            with self.subTest(answer=answer, exit=exit):
+                self.world.answer(answer, exit)
+                result = self.world.judge("A-7", "generation-one")
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertIn(MARKER.encode(), (self.world.state / self.world.verdicts()[0]["review"]["log"]).read_bytes())
+                for seen in (result.stdout, result.stderr, (self.world.state / "verdicts.jsonl").read_text()):
+                    self.assertNotIn("log marker 5c1e", seen)
+
+    def test_the_help_says_where_the_session_log_is_kept(self) -> None:
+        help_text = " ".join(self.world.judge("--help").stdout.split())
+        for sentence in (
+                "An answer with any other line, or that breaks these rules, gives no verdict, as does a review that "
+                "fails, runs for more than 60 minutes or leaves no session log.",
+                "review {passed, reason, requirements, findings, proven, lines, prompt, log}",
+                "Paths are relative to the machine directory; log is null when the session left no log.",
+                "review.txt, the review's answer as it came; session.jsonl, the review session's log, with session/ "
+                "beside it when Claude Code keeps a folder for the session.",
+                "The judge starts the review with --session-id and, when the session ends, moves its log and folder "
+                "here from $CLAUDE_CONFIG_DIR/projects (default ~/.claude), so none of them stays there.",
+                "session.jsonl and each file in session/ are mode 0600.",
+                "The line on record names the files of its own attempt.",
+                "Once a new line is written the judge tries to remove the folder of the attempt it replaced, its log "
+                "included; a folder no line names can stay behind after an interrupt or a failed removal.",
+                "Exit 1: an error; nothing was recorded, not even the log of a review that ran, and the line and "
+                "files of an earlier attempt stay as they were."):
+            self.assertIn(sentence, help_text)
+        self.assertNotIn("names the three files", help_text)
+        self.assertNotIn("no session log is kept", (SCRIPTS / "judge.py").read_text())
 
     def test_the_review_starts_headless_on_opus_at_medium_effort_with_read_tools_only(self) -> None:
         self.world.judge("A-7", "generation-one")

@@ -103,8 +103,8 @@ where the evidence is one of:
 {RULES}
 
 Test 2 passes when the review passes. An answer with any other line, or that
-breaks these rules, gives no verdict, as does a review that fails or runs for
-more than {REVIEW_TIMEOUT // 60} minutes.
+breaks these rules, gives no verdict, as does a review that fails, runs for
+more than {REVIEW_TIMEOUT // 60} minutes or leaves no session log.
 
 The version is right first time when both tests pass. The judge checks that
 the version's commit and its tree are the same after the review as before it.
@@ -117,22 +117,32 @@ holds the ticket, project-labels.json and repos.json, and writes:
                         the version is judged again: label, ticket, version,
                         commit, base_commit, judged_at, check {{passed,
                         reason, output}}, review {{passed, reason,
-                        requirements, findings, proven, lines, prompt}} and
-                        right_first_time: true, false, or null for no
-                        verdict. Paths are relative to the machine directory.
+                        requirements, findings, proven, lines, prompt, log}}
+                        and right_first_time: true, false, or null for no
+                        verdict. Paths are relative to the machine directory;
+                        log is null when the session left no log.
   judged/<label>-<ticket>-<version>/<attempt>/
                         check.txt, the output of setup and check; prompt.txt,
                         what the reviewer was given; review.txt, the
-                        review's answer as it came. The line on record
-                        names the three files of its own attempt. Once a
-                        new line is written the judge tries to remove the
-                        folder of the attempt it replaced; a folder no
-                        line names can stay behind after an interrupt or
-                        a failed removal.
+                        review's answer as it came; session.jsonl, the
+                        review session's log, with session/ beside it when
+                        Claude Code keeps a folder for the session. The
+                        judge starts the review with --session-id and,
+                        when the session ends, moves its log and folder
+                        here from $CLAUDE_CONFIG_DIR/projects (default
+                        ~/.claude), so none of them stays there.
+                        session.jsonl and each file in session/ are mode
+                        0600. The line on record names the files of its
+                        own attempt. Once a new line is written the judge
+                        tries to remove the folder of the attempt it
+                        replaced, its log included; a folder no line names
+                        can stay behind after an interrupt or a failed
+                        removal.
   judge-work/           Clones and checkouts, removed when the judge ends.
 
-Exit 0: a verdict was recorded. Exit 1: an error; nothing was recorded, and
-the line and files of an earlier attempt stay as they were. Exit 2: bad usage.
+Exit 0: a verdict was recorded. Exit 1: an error; nothing was recorded, not
+even the log of a review that ran, and the line and files of an earlier
+attempt stay as they were. Exit 2: bad usage.
 Exit {EXIT_NO_VERDICT}: the review gave no verdict, recorded as null."""
 
 PROMPT = f"""\
@@ -321,8 +331,8 @@ def review(prompt: str, folder: Path, session: str) -> tuple[str, str | None]:
 
 
 def private_copy(source: str | Path, target: str | Path) -> None:
-    """Copy a file's bytes to a new file only its owner can read."""
-    with open(source, "rb") as found, os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600),
+    """Copy a file's bytes to `target`, a file only its owner can read."""
+    with open(source, "rb") as found, os.fdopen(os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
                                                 "wb") as kept:
         os.fchmod(kept.fileno(), 0o600)  # whatever the umask
         shutil.copyfileobj(found, kept)

@@ -258,10 +258,12 @@ def export(clone: Path, commit: str, folder: Path) -> None:
         else:
             target.write_bytes(content)
             target.chmod(0o755 if mode == b"100755" else 0o644)
-    root = folder.resolve()
     for link, to in links:  # made last, so no file is written through one
-        if (link.parent / to).resolve().is_relative_to(root):
-            link.symlink_to(to)
+        link.symlink_to(to)
+    # Each link is judged with every link in place, so one that leads through another is followed as the kernel would.
+    root = folder.resolve()
+    for link in [link for link, _ in links if not link.resolve().is_relative_to(root)]:
+        link.unlink()
 
 
 def read_answer(text: str, count: int) -> dict | None:

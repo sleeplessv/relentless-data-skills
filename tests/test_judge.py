@@ -281,6 +281,27 @@ class TestJudge(unittest.TestCase):
         self.assertEqual(tree["stamp.txt"][1], b"$Format:%an %s$\n")
         self.assertEqual(tree["run.sh"][0], "100755")
 
+    def test_a_link_that_leads_inside_through_a_later_link_reaches_the_reviewer(self) -> None:
+        clone = self.world.root / "linked"
+        git(self.world.root, "clone", "-q", str(self.world.replay_clone), str(clone))
+        git(clone, "checkout", "-q", "--detach", self.world.replay)
+        (clone / "sub" / "deep").mkdir(parents=True)
+        (clone / "sub" / "deep" / "kept.txt").write_text("deep\n")
+        # z-link sorts after the links that go through it. Read as a plain folder, z-link/../.. is outside the copy;
+        # through the link it is the copy's root.
+        (clone / "z-link").symlink_to("sub/deep")
+        (clone / "a-link").symlink_to("z-link/../../report.txt")
+        (clone / "b-link").symlink_to("z-link/../../../outside")
+        linked = commit(clone, "Links", ("Replay Author", "replay@example.com"), {})
+        result = self.world.judge("A-7", "direct", "--commit", linked, "--from", str(clone))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        copy = self.world.records / "copy"
+        self.assertEqual({name: os.readlink(copy / name) for name in ("a-link", "z-link")},
+                         {"a-link": "z-link/../../report.txt", "z-link": "sub/deep"})
+        self.assertEqual((copy / "a-link").read_text(), "rows\ntotal from replay\n")
+        for gone in ("b-link", "outside-link"):
+            self.assertFalse((copy / gone).is_symlink(), gone)
+
     def set_requirements(self, *value: object) -> None:
         """Give the set entry `value` as its requirements, or no requirements field when no value is given."""
         path = self.world.state / "replay-set-1.json"

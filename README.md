@@ -210,6 +210,8 @@ with Playwright, and fails if any of those tests skips. The
 [browser workflow](.github/workflows/browser.yml) runs it on pull requests that
 change the dossier skill. To run its fast subset on every commit, enable the
 opt-in hook once per clone with `git config core.hooksPath .githooks`.
+A run without `--fast` waits its turn behind any other such run of this clone
+and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) explains.
 
 - `python3 -m unittest discover -s tests -v` runs the repository's Python tests.
 - `python3 scripts/lint_skill.py` checks skill frontmatter, invocation triggers,

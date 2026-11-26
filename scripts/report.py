@@ -29,7 +29,8 @@ TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool
 NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
                                        "judged at a commit the version does not record")
 # Warning sign 2: generation one's steps and the words that name each, as named() reads them. A bare "fix" names no
-# step, since a ticket's own title may hold it. "Read" names none, since a brief opens its instructions with it.
+# step, since a ticket's own title may hold it. "Read" names none, since a brief opens its instructions with it, and
+# "findings" names no search, since a re-check's brief speaks of them.
 STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, words in (
     ("re-check", r"re-?check|re-?verif|fix head\b"),
     ("closing verification", r"verif(?:y|ier|ication)\b"),
@@ -38,12 +39,14 @@ STEPS = tuple((name, re.compile(rf"\b(?:{words})", re.IGNORECASE)) for name, wor
     ("review", r"review|ponytail|audit"),
     ("implement", r"implement|build|integrat"),
     ("publish", r"publish|ready\b|pr body|merge|push|(?:start|stop) comment|tracker|claim"),
-    ("explore", r"explor|research|find|search|investigat|locate|survey|look up"),
+    ("explore", r"explor|research|find(?!ing)|search|investigat|locate|survey|look up"),
 ))
 CUT = ("closing verification", "fix", "re-check")  # the steps the small cut takes out
 # Text that names no role of its own, so named() reads the text without it: a generation-one skill's name names the
-# whole run, every step at once, and a ticket's title after its number ("#12: Verify CSV headers") names its subject.
-NO_ROLE = re.compile("|".join([*map(re.escape, draw.GENERATION_ONE), r"#\d+:[^.\n]*"]), re.IGNORECASE)
+# whole run, every step at once, a ticket's title after its number ("#12: Verify CSV headers") names its subject, and
+# the words after "by" name who acted, not the helper ("the errors flagged by the reviewer").
+NO_ROLE = re.compile("|".join([*map(re.escape, draw.GENERATION_ONE), r"#\d+:[^.\n]*", r"\bby\b[^.,;:\n]*"]),
+                     re.IGNORECASE)
 AGAIN = re.compile(r"\b(?:follow-?up|round \d|fix(?:es)? round)", re.IGNORECASE)  # words that make a review a re-check
 
 
@@ -58,30 +61,37 @@ def listed(items: list) -> str:
     return " and ".join([", ".join(map(str, items[:-1])), str(items[-1])] if len(items) > 1 else map(str, items))
 
 
-def named(text: str | None) -> str | None:
-    """The step a text names, read without NO_ROLE: the step whose words come first, on a tie the first in STEPS,
-    except that a review that also names a re-check or AGAIN's words is a re-check, a review of a fix. None when the
-    text names no step.
-
-    Taking the first step named assumes a helper's text names its own role before any other step. Where it does not,
-    the sort can be wrong: "Verify CSV headers", a ticket's title with no number, describing the helper that implements
-    it, is sorted as closing verification."""
+def named(text: str | None) -> list[str]:
+    """The steps a text names, read without NO_ROLE, in the order their words come, on a tie in the order of STEPS.
+    Words inside another step's words are that step's: "address what the final reviewer identified" is a fix, not a
+    review. A text whose first step is a review and that also names a re-check or AGAIN's words names a re-check
+    first, a review of a fix."""
     text = NO_ROLE.sub(" ", text or "")
-    found = sorted((match.start(), at, name) for at, (name, words) in enumerate(STEPS) if (match := words.search(text)))
-    first = found[0][2] if found else None
-    if first == "review" and ("re-check" in (name for *_, name in found) or AGAIN.search(text)):
-        return "re-check"
-    return first
+    found = [(match.start(), at, match.end(), name)
+             for at, (name, words) in enumerate(STEPS) if (match := words.search(text))]
+    found = [name for start, _, _, name in sorted(found) if not any(other < start < end for other, _, end, _ in found)]
+    if found[:1] == ["review"] and ("re-check" in found or AGAIN.search(text)):
+        return ["re-check", *found[1:]]
+    return found
 
 
 def step(description: str | None, brief_head: str | None) -> str | None:
-    """The step of generation one a helper took: the one its description names or, when its description names none,
-    the one the head of its brief names. A description that names a review and a brief that names a re-check make a
-    re-check: the description names the reviewer, the brief the pass it makes. None when neither names a step."""
-    description_step, brief_step = named(description), named(brief_head)
-    if description_step is None or (description_step, brief_step) == ("review", "re-check"):
-        return brief_step
-    return description_step
+    """The step of generation one a helper took, or None to leave it not sorted. A text that names steps on both
+    sides of the cut is read as naming none; the helper takes the first step its description names or, when that
+    names none, its brief, unless the two name steps on different sides of the cut. A brief that opens with a heading
+    naming a step ("# Publish brief") is read by that heading alone, and a description that names a review with a
+    brief that names a re-check make a re-check: the description names the reviewer, the brief the pass it makes.
+
+    The sort can still be wrong in two ways. Between two steps on one side of the cut it takes the first named, which
+    may be a step the text only mentions; that changes no verdict. And when every step a helper's texts name is one
+    it only mentions, on the other side of the cut from its own, it is sorted across the cut: "Correct the errors
+    the reviewer flagged", a fix, is sorted as a review."""
+    heading = re.match(r"#[^.:\n]*", brief_head or "")
+    texts = [named(description), heading and named(heading[0]) or named(brief_head)]
+    texts = [steps for steps in texts if len({name in CUT for name in steps}) == 1]
+    if [steps[0] for steps in texts] == ["review", "re-check"]:
+        return "re-check"
+    return texts[0][0] if texts and len({steps[0] in CUT for steps in texts}) == 1 else None
 
 
 HELP = f"""\
@@ -152,8 +162,9 @@ waits, as for warning sign 1, until every ticket has both versions judged.
 The report reads each helper's description and the head of its brief, and
 puts the helper in a step of generation one or leaves it not sorted. How it
 chooses, and where it can sort wrong, are in step() and named() in
-scripts/report.py, with each step's words in STEPS. A helper sorted into
-the wrong step can move the cut either way. The steps:
+scripts/report.py, with each step's words in STEPS, the words read past in
+NO_ROLE and those that make a review a re-check in AGAIN. A helper sorted
+into the wrong step can move the cut either way. The steps:
 
   {listed([name for name, _ in STEPS])}.
 

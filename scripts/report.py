@@ -195,11 +195,12 @@ the draw would not give or bucket it does not use, a version name in
 versions.jsonl or verdicts.jsonl the judge would not take, a total_tokens that
 is negative, infinite or not a number, helpers that hold more tokens than their
 row's total_tokens, or a second line for one ticket and version, one session or
-one ticket of the sets stops the report. The error names the folder or file, and
-the ledger line, helper or set ticket entry that fails a check. A set file that
-is not JSON, or not an object holding a list of tickets, and a versions.jsonl or
-verdicts.jsonl that is not UTF-8 are named by file alone. It never prints a
-refused label or version name, and prints nothing on standard output.
+one ticket of the sets stops the report. The error goes on standard error and
+names the folder or file, and the ledger line, helper or set ticket entry that
+fails a check. A set file that is not JSON, or not an object holding a list of
+tickets, and a versions.jsonl or verdicts.jsonl that is not UTF-8 are named by
+file alone. It never prints a refused label or version name, and prints nothing
+on standard output.
 
 Exit 0: the report was printed, with or without a verdict. Exit 1: an error;
 no set, or a folder or file the report cannot read with certainty. Exit 2:
@@ -249,8 +250,7 @@ def blank(line: bytes) -> bool:
 
 def row_lines(path: Path) -> tuple[list[tuple[str, dict]], int]:
     """The lines of scan-rows.jsonl that can be rows, each with where it is, and how many nonblank lines are left out;
-    none of either for a file that does not exist. Each line left out is named on standard error as it is found. --help
-    states which lines those are."""
+    none of either for a file that does not exist."""
     try:
         data = path.read_bytes()
     except FileNotFoundError:  # any other OSError reaches main()

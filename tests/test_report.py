@@ -858,8 +858,12 @@ class TestReport(unittest.TestCase):
             "left out when it prints the report. A line of nothing but whitespace is blank,\n"
             "and is passed over and not counted. A session whose row was such a line is left\n"
             "out of the token figures and counted, like one with no row.\n", text + "\n")
-        self.assertIn("verdicts.jsonl that is not UTF-8 are named by file alone. It never prints a\n"
-                      "refused label or version name, and prints nothing on standard output.\n", text + "\n")
+        self.assertIn("one ticket of the sets stops the report. The error goes on standard error and\n"
+                      "names the folder or file, and the ledger line, helper or set ticket entry that\n"
+                      "fails a check. A set file that is not JSON, or not an object holding a list of\n"
+                      "tickets, and a versions.jsonl or verdicts.jsonl that is not UTF-8 are named by\n"
+                      "file alone. It never prints a refused label or version name, and prints nothing\n"
+                      "on standard output.\n", text + "\n")
 
     def test_help_exits_0_and_bad_usage_exits_2(self) -> None:
         self.world.draw()

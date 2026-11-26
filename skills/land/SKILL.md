@@ -1,23 +1,27 @@
 ---
 name: land
-description: Branches off main for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch without asking. Waits for CI and never merges a PR with a failing check.
+description: Branches off the default branch for the current changes, commits them smart-git-commit style, opens a PR, then squash-merges and deletes the local and remote branch without asking. Waits for CI and never merges a PR with a failing check.
 disable-model-invocation: true
 ---
 
 # Land
 
-Take the current working-tree changes from branch to merged PR in one pass: branch off `main`, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
+Take the current working-tree changes from branch to merged PR in one pass: branch off the default branch, commit smart-git-commit style, open a PR, then squash-merge and clean up the local and remote branch.
 
-**Argument:** land merges and cleans up by default once the Step 5 CI gate is green; `clean` is accepted and changes nothing. "Don't merge" or "ask first" stops at Step 5 with the PR open, or asks there. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off `main` even from a live branch, and "staged changes" means ship only the index.
+**Argument:** land merges and cleans up by default once the Step 5 CI gate is green; `clean` is accepted and changes nothing. "Don't merge" or "ask first" stops at Step 5 with the PR open, or asks there. Any other argument text is a user instruction that overrides the Step 1 and Step 2 decisions it speaks to: "separate PR" means a fresh branch off the default branch even from a live branch, and "staged changes" means ship only the index.
 
 **Scope:** ship the changes already in the working tree, as they are. Do not fix, refactor, tidy, or reformat anything on the way through. A problem you notice in passing goes in the close-out, not into a commit. The PR's checks are the test gate: the flow runs git and gh commands plus what the `smart-git-commit` and `pr` skills read, and nothing that executes the code.
 
 ## Step 0: Preflight
 
-Run in parallel:
+Run `git status`, `git remote get-url origin`, `gh auth status`, and `gh repo view --json url,defaultBranchRef`. Confirm the GitHub URL identifies the same repository as `origin`. Set `default_branch` to `defaultBranchRef.name` for the whole run. Stop if a command fails, the repositories differ, or the default branch is empty. Then run:
 
-- `git status` and `git log --oneline origin/main..HEAD`. A clean tree on a feature branch still ships when the branch holds work: with an open PR on the current branch (the Step 2 `gh pr list --state open` check) resume at Step 5; with commits ahead of `origin/main` and no PR, resume at the Step 3 push. A clean tree on `main` with commits ahead of `origin/main` is not land's to push: name those commits and stop. A branch with neither is nothing to ship: say so and stop.
-- `gh auth status` and `git remote get-url origin`. If `gh` is missing or unauthenticated, or there is no `origin` remote, stop with a clear message before touching anything.
+```bash
+git fetch origin "refs/heads/$default_branch:refs/remotes/origin/$default_branch"
+git log --oneline "origin/$default_branch..HEAD"
+```
+
+Both commands must succeed. On a clean feature branch, resume at Step 5 for an open PR (the Step 2 check), or at the Step 3 push for commits ahead with no PR. On a clean default branch, report any commits ahead and stop. With a clean tree, no open PR, and no commits ahead, there is nothing to ship.
 
 **Run all `gh` and `git fetch`/`pull`/`push`/`ls-remote` outside the sandbox.** It blocks network, and the failure looks like a `gh`/remote auth error; on a connection error, suspect the sandbox first.
 
@@ -27,27 +31,26 @@ Form the commit groups **before** any branching (the `smart-git-commit` grouping
 
 **Unrelated-work detection:** if the groups would not sit honestly under a single PR title, because they are disjoint subsystems with different intents (e.g. a `feat` in `api/` plus an unrelated `fix` in `.github/workflows/`), ask: "These look like unrelated changes: <one line per group>. Ship as separate branches/PRs, or together?" A feature plus its own tests/docs is NOT a split; when in doubt, default to one branch. This prompt always fires; silently bundling unrelated work into a merge nobody confirms is what it prevents.
 
-**If splitting:** run Steps 2–5 once per group, each on its own branch off updated main (`git checkout main && git pull && git checkout -b …` between groups carries the remaining uncommitted changes along). Disjoint files mean later PRs merge cleanly after earlier ones.
+**If splitting:** run Steps 2–5 once per group, using the fresh-branch mechanics in Step 2 between groups to carry the remaining uncommitted changes along. Disjoint files mean later PRs merge cleanly after earlier ones.
 
 ## Step 2: Pick the branch
 
-Decide where the changes should live from git/gh state; only ask when it is genuinely ambiguous. On `main`, skip the detection below and go straight to a fresh branch. On a feature branch, detect "merged" two ways (either signal counts, because squash merges are not git ancestors) and check for an open PR (an open PR means live work):
+Decide where the changes should live from git/gh state; only ask when it is genuinely ambiguous. On the default branch, skip the detection below and go straight to a fresh branch. On a feature branch, detect "merged" two ways (either signal counts, because squash merges are not git ancestors) and check for an open PR (an open PR means live work):
 
 ```bash
-git fetch origin main
-git merge-base --is-ancestor HEAD origin/main && echo ancestor-merged
+git merge-base --is-ancestor HEAD "origin/$default_branch" && echo ancestor-merged
 gh pr list --head "$(git branch --show-current)" --state merged --json number
 gh pr list --head "$(git branch --show-current)" --state open --json number
 ```
 
 | Current state | Action |
 |---|---|
-| On `main` | Create a fresh branch off updated main |
-| Feature branch, already merged, no commits beyond `origin/main` | Stale. Create a fresh branch off updated main; uncommitted changes carry over with the checkout (stash, pull, branch, pop if the checkout conflicts) |
-| Feature branch, not merged (unmerged commits or an open PR) | Live work. Use it as-is, skip branch creation. When splitting, only the group related to this branch's work stays here; the rest get fresh branches off main |
-| Merged AND new local commits on top | The one ambiguous case. Ask: fresh branch off main, or continue on this one? |
+| On the default branch | Create a fresh branch off the updated default branch |
+| Feature branch, already merged, no commits beyond `origin/$default_branch` | Stale. Create a fresh branch off the updated default branch; uncommitted changes carry over with the checkout (stash, pull, branch, pop if the checkout conflicts) |
+| Feature branch, not merged (unmerged commits or an open PR) | Live work. Use it as-is, skip branch creation. When splitting, only the group related to this branch's work stays here; the rest get fresh branches off the default branch |
+| Merged AND new local commits on top | The one ambiguous case. Ask: fresh branch off the default branch, or continue on this one? |
 
-Fresh-branch mechanics: `git checkout main && git pull && git checkout -b <branch>`.
+Fresh-branch mechanics: `git checkout "$default_branch" && git pull --ff-only origin "$default_branch" && git checkout -b <branch>`.
 
 **Branch name (fixed format):** `<type>/<short-slug>`. `type` is the conventional-commit type of the dominant change group, slug is 2-4 kebab-case words. Examples: `feat/land-skill`, `fix/null-order-totals`.
 
@@ -64,15 +67,15 @@ Done when the push succeeds; if the push is rejected (e.g. non-fast-forward), st
 ## Step 4: Open the PR
 
 ```bash
-gh pr create --base main --title "<conventional subject>" --body "$(cat <<'EOF'
+gh pr create --base "$default_branch" --title "<conventional subject>" --body "$(cat <<'EOF'
 <body>
 EOF
 )"
 ```
 
-- The title is the conventional-commit subject of the dominant change (e.g. `feat: add land skill`). Squash merge makes the title the commit on `main`, so it must itself be a valid conventional commit.
+- The title is the conventional-commit subject of the dominant change (e.g. `feat: add land skill`). Squash merge makes the title the commit on the default branch, so it must itself be a valid conventional commit.
 - Load the **`pr`** skill with the Skill tool (`Skill: pr`) and write the body to its template: Summary, Evidence, Merge Danger. Evidence comes only from what this session actually ran or saw; never invent test runs or output. If that skill is unavailable, fall back to `## Summary` with one bullet per commit group (a single group gets one or two bullets; don't pad to fill) and no test-plan boilerplate.
-- On a live branch, when the PR includes commits that predate this run, the title and body describe the whole PR (everything the squash lands on `main`), not just this session's groups.
+- On a live branch, when the PR includes commits that predate this run, the title and body describe the whole PR (everything the squash lands on the default branch), not just this session's groups.
 - Do not use em dashes in the title or body. Use a comma, colon, or parentheses, or rewrite the sentence. Same rule as the commit messages.
 
 ## Step 5: Merge and clean up
@@ -118,7 +121,7 @@ gh pr view <number> --json state,mergeCommit,autoMergeRequest,headRefName
 
 | End state | Action |
 |---|---|
-| `MERGED` | Finish on `main` (below) |
+| `MERGED` | Finish on the default branch (below) |
 | `OPEN`, `autoMergeRequest` set | Auto-merge armed; it lands once the PR's requirements are met. Stop |
 | `OPEN`, the plain merge refused as not mergeable (branch policy or required checks; `gh`'s error suggests `--auto`) | Retry with `gh pr merge <number> --squash --delete-branch --auto`, re-read the state, and route it again. A refused `--auto` falls to the last row |
 | `OPEN`, no `autoMergeRequest`, the merge command exited 0 | Queued (a merge queue). Stop; run no pull |
@@ -126,11 +129,11 @@ gh pr view <number> --json state,mergeCommit,autoMergeRequest,headRefName
 
 On every row that stops, nothing has been deleted: both branches still exist and the session stays on the PR's head branch (`headRefName`).
 
-**Finish on `main`** (`MERGED` only). `gh` may leave you on another branch (it does when local cleanup fails), so check out `main` and pull either way; this is part of the flow, not recovery. Then confirm, with `<branch>` from `headRefName`:
+**Finish on the default branch** (`MERGED` only). `gh` may leave you on another branch (it does when local cleanup fails), so check out the default branch and pull either way; this is part of the flow, not recovery. Then confirm, with `<branch>` from `headRefName`:
 
 ```bash
-git checkout main && git pull
-git merge-base --is-ancestor <mergeCommit.oid> main   # exit 0 = merge commit on local main
+git checkout "$default_branch" && git pull --ff-only origin "$default_branch"
+git merge-base --is-ancestor <mergeCommit.oid> "$default_branch"   # exit 0 = merge commit on the local default branch
 git ls-remote --exit-code --heads origin <branch>      # exit 2 = remote branch gone
 git rev-parse --verify --quiet refs/heads/<branch>     # non-zero = local branch gone
 ```

@@ -1,7 +1,7 @@
 # land
 
 The `land` agent skill takes the changes in your working tree to a merged pull
-request in one run. It creates a branch off `main`, commits the changes in the
+request in one run. It creates a branch off the default branch, commits the changes in the
 `smart-git-commit` style, and opens a PR. It then squash-merges the PR and
 deletes the local and remote branches.
 
@@ -10,7 +10,7 @@ conversation. Run it as `/land`: it merges and cleans up without asking
 once CI is green. Add "don't merge" or "ask first" to stop or ask before the
 merge. On a clean tree it resumes from where the branch stands: an open
 PR goes to the CI wait and merge, commits that are not pushed yet go to the push
-and PR. On `main` with unpushed commits it stops and names them.
+and PR. On the default branch with unpushed commits it stops and names them.
 
 ## What it does
 
@@ -22,9 +22,9 @@ The skill runs these steps in order:
    asks, because a merge nobody confirms must never bundle unrelated work.
 2. **Picks the branch.** It reads the git and `gh` state and asks only in the
    one ambiguous case:
-   - On `main`, it creates a branch off the updated `main`.
+   - On the default branch, it creates a branch off its updated tip.
    - On a branch that is already merged, it moves the changes to a new branch
-     off `main`. It uses `gh pr list` to detect squash merges, because a squash
+     off the default branch. It uses `gh pr list` to detect squash merges, because a squash
      merge is not a git ancestor.
    - On a branch with unmerged commits or an open PR, it stays on that branch.
    - On a merged branch with new local commits, it asks which branch to use.
@@ -35,7 +35,7 @@ The skill runs these steps in order:
    [`smart-git-commit`](../smart-git-commit) skill, one conventional commit per
    group. Then it pushes the branch itself.
 4. **Opens the PR.** The title is a conventional-commit subject, because the
-   squash merge makes the title the commit on `main`. The `pr` skill writes the
+   squash merge makes the title the commit on the default branch. The `pr` skill writes the
    body. If `pr` isn't installed, the body is a short Summary with one bullet
    per commit group.
 5. **Waits for CI.** It runs `gh pr checks --watch --fail-fast` before it
@@ -48,8 +48,8 @@ The skill runs these steps in order:
    ask first unless you said "don't merge" or "ask first". If you decline, it
    leaves the PR open and deletes nothing.
 7. **Confirms the outcome.** It reads the PR state from GitHub and ignores the
-   exit code of `gh`. For a merged PR, it checks out and pulls `main`, then
-   confirms that the squash commit is on local `main` and that both branches
+   exit code of `gh`. For a merged PR, it checks out and pulls the default branch, then
+   confirms that the squash commit is on the local default branch and that both branches
    are gone. If branch policy or required checks refuse the merge, it retries
    with `--auto`. If the repo uses a merge queue, it reports the PR as queued.
 

@@ -68,7 +68,7 @@ HTML_BLOCKS = [
                 r"html|iframe|legend|li|link|main|menu|menuitem|nav|noframes|ol|optgroup|option|p|param|search|"
                 r"section|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(?:[ \t>]|/>|$)", re.I), BLANK)]
 # A list item's marker and the spaces after it; more than 4 spaces make the item open with code.
-MARKER = re.compile(r"(?:[-*+]|(\d{1,9})[.)])(?: {1,4}|[ \t]*$)")
+MARKER = re.compile(r"(?:[-*+]|([0-9]{1,9})[.)])(?: {1,4}|[ \t]*$)")
 SETEXT = re.compile(r"(?:=+|-+)[ \t]*")  # the underline that makes the paragraph above it a heading
 BREAK = re.compile(r"([-*_])(?:[ \t]*\1){2,}[ \t]*")  # - - - is a break, not an item
 # The start of a block that is not a paragraph or a list: a quote, HTML, a fence, an ATX heading, an underline, a break.
@@ -76,6 +76,7 @@ OPENS = re.compile(rf"[<>]|`{{3}}|~{{3}}|#{{1,6}}(?:[ \t]|$)|(?:{SETEXT.pattern}
 # Kind 7: one whole open or closing tag alone on its line.
 TAG_LINE = re.compile(r"(?:<[A-Za-z][A-Za-z0-9-]*(?:[ \t]+[A-Za-z_:][\w.:-]*(?:[ \t]*=[ \t]*(?:[^ \t\"'=<>`]+|'[^']*'"
                       r"|\"[^\"]*\"))?)*[ \t]*/?>|</[A-Za-z][A-Za-z0-9-]*[ \t]*>)[ \t]*")
+HEADING = re.compile(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*")  # an ATX heading: its level and its text
 
 
 def one_of(items: list[str]) -> str:
@@ -160,10 +161,52 @@ The pool is every ticket that meets all of these:
 - The ticket's body holds an item of a list under
   {one_of([f'"## {heading}"' for heading in CRITERIA_HEADINGS])}, read as Markdown:
   a list in code or in an HTML block does not count, and a "# " or "## "
-  heading ends the section. A list the draw cannot read with
-  certainty does not count either: judge.py --help says which lists it reads.
+  heading ends the section. A list the draw cannot read with certainty does
+  not count either: the lists it reads are below.
 - The PR's repo is in repos.json, and the ticket is in no earlier set, kept or
   set aside.
+
+The draw reads the body as CommonMark's blocks, and a line ends only at a line
+feed, a carriage return or both. Code, fenced or indented, and HTML blocks
+hide what they hold. In the section the draw reads lists of items marked - * +
+or ASCII digits and . or ), each with its text on its marker line. An item's
+text can wrap onto the lines after it, however they are indented, until a
+blank line or the next item. It is read without its marker or a task box. A
+list nested in an item, its markers at most 3 columns past the item's text,
+gives items of its own after their parent. Between lists stand paragraphs,
+headings of level three and deeper, breaks such as * * *, and code and HTML
+blocks. Any other line in the section is one the draw cannot read with
+certainty: inside an item, a quote, code, a fence, HTML, a heading, a break or
+a second paragraph; an item with nothing but white space after its marker and
+any task box; an item with no task box whose text starts with < or >, three
+backticks or three tildes, the one to six # of a heading, another marker, or
+more than four spaces, or is a break or a line of = or -; a line indented into
+an item that wraps its text and starts with < or >, three backticks or three
+tildes, or the one to six # of a heading, or is a break or a line of = or -; a
+quote; an underline below a line of text; and, right after a line of text, a
+marker numbered other than 1 with no list open or indented at least to the
+text of the last open item. Anywhere in the body but inside a fence or an HTML
+block the draw holds open, which it opens only at a line indented at most 3
+spaces, with no > or marker, that starts a fence or one of CommonMark's HTML
+blocks of kinds 1 to 6, and holds until a later line ends it or its first line
+does past the text that opens it, so is a line that is a "## " criteria
+heading once its indent, the > of any quotes and any list markers are taken
+off, when it had a > or a marker, or when it is indented and a line outside
+such a block that starts, at most 3 spaces in, with a list marker came before
+it, as it may stand inside a quote or an item; and a line indented at most 3
+spaces that holds one HTML tag alone and starts none of those HTML blocks,
+which may be text or an HTML block. Inside such a block, so is a non-blank
+line indented less than the block's first line. Outside the criteria sections,
+from a line outside such a block that starts, at most 3 spaces in, with a list
+marker, that line included, to the next heading at the margin that starts with
+#, so is a line outside such a block that starts with three backticks, three
+tildes or < once its indent, any > and any list markers are taken off, unless
+it starts at the margin with none of them, as it may open a block inside an
+item. Outside the criteria sections such a line refuses the body only when it
+or a line after it is a "## " criteria heading once its indent, any > and any
+list markers are taken off; otherwise the list is the items read before it.
+The items of the list are the ticket's requirements, in the order written, and
+the draw stores them in its entry of the set.
 
 A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
@@ -200,11 +243,12 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
                         AA, AB and on.
   replay-set-<n>.json   Set n, as {{"set", "seed", "drawn_at", "tickets",
                         "set_aside"}}. A ticket entry holds label, ticket,
-                        bucket, size, title, body, base_commit, ready_commit,
-                        model, pr, session, log and check_output. A set-aside
-                        entry holds label, ticket, bucket, reason and
-                        check_output. Paths are relative to the machine
-                        directory.
+                        bucket, size, title, body, requirements, base_commit,
+                        ready_commit, model, pr, session, log and
+                        check_output. Its requirements are a list of
+                        strings. A set-aside entry holds label, ticket,
+                        bucket, reason and check_output. Paths are relative
+                        to the machine directory.
   checks/<label>-<ticket>.txt
                         The output of each try: its setup and check, or what
                         the clone, checkout or gh call that failed printed on
@@ -241,6 +285,15 @@ its result's is missing or cannot be read. That call may have opened that PR,
 so it counts against other sessions and against the session's other PRs; the
 session can still put that PR's ticket in the pool through another call that
 opened it.
+
+After the count of vetoed PRs and before the count per bucket, the draw prints
+how many tickets of the listed repos it left out because it refused their body
+as above. A body is never refused when none of its lines is a "## " criteria
+heading once its indent, any > and any list markers are taken off, or when
+none of its lines starts with a list marker once its indent and any > are
+taken off, as it then holds no item. That count is taken before the rules on a
+ticket's other PRs and earlier sets, so it is the most tickets the reader can
+have cost the pool.
 
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
 usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
@@ -491,88 +544,119 @@ def parent_model(main: list[dict], helpers: list[dict]) -> str | None:
     return max(counts, key=counts.get) if counts else None
 
 
-def has_criteria(body: str | None) -> bool:
-    """True when the body holds an item of a list under a "## " heading among the CRITERIA_HEADINGS."""
-    try:
-        return bool(requirements(body))
-    except Unreadable:  # not an empty list: a list the reader refuses, which the draw leaves out all the same
-        return False
-
-
 def opens(line: str) -> bool:
-    """True when the line, its indent taken off, starts a block that is not a paragraph's text."""
+    """True when an item's text, or a line inside an item, starts with what HELP says the reader refuses there."""
     return bool(OPENS.match(line) or MARKER.match(line))
+
+
+def criteria(text: str) -> bool:
+    """True when the line is what HELP calls a "## " criteria heading."""
+    heading = HEADING.fullmatch(text.lstrip(" "))
+    return bool(heading and len(text) - len(text.lstrip(" ")) < 4 and heading.group(1) == "##"
+                and (heading.group(2) or "").lower() in {name.lower() for name in CRITERIA_HEADINGS})
+
+
+def unquoted(line: str) -> str:
+    """The line without its indent and the > of any quotes."""
+    while (rest := line.lstrip(" ")).startswith(">"):
+        line = rest[1:]
+    return rest
+
+
+def unmarked(line: str) -> str:
+    """The line without its indent, the > of any quotes and the markers of any items."""
+    while (marker := MARKER.match(rest := unquoted(line))) and rest:
+        line = rest[marker.end():]
+    return rest
 
 
 def requirements(body: str | None) -> list[str]:
     """The text of each item of a list under a "## " heading among the CRITERIA_HEADINGS, in the order written.
-    Unreadable names the first line of the section the reader cannot read with certainty.
-
-    The body is read as CommonMark's blocks: code, fenced or indented, and HTML blocks hide what they
-    hold; one of those ATX headings opens the section, and any ATX heading of level one or two ends it.
-    In the section the reader reads lists of items marked - * + or a number and . or ), each with its
-    text on its marker line. An item's text can wrap onto the lines after it, however they are indented, until a blank
-    line or the next item; it is read without its marker or a task box. A list nested in an item, its
-    markers at most 3 columns past the item's text, gives items of its own after their parent. Between
-    lists stand paragraphs, headings of level three and deeper, breaks, and code and HTML blocks, which
-    end the list. Any other line refuses the list: inside an item, a quote, code, a fence, HTML, a
-    heading, a break or a second paragraph; an item with no text on its marker line, or that opens
-    another block there; a quote; an underline below a line of text; and a marker numbered other than
-    1 right after a line of text, where it would start a list."""
-    headings = {heading.lower() for heading in CRITERIA_HEADINGS}
+    Unreadable names the first line the reader cannot read with certainty. HELP says which lists it reads."""
+    # CommonMark ends a line only at \n, \r or both; str.splitlines also ends one at \v, \f, \x85 and others.
+    lines = re.split(r"\r\n|\r|\n", (body or "").expandtabs(4))
     found: list[str] = []
     columns: list[int] = []  # the text column of each open item of the section, outermost first
     under = paragraph = False  # paragraph: the line before is text that a line of text continues
+    after_item = False  # a line that starts with a list marker came before: an item may still be open
+    loose = False  # such a line came outside the criteria sections since the last heading at the margin
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
-    for number, text in enumerate((body or "").expandtabs(4).splitlines(), 1):
-        if fence:  # a fence ends at a line of at least as many of its own character
-            if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
-                fence = ""
-            continue
-        if html:
-            if html.search(text):
-                html = None
-            continue
-        line = text.lstrip(" ")
-        indent = len(text) - len(line)
-        if not line:
-            paragraph = False
-            continue
-        depth = sum(column <= indent for column in columns)  # the open items the line is indented into
-        marker = MARKER.match(line) if indent - (columns[depth - 1] if depth else 0) < 4 else None
-        if under and (depth or marker or line.startswith(">") or paragraph and SETEXT.fullmatch(line)):
-            content = line[marker.end():] if marker else ""
-            if marker and content.strip() and not content.startswith(" ") and not opens(content) and not (
-                    depth == len(columns) and paragraph and int(marker.group(1) or 1) != 1):
-                del columns[depth:]
-                columns.append(indent + marker.end())
-                found.append(re.sub(r"\A\[[ xX]\][ \t]+", "", content).strip())
-                paragraph = True
-            elif depth and paragraph and not opens(line):
-                found[-1] += " " + line.strip()
-            else:
+    block_indent = 0  # the indent of the open fence or HTML block's first line
+    try:
+        for number, text in enumerate(lines, 1):
+            if (fence or html) and text.strip(" \t") and len(text) - len(text.lstrip(" ")) < block_indent:
+                # Inside an item the block ends with the item, and at the top level it does not: no telling which.
                 raise Unreadable(number, text)
-            continue
-        start = indent < 4 and (next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
-                                or ((None, BLANK) if not paragraph and TAG_LINE.fullmatch(line) else None))
-        if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
-            fence = opening.group()
-        elif start:
-            begin, end = start
-            html = None if begin and end is not BLANK and end.search(line, begin.match(line).end()) else end
-        elif indent < 4 and (heading := re.fullmatch(r"(#{1,6})(?:[ \t]+(.*?))?(?:[ \t]+#+)?[ \t]*", line)):
-            if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
-                under = heading.group(1) == "##" and (heading.group(2) or "").strip().lower() in headings
-        elif not (indent < 4 and (BREAK.fullmatch(line) or paragraph and SETEXT.fullmatch(line))):
-            # Text: it continues the paragraph above, or starts one; indented, after no paragraph, it is code.
-            if paragraph and columns:
-                found[-1] += " " + line.strip()
-            elif not paragraph:
-                columns.clear()
-            paragraph = paragraph or indent < 4
-            continue
-        columns.clear()  # any other block ends the list and the paragraph
-        paragraph = False
+            if fence:  # a fence ends at a line of at least as many of its own character
+                if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
+                    fence = ""
+                continue
+            if html:
+                if html.search(text):
+                    html = None
+                continue
+            line = text.lstrip(" ")
+            indent = len(text) - len(line)
+            if not line:
+                paragraph = False
+                continue
+            depth = sum(column <= indent for column in columns)  # the open items the line is indented into
+            marker = MARKER.match(line) if indent - (columns[depth - 1] if depth else 0) < 4 else None
+            marker = None if BREAK.fullmatch(line) else marker  # * * * is a break, not an item
+            starts_item = bool(indent < 4 and MARKER.match(line) and not BREAK.fullmatch(line))
+            after_item = after_item or starts_item
+            loose = loose or starts_item and not under
+            if loose and not under and (indent or line != unmarked(line)) and re.match(r"`{3}|~{3}|<", unmarked(line)):
+                # A fence or HTML block that may open inside an item outside the sections: where it ends, no telling.
+                raise Unreadable(number, text)
+            if criteria(unmarked(line)) and (line != unmarked(line) or indent and after_item):
+                raise Unreadable(number, text)  # a criteria heading in a quote or an item, or that may be in an item
+            if under and (depth or marker or line.startswith(">") or paragraph and SETEXT.fullmatch(line)):
+                content = line[marker.end():].rstrip(" \t") if marker else ""
+                if marker and content and not content.startswith(" ") and not opens(content) and not (
+                        depth == len(columns) and paragraph and int(marker.group(1) or 1) != 1):
+                    del columns[depth:]
+                    columns.append(indent + marker.end())
+                    found.append(re.sub(r"\A\[[ xX]\](?:[ \t]+|\Z)", "", content))
+                    if not found[-1].strip():  # no text, or a task box with none: the judge's test
+                        raise Unreadable(number, text)
+                    paragraph = True
+                elif depth and paragraph and not opens(line):
+                    found[-1] += " " + line.rstrip(" \t")
+                else:
+                    raise Unreadable(number, text)
+                continue
+            start = indent < 4 and next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
+            if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
+                fence, block_indent = opening.group(), indent
+            elif start:
+                begin, end = start
+                html = None if end is not BLANK and end.search(line, begin.match(line).end()) else end
+                block_indent = indent
+            elif indent < 4 and TAG_LINE.fullmatch(line):  # an HTML block, or a paragraph's text: the line above says
+                raise Unreadable(number, text)
+            elif indent < 4 and (heading := HEADING.fullmatch(line)):
+                loose = loose and bool(indent)  # a heading at the margin ends every item
+                if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
+                    under = criteria(text)
+            elif not (indent < 4 and (BREAK.fullmatch(line) or paragraph and SETEXT.fullmatch(line))):
+                # Text: it continues the paragraph above, or starts one; indented, after no paragraph, it is code.
+                if paragraph and columns:
+                    found[-1] += " " + line.rstrip(" \t")
+                elif not paragraph:
+                    columns.clear()
+                paragraph = paragraph or indent < 4
+                continue
+            columns.clear()  # any other block ends the list and the paragraph
+            paragraph = False
+    except Unreadable as refusal:
+        # Outside every criteria section, a line the reader cannot be sure of costs the list only when a criteria
+        # heading may come at or after it; the items read before it stand.
+        # A body with no line that may start an item has no list: no refusal can cost it one.
+        if not any(MARKER.match(unquoted(text)) for text in lines):
+            return found
+        if under or any(criteria(unmarked(text)) for text in lines[refusal.number - 1:]):
+            raise
     return found
 
 
@@ -681,10 +765,16 @@ class Draw:
             return None
         number = closes[0]["number"]
         issue = self.gh(label, json.loads, "issue", "view", str(number), "--repo", repo["repo"], "--json", "title,body")
-        if not has_criteria(issue.get("body")):
+        try:
+            required = requirements(issue.get("body"))
+        except Unreadable:
+            self.refused.add((repo["repo"], number))
+            return None
+        if not required:
             return None
         return {"label": label, "ticket": number, "bucket": bucket, "size": size, "title": issue["title"],
-                "body": issue["body"], "pr": pr, "session": opener["log"].stem, "model": opener["model"],
+                "body": issue["body"], "requirements": required, "pr": pr, "session": opener["log"].stem,
+                "model": opener["model"],
                 "repo": repo, "merge": view["mergeCommit"]["oid"], "created": view["createdAt"],
                 "branch": view["headRefName"], "fork": view["isCrossRepository"], "source": opener["log"],
                 "transcripts": opener["transcripts"]}
@@ -775,6 +865,7 @@ class Draw:
         print(f"Vetoed {vetoed} PRs of the listed repos: a call that may have opened each, or another PR of the "
               f"session that opened it, keeps it out of the pool.")
         tickets: dict[tuple[str, int], dict | None] = {}
+        self.refused: set[tuple[str, int]] = set()  # the tickets whose list the reader refuses
         for (repo, pr), found in sorted(touched.items()):
             if repo not in repos or not alone((repo, pr), found, ()):
                 continue
@@ -788,6 +879,8 @@ class Draw:
             if candidate:
                 key = (repo, candidate["ticket"])
                 tickets[key] = None if key in tickets else candidate  # a ticket with two PRs has no PR of its own
+        print(f"Refused {len(self.refused)} tickets of the listed repos: a list under a criteria heading that the draw "
+              f"cannot read with certainty keeps each out of the pool.")
         used = self.used()
         buckets: dict[str, list[dict]] = {name: [] for name in BUCKETS}
         for _, found in sorted(tickets.items()):  # by repo and ticket, so the repo list's order changes nothing
@@ -1013,8 +1106,8 @@ class Draw:
                 return EXIT_SHORT
             for candidate in kept:
                 candidate["log"] = self.save_log(candidate)
-            fields = ("label", "ticket", "bucket", "size", "title", "body", "base_commit", "ready_commit", "model",
-                      "pr", "session", "log", "check_output")
+            fields = ("label", "ticket", "bucket", "size", "title", "body", "requirements", "base_commit",
+                      "ready_commit", "model", "pr", "session", "log", "check_output")
             number = 1 + max(self.sets(), default=0)
             path = self.state / f"replay-set-{number}.json"
             scan.write_private(path, json.dumps({

@@ -34,25 +34,20 @@ NO_PUSH = "GitHub records no push to the PR's branch by the time it was first re
 UNREAD = "GitHub's record of the PR's history or of the pushes to its branch could not be read"
 PR_URL = re.compile(r"https://github\.com/([\w.-]+/[\w.-]+)/pull/(\d+)")
 MODEL_NAME = re.compile(r"[A-Za-z][\w.:@/-]*")
-HEREDOC = re.compile(r"(?<!<)<<(-?)[ \t]*(['\"]?)([\w.-]+)\2")
-OPERATORS = sorted([";;&", ";;", ";&", "&&", "||", "|&", "&>>", "&>", ">>", "<<-", "<<<", "<<", "<&", ">&", "<>",
-                    ">|", ";", "&", "|", "(", ")", "<", ">", "\n"], key=len, reverse=True)
-REDIRECTS = {"<", ">", ">>", "<<", "<<-", "<<<", "<&", ">&", "&>", "&>>", "<>", ">|"}
-# Bash's reserved words. The reader models if, while, until, for, { } and the ! and time that start a pipeline;
-# any other one in a command's place makes the whole call one it cannot read.
-RESERVED = {"if", "then", "else", "elif", "fi", "while", "until", "for", "do", "done", "{", "}", "!", "time",
-            "case", "esac", "select", "function", "coproc", "[[", "]]"}
-# Commands that can end the shell, skip what follows, run text as commands, or change what a later name runs.
-STOPPERS = {"exit", "exec", "return", "logout", "set", "trap", "kill", "source", ".", "eval", "break", "continue",
-            "builtin", "alias", "shopt", "enable", "hash", "suspend"}
-# Each prefix that runs the command after it, with the options the reader knows: True for one that takes a
-# value. Any other option leaves the command one the reader cannot name.
-PREFIXES: dict[str, dict[str, bool]] = {"command": {"--": False}, "exec": {"-a": True, "--": False},
-                                        "env": {"-u": True, "--": False}, "nohup": {"--": False}}
-FAILS = "\x01"  # stands in a word for an expansion that can end the shell or abandon the rest of its line
-# Redirections that cannot fail: duplicating standard output or error, here-documents and strings, /dev/null.
-SAFE_REDIRECTS = {(">&", "1"), (">&", "2"), (">", "/dev/null"), (">>", "/dev/null"), ("&>", "/dev/null"),
-                  ("&>>", "/dev/null")}
+# The commands an opening call may run besides gh pr create. Each is a program, or the builtin cd, that cannot end
+# the shell or skip what follows it.
+OTHERS = ("cd", "git", "cat", "tail")
+# The pieces an opening call is made of, tried in turn at each point. A call with any other text has no opening form.
+PIECE = re.compile(r"""
+    (?P<blank>[ \t]+|(?<=[ \t])\\\n)
+  | (?P<op>&&|\|(?![|&])|;(?!;)|\n)
+  | (?P<errors>(?<![^ \t\n;|&])2>&1(?=[ \t\n;|&]|\Z))
+  | (?P<to>(?<![^ \t\n;|&])>>?(?![>|&]))
+  | (?P<here>(?<![^ \t\n;|&])<<'(?P<delimiter>[A-Za-z_]\w*)'(?=[ \t\n;|&]|\Z))
+  | (?P<body>"\$\(cat\ <<'(?P<inner>[A-Za-z_]\w*)'\n(?P<lines>(?:.*\n)*?)(?P=inner)\n\)")
+  | (?P<plain>[A-Za-z0-9_./,:=@%+-]+)
+  | (?P<quoted>'[^']*'|"(?:[^"\\$`]|\\[\s\S])*"|\\[^\n])
+""", re.X | re.A)
 # CommonMark's HTML blocks of kinds 1 to 6: what starts one and what ends it; a blank line ends kinds 6 and 7.
 BLANK = re.compile(r"\A[ \t]*\Z")
 HTML_BLOCKS = [
@@ -92,29 +87,47 @@ The pool is every ticket that meets all of these:
   time GitHub gives for the PR's opening falls between the call and its
   result, give or take {CLOCK_SLACK.seconds // 60} minute. No other session opened or may have opened
   the PR, and the session opened or may have opened no other PR.
-- A call runs `gh pr create` for certain when the draw proves from its words,
-  and from its exit of 0, that bash started that command. The draw reads the
-  call as bash's lists, pipelines, simple commands, functions, if, while,
-  until and for loops, groups and subshells; any other grammar, such as case
-  or [[, makes the call one it cannot read. It proves a start when gh pr
-  create is a simple command outside any compound command; its three words
-  are exact, with no expansion, glob or escape in $'...'; the prefixes before
-  it are assignments, !, time, command, exec, env and nohup with options the
-  draw knows; its redirections cannot fail; no command before it can end the
-  shell or skip what follows, such as exit, exec, set, trap, eval or a name
-  given by an expansion; and its pipeline comes first in its list, the
-  commands up to the next ;, & or new line, or its list is the last, not run
-  with &, and && joins every pipeline from just before it to the end. A
-  command substitution in a command proved to start counts the same way. The
-  draw takes for granted that the call ran in bash, and that gh names the
-  GitHub CLI: no alias, function or PATH set before the call changes it.
-  A call that may run it anywhere else, as after || or in a branch, or that
-  cannot be read, may have opened the PR its result names, if GitHub's
-  time falls in its span. So may a call whose line or whose result's line
-  has a time that is missing, has no zone or is at an end of the calendar.
-  A PR in a repo outside repos.json counts on the command alone: opened or
-  may have opened. A command run by another program, as with bash -c, does
-  not count. Lines in the session's log or a helper's that carry another
+- A call runs `gh pr create` for certain when it exited 0 and has this form,
+  which shows that bash started that command:
+  - The call is commands joined by &&, |, ; and new lines. A new line may
+    also follow && or |.
+  - One command is gh pr create, with its three words unquoted and nothing
+    before them, as in
+      gh pr create --title "t" --body "b"
+  - That command comes after the last ; or new line that ends a command, and
+    first in its pipeline. It may feed a pipe and send its errors to its
+    output, as in
+      cd repo && gh pr create --fill 2>&1 | tail -1
+  - Every other command is cd, git, cat or tail. It may write its output to
+    a file with > or >>, send its errors to its output with 2>&1, and read a
+    here-document with a quoted delimiter, as in
+      cat > body.md <<'EOF'
+      Body text.
+      EOF
+      git push -u origin b && gh pr create --body-file body.md
+  - Each word is made of letters, digits and _ . / , : = @ % + -, of text in
+    single quotes, of text in double quotes with no $ or `, of characters
+    after a backslash, and of a body in this form, whose lines are text and
+    never commands, and none of which starts with the delimiter:
+      --body "$(cat <<'EOF'
+      Body text.
+      EOF
+      )"
+    A backslash that ends a line, after a blank, joins the next line to it.
+  The draw takes for granted that the call ran in bash 5.2 or later, with
+  its default options; that no alias, function, variable or option set
+  before the call changes what a name in it runs; and that gh names the
+  GitHub CLI and cd, git, cat and tail the commands of those names, wherever
+  the call runs them.
+  Any other call whose text holds the words gh, pr and create, in any order,
+  case or quoting, may have opened the PR its result names, if GitHub's
+  time falls in its span. A call whose text does not hold the three words
+  does not count. So a command that builds the words when it runs, or a
+  script or program that runs gh pr create, leaves no evidence. A call may
+  also have opened the PR when its line or its result's line has a time
+  that is missing, has no zone or is at an end of the calendar. A PR in a
+  repo outside repos.json counts on the command alone: opened or may have
+  opened. Lines in the session's log or a helper's that carry another
   session's id, as lines a resumed session copied do, are left out of this
   reading of the session and credited to no other.
 - The session's own responses name the model it ran on: the name most of
@@ -190,7 +203,9 @@ Every file is in the machine directory, $DELIVER_STATE_DIR (default
                         scanned; until then it stays as it was.
   draw-work/            Clones and checkouts, removed when the draw ends.
 
-Output names projects by label only. A session log and its helpers' logs are
+Output names projects by label only. Before the count per bucket, the draw
+prints how many PRs of the listed repos a call may have opened. None of
+them is in the pool. A session log and its helpers' logs are
 read as a session only when the text of one of them holds github.com or a \\u
 escape, as one must that holds a PR's URL. A log adds one, once, to the count
 of skipped logs when an error arises while finding or reading its helpers'
@@ -280,501 +295,85 @@ def result_text(part: dict) -> str:
     return str(content or "")
 
 
-def quote_end(text: str, at: int, mark: str) -> int:
-    """Where the quote or backtick that opens before `at` closes; -1 when it does not."""
-    while at < len(text):
-        if text[at] == "\\":
-            at += 1
-        elif text[at] == mark:
-            return at
-        at += 1
-    return -1
-
-
-def closing(text: str, at: int, opener: str = "(", closer: str = ")") -> int:
-    """Where the bracket that opens before `at` closes, past quotes and nested brackets; -1 when it does not."""
-    depth = 1
-    while 0 <= at < len(text):
-        char = text[at]
-        if char == "\\":
-            at += 1
-        elif char == "'":
-            at = text.find("'", at + 1)
-        elif char in "\"`":
-            at = quote_end(text, at + 1, char)
-        elif char == opener:
-            depth += 1
-        elif char == closer:
-            depth -= 1
-            if not depth:
-                return at
-        if at >= 0:
-            at += 1
-    return -1
-
-
-def shell_tokens(command: str) -> tuple[list[tuple], list[tuple[str, int, bool]]] | None:
-    """A command's tokens, and each command it substitutes; None when it does not parse.
-
-    A token is ("op", operator) or ("word", text, exact, quoted, assignment). Quotes and backslashes are
-    removed. A word is exact only when its text is surely what bash passes on: one that holds an expansion
-    (and holds "\\0" where it stands), an escape in $'...', a $"..." string, a glob, a brace expansion or a
-    leading ~ is not. A word also holds FAILS where an expansion can end the shell or abandon its line: any
-    ${...} but ${name}, and arithmetic. A substitution is (its text, the index of the token that holds it, whether it runs
-    whenever its word is expanded); one inside ${...} may not run."""
-    tokens: list[tuple] = []
-    inner: list[tuple[str, int, bool]] = []
-    word: list | None = None  # [text, exact, quoted, assignment]
-
-    def add(text: str, quoted: bool = False, exact: bool = True) -> None:
-        nonlocal word
-        if word is None:
-            word = ["", True, False, False]
-        if text == "=" and not quoted and not word[2] and word[1] and re.fullmatch(r"[A-Za-z_]\w*", word[0]):
-            word[3] = True
-        word[0] += text
-        word[1] = word[1] and exact
-        word[2] = word[2] or quoted
-
-    def substitution(start: int, end: int, quoted: bool) -> int:
-        if end < 0:
-            raise ValueError("unclosed substitution")
-        inner.append((command[start:end], len(tokens), True))
-        add("\0", quoted, exact=False)
-        return end + 1
-
-    def dollar(at: int, quoted: bool) -> int:
-        """Read the expansion at `at`, a "$"; return where reading goes on."""
-        following = command[at + 1:at + 2]
-        if following == "(":
-            if command[at + 2:at + 3] == "(":  # arithmetic, whose error abandons the line
-                add(FAILS, quoted, exact=False)
-            return substitution(at + 2, closing(command, at + 2), quoted)
-        end = at + 2
-        if following == "{":
-            end = closing(command, at + 2, "{", "}") + 1
-            if not end:
-                raise ValueError("unclosed expansion")
-            if found := re.search(r"\$\(|`", command[at:end]):  # as in ${name:-$(command)}, which may run
-                inner.append((command[at + found.end():end - 1], len(tokens), False))
-            if not re.fullmatch(r"\$\{([A-Za-z_]\w*|\d+|[@*#?$!-])\}", command[at:end]):
-                add(FAILS, quoted, exact=False)  # ${x:?} ends the shell; a bad substitution abandons the line
-        elif following.isalpha() or following == "_":
-            while end < len(command) and (command[end].isalnum() or command[end] == "_"):
-                end += 1
-        elif following == "[":  # an old arithmetic expansion
-            end = closing(command, at + 2, "[", "]") + 1
-            if not end:
-                raise ValueError("unclosed expansion")
-            add(FAILS, quoted, exact=False)
-        elif not following or following not in "0123456789@*#?$!-":
-            add("$", quoted)
-            return at + 1
-        add("\0", quoted, exact=False)
-        return end
-
-    at = 0
-    try:
-        while at < len(command):
-            char = command[at]
-            if char == "\\":
-                if command[at + 1:at + 2] != "\n":  # a backslash before a new line joins the two lines
-                    add(command[at + 1:at + 2], quoted=True)
-                at += 2
-            elif char == "'":
-                end = command.find("'", at + 1)
-                if end < 0:
-                    raise ValueError("unclosed quote")
-                add(command[at + 1:end], quoted=True)
-                at = end + 1
-            elif char == "$" and command[at + 1:at + 2] == "'":  # $'...': the reader finds its end, not its bytes
-                at += 2
-                while command[at:at + 1] != "'":
-                    if at >= len(command):
-                        raise ValueError("unclosed quote")
-                    escaped = command[at] == "\\"
-                    at += escaped
-                    add(command[at:at + 1], quoted=True, exact=not escaped)
-                    at += 1
-                at += 1
-            elif char == '"' or char == "$" and command[at + 1:at + 2] == '"':
-                add("", quoted=True, exact=char == '"')  # $"..." may be translated
-                at += 1 if char == '"' else 2
-                while command[at:at + 1] != '"':
-                    if at >= len(command):
-                        raise ValueError("unclosed quote")
-                    if command[at] == "\\" and command[at + 1:at + 2] in ("$", "`", '"', "\\", "\n"):
-                        if command[at + 1] != "\n":
-                            add(command[at + 1], quoted=True)
-                        at += 2
-                    elif command[at] == "$":
-                        at = dollar(at, quoted=True)
-                    elif command[at] == "`":
-                        at = substitution(at + 1, quote_end(command, at + 1, "`"), quoted=True)
-                    else:
-                        add(command[at], quoted=True)
-                        at += 1
-                at += 1
-            elif char == "`":
-                at = substitution(at + 1, quote_end(command, at + 1, "`"), quoted=False)
-            elif char == "$":
-                at = dollar(at, quoted=False)
-            elif char in "<>" and command[at + 1:at + 2] == "(":  # a process substitution is a word
-                at = substitution(at + 2, closing(command, at + 2), quoted=False)
-            elif char in " \t\r":
-                if word is not None:
-                    tokens.append(("word", *word))
-                    word = None
-                at += 1
-            elif char == "#" and word is None:  # a comment runs to the end of its line
-                end = command.find("\n", at)
-                at = len(command) if end < 0 else end
-            elif operator := next((op for op in OPERATORS if command.startswith(op, at)), None):
-                if word is not None and not (operator[0] in "<>" and word[0].isdigit() and not word[2]):
-                    tokens.append(("word", *word))  # digits right before a redirection name a file descriptor
-                word = None
-                tokens.append(("op", operator))
-                at += len(operator)
-            else:  # a glob, a brace expansion or a leading ~ may change the word
-                add(char, exact=char not in "*?[{~" or char == "~" and word is not None and word[0] != ""
-                    or char == "[" and "]" not in command[at:at + 200].split()[0]
-                    or char == "{" and not re.match(r"\{[^\s{}]*(,|\.\.)[^\s{}]*\}", command[at:]))
-                at += 1
-    except ValueError:
-        return None
-    if word is not None:
-        tokens.append(("word", *word))
-    return tokens, inner
-
-
-def strip_here_documents(command: str) -> tuple[str, list[str], int]:
-    """The command less its here-documents' bodies, which are input, not commands; the bodies the shell
-    expands, since a command substitution in one runs; and how many here-documents it found. It finds them
-    in the text, quotes aside, so the caller checks that count against the operators the shell reads."""
-    kept, expanded, ends, found = [], [], [], 0
-    for text in command.split("\n"):
-        if ends:
-            strip, quote, end, body = ends[0]
-            if (text.lstrip("\t") if strip else text) == end:
-                ends.pop(0)
-                if not quote:
-                    expanded.append("\n".join(body))
-            else:
-                body.append(text)
-            continue
-        kept.append(text)
-        ends = [(strip, quote, end, []) for strip, quote, end in HEREDOC.findall(text)]
-        found += len(ends)
-    expanded += ["\n".join(body) for strip, quote, end, body in ends if not quote]
-    return "\n".join(kept), expanded, found
-
-
 def runs_gh_pr_create(command: str, exited_zero: bool = True) -> str | None:
-    """Whether a Bash command runs `gh pr create`: "opens" when the reader proves bash started it, "maybe"
-    when it may have, or when the call holds anything the reader does not model; None when it does not.
-    `exited_zero` says the call is known to have exited 0.
-
-    The reader parses the call as bash's lists, and-or lists, pipelines, simple commands, functions, if,
-    while, until and for loops, groups and subshells, and fails closed on any other grammar (`case`, `[[`,
-    `((`, `select`, `coproc`, `function`) and on a here-document it cannot match to its operator. It proves
-    a start when `gh pr create` is a simple command at the top level, outside any compound command; its
-    three words are exact; its prefixes and their options are ones it knows; its redirections cannot fail;
-    no simple command before it, at any depth, is one that `stops`; no function anywhere in the call is
-    named gh, a prefix or a STOPPER; and either its
-    pipeline is the first of its and-or list, or that list ends the call, is not run in the background,
-    and && joins every pipeline from just before it to the end, so an exit of 0 means each ran. A command
-    substitution in a word of a command proved to start counts when its own command is proved to start
-    `gh pr create`, its exit unknown. It takes for granted that the call runs in bash, that gh, env and
-    nohup name the programs their names give, and that nothing outside the call, such as an alias, a
-    function or PATH set before it, changes that."""
-    command, expanded, heres = strip_here_documents(command)
-    read = shell_tokens(command)
-    if read is None:
-        return "maybe"
-    tokens, inner = read
-    if heres != here_operators(tokens, inner):  # a << the text shows that the shell does not read, or the reverse
-        return "maybe"
-    try:
-        top = Grammar(tokens).program()
-    except ValueError:  # grammar the reader does not model
-        return "maybe"
-    surely, found = True, None  # surely: no command so far can stop the ones after it
-    for number, (pipelines, ending) in enumerate(top):
-        last = number == len(top) - 1 and ending != "&"
-        for place, (pipeline, _) in enumerate(pipelines):
-            joined = [after for _, after in pipelines[max(place - 1, 0):-1]] if place else []
-            started = surely and (place == 0 or exited_zero and last and all(op == "&&" for op in joined))
-            for item in pipeline:
-                nested = item["compound"]
-                for simple in item["simple"]:
-                    kind = gh_pr_create(simple["words"], simple["redirects"])
-                    if kind == "opens" and started and not nested:
-                        return "opens"
-                    found = found or kind
-                    for text, at, runs in inner:
-                        if at in simple["span"]:
-                            within = runs_gh_pr_create(text, exited_zero=False)
-                            if within == "opens" and runs and started and not nested:
-                                return "opens"
-                            found = found or within
-            if any(stops(simple["words"], simple["redirects"]) for item in pipeline for simple in item["simple"]):
-                surely = False
-    if found or any(runs_gh_pr_create(text) for text in expanded):
-        return "maybe"
-    return None
-
-
-def here_operators(tokens: list[tuple], inner: list[tuple[str, int, bool]]) -> int:
-    """How many here-document operators the shell reads in the tokens and in the commands they substitute."""
-    count = sum(token == ("op", "<<") or token == ("op", "<<-") for token in tokens)
-    for text, _, _ in inner:
-        read = shell_tokens(text)
-        count += here_operators(*read) if read else 0
-    return count
-
-
-class Grammar:
-    """Bash's grammar over a call's tokens, as far as the reader models it; ValueError beyond that.
-
-    `program` gives the call's lists, each as (its and-or list, the operator that ends it). An and-or list
-    is [(pipeline, the operator after it)], and a pipeline is a list of commands. A command is
-    {"compound": whether it is a compound command or a function, "simple": every simple command in it}, and
-    a simple command is {"words", "redirects": [(operator, target)], "span": its tokens' indices}."""
-
-    def __init__(self, tokens: list[tuple]) -> None:
-        self.tokens = tokens
-        self.at = 0
-
-    def peek(self, ahead: int = 0) -> tuple | None:
-        return self.tokens[self.at + ahead] if self.at + ahead < len(self.tokens) else None
-
-    def reserved(self, *names: str) -> bool:
-        """Whether the next token is a reserved word, one of `names` when they are given."""
-        token = self.peek()
-        return (token is not None and token[0] == "word" and token[2] and not token[3] and token[1] in RESERVED
-                and (not names or token[1] in names))
-
-    def op(self, *names: str) -> bool:
-        token = self.peek()
-        return token is not None and token[0] == "op" and token[1] in names
-
-    def expect(self, name: str) -> None:
-        if not (self.reserved(name) or self.op(name)):
-            raise ValueError(f"expected {name}")
-        self.at += 1
-
-    def newlines(self) -> None:
-        while self.op("\n"):
-            self.at += 1
-
-    def program(self) -> list:
-        found = self.lists(())
-        if self.at < len(self.tokens):
-            raise ValueError("unexpected token")
-        return found
-
-    def lists(self, ends: tuple[str, ...]) -> list:
-        """And-or lists up to one of the reserved words `ends`, or a closing parenthesis."""
-        found = []
-        self.newlines()
-        while self.peek() is not None and not (ends and self.reserved(*ends)) and not self.op(")"):
-            pipelines = [(self.pipeline(), None)]
-            while self.op("&&", "||"):
-                pipelines[-1] = (pipelines[-1][0], self.peek()[1])
-                self.at += 1
-                self.newlines()
-                pipelines.append((self.pipeline(), None))
-            ending = self.peek()[1] if self.op(";", "&", "\n") else None
-            found.append((pipelines, ending))
-            if ending is None:
-                break
-            self.at += 1
-            self.newlines()
-        return found
-
-    def pipeline(self) -> list[dict]:
-        while self.reserved("!", "time"):
-            self.at += 1
-            if self.tokens[self.at - 1][1] == "time" and self.peek() and self.peek()[1:3] == ("-p", True):
-                self.at += 1
-        commands = [self.command()]
-        while self.op("|", "|&"):
-            self.at += 1
-            self.newlines()
-            commands.append(self.command())
-        return commands
-
-    def command(self) -> dict:
-        token = self.peek()
-        if token is None:
-            raise ValueError("a command is missing")
-        if self.op("("):
-            self.at += 1
-            if self.op("("):
-                raise ValueError("arithmetic")
-            inside = self.lists(())
-            self.expect(")")
-            return self.compound(inside)
-        if self.reserved("if"):
-            self.at += 1
-            inside = self.lists(("then",))
-            self.expect("then")
-            inside += self.lists(("elif", "else", "fi"))
-            while self.reserved("elif"):
-                self.at += 1
-                inside += self.lists(("then",))
-                self.expect("then")
-                inside += self.lists(("elif", "else", "fi"))
-            if self.reserved("else"):
-                self.at += 1
-                inside += self.lists(("fi",))
-            self.expect("fi")
-            return self.compound(inside)
-        if self.reserved("while", "until"):
-            self.at += 1
-            inside = self.lists(("do",))
-            self.expect("do")
-            inside += self.lists(("done",))
-            self.expect("done")
-            return self.compound(inside)
-        if self.reserved("for"):
-            self.at += 1
-            first = self.at
-            if self.peek() is None or self.peek()[0] != "word" or not re.fullmatch(r"[A-Za-z_]\w*", self.peek()[1]):
-                raise ValueError("a loop's name")
-            self.at += 1
-            self.newlines()
-            words = []
-            if self.peek() and self.peek()[0] == "word" and self.peek()[1] == "in" and not self.peek()[3]:
-                self.at += 1
-                while self.peek() and self.peek()[0] == "word":
-                    words.append(self.peek())
-                    self.at += 1
-            header = {"words": words, "redirects": [], "span": range(first, self.at)}
-            if self.op(";", "\n"):
-                self.at += 1
-            self.newlines()
-            self.expect("do")
-            inside = self.lists(("done",))
-            self.expect("done")
-            return self.compound(inside, [header])
-        if self.reserved("{"):
-            self.at += 1
-            inside = self.lists(("}",))
-            self.expect("}")
-            return self.compound(inside)
-        if self.reserved():
-            raise ValueError(f"the reserved word {token[1]}")
-        if token[0] == "word" and self.peek(1) == ("op", "(") and self.peek(2) == ("op", ")"):
-            if not token[2] or token[1] == "gh" or token[1] in PREFIXES or token[1] in STOPPERS:
-                raise ValueError("a function that changes what a name runs")
-            self.at += 3
-            self.newlines()
-            body = self.command()
-            if not body["compound"]:
-                raise ValueError("a function's body")
-            return {"compound": True, "simple": body["simple"]}
-        return {"compound": False, "simple": [self.simple()]}
-
-    def compound(self, inside: list, extra: list[dict] | None = None) -> dict:
-        """A compound command, with its redirections, and every simple command in it."""
-        simple = list(extra or [])
-        for pipelines, _ in inside:
-            for pipeline, _ in pipelines:
-                for command in pipeline:
-                    simple += command["simple"]
-        self.redirects([])
-        return {"compound": True, "simple": simple}
-
-    def redirects(self, found: list) -> None:
-        while self.op(*REDIRECTS):
-            operator = self.peek()[1]
-            self.at += 1
-            if self.peek() is None or self.peek()[0] != "word":
-                raise ValueError("a redirection's target")
-            found.append((operator, self.peek()))
-            self.at += 1
-
-    def simple(self) -> dict:
-        first, words, redirects = self.at, [], []
-        while True:
-            if self.peek() is not None and self.peek()[0] == "word":
-                words.append(self.peek())
-                self.at += 1
-            elif self.op(*REDIRECTS):
-                self.redirects(redirects)
-            else:
-                break
-        if not words and not redirects:
-            raise ValueError("a command is missing")
-        return {"words": words, "redirects": redirects, "span": range(first, self.at)}
-
-
-def command_name(words: list[tuple]) -> tuple[int, bool, bool]:
-    """Where a simple command's name stands, past assignments and the prefixes that run it; whether every
-    option given a prefix is one the reader knows; and whether a prefix only looks the name up."""
-    at, known = 0, True
-    while at < len(words):
-        _, text, exact, quoted, assignment = words[at]
-        if assignment:
-            at += 1
-        elif exact and text in PREFIXES:
-            at += 1
-            while at < len(words) and (words[at][1].startswith("-") or not words[at][2]
-                                       or text == "env" and words[at][4]):
-                option = words[at]
-                at += 1
-                if text == "env" and option[4]:
-                    continue
-                if text == "command" and re.fullmatch(r"-[pvV]*[vV][pvV]*", option[1]):
-                    return at, known, True  # command -v and -V only name the command
-                if not option[2] or option[1] not in PREFIXES[text]:
-                    known = False
-                elif option[1] == "--":
-                    break
-                else:
-                    at += PREFIXES[text][option[1]]
-        else:
-            break
-    return at, known, False
-
-
-def stops(words: list[tuple], redirects: list[tuple] = []) -> bool:
-    """Whether a simple command can end the shell or skip what follows it: one of the STOPPERS, any exec,
-    a command named by a word that is not exact, one the reader cannot name, or one with an expansion
-    that can fail (FAILS)."""
-    if any(FAILS in word[1] for word in words + [target for _, target in redirects]):
-        return True
-    at, known, lookup = command_name(words)
-    if any(word[2] and not word[4] and word[1] == "exec" for word in words[:at]):
-        return True  # exec replaces the shell, and a failed redirection given to it can end the shell
-    if lookup or at >= len(words):
-        return not known
-    return not known or not words[at][2] or words[at][1] in STOPPERS
-
-
-def gh_pr_create(words: list[tuple], redirects: list[tuple] = []) -> str | None:
-    """Whether one simple command runs `gh pr create`: "opens" when it surely does, "maybe" when it may, as
-    when a word that is not exact could spell it or the reader does not know a prefix's option or that a
-    redirection cannot fail; None when it does not."""
-    at, known, lookup = command_name(words)
-    if lookup:
+    """Whether a Bash call ran `gh pr create`: "opens" when it exited 0 and has an opening form, "maybe" when its
+    text holds the three words otherwise, None when it does not. --help gives the forms and what they take for
+    granted."""
+    words = re.sub(r"\\\n|[\\'\"]", "", command)  # a backslash that ends a line joins it to the next
+    if not all(re.search(rf"\b{word}\b", words, re.I | re.A) for word in ("gh", "pr", "create")):
         return None
-    sure = known and not any(FAILS in word[1] for word in words + [target for _, target in redirects])
-    for place, wanted in enumerate(("gh", "pr", "create")):
-        if at + place >= len(words):
-            return None
-        _, text, exact, quoted, _ = words[at + place]
-        if not exact:
-            if not quoted:
-                return "maybe"  # it may expand to any number of words
-            sure = False
-        elif (text.rsplit("/", 1)[-1] if place == 0 else text) != wanted:
-            return None
-    if not all((operator, target[1]) in SAFE_REDIRECTS and target[2] or operator in ("<<", "<<-", "<<<")
-               for operator, target in redirects):
-        sure = False
-    return "opens" if sure else "maybe"
+    return "opens" if exited_zero and opening_form(command) else "maybe"
+
+
+def opening_form(command: str) -> bool:
+    """Whether a call has the form --help gives for one whose exit of 0 shows bash started `gh pr create`."""
+    commands: list[dict] = []  # each with its words, redirections, list and place in its pipeline
+    current: dict = {"words": [], "redirects": [], "list": 0, "first": True}
+    word: list[tuple[str, str]] = []  # the pieces of the word being read
+    target = False  # a > or >> waits for its file's word
+    here: list[str] = []  # the delimiters of here-documents whose bodies follow the next new line
+    after, lists, at = "\n", 0, 0  # after: the operator that ended the last command; lists: those ended so far
+
+    def end_word() -> None:
+        nonlocal word, target
+        if word:
+            text = "".join(piece for _, piece in word) if all(kind == "plain" for kind, _ in word) else None
+            current["redirects" if target else "words"].append(text)
+            word, target = [], False
+
+    while at < len(command):
+        found = PIECE.match(command, at)
+        if not found:
+            return False
+        kind, text, at = found.lastgroup, found.group(), found.end()
+        if kind in ("plain", "quoted", "body"):
+            if here and "\n" in text or kind == "body" and any(
+                    line.startswith(found["inner"]) for line in found["lines"].splitlines()):
+                return False
+            word.append((kind, text))
+            continue
+        end_word()
+        if kind == "blank":
+            continue
+        if target or kind != "op" and not current["words"]:  # > waits for its file; a name comes before redirections
+            return False
+        if kind == "errors":
+            current["redirects"].append(text)
+        elif kind == "to":
+            target = True
+        elif kind == "here":
+            current["redirects"].append("<<")
+            here.append(found["delimiter"])
+        elif current["words"]:
+            commands.append(current)
+            lists += text in ";\n"
+            current = {"words": [], "redirects": [], "list": lists, "first": text != "|"}
+            after = text
+        elif text != "\n":
+            return False
+        if kind == "op" and text == "\n":
+            for delimiter in here:
+                while True:
+                    end = command.find("\n", at)
+                    line, at = (command[at:], len(command)) if end < 0 else (command[at:end], end + 1)
+                    if line == delimiter:
+                        break
+                    if end < 0:
+                        return False
+            here = []
+    end_word()
+    if target or here or not current["words"] and after in ("&&", "|"):
+        return False
+    if current["words"]:
+        commands.append(current)
+    opening = False
+    for found in commands:
+        if found["words"][:3] == ["gh", "pr", "create"]:
+            last = found["list"] == commands[-1]["list"]
+            opening = opening or found["first"] and last and set(found["redirects"]) <= {"2>&1"}
+        elif found["words"][0] not in OTHERS:
+            return False
+    return opening
 
 
 Run = tuple[datetime | None, datetime | None, bool]
@@ -1123,6 +722,9 @@ class Draw:
                     touched.setdefault(key, []).append(session)
         if unreadable:
             print(f"Skipped {unreadable} session logs that could not be read.")
+        vetoed = sum(repo in repos and any(session["opened"][(repo, pr)] == "maybe" for session in found)
+                     for (repo, pr), found in touched.items())
+        print(f"Vetoed {vetoed} PRs of the listed repos: a call may have opened each, so none is in the pool.")
         tickets: dict[tuple[str, int], dict | None] = {}
         for (repo, pr), found in sorted(touched.items()):
             if repo not in repos or len(found) != 1 or not found[0]["eligible"] \

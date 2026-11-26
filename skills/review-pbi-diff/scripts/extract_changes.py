@@ -10,7 +10,7 @@ sides of a git ref range and emits:
 Usage:
   python3 extract_changes.py [RANGE] --out DIR [--repo ROOT]
 
-RANGE forms (default: main...HEAD):
+RANGE forms (default: the default branch recorded in origin/HEAD vs HEAD):
   A...B   merge-base(A,B) vs B
   A..B    A vs B
   A       A vs working tree
@@ -592,12 +592,17 @@ def diff_relationships(before, after):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("range", nargs="?", default="main...HEAD")
+    ap.add_argument("range", nargs="?")
     ap.add_argument("--out", required=True, help="output directory")
     ap.add_argument("--repo", default=".", help="repo root (default: cwd)")
     args = ap.parse_args()
 
     repo = os.path.abspath(args.repo)
+    if args.range is None:
+        default = git(repo, "symbolic-ref", "--quiet", "refs/remotes/origin/HEAD", check=False).strip()
+        if not default or not git(repo, "rev-parse", "--verify", "--quiet", default + "^{commit}", check=False):
+            ap.error("origin/HEAD does not identify a local commit. Pass an explicit range, e.g. BASE...HEAD.")
+        args.range = f"{default}...HEAD"
     base, head = resolve_range(repo, args.range)
     changes = list_changed(repo, base, head)
     if not changes:

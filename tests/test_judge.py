@@ -314,6 +314,33 @@ class TestJudge(unittest.TestCase):
                 self.assertFalse((self.world.state / "verdicts.jsonl").exists())
                 self.assertFalse((self.world.state / "judged").exists())
 
+    def test_a_list_the_draw_stores_passes_the_judge_s_check_and_keeps_its_unicode(self) -> None:
+        # One entry through both scripts: the draw's command line stores it and the judge's reads it. An item left
+        # with only white space that is not a space, such as a no-break space, is one the draw refuses.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        self.addCleanup(sys.path.remove, str(Path(__file__).resolve().parent))
+        drawing = importlib.import_module("test_draw")
+        for criteria, stored in (("## Acceptance\n\n- [ ]  Keep the space.\n- [x]  Save.",
+                                  [" Keep the space.", " Save."]),
+                                 ("## Acceptance\n\n- [ ]  \n- Save.", None)):
+            with self.subTest(criteria=criteria):
+                folder = tempfile.TemporaryDirectory()
+                self.addCleanup(folder.cleanup)
+                draw = drawing.World(Path(folder.name), drawing.full_pool(criteria=criteria))
+                result = draw.draw()
+                if stored is None:
+                    self.assertEqual(result.returncode, 3, result.stderr)
+                    self.assertIn("Refused 36 tickets of the listed repos: a list under a criteria heading that the "
+                                  "draw cannot read with certainty keeps each out of the pool.", result.stdout)
+                    continue
+                self.assertEqual(result.returncode, 0, result.stderr)
+                [entry, *_] = draw.set_file()["tickets"]
+                self.assertEqual(entry["requirements"], stored)
+                self.set_requirements(entry["requirements"])
+                self.world.answer("R1: met\nR2: met")
+                self.assertEqual(self.world.judge("A-7", "generation-one").returncode, 0)
+                self.assertIn("R1:  Keep the space.\nR2:  Save.\n", self.world.record("prompt"))
+
     def test_the_help_points_to_the_draw_for_the_list_and_states_no_grammar(self) -> None:
         help_text = " ".join(self.world.judge("--help").stdout.split())
         self.assertIn(" The requirements are the list the draw stored in the ticket's entry of the replay set, "

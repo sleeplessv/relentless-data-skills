@@ -177,22 +177,32 @@ gives items of its own after their parent. Between lists stand paragraphs,
 headings of level three and deeper, breaks such as * * *, and code and HTML
 blocks. Any other line in the section is one the draw cannot read with
 certainty: inside an item, a quote, code, a fence, HTML, a heading, a break or
-a second paragraph; an item with no text, or with a task box and no text; an
-item whose text starts with < or >, three backticks or three tildes, the one
-to six # of a heading, another marker, or more than four spaces, or is a break
-or a line of = or -; a quote; an underline below a line of text; and, right
-after a line of text, a marker numbered other than 1 with no list open or
-indented at least to the text of the last open item. Anywhere in the body, so
-is a "## " criteria heading indented 1 to 3 spaces after a line that starts,
-at most 3 spaces in, with a list marker, as it may stand inside that item; a
-line indented at most 3 spaces that holds one HTML tag alone and starts none
-of the HTML blocks above, which may be text or an HTML block; and a non-blank
-line indented less than the first line of the fence or HTML block it falls in.
+a second paragraph; an item with nothing but white space after its marker and
+any task box; an item whose text starts with < or >, three backticks or three
+tildes, the one to six # of a heading, another marker, or more than four
+spaces, or is a break or a line of = or -; a line indented into an item that
+wraps its text and starts with < or >, three backticks or three tildes, or the
+one to six # of a heading, or is a break or a line of = or -; a quote; an
+underline below a line of text; and, right after a line of text, a marker
+numbered other than 1 with no list open or indented at least to the text of
+the last open item. Anywhere in the body but inside a fence or an HTML block,
+so is a line that is a "## " criteria heading once its indent, the > of any
+quotes and any list markers are taken off, when it had a > or a marker, or
+when it is indented and a line that starts, at most 3 spaces in, with a list
+marker came before it, as it may stand inside a quote or an item; a line
+indented at most 3 spaces that holds one HTML tag alone and starts none of the
+HTML blocks above, which may be text or an HTML block; and a non-blank line
+indented less than the first line of the fence or HTML block it falls in.
+Outside the criteria sections, from a line that starts, at most 3 spaces in,
+with a list marker, that line included, to the next heading at the margin that
+starts with #, so is a line that starts with three backticks, three tildes or
+< once its indent, any > and any list markers are taken off, unless it starts
+at the margin with none of them, as it may open a block inside an item.
 Outside the criteria sections such a line refuses the body only when it or a
-line after it is a "## " criteria heading indented at most 3 spaces; otherwise
-the list is the items read before it. The items of the list are the ticket's
-requirements, in the order written, and the draw stores them in its entry of
-the set.
+line after it is a "## " criteria heading once its indent, any > and any list
+markers are taken off; otherwise the list is the items read before it. The
+items of the list are the ticket's requirements, in the order written, and the
+draw stores them in its entry of the set.
 
 A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
@@ -274,8 +284,10 @@ opened it.
 
 After the count of vetoed PRs and before the count per bucket, the draw prints
 how many tickets of the listed repos it left out because it refused their body
-as above. A body with no line that is a "## " criteria heading indented at
-most 3 spaces is never refused. That count is taken before the rules on a
+as above. A body is never refused when none of its lines is a "## " criteria
+heading once its indent, any > and any list markers are taken off, or when
+none of its lines starts with a list marker once its indent and any > are
+taken off, as it then holds no item. That count is taken before the rules on a
 ticket's other PRs and earlier sets, so it is the most tickets the reader can
 have cost the pool.
 
@@ -534,10 +546,24 @@ def opens(line: str) -> bool:
 
 
 def criteria(text: str) -> bool:
-    """True when the line is what HELP calls a "## " criteria heading indented at most 3 spaces."""
+    """True when the line is what HELP calls a "## " criteria heading."""
     heading = HEADING.fullmatch(text.lstrip(" "))
     return bool(heading and len(text) - len(text.lstrip(" ")) < 4 and heading.group(1) == "##"
                 and (heading.group(2) or "").lower() in {name.lower() for name in CRITERIA_HEADINGS})
+
+
+def unquoted(line: str) -> str:
+    """The line without its indent and the > of any quotes."""
+    while (rest := line.lstrip(" ")).startswith(">"):
+        line = rest[1:]
+    return rest
+
+
+def unmarked(line: str) -> str:
+    """The line without its indent, the > of any quotes and the markers of any items."""
+    while (marker := MARKER.match(rest := unquoted(line))) and rest:
+        line = rest[marker.end():]
+    return rest
 
 
 def requirements(body: str | None) -> list[str]:
@@ -549,6 +575,7 @@ def requirements(body: str | None) -> list[str]:
     columns: list[int] = []  # the text column of each open item of the section, outermost first
     under = paragraph = False  # paragraph: the line before is text that a line of text continues
     after_item = False  # a line that starts with a list marker came before: an item may still be open
+    loose = False  # such a line came outside the criteria sections since the last heading at the margin
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
     block_indent = 0  # the indent of the open fence or HTML block's first line
     try:
@@ -572,7 +599,14 @@ def requirements(body: str | None) -> list[str]:
             depth = sum(column <= indent for column in columns)  # the open items the line is indented into
             marker = MARKER.match(line) if indent - (columns[depth - 1] if depth else 0) < 4 else None
             marker = None if BREAK.fullmatch(line) else marker  # * * * is a break, not an item
-            after_item = after_item or bool(indent < 4 and MARKER.match(line) and not BREAK.fullmatch(line))
+            starts_item = bool(indent < 4 and MARKER.match(line) and not BREAK.fullmatch(line))
+            after_item = after_item or starts_item
+            loose = loose or starts_item and not under
+            if loose and not under and (indent or line != unmarked(line)) and re.match(r"`{3}|~{3}|<", unmarked(line)):
+                # A fence or HTML block that may open inside an item outside the sections: where it ends, no telling.
+                raise Unreadable(number, text)
+            if criteria(unmarked(line)) and (line != unmarked(line) or indent and after_item):
+                raise Unreadable(number, text)  # a criteria heading in a quote or an item, or that may be in an item
             if under and (depth or marker or line.startswith(">") or paragraph and SETEXT.fullmatch(line)):
                 content = line[marker.end():].rstrip(" \t") if marker else ""
                 if marker and content and not content.startswith(" ") and not opens(content) and not (
@@ -580,7 +614,7 @@ def requirements(body: str | None) -> list[str]:
                     del columns[depth:]
                     columns.append(indent + marker.end())
                     found.append(re.sub(r"\A\[[ xX]\](?:[ \t]+|\Z)", "", content))
-                    if not found[-1]:  # a task box with no text
+                    if not found[-1].strip():  # no text, or a task box with none: the judge's test
                         raise Unreadable(number, text)
                     paragraph = True
                 elif depth and paragraph and not opens(line):
@@ -598,8 +632,7 @@ def requirements(body: str | None) -> list[str]:
             elif indent < 4 and TAG_LINE.fullmatch(line):  # an HTML block, or a paragraph's text: the line above says
                 raise Unreadable(number, text)
             elif indent < 4 and (heading := HEADING.fullmatch(line)):
-                if indent and after_item and criteria(text):  # it may stand inside an item
-                    raise Unreadable(number, text)
+                loose = loose and bool(indent)  # a heading at the margin ends every item
                 if len(heading.group(1)) <= 2:  # a deeper heading stays in the section
                     under = criteria(text)
             elif not (indent < 4 and (BREAK.fullmatch(line) or paragraph and SETEXT.fullmatch(line))):
@@ -615,7 +648,10 @@ def requirements(body: str | None) -> list[str]:
     except Unreadable as refusal:
         # Outside every criteria section, a line the reader cannot be sure of costs the list only when a criteria
         # heading may come at or after it; the items read before it stand.
-        if under or any(criteria(text) for text in lines[refusal.number - 1:]):
+        # A body with no line that may start an item has no list: no refusal can cost it one.
+        if not any(MARKER.match(unquoted(text)) for text in lines):
+            return found
+        if under or any(criteria(unmarked(text)) for text in lines[refusal.number - 1:]):
             raise
     return found
 

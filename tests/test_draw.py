@@ -963,14 +963,17 @@ class TestDraw(unittest.TestCase):
 
     def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
         cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
-        notes = "## Notes\n\n- ```sh\n  true\n  ```\n\nMore notes."  # More notes. falls left of the fence
-        # Ticket 1 has a list and tickets 2, 10 and 11 none: the draw stops reading 10 and 11 at a line outside
-        # every criteria section with no criteria heading after it. The draw cannot read the lists of tickets 3, 4
-        # and 5, of ticket 300, which two PRs close, and of ticket 7, which an earlier set holds. Ticket 8's repo is
-        # not listed and ticket 9's PR is not merged, so their bodies are never read.
+        notes = "## Notes\n\n- ```sh\n  true\n  ```\n\nMore notes."  # a fence on a Notes item's marker line
+        # Ticket 1 has a list and tickets 2, 10, 11, 12 and 13 none: the draw stops reading 10 and 11 at a line
+        # outside every criteria section with no criteria heading after it, and 12 and 13 hold no line that starts
+        # with a list marker, so the lines it cannot be sure of in them cost no list. The draw cannot read the lists
+        # of tickets 3, 4 and 5, of ticket 300, which two PRs close, and of ticket 7, which an earlier set holds.
+        # Ticket 8's repo is not listed and ticket 9's PR is not merged, so their bodies are never read.
         world = self.world([
             Ticket(1, 20), Ticket(2, 20, criteria="## Acceptance\n\nNone yet."), Ticket(10, 20, criteria=notes),
-            Ticket(11, 20, criteria=f"## Acceptance\n\nNothing yet.\n\n{notes}"), Ticket(3, 20, criteria=cannot),
+            Ticket(11, 20, criteria=f"## Acceptance\n\nNothing yet.\n\n{notes}"),
+            Ticket(12, 20, criteria="## Acceptance\n\n<widget>\nNothing yet.\n</widget>"),
+            Ticket(13, 20, criteria="## Acceptance\n\n  ```sh\ntrue\n  ```"), Ticket(3, 20, criteria=cannot),
             Ticket(4, 100, criteria=cannot), Ticket(5, 20, criteria=cannot.replace("Count rows.", "- [ ]")),
             Ticket(21, 20, issue=300, criteria=cannot), Ticket(22, 100, issue=300, criteria=cannot),
             Ticket(7, 20, criteria=cannot), Ticket(8, 20, repo=BETA, criteria=cannot),
@@ -1001,18 +1004,26 @@ class TestDraw(unittest.TestCase):
             "Between lists stand paragraphs, headings of level three and deeper, breaks such as * * *, and code and "
             "HTML blocks.",
             "Any other line in the section is one the draw cannot read with certainty: inside an item, a quote, code, "
-            "a fence, HTML, a heading, a break or a second paragraph; an item with no text, or with a task box and no "
-            "text; an item whose text starts with < or >, three backticks or three tildes, the one to six # of a "
-            "heading, another marker, or more than four spaces, or is a break or a line of = or -; a quote; an "
-            "underline below a line of text; and, right after a line of text, a marker numbered other than 1 with no "
-            "list open or indented at least to the text of the last open item.",
-            "Anywhere in the body, so is a \"## \" criteria heading indented 1 to 3 spaces after a line that starts, "
-            "at most 3 spaces in, with a list marker, as it may stand inside that item; a line indented at most 3 "
-            "spaces that holds one HTML tag alone and starts none of the HTML blocks above, which may be text or an "
-            "HTML block; and a non-blank line indented less than the first line of the fence or HTML block it falls "
-            "in.",
+            "a fence, HTML, a heading, a break or a second paragraph; an item with nothing but white space after its "
+            "marker and any task box; an item whose text starts with < or >, three backticks or three tildes, the one "
+            "to six # of a heading, another marker, or more than four spaces, or is a break or a line of = or -; a "
+            "line indented into an item that wraps its text and starts with < or >, three backticks or three tildes, "
+            "or the one to six # of a heading, or is a break or a line of = or -; a quote; an underline below a line "
+            "of text; and, right after a line of text, a marker numbered other than 1 with no list open or indented "
+            "at least to the text of the last open item.",
+            "Anywhere in the body but inside a fence or an HTML block, so is a line that is a \"## \" criteria "
+            "heading once its indent, the > of any quotes and any list markers are taken off, when it had a > or a "
+            "marker, or when it is indented and a line that starts, at most 3 spaces in, with a list marker came "
+            "before it, as it may stand inside a quote or an item; a line indented at most 3 spaces that holds one "
+            "HTML tag alone and starts none of the HTML blocks above, which may be text or an HTML block; and a "
+            "non-blank line indented less than the first line of the fence or HTML block it falls in.",
+            "Outside the criteria sections, from a line that starts, at most 3 spaces in, with a list marker, that "
+            "line included, to the next heading at the margin that starts with #, so is a line that starts with "
+            "three backticks, three tildes or < once its indent, any > and any list markers are taken off, unless it "
+            "starts at the margin with none of them, as it may open a block inside an item.",
             "Outside the criteria sections such a line refuses the body only when it or a line after it is a \"## \" "
-            "criteria heading indented at most 3 spaces; otherwise the list is the items read before it.",
+            "criteria heading once its indent, any > and any list markers are taken off; otherwise the list is the "
+            "items read before it.",
             "The items of the list are the ticket's requirements, in the order written, and the draw stores them in "
             "its entry of the set.",
             "A ticket entry holds label, ticket, bucket, size, title, body, requirements, base_commit, ready_commit, "
@@ -1020,7 +1031,9 @@ class TestDraw(unittest.TestCase):
             "Its requirements are a list of strings.",
             "After the count of vetoed PRs and before the count per bucket, the draw prints how many tickets of the "
             "listed repos it left out because it refused their body as above.",
-            "A body with no line that is a \"## \" criteria heading indented at most 3 spaces is never refused.",
+            "A body is never refused when none of its lines is a \"## \" criteria heading once its indent, any > and "
+            "any list markers are taken off, or when none of its lines starts with a list marker once its indent and "
+            "any > are taken off, as it then holds no item.",
             "That count is taken before the rules on a ticket's other PRs and earlier sets, so it is the most tickets "
             "the reader can have cost the pool."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
@@ -1103,12 +1116,12 @@ class TestDraw(unittest.TestCase):
         # the reader refuses the body at.
         self.read_or_refuse({
             # 1. Another section's item opens a fence on its marker line; its closing fence hid the second section.
-            # The reader takes that closing fence for an opener, and the heading falls left of it.
+            # The reader refuses the fence's first line, a block that may open inside an item outside the sections.
             "## Acceptance criteria\n\n- One.\n\n## Notes\n\n- ```text\n  example\n  ```\n\n## Done when\n\n- Two.\n"
-            "- Three.\n": "## Done when",
+            "- Three.\n": "- ```text",
             # 2. Another section's item holds an HTML block, which ends with the item; it hid the heading after it.
             "## Acceptance criteria\n\n- One.\n\n## Notes\n\n- A note.\n  <div>\n## Done when\n\n- Two.\n":
-                "## Done when",
+                "  <div>",
             # 3. * ** after a paragraph is a break, not an item.
             "## Acceptance criteria\n\nIntro.\n* **\n\n- One.\n": ["One."],
             # 4. A digit that is not ASCII starts no item: an Arabic-Indic one and a fullwidth one.
@@ -1137,50 +1150,94 @@ class TestDraw(unittest.TestCase):
             "## Acceptance\n\n- One.\n\n> A quote.\n\n- Two.\n": "> A quote.",
         })
 
-    def test_a_block_opened_indented_is_read_only_while_no_line_falls_left_of_it(self) -> None:
-        # Inside an item a fence or an HTML block ends with the item; at the top level it does not. The reader cannot
-        # tell which, so a line indented less than the block's first line refuses the body.
+    def test_a_block_that_may_open_inside_an_item_outside_the_criteria_sections_is_refused_at_its_first_line(
+            self) -> None:
+        # Inside an item a fence or an HTML block ends with the item, and its opener and closer are measured from
+        # the item's text; at the top level neither holds. Outside the criteria sections the reader does not follow
+        # items, so after a line that starts with a list marker it refuses each line that may open or close such a
+        # block in an item, at that line. The last rows are read: a margin heading ends every item, a fence at the
+        # margin with no marker is at the top level, and with no marker before it a block opened indented is at the
+        # top level, which a blank line does not end.
+        first = "## Acceptance\n- First\n## Notes\n"
+        after = "\n\n  ## Done when\n\n  - Save\n  - Report\n"
         self.read_or_refuse({
-            "## Steps\n\n1. Run:\n\n   ```sh\n   ## Acceptance\n   ```\n\n## Acceptance\n\n- One.\n": ["One."],
-            "## Steps\n\n1. Run:\n\n   ```sh\n   make\n```\n\n## Acceptance\n\n- One.\n": "```",
-            "## Steps\n\n- Note.\n  <!--\nhidden\n  -->\n\n## Acceptance\n\n- One.\n": "hidden",
-            "  ```\n\n  ```\n\n## Acceptance\n\n- One.\n": ["One."],  # a blank line falls left of no block
+            "## Steps\n\n1. Run:\n\n   ```sh\n   ## Acceptance\n   ```\n\n## Acceptance\n\n- One.\n": "   ```sh",
+            "## Steps\n\n1. Run:\n\n   ```sh\n   make\n```\n\n## Acceptance\n\n- One.\n": "   ```sh",
+            "## Steps\n\n- Note.\n  <!--\nhidden\n  -->\n\n## Acceptance\n\n- One.\n": "  <!--",
+            # The probes of fix round 2: in CommonMark each gives First, Save and Report.
+            f"{first}- ```sh\n  ls\n  ```{after}": "- ```sh",
+            f"{first}- <pre>\n  ```\n  </pre>{after}": "- <pre>",
+            f"{first}- Run:\n  ```sh\n  ls\n    ```{after}": "  ```sh",
+            f"{first}- Note\n    <!--\n  ```\n  -->{after}": "    <!--",
+            "## Notes\n\n- Note.\n\n## Steps\n\n  ```sh\n  ## Acceptance\n  ```\n\n## Acceptance\n\n- One.\n": ["One."],
+            "## Notes\n\n- Note.\n\n```sh\n## Acceptance\n```\n\n## Acceptance\n\n- One.\n": ["One."],
+            "  ```\n\n  ```\n\n## Acceptance\n\n- One.\n": ["One."],
+            # An item of a criteria section is followed exactly, so the reader knows the heading left of it ends it.
+            "## Acceptance\n\n- One.\n\n ## Notes\n\n ```sh\n ## Done when\n ```\n\n## Done when\n\n- Two.\n": [
+                "One.", "Two."],
         })
 
     def test_a_line_that_may_stand_inside_another_section_s_item_is_never_taken_as_a_criteria_heading(self) -> None:
-        # In each body CommonMark holds the indented criteria heading inside a block of a Notes or Steps item. The
-        # reader does not follow items outside a criteria section, so it refuses the body at that heading or at the
-        # tag line before it.
+        # In the first rows CommonMark holds the criteria heading inside a block of a Notes or Steps item, or reads
+        # it after the item, and the reader refuses each at the block's first line or at the tag line. In the rows
+        # after them the heading stands behind a > or a marker, or is indented after a marker, and the reader
+        # refuses each at the heading. The last rows are read: with no marker before it, an indented heading is at
+        # the top level, and indented code at the top level hides what it holds.
         self.read_or_refuse({
-            "## Notes\n- Note.\n    <!--\n  ## Acceptance\n  - fake\n## Done when\n- real": "  ## Acceptance",
-            "## Acceptance\n- One\n## Notes\n- Note\n    <div>\n  ## Done when\n\n- Outside": "  ## Done when",
-            "## Acceptance\n\n- One.\n\n## Notes\n\n- Note.\n    ```\n  ## Done when\n\n- Notes only.\n":
-                "  ## Done when",
-            "## Steps\n\n- Run:\n\n    ```\n  ## Acceptance criteria\n    ```\n\n- Not a requirement.\n":
-                "  ## Acceptance criteria",
-            # An empty item, then a tag alone: CommonMark opens an HTML block that holds the heading.
+            "## Notes\n- Note.\n    <!--\n  ## Acceptance\n  - fake\n## Done when\n- real": "    <!--",
+            "## Acceptance\n- One\n## Notes\n- Note\n    <div>\n  ## Done when\n\n- Outside": "    <div>",
+            "## Acceptance\n\n- One.\n\n## Notes\n\n- Note.\n    ```\n  ## Done when\n\n- Notes only.\n": "    ```",
+            "## Steps\n\n- Run:\n\n    ```\n  ## Acceptance criteria\n    ```\n\n- Not a requirement.\n": "    ```",
+            # An empty item, then a tag alone at the margin: CommonMark ends the item and opens an HTML block that
+            # holds the heading. Two columns in, the tag opens the block inside the item, and the heading ends both.
             "## Acceptance\n\n- One.\n\n## Notes\n\n-\n<custom-tag>\n## Done when\n\n- Notes only.\n": "<custom-tag>",
+            "## Acceptance\n\n- One.\n\n## Notes\n\n-\n  <custom-tag>\n## Done when\n\n- Notes only.\n":
+                "  <custom-tag>",
             "## Acceptance\n\n<my-note>\n- inside a custom element\n</my-note>": "<my-note>",
-            # With no item before it, an indented heading is at the top level; indented code at the top level hides.
+            # A fence after five spaces on a marker line is code in that item, which ends before the heading.
+            "## Notes\n-      ```literal\n## Done when\n- Second": "-      ```literal",
+            "## Notes\n\n- Note.\n  ## Acceptance\n  - x\n": "  ## Acceptance",
+            "## Notes\n\n- Note.\n\n    ## Acceptance\n\n    - x\n": "    ## Acceptance",
+            "> ## Acceptance\n> - x\n": "> ## Acceptance",
+            "- ## Acceptance\n  - x\n": "- ## Acceptance",
             "Intro.\n\n  ## Acceptance\n\n- One.\n": ["One."],
             "## Acceptance\n\n    <!--\n\n- yes": ["yes"],
-            # A fence after five spaces on a marker line is code in that item, which ends before the heading.
-            "## Notes\n-      ```literal\n## Done when\n- Second": ["Second"],
         })
 
     def test_a_line_the_reader_cannot_be_sure_of_after_the_last_criteria_section_costs_no_list(self) -> None:
-        notes = "## Notes\n\n- ```sh\n  true\n  ```\n\nMore notes.\n"  # More notes. falls left of the fence
+        notes = "## Notes\n\n- ```sh\n  true\n  ```\n\nMore notes.\n"  # a fence on a Notes item's marker line
         self.read_or_refuse({
             notes: [],
             f"## Acceptance\n\nNothing yet.\n\n{notes}": [],
             f"## Acceptance\n\n- One.\n- Two.\n\n{notes}": ["One.", "Two."],
-            f"{notes}\n## Acceptance\n\n- One.\n": "More notes.",
-            f"## Acceptance\n\n- One.\n\n{notes}\n## Done when\n\n- Two.\n": "More notes.",
-            f"{notes}\n```\n## Acceptance\n```\n": "More notes.",  # a criteria heading's line, even in a fence
+            f"{notes}\n## Acceptance\n\n- One.\n": "- ```sh",
+            f"## Acceptance\n\n- One.\n\n{notes}\n## Done when\n\n- Two.\n": "- ```sh",
+            f"{notes}\n```\n## Acceptance\n```\n": "- ```sh",  # a criteria heading's line, even in a fence
         })
 
-    def test_an_item_s_text_loses_only_the_spaces_and_tabs_around_it(self) -> None:
-        # CommonMark strips spaces and tabs from a paragraph's lines; U+2028 and its kind are text.
+    def test_a_body_with_no_line_that_may_start_an_item_is_never_refused(self) -> None:
+        # CommonMark starts each item at a list marker, behind nothing but spaces and the > of quotes: without such
+        # a line there is no list, so a line the reader cannot be sure of costs none. With a marker, it is refused.
+        self.read_or_refuse({
+            "## Acceptance\n\n<widget>\nNothing yet.\n</widget>": [],
+            "## Acceptance\n\n  ```sh\ntrue\n  ```": [],
+            "## Acceptance\n\n> A quote.\n": [],
+            "## Acceptance\n\n<widget>\n- Save.\n</widget>": "<widget>",
+            "## Acceptance\n\n  ```sh\ntrue\n  ```\n\n- Save.\n": "true",
+            "## Acceptance\n\n> - Save.\n": "> - Save.",
+        })
+
+    def test_an_item_with_only_white_space_after_its_marker_and_task_box_is_refused(self) -> None:
+        # The judge calls an item blank by str.strip, which takes off a no-break space and U+2028 too.
+        self.read_or_refuse({
+            "## Acceptance\n- [ ]  \n- Save.": "- [ ]  ",
+            "## Acceptance\n- [ ] \u00a0\n- Save.": "- [ ] \u00a0",
+            "## Acceptance\n- \u2028\n- Save.": "- \u2028",
+            "## Acceptance\n- [ ] \u00a0Keep.\n- \u2028Save.": ["\u00a0Keep.", "\u2028Save."],
+        })
+
+    def test_an_item_s_text_keeps_u2028_at_either_end_of_a_line(self) -> None:
+        # CommonMark strips spaces and tabs at the ends of a paragraph's lines; U+2028 and its kind are text.
         self.read_or_refuse({
             "## Acceptance\n\n- Keep A\u2028\n  before B.\n": ["Keep A\u2028 before B."],
             "## Acceptance\n\n- Keep A\n  \u2028before B.\n": ["Keep A \u2028before B."],

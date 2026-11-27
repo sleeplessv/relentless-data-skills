@@ -212,14 +212,14 @@ class World:
         self.exit = exit
 
     def env(self) -> dict[str, str]:
-        """What the judge runs with: the caller's environment, with the stand-ins first on PATH, a scratch home and
-        machine directory, CLAUDE_CONFIG_DIR and CLAUDE_CODE_SKIP_PROMPT_HISTORY as this world sets them, and the
-        stand-ins' controls."""
+        """What the judge runs with: the caller's environment, with no global or system git config, the stand-ins
+        first on PATH, a scratch home and machine directory, CLAUDE_CONFIG_DIR and CLAUDE_CODE_SKIP_PROMPT_HISTORY as
+        this world sets them, and the stand-ins' controls."""
         environ = {key: value for key, value in os.environ.items() if key not in (
             "PYTHONDONTWRITEBYTECODE", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SKIP_PROMPT_HISTORY", "CLAUDE_STDERR")}
         return {**environ, **({} if self.config is None else {"CLAUDE_CONFIG_DIR": self.config}),
                 **({} if self.no_log is None else {"CLAUDE_CODE_SKIP_PROMPT_HISTORY": self.no_log}),
-                "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
+                **GIT_ENV, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
                 "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GH_LOG": str(self.records / "gh"),
                 "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
                 "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,

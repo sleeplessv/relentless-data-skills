@@ -62,6 +62,9 @@ class StatuslineTest(unittest.TestCase):
             "CLAUDE_CONFIG_DIR": str(self.tmp),
             "CLAUDE_STATUSLINE_ACCOUNT": "",
             "CLAUDE_STATUSLINE_HIDE_ACCOUNT": "",
+            # Neither the fixtures' git nor the script's reads a global or system config.
+            "GIT_CONFIG_GLOBAL": os.devnull,
+            "GIT_CONFIG_NOSYSTEM": "1",
         }
 
     def render(self, branch, prs, cache_age=0, stamp=True):
@@ -89,11 +92,11 @@ class StatuslineTest(unittest.TestCase):
         return lines[1] if len(lines) > 1 else ""
 
     def git(self, *args, cwd=None):
-        """Run git in the test repo, or in `cwd`, with no global or system config. Return its stdout."""
+        """Run git in the test repo, or in `cwd`, in the script's environment. Return its stdout."""
         return subprocess.run(
             ["git", "-C", str(cwd or self.repo), "-c", "user.name=t", "-c", "user.email=t@t", *args],
             capture_output=True, text=True, check=True,
-            env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+            env=self.env,
         ).stdout
 
     def feature_repo(self, default="main", remote=True):

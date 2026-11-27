@@ -73,6 +73,7 @@ class GitIsolationTest(unittest.TestCase):
         env = {key: value for key, value in os.environ.items()
                if key not in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_CONFIG_SYSTEM", "XDG_CONFIG_HOME")}
         env["HOME"] = str(case / "home")
+        env["GIT_CONFIG_SYSTEM"] = os.devnull  # no machine settings: only the case's own config reaches git
         if source != "home":
             env[source] = str(path)
         return env

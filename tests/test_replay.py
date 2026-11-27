@@ -360,7 +360,8 @@ class ReplayTest(unittest.TestCase):
                 "excludedCommands": [],
                 "filesystem": {"denyRead": [str(home)], "allowRead": [clone, *caches], "allowWrite": caches},
                 "network": {"allowedDomains": ["pypi.org", "files.pythonhosted.org", "registry.npmjs.org"],
-                            "strictAllowlist": True},
+                            "strictAllowlist": True, "allowLocalBinding": True,
+                            "allowUnixSockets": [f"/tmp/claude-{os.getuid()}", f"/private/tmp/claude-{os.getuid()}"]},
             },
             # The web tools are not commands, so the sandbox's network list does not bind them.
             "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True,
@@ -1403,6 +1404,9 @@ class ReplayTest(unittest.TestCase):
                       "the system config file, of ~/.gitconfig, and of the config, ignore and attributes files under "
                       "$XDG_CONFIG_HOME/git/ (~/.config/git/ when XDG_CONFIG_HOME is unset).",
                       " ".join(result.stdout.split()))
+        self.assertIn("network only to pypi.org, files.pythonhosted.org, registry.npmjs.org; local port binding; "
+                      "Unix sockets only in the sandbox's temporary folder, /tmp/claude-<uid> and its spelling "
+                      "/private/tmp/claude-<uid>, and in no other folder;", " ".join(result.stdout.split()))
         self.assert_help_states(" ".join(result.stdout.split()))
         self.assertFalse(self.world.starts.exists())
 

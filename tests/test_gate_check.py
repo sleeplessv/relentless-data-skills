@@ -238,5 +238,20 @@ class GateCheckTest(unittest.TestCase):
         self.assertEqual(self.gate(body), (0, "gate_check: passed: code change.\n", ""))
 
 
+    def test_refuses_a_deliver_change_that_also_changes_the_gate(self) -> None:
+        for gate_file in ("scripts/gate_check.py", ".github/workflows/ci.yml"):
+            with self.subTest(gate_file=gate_file):
+                self.assertEqual(
+                    self.gate("## Change kind\n\nkind: code change\ntests: 4 of 4 pass\n",
+                              changed=("skills/deliver/SKILL.md", gate_file)),
+                    (1, "", f"gate_check: refused: the PR changes skills/deliver/ and the gate's {gate_file}; "
+                            "change the gate in a PR of its own.\n"))
+
+    def test_silent_on_a_pr_that_changes_only_the_gate(self) -> None:
+        self.assertEqual(
+            self.gate(None, changed=("scripts/gate_check.py", ".github/workflows/ci.yml")),
+            (0, "gate_check: not checked: no changed file is under skills/deliver/.\n", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

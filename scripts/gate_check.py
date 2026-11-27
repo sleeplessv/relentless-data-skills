@@ -19,7 +19,9 @@ the block holds the lines that kind needs, in #231 rule 40's form:
 A count the check cannot read is refused, never guessed. The lines are #180 rules 11
 to 15, scaled by #407 reading 11: the harm test gets no fewer right and its median
 tokens rise 10% at most; a replay gets no fewer right, and a tie (as many right and
-no fewer tokens) fails. No line or flag waives the check (#180 rule 17).
+no fewer tokens) fails. No line or flag waives the check (#180 rule 17), and a PR
+that changes skills/deliver/ is refused when it also changes the gate: this script or
+the workflow that runs it.
 
 Exit status: 0 when the PR passes or is not checked, with one line on stdout; 1 when
 it is refused, with one line on stderr naming what is missing or below the line;
@@ -34,6 +36,9 @@ import sys
 
 DELIVER = "skills/deliver/"
 HEADING = "## Change kind"
+# What judges a PR: CI runs the base's copy of this script from the job in ci.yml. A PR that
+# changes skills/deliver/ may not change either; the gate changes in a PR of its own (#180 rule 17).
+GATE = ("scripts/gate_check.py", ".github/workflows/ci.yml")
 # #407 reading 11 scales #180's lines to the replay set: the small edit's bucket holds 3
 # tickets and the whole set 12. Starting figures; the owner moves one in a PR of its own.
 HARM_TICKETS = 3
@@ -194,6 +199,10 @@ def main(argv: list[str]) -> int:
     else:
         with open(args.body, encoding="utf-8") as f:
             passed, line = check(f.read())
+        gate = [path for path in GATE if path in changed]
+        if gate:
+            passed = False
+            line = f"the PR changes {DELIVER} and the gate's {gate[0]}; change the gate in a PR of its own"
         if not passed:
             print(f"gate_check: refused: {line}.", file=sys.stderr)
             return 1

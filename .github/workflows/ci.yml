@@ -108,7 +108,11 @@ jobs:
         run: |
           printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.md"
           git diff -z --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed"
-          python scripts/gate_check.py --body "$RUNNER_TEMP/body.md" --base "$BASE_REF" \
+          # The base's copy judges the PR, so a PR cannot loosen the gate that judges it.
+          # A base without the script (before the gate lands) runs the PR's copy.
+          git show HEAD^1:scripts/gate_check.py > "$RUNNER_TEMP/gate_check.py" 2>/dev/null \
+            || cp scripts/gate_check.py "$RUNNER_TEMP/gate_check.py"
+          python "$RUNNER_TEMP/gate_check.py" --body "$RUNNER_TEMP/body.md" --base "$BASE_REF" \
             --default-branch "$DEFAULT_BRANCH" --base-rev HEAD^1 --changed "$RUNNER_TEMP/changed"
 
   # The generated-registry check runs in skill-version-check, the check the

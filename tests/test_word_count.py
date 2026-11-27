@@ -103,7 +103,7 @@ class TestWordCount(unittest.TestCase):
 
 
 class TestPathMap(unittest.TestCase):
-    def test_small_edit_row_lists_its_two_files_and_no_limit(self) -> None:
+    def test_small_edit_row_lists_its_two_files_and_its_limit(self) -> None:
         with (REPO_ROOT / "docs" / "path-map.toml").open("rb") as path_map:
             rows = tomllib.load(path_map)["path"]
         self.assertEqual(
@@ -111,6 +111,7 @@ class TestPathMap(unittest.TestCase):
             [{
                 "name": "small edit",
                 "files": ["skills/deliver/SKILL.md", "skills/deliver/agents/deliver-reader.md"],
+                "limit": 534,
             }],
         )
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """deliver's guard: a PreToolUse hook on the shell tool (#256 rules 12 to 16, #213 X7).
 
-`hooks/hooks.json` registers it, through `uv`, or else a `python3` of 3.11 or later; with neither
+`hooks/hooks.json` registers it, through `uv`, or else a `python3` of 3.13 or later; with neither
 it does not run. It reads Claude Code's hook input on standard input and finds
 a run mark (`deliver-mark.json` in the checkout's own git directory) by walking up from the
 input's `cwd` and from its own working directory to the nearest `.git`. It starts no `git`

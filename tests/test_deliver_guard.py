@@ -258,7 +258,7 @@ class Registration(unittest.TestCase):
 
     @unittest.skipIf(shutil.which("uv", path="/usr/bin:/bin"), "a uv in /usr/bin or /bin would be found first")
     def test_an_old_python3_without_uv_exits_silently(self):
-        # A python3 older than 3.11, such as macOS's /usr/bin/python3: no tomllib.
+        # A python3 older than 3.13, such as macOS's /usr/bin/python3 (3.9, no tomllib).
         (self.bin / "python3").write_text(
             '#!/bin/sh\n[ "$1" = -c ] && exit 1\n'
             'echo "ModuleNotFoundError: No module named tomllib" >&2\nexit 1\n', encoding="utf-8")

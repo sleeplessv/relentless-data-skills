@@ -13,6 +13,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`astra-review`](skills/astra-review/) | Get a ponytail review of a change from Astra, the Codex CLI on an Astra model, in a Herdr tab, then fix the findings that hold up. |
 | [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
+| [`deliver`](skills/deliver/) | Take a change from request to pull request through one tested program, with preflight, guards and saved evidence. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Harness and Relentless Data conventions. |
 | [`dossier`](skills/dossier/) | Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |

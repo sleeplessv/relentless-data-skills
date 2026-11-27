@@ -1,0 +1,139 @@
+# The built-in lists of deliver, read by deliver.py (settings.py) and by the guard hook.
+# Each reader loads this file with tomllib alone and imports nothing of the program, so a
+# broken program never breaks the guard. A repo adds to these lists in its stack settings
+# (docs/agents/stack.toml) and never removes from them.
+#
+# Command patterns are Python regular expressions searched in the command text. Path
+# patterns are globs matched against a path relative to the repo root: `*` stays inside
+# one folder, `**/` matches any number of folders (none included), and a leading dot is
+# matched like any other character.
+
+# Commands that wait for the owner inside a run: #178 rule 21, amended by #213 X7.
+one_way_commands = [
+  # A force push.
+  '\bgit\b[^;&|\n]*\spush\b[^;&|\n]*\s(?:--force\S*|-[A-Za-z]*f[A-Za-z]*(?=\s|$)|\+\S+)',
+  # Deleting a remote branch or tag.
+  '\bgit\b[^;&|\n]*\spush\b[^;&|\n]*\s(?:--delete\b|-d(?=\s|$)|:\S+)',
+  '\bgh\s+api\b(?=[^;&|\n]*(?:-X\s*|--method[=\s]\s*)DELETE)(?=[^;&|\n]*\bgit/refs/)',
+  # Creating a release.
+  '\bgh\s+release\s+create\b',
+  # Publishing a package.
+  '\b(?:npm|pnpm|yarn|bun|uv|poetry|hatch|flit|cargo)\s+publish\b',
+  '\btwine\s+upload\b',
+  '\bgem\s+push\b',
+  '\bdocker\s+push\b',
+  # Any command aimed at a target named production.
+  '(?i)(?:^|[\s=:@"\x27])(?:prod|production)(?=$|[\s"\x27,;&|)])',
+]
+
+# Paths whose change makes the door one-way at `ready`: #256 rule 51.
+one_way_paths = [
+  # CI workflows and the rest of .github/.
+  ".github/**",
+  "**/CODEOWNERS",
+  "**/CLAUDE.md",
+  "**/AGENTS.md",
+  ".claude/**",
+  "**/.mcp.json",
+  # Git hooks.
+  ".githooks/**",
+  ".husky/**",
+  "**/.pre-commit-config.yaml",
+  "**/lefthook.yml",
+  # Files that set permissions or hold secrets.
+  "**/.env",
+  "**/.env.*",
+  "**/*.pem",
+  "**/*.key",
+  "**/secrets/**",
+  "**/*secret*",
+  "**/*credential*",
+  "**/permissions/**",
+  "**/*permission*",
+]
+
+# Paths where every change gets a review: #171 rule 4, with the stack settings file and
+# AGENTS.md always on it (#179 rule 4).
+critical_paths = [
+  # Agent instructions: skill text, AGENTS.md, prompts.
+  "**/SKILL.md",
+  "**/AGENTS.md",
+  "**/CLAUDE.md",
+  ".claude/**",
+  ".cursor/**",
+  ".codex/**",
+  "**/prompts/**",
+  "**/*.prompt.md",
+  "docs/agents/stack.toml",
+  # CI workflows.
+  ".github/workflows/**",
+  ".gitlab-ci.yml",
+  ".circleci/**",
+  "**/azure-pipelines.yml",
+  "**/Jenkinsfile",
+  # Dependency files and lockfiles.
+  "**/pyproject.toml",
+  "**/requirements*.txt",
+  "**/setup.py",
+  "**/setup.cfg",
+  "**/Pipfile",
+  "**/Pipfile.lock",
+  "**/uv.lock",
+  "**/poetry.lock",
+  "**/package.json",
+  "**/package-lock.json",
+  "**/pnpm-lock.yaml",
+  "**/yarn.lock",
+  "**/go.mod",
+  "**/go.sum",
+  "**/Cargo.toml",
+  "**/Cargo.lock",
+  "**/Gemfile",
+  "**/Gemfile.lock",
+  "**/packages.yml",
+  "**/package-lock.yml",
+  "**/dependencies.yml",
+  # Configuration, permissions, secrets and sign-in code.
+  "**/CODEOWNERS",
+  "**/.mcp.json",
+  "**/.env",
+  "**/.env.*",
+  "**/*.pem",
+  "**/*.key",
+  "**/secrets/**",
+  "**/*secret*",
+  "**/*credential*",
+  "**/permissions/**",
+  "**/*permission*",
+  "**/auth/**",
+  "**/*auth*.*",
+  "**/*login*.*",
+  "**/config/**",
+  "**/*.config.*",
+  "**/settings.*",
+  # Database migrations and schema files.
+  "**/migrations/**",
+  "**/alembic/**",
+  "**/schema.*",
+  "**/*.schema.*",
+  "**/*.prisma",
+  # dbt sources, shared macros, snapshots and project config.
+  "**/*sources*.yml",
+  "**/*sources*.yaml",
+  "**/macros/**",
+  "**/snapshots/**",
+  "**/dbt_project.yml",
+  "**/profiles.yml",
+  "**/selectors.yml",
+  # Semantic-model relationships and row-level security.
+  "**/relationships.tmdl",
+  "**/roles/*.tmdl",
+  "**/*.bim",
+]
+
+# Hooks on the shell tool that preflight knows: #178 rule 38, as reading 8 of spec #407 sets it.
+# `script` is the end of the hook command's path inside the named plugin.
+known_hooks = [
+  { name = "deliver guard", plugin = "deliver", script = "scripts/guard.py" },
+  { name = "snowman guard", plugin = "snowman", script = "hooks/snow_guard.py" },
+]

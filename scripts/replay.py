@@ -248,7 +248,7 @@ def cut(source_repo: str, label: str, found: dict, clone: Path, store: Path) -> 
 def tracked(store: Path, clone: Path) -> list[bytes]:
     """The paths the clone's index lists, as the bytes git holds them. Empty when the clone's .git/ is a folder with no
     index file in it. The index must be a regular file, which is copied as data into a private git folder with the
-    shared indexes beside it that a split index reads, and listed there; the version's repo is not touched. An index
+    shared index beside it that a split index names, and listed there; the version's repo is not touched. An index
     that --help's exit paragraph says the replay cannot list raises ReplayError."""
     index = clone / ".git" / "index"
 
@@ -273,9 +273,11 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
             if made.returncode:
                 raise unreadable(f"git init exited {made.returncode}")
             shutil.copyfile(index, meta / "index")
-            for shared in index.parent.glob("sharedindex.*"):  # a split index reads the one it names
-                with contextlib.suppress(OSError):  # any other may be unreadable or a link to anywhere; git fails
-                    if stat.S_ISREG(shared.lstat().st_mode):  # below when the named one is missing
+            base = shared_index((meta / "index").read_bytes())  # a split index reads the one it names: found by
+            if base:  # name, as git finds it, for .git/ may be searchable and not readable
+                shared = index.parent / f"sharedindex.{base}"
+                with contextlib.suppress(OSError):  # it may be missing, unreadable or a link to anywhere: git fails
+                    if stat.S_ISREG(shared.lstat().st_mode):  # below, as native git does when it cannot read it
                         shutil.copyfile(shared, meta / shared.name)
             # A sparse index names trees, which are in the clone's objects or in a folder its alternates file names.
             # They are read through links with names of the replay's own, so the private alternates file holds no
@@ -294,10 +296,48 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
         raise unreadable("git ls-files reported an error")
     paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path]
     # Each path must name a file or link in the clone itself: not under .git/, and not reached through a link
-    # or as a folder, which a forced add would take whole, ignored files and all.
+    # or as a folder, which a forced add would take whole, ignored files and all. os.path answers False where the
+    # name cannot be looked up, too long for one, which Path raises for before Python 3.14.
     return [os.fsencode(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
-            and not any((clone / Path(*path.parts[:end])).is_symlink() for end in range(1, len(path.parts)))
-            and ((clone / path).is_symlink() or (clone / path).is_file())]
+            and not any(os.path.islink(clone / Path(*path.parts[:end])) for end in range(1, len(path.parts)))
+            and (os.path.islink(clone / path) or os.path.isfile(clone / path))]
+
+
+def shared_index(data: bytes) -> str | None:
+    """The hex name of the shared index that the last `link` extension of the index bytes `data` names, as git reads
+    it; None when there is none. The entries are stepped over as git's single-threaded read steps over them, in
+    versions 2 to 4 with 20-byte object names, the size of the private folder's. Where git cannot read the bytes, any
+    answer does: the listing fails."""
+    end = len(data) - 20  # the checksum
+    if end < 12 or data[:4] != b"DIRC" or not 2 <= int.from_bytes(data[4:8]) <= 4:
+        return None
+    version, at, previous_length = int.from_bytes(data[4:8]), 12, None
+    try:
+        for _ in range(int.from_bytes(data[8:12])):
+            flags = int.from_bytes(data[at + 60:at + 62])
+            name_at = at + 62 + (2 if flags & 0x4000 else 0)  # the extended flag adds two bytes of flags
+            length, copied = flags & 0xFFF, 0
+            if version == 4:  # a varint of bytes to strip from the previous name, then the rest of this one
+                strip, name_at = data[name_at] & 127, name_at + 1
+                while data[name_at - 1] & 128:
+                    strip, name_at = ((strip + 1) << 7) + (data[name_at] & 127), name_at + 1
+                if previous_length is not None:  # the first entry has no name before it, and git ignores its strip
+                    copied = previous_length - strip
+            if length == 0xFFF:  # too long for the flags: the name runs to its NUL
+                length = data.index(b"\0", name_at) - name_at + copied
+            at = name_at + length + 1 - copied if version == 4 else at + ((name_at - at + length + 8) & ~7)
+            if copied < 0 or at > end:
+                return None
+            previous_length = length
+    except (IndexError, ValueError):  # the bytes end inside an entry
+        return None
+    base = None
+    while at + 8 <= end:  # each link extension git reads replaces the base the one before it named
+        size = int.from_bytes(data[at + 4:at + 8])
+        if data[at:at + 4] == b"link":
+            base = data[at + 8:at + 28].hex()
+        at += 8 + size
+    return base
 
 
 def borrowed(objects: Path, meta: Path) -> list[str]:

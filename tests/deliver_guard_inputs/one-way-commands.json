@@ -1,0 +1,406 @@
+[
+ {
+  "command": "git push --force origin main",
+  "old": true
+ },
+ {
+  "command": "git push -f origin main",
+  "old": true
+ },
+ {
+  "command": "git push origin +main",
+  "old": true
+ },
+ {
+  "command": "git push --force-with-lease",
+  "old": true
+ },
+ {
+  "command": "git -C /x push --force",
+  "old": true
+ },
+ {
+  "command": "git push origin --delete feature",
+  "old": true
+ },
+ {
+  "command": "git push origin :feature",
+  "old": true
+ },
+ {
+  "command": "git push -d origin feat",
+  "old": true
+ },
+ {
+  "command": "git push --mirror origin",
+  "old": false
+ },
+ {
+  "command": "git push --mirror",
+  "old": false
+ },
+ {
+  "command": "git push --prune origin",
+  "old": false
+ },
+ {
+  "command": "git push --tags --force",
+  "old": true
+ },
+ {
+  "command": "gh api -X DELETE repos/o/r/git/refs/heads/x",
+  "old": true
+ },
+ {
+  "command": "gh api --method DELETE repos/o/r/git/refs/heads/x",
+  "old": true
+ },
+ {
+  "command": "gh api -X DELETE \"repos/o/r/git/refs/heads/x\"",
+  "old": true
+ },
+ {
+  "command": "gh api \"repos/o/r/git/refs/heads/x\" -X DELETE",
+  "old": true
+ },
+ {
+  "command": "gh api -XDELETE repos/o/r/git/refs/tags/v1",
+  "old": true
+ },
+ {
+  "command": "gh release create v1",
+  "old": true
+ },
+ {
+  "command": "npm publish",
+  "old": true
+ },
+ {
+  "command": "uv publish",
+  "old": true
+ },
+ {
+  "command": "twine upload dist/*",
+  "old": true
+ },
+ {
+  "command": "gem push x.gem",
+  "old": true
+ },
+ {
+  "command": "docker push img:latest",
+  "old": true
+ },
+ {
+  "command": "git commit -m \"msg\" && git push --force",
+  "old": true
+ },
+ {
+  "command": "git commit -m 'it''s' && git push --force",
+  "old": true
+ },
+ {
+  "command": "echo \"a\" ; git push -f",
+  "old": true
+ },
+ {
+  "command": "git commit -m \"don't\" && git push --force",
+  "old": true
+ },
+ {
+  "command": "git commit -m 'it\\'s fine' && git push --force",
+  "old": true
+ },
+ {
+  "command": "git push origin \"+main\"",
+  "old": false
+ },
+ {
+  "command": "git push origin '+main'",
+  "old": false
+ },
+ {
+  "command": "git push \"--force\"",
+  "old": false
+ },
+ {
+  "command": "dbt run --target prod",
+  "old": true
+ },
+ {
+  "command": "dbt run --target PROD",
+  "old": true
+ },
+ {
+  "command": "dbt run --target=production",
+  "old": true
+ },
+ {
+  "command": "dbt run --target='prod'",
+  "old": true
+ },
+ {
+  "command": "dbt run --profiles-dir . --target prod",
+  "old": true
+ },
+ {
+  "command": "DBT_TARGET=prod dbt run",
+  "old": true
+ },
+ {
+  "command": "export DBT_TARGET=prod; dbt run",
+  "old": true
+ },
+ {
+  "command": "env DBT_TARGET=prod dbt run",
+  "old": true
+ },
+ {
+  "command": "dbt run --target prod-eu",
+  "old": false
+ },
+ {
+  "command": "dbt run --target prd",
+  "old": false
+ },
+ {
+  "command": "terraform apply -var env=prod",
+  "old": true
+ },
+ {
+  "command": "terraform workspace select prod",
+  "old": true
+ },
+ {
+  "command": "terraform workspace select production",
+  "old": true
+ },
+ {
+  "command": "kubectl --context=prod apply -f x",
+  "old": true
+ },
+ {
+  "command": "kubectl -n production delete pod x",
+  "old": true
+ },
+ {
+  "command": "helm upgrade x . --namespace prod",
+  "old": true
+ },
+ {
+  "command": "serverless deploy --stage prod",
+  "old": true
+ },
+ {
+  "command": "sls deploy -s prod",
+  "old": true
+ },
+ {
+  "command": "fly deploy --app myapp-prod",
+  "old": false
+ },
+ {
+  "command": "vercel --prod",
+  "old": false
+ },
+ {
+  "command": "netlify deploy --prod",
+  "old": false
+ },
+ {
+  "command": "firebase deploy --project prod",
+  "old": true
+ },
+ {
+  "command": "firebase deploy -P prod",
+  "old": true
+ },
+ {
+  "command": "gcloud config set project prod",
+  "old": true
+ },
+ {
+  "command": "aws --profile prod s3 rm s3://x --recursive",
+  "old": true
+ },
+ {
+  "command": "AWS_PROFILE=prod aws s3 rm s3://x",
+  "old": true
+ },
+ {
+  "command": "ENV=prod ./deploy.sh",
+  "old": true
+ },
+ {
+  "command": "ENVIRONMENT=production ./deploy.sh",
+  "old": true
+ },
+ {
+  "command": "APP_ENV=production ./deploy.sh",
+  "old": true
+ },
+ {
+  "command": "RAILS_ENV=production rails db:migrate",
+  "old": true
+ },
+ {
+  "command": "MIX_ENV=prod mix ecto.migrate",
+  "old": true
+ },
+ {
+  "command": "./deploy.sh prod",
+  "old": true
+ },
+ {
+  "command": "./deploy.sh production",
+  "old": true
+ },
+ {
+  "command": "make deploy-prod",
+  "old": false
+ },
+ {
+  "command": "make deploy ENV=prod",
+  "old": true
+ },
+ {
+  "command": "cdk deploy ProdStack",
+  "old": false
+ },
+ {
+  "command": "pulumi up --stack prod",
+  "old": true
+ },
+ {
+  "command": "pulumi up -s prod",
+  "old": true
+ },
+ {
+  "command": "ansible-playbook -i production site.yml",
+  "old": true
+ },
+ {
+  "command": "ansible-playbook -i inventories/prod site.yml",
+  "old": false
+ },
+ {
+  "command": "snow sql -c prod -q 'x'",
+  "old": true
+ },
+ {
+  "command": "snow sql --connection prod -q 'x'",
+  "old": true
+ },
+ {
+  "command": "psql -h prod-db",
+  "old": false
+ },
+ {
+  "command": "git push production main",
+  "old": true
+ },
+ {
+  "command": "git push prod main",
+  "old": true
+ },
+ {
+  "command": "heroku run rake -a myapp --remote production",
+  "old": true
+ },
+ {
+  "command": "dbt run --target prod # comment",
+  "old": true
+ },
+ {
+  "command": "(dbt run --target prod)",
+  "old": true
+ },
+ {
+  "command": "dbt run --target prod|tee x",
+  "old": true
+ },
+ {
+  "command": "git commit -m 'fix prod bug'",
+  "old": true
+ },
+ {
+  "command": "echo production",
+  "old": true
+ },
+ {
+  "command": "npm install --production",
+  "old": false
+ },
+ {
+  "command": "cat prod.yml",
+  "old": false
+ },
+ {
+  "command": "echo \"git push --force\"",
+  "old": true
+ },
+ {
+  "command": "echo 'gh release create' ",
+  "old": true
+ },
+ {
+  "command": "bash -c \"git push --force\"",
+  "old": true
+ },
+ {
+  "command": "sh -c 'npm publish'",
+  "old": true
+ },
+ {
+  "command": "ssh host \"docker push x\"",
+  "old": true
+ },
+ {
+  "command": "git commit -m \"$(echo hi)\" && git push -f",
+  "old": true
+ },
+ {
+  "command": "out=\"$(git push --force origin \"$branch\" 2>&1)\"",
+  "old": true
+ },
+ {
+  "command": "echo \"$(git push --force origin \"main\")\"",
+  "old": true
+ },
+ {
+  "command": "echo \"$(echo \"a\"; git push --force)\"",
+  "old": true
+ },
+ {
+  "command": "log=\"$(npm publish --tag \"next\" 2>&1)\"",
+  "old": true
+ },
+ {
+  "command": "out=\"$(dbt run --target prod --select \"x\")\"",
+  "old": true
+ },
+ {
+  "command": "out=$(git push --force origin \"$b\" 2>&1)",
+  "old": true
+ },
+ {
+  "command": "echo \"`git push -f origin \"main\"`\"",
+  "old": true
+ },
+ {
+  "command": "out=\"$(git push --force origin main 2>&1)\"",
+  "old": true
+ },
+ {
+  "command": "url=\"$(gh release create v1.2 --notes \"Fixes\")\"",
+  "old": true
+ },
+ {
+  "command": "url=\"$(gh release create v1.2)\"",
+  "old": true
+ },
+ {
+  "command": "echo \"$(docker push img:latest)\"",
+  "old": true
+ }
+]

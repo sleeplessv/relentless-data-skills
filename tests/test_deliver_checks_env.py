@@ -42,9 +42,9 @@ def repo_view(repo="owner/repo", branch="main", permission="ADMIN", issues=True)
 
 
 class Order(unittest.TestCase):
-    def test_git_and_gh_come_before_the_repos_commands(self):
-        order = [preflight.check_settings, checks_env.check_python, checks_env.check_writable,
-                 checks_env.check_signing, checks_env.check_gh_signed_in, checks_env.check_github,
+    def test_harness_then_git_and_gh_then_the_repos_commands(self):
+        order = [preflight.check_settings, preflight.check_guard.check_guard_probe, checks_env.check_python,
+                 checks_env.check_writable, checks_env.check_signing, checks_env.check_gh_signed_in, checks_env.check_github,
                  checks_env.check_push, checks_env.check_issues, checks_env.check_branch_rules,
                  checks_env.check_check_command, checks_env.check_reach, checks_env.check_dependents]
         places = [preflight.CHECKS.index(check) for check in order]
@@ -64,6 +64,7 @@ class Checks(unittest.TestCase):
 
     def setUp(self):
         self.world.write_mark(run="run-9")
+        self.world.probe()
         deliver_kit.reset_gh(self.world)
         self.stack(STACK)
         for key in ("commit.gpgsign", "gpg.program"):
@@ -124,9 +125,13 @@ class Checks(unittest.TestCase):
         self.assertEqual(self.world.state_lines("preflight-stops.jsonl")[-1]["code"], "preflight.cannot-write")
 
     def test_preflight_cannot_write_the_machine_directory(self):
-        state = self.world.root / "gh-answers.json" / "state"
+        state = self.world.root / "read-only-state"
+        state.mkdir()
+        shutil.copy(self.world.state / "guard-refusals.jsonl", state)
+        state.chmod(0o555)
+        self.addCleanup(state.chmod, 0o755)
         self.assertEqual(self.preflight(DELIVER_STATE_DIR=str(state)), self.refused(
-            "preflight.cannot-write", f"the run cannot write {state}: Not a directory",
+            "preflight.cannot-write", f"the run cannot write {state}: Permission denied",
             "make that folder writable or set DELIVER_STATE_DIR to one that is"))
         self.assertEqual([r["stops"] for r in self.world.records()][-1:], [["preflight.cannot-write"]])
 

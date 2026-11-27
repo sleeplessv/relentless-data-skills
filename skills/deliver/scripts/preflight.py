@@ -23,6 +23,7 @@ import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+import check_guard
 import checks_env
 import core
 import settings
@@ -68,6 +69,7 @@ def check_settings(ctx: Context) -> Stop | Warn | None:
 
 CHECKS: list[Check] = [
     check_settings,
+    check_guard.check_guard_probe,
     checks_env.check_python,
     checks_env.check_writable,
     checks_env.check_signing,

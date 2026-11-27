@@ -84,9 +84,7 @@ class GenRolesTest(unittest.TestCase):
     def test_committed_files_match(self) -> None:
         """Run the check in every CI run.
 
-        ci.yml's tests job runs the unit tests and not scripts/check.sh. Only browser.yml runs
-        scripts/check.sh --fast, and only on a PR that changes the dossier skill, its tests,
-        scripts/check.sh or browser.yml.
+        ci.yml's tests job runs the unit tests and not scripts/check.sh, so this test runs the check there.
         """
         proc = subprocess.run([sys.executable, str(SCRIPT), "--check"], capture_output=True, text=True, check=False)
         self.assertEqual((proc.returncode, proc.stdout + proc.stderr), (0, "role files check OK (1 file(s)).\n"))

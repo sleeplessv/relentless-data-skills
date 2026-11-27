@@ -122,8 +122,8 @@ The {VERSION} version pushes nothing and opens no PR.
 The deliver version differs from {VERSION} in these ways and no other. Its
 session loads the plugin in this tree's skills/deliver/ for that session only,
 with --plugin-dir, may read that folder from the sandbox, and runs with hooks
-on, so deliver's own hook is its only hook. Its prompt is the typed command
-/deliver:deliver TICKET. Before setup, the replay copies the stand-in gh,
+on: deliver's own hook, and any hook in the clone's project settings. Its prompt
+is the typed command /deliver:deliver TICKET. Before setup, the replay copies the stand-in gh,
 scripts/replay_gh.py, to .git/replay-deliver/bin/gh in the clone, and the
 session finds it first on its PATH. The stand-in answers issue view with the
 ticket's title and body from the replay set, records every call in
@@ -143,8 +143,9 @@ Files, all in the machine directory:
                 judged. Its remote is .git/{ORIGIN}.
   replays/<label>-<ticket>-<version>.git/
                 The version's repo, out of the session's reach: the history
-                up to base_commit, the version's commit at refs/replay/<version>, and
-                replay-index, the index the commit was written from.
+                up to base_commit, the version's commit at
+                refs/replay/<version>, and replay-index, the index the commit
+                was written from.
   versions.jsonl
                 One JSON line per ticket and version, replaced when the same
                 one is recorded again: label, ticket, version, commit, repo,
@@ -555,9 +556,9 @@ def replay(label: str, ticket: int, group: SetupGroup, version: str = VERSION) -
                   file=sys.stderr)
             row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: blanks
     line = {"label": label, "ticket": ticket, "version": version, "commit": commit,
-               "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
-               "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
-               "not_direct": not_direct}
+            "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
+            "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
+            "not_direct": not_direct}
     record(state, line)
     try:
         with contextlib.redirect_stderr(warnings):

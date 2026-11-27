@@ -1529,8 +1529,8 @@ class DeliverVersionTest(unittest.TestCase):
                 "With no --version, the replay is the direct version.",
                 "The deliver version differs from direct in these ways and no other.",
                 "Its session loads the plugin in this tree's skills/deliver/ for that session only, with "
-                "--plugin-dir, may read that folder from the sandbox, and runs with hooks on, so deliver's own hook "
-                "is its only hook.",
+                "--plugin-dir, may read that folder from the sandbox, and runs with hooks on: deliver's own hook, "
+                "and any hook in the clone's project settings.",
                 "Its prompt is the typed command /deliver:deliver TICKET.",
                 "The stand-in answers issue view with the ticket's title and body from the replay set, records "
                 "every call in .git/replay-deliver/gh-calls.jsonl, and merges a PR by squashing its branch onto "

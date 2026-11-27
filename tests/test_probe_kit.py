@@ -2181,8 +2181,8 @@ class TestHookAgentEntries(HookTest):
         for fact in ("matches every tool", "from any folder inside the probe folder",
                      "the same in every probe folder, so one trust covers every run",
                      "Codex runs no hook it has not trusted", "Before D1 runs, the kit prints the step that trusts the hook",
-                     "D1 to D4 and D6 fail with that step and the harness's exit status whenever their hook logged "
-                     "no input.",
+                     "When D1 to D4 or D6 fails because its hook logged no input, the line gives that step and the "
+                     "harness's exit status.",
                      "writes a refusal line to logs/hook.jsonl",
                      "marked by agent_id, reached the hook for a command that runs merge-script.sh",
                      "D2 records the tool name of the session's call whose input names the reader role as its "
@@ -2734,7 +2734,7 @@ class TestLimitEntries(HookTest):
                              f"{entry} cortex failed: the resume call failed: task tool failed: Agent session ... not "
                              f"found. Cannot resume.\n")  # Cortex Code's string error, with no is_error flag
 
-    def test_k4s_second_brief_and_the_help_tell_the_resumed_agent_to_run_no_command_its_first_brief_gave(self):
+    def test_k4s_second_brief_tells_the_agent_to_run_no_command_its_first_brief_gave_and_the_help_says_so(self):
         # The resumed agent ran its first brief's sleep again, and the session hit the time limit (#408).
         kit, work = self.load_kit(), self.world.root / "k4-work"
         kit.PROBES["K4"].setup("cortex", work, "k4-codeword")
@@ -2745,8 +2745,8 @@ class TestLimitEntries(HookTest):
                                    f"brief gave you, even one that did not finish. Change nothing else.")
         code, out, err = self.world.kit("--help")
         self.assertEqual((code, err), (0, ""))
-        self.assertIn("K4's second brief tells the agent to run no command its first brief gave it, so the resumed "
-                      "agent does not run the sleep again.", " ".join(out.split()))
+        self.assertIn("K4's second brief tells the agent to run no command its first brief gave it.",
+                      " ".join(out.split()))
 
     def test_k4_and_k5_run_cortex_without_private_and_other_cortex_entries_keep_it(self):
         for entry in ("K4", "K5", "K1"):  # resume reads the saved session, and --private saves none (#405)

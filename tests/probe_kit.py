@@ -101,10 +101,10 @@ for D6. On Codex the hook's -c override matches every tool and runs
 hooks/guard.py of the probe folder, which it finds with `git rev-parse
 --git-common-dir` from any folder inside the probe folder. Its text is the same
 in every probe folder, so one trust covers every run. Codex runs no hook it has
-not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1 to
-D4 and D6 fail with that step and the harness's exit status whenever their hook
-logged no input. The line names the trust step even when the output shows no
-tool call, since Codex's output shows no agent start and no agent's command.
+not trusted. Before D1 runs, the kit prints the step that trusts the hook. When
+D1 to D4 or D6 fails because its hook logged no input, the line gives that step
+and the harness's exit status. The line names the trust step even when the
+output shows no tool call, since Codex's output shows no agent start and no agent's command.
 The hook writes a refusal line to logs/hook.jsonl after the input of each
 command it refuses. D1 is seen when
 an agent's input, marked by agent_id, reached the hook for a command that runs
@@ -138,8 +138,7 @@ agent as called back only when its second marker holds a word its first brief
 gave it to remember and write nowhere; that brief deleted itself. K4 needs a
 kill_agent call that names the agent and succeeded, before the resume, and no
 finished sleep. K4's second brief tells the agent to run no command its first
-brief gave it, so the resumed agent does not run the sleep again. When the
-resume call failed, K4 and K5 say so, with the
+brief gave it. When the resume call failed, K4 and K5 say so, with the
 harness's reason, its ids and paths left out. K5 reads the model from the events
 tied to the call that resumed the agent and fails when they name none. D3 and D4
 add the guard hook and read the agents from its log, since Codex's output shows

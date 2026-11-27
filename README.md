@@ -214,8 +214,20 @@ A run without `--fast` waits its turn behind any other such run of this clone
 and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) explains.
 
 - `python3 -m unittest discover -s tests -v` runs the repository's Python tests.
-- `python3 scripts/lint_skill.py` checks skill frontmatter, invocation triggers,
-  description lengths, line budgets, and YAML-safe values.
+- `python3 scripts/lint_skill.py` checks each skill under `skills/` for:
+  - a SKILL.md that opens with a closed `---` YAML frontmatter block, non-empty
+    `name` and `description` keys, and no key outside `ALLOWED_KEYS`;
+  - YAML-safe frontmatter values;
+  - a "Use when" trigger clause in the description, which a skill with
+    `disable-model-invocation: true` must not have;
+  - a description of at most 1024 characters and a SKILL.md of at most 150 lines;
+  - no `$` followed by a digit or `ARGUMENTS` in SKILL.md, with or without a backslash
+    (item 19 of
+    [the skill authoring checklist](docs/research/skill-authoring-best-practices.md#c-invocation-control)
+    gives the reason);
+  - no outward side-effect command, such as `git push` or `gh pr merge`, in any text
+    file in a model-invocable skill's folder, unless the skill is listed in
+    `SIDE_EFFECT_ALLOWLIST`.
 - `python3 scripts/check_doc_urls.py` checks HTTPS URLs marked with `=>` in
   `skills/*/references/docs-map.md`. It fails when a marked URL no longer resolves.
 - `python3 scripts/sync_registry.py --check` checks that the marketplace entries

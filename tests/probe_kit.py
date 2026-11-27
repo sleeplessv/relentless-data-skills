@@ -35,7 +35,8 @@ hook input's cwd with the probe folder and with the directory the stand-in
 recorded. X2 starts no session. It times the hook command as registered,
 python3 and then `uv run --python 3.13 --no-project`, 5 calls each, and prints
 the difference of the two medians. A5 asks the agent to run `agy -p "/hooks"`
-and looks for the stand-in hook's name in the list it wrote.
+and save the list and the call's exit status. It is seen when the call exited 0
+and the list names the stand-in hook.
 
 `x7` makes a probe folder with the hook the same way and starts the harness's
 terminal UI in it with `hc run --bg`. It prints the `hc send` and `hc read`
@@ -46,8 +47,8 @@ folder's .codex/rules/.
 
 Cortex Code needs --connection, the Snowflake connection its runs spend. The kit
 passes it on the harness's command line only: it is not in the terminal name, it
-is replaced by <connection> before any output reaches a file, and the kit never
-prints it.
+is replaced by <connection> before any output reaches a file, the hook writes
+<connection> in its place in logs/hook.jsonl, and the kit never prints it.
 
 The kit judges from files: marker files, the output stream and the folder. The
 raw output goes to probes/<run id>/ in the machine directory, $DELIVER_STATE_DIR
@@ -66,6 +67,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import secrets
 import threading
 import shlex
@@ -304,9 +306,11 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
     if harness == "cortex":
         argv += ["-c", args.connection]
     if probe.hook and harness == "codex":
-        argv[-1:-1] = CODEX_HOOK  # before the prompt, which comes last
+        argv[-1:-1] = codex_hook(root / "work")  # before the prompt, which comes last
     relayed = [sys.executable, str(Path(__file__).resolve()), "--relay", str(out), str(err), args.connection or "", *argv]
     line = f"{probe.env} {shlex.join(relayed)}".lstrip()
+    if args.connection:  # the hook hides it in its log, as the relay does in the output
+        line = f"{HIDE_VAR}={shlex.quote(args.connection)} {line}"
     name = f"probe-{harness}-{entry.lower()}-{os.getpid()}"
     address, ended = None, False
     try:
@@ -323,7 +327,7 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
             (saved / f"{entry}-{harness}{source.suffix}").write_text(text)
         hook_log_file = root / "work" / "logs" / "hook.jsonl"
         if hook_log_file.is_file():
-            (saved / f"{entry}-{harness}-hook.jsonl").write_text(hook_log_file.read_text())
+            (saved / f"{entry}-{harness}-hook.jsonl").write_text(hide(hook_log_file.read_text(), args.connection))
         if info is None:
             return "failed", f"no finish within {args.time_limit:g} seconds, terminal ended"
         hc("rm", address)
@@ -391,16 +395,27 @@ SKILL_DIRS["claude"] = ".claude/skills"
 HOOK_FORMS = {"claude": "settings", "cortex": "settings", "codex": "settings", "cursor": "beforeShell",
               "antigravity": "pre"}
 HOOK_NAME = "probe-guard"  # the hook's name in Antigravity's hooks.json, which `agy -p "/hooks"` lists
-# The hook comes inline on Codex. Its path is relative, so the hook's text is the same in every probe folder.
-CODEX_HOOK = ["-c", 'hooks.PreToolUse=[{matcher="Bash",hooks=[{type="command",'
-                    'command="python3 hooks/guard.py settings",timeout=20}]}]']
+HIDE_VAR = "PROBE_KIT_CONNECTION"  # GUARD reads the connection from this variable and logs <connection> instead
+
+
+def hide(text: str, secret: str | None) -> str:
+    return text.replace(secret, "<connection>") if secret else text
+
+
+def codex_hook(work: Path) -> list[str]:
+    """The hook inline on Codex, as the research note gives it, with the script's absolute path."""
+    return ["-c", 'hooks.PreToolUse=[{matcher="Bash",hooks=[{type="command",'
+                  f'command="{hook_command("codex", work)}",timeout=20}}]}}]']
+
+
 CODEX_RULE = ('prefix_rule(pattern = ["./oneway-probe.sh"], decision = "prompt",\n'
               '    justification = "one-way command, needs the owner\'s answer")\n')
 GUARD = r'''import json, os, sys
 from pathlib import Path
 
 # The stand-in guard hook, seeded from the guard research fixture. Its argument names the
-# input and answer shape: settings, beforeShell (Cursor) or pre (Antigravity).
+# input and answer shape: settings, beforeShell (Cursor) or pre (Antigravity). sessionStart
+# (Cursor) is logged only.
 form = sys.argv[1]
 raw = sys.stdin.read()
 try:
@@ -409,15 +424,22 @@ except ValueError:
     data = None
 if not isinstance(data, dict):
     data = {"unparsed": raw}
+cmd = ""
 if form == "beforeShell":
     cmd = str(data.get("command") or "")
 elif form == "pre":
     cmd = json.dumps((data.get("toolCall") or {}).get("args") or {})
-else:
+elif form == "settings":
     cmd = str((data.get("tool_input") or {}).get("command") or "")
 is_helper = "agent_id" in data
+line = json.dumps({"form": form, "command": cmd, "hook_cwd": os.getcwd(), "input": data})
+secret = os.environ.get("PROBE_KIT_CONNECTION", "")
+if secret:  # the Cortex Code connection never reaches the log
+    line = line.replace(json.dumps(secret)[1:-1], "<connection>")
 with open(Path(__file__).resolve().parent.parent / "logs" / "hook.jsonl", "a") as log:
-    log.write(json.dumps({"form": form, "command": cmd, "hook_cwd": os.getcwd(), "input": data}) + "\n")
+    log.write(line + "\n")
+if form == "sessionStart":  # Cursor's session start: logged only, no decision
+    sys.exit(0)
 
 
 def out(decision, reason):
@@ -451,7 +473,7 @@ def hook_command(harness: str, work: Path) -> str:
     form = HOOK_FORMS[harness]
     if harness == "claude":
         return f'python3 "$CLAUDE_PROJECT_DIR/hooks/guard.py" {form}'
-    if harness in ("codex", "cursor"):
+    if harness == "cursor":
         return f"python3 hooks/guard.py {form}"
     return f"python3 {shlex.quote(str(work / 'hooks' / 'guard.py'))} {form}"
 
@@ -470,7 +492,9 @@ def write_guard(harness: str, work: Path) -> None:
     files = {
         "claude": (".claude/settings.json", settings),
         "cortex": (".cortex/settings.json", settings),
-        "cursor": (".cursor/hooks.json", {"version": 1, "hooks": {"beforeShellExecution": [{"command": command}]}}),
+        "cursor": (".cursor/hooks.json", {"version": 1, "hooks": {
+            "beforeShellExecution": [{"command": command}],
+            "sessionStart": [{"command": "python3 hooks/guard.py sessionStart"}]}}),
         "antigravity": (".agents/hooks.json", {HOOK_NAME: {"PreToolUse": [{"matcher": "", "hooks": [
             {"type": "command", "command": command, "timeout": 20}]}]}}),
     }
@@ -546,6 +570,7 @@ def judge_x2(harness: str, run: Finished) -> tuple[str, str]:
 
 
 HOOKS_LIST = "hooks-list.txt"
+HOOKS_STATUS = "hooks-list.status"  # the exit status of the inner agy -p "/hooks"
 
 
 def judge_a5(harness: str, run: Finished) -> tuple[str, str]:
@@ -555,26 +580,31 @@ def judge_a5(harness: str, run: Finished) -> tuple[str, str]:
     listing = run.work / HOOKS_LIST
     if not listing.is_file():
         return "failed", "the agy -p \"/hooks\" call left no list"
-    if HOOK_NAME not in listing.read_text(errors="replace"):
+    status = run.work / HOOKS_STATUS
+    code = status.read_text(errors="replace").strip() if status.is_file() else ""
+    if code != "0":
+        return "failed", f"the agy -p \"/hooks\" call exited {code}" if code else "the agy -p \"/hooks\" call left no exit status"
+    if not re.search(rf"(?<![\w.-]){re.escape(HOOK_NAME)}(?![\w.-])", listing.read_text(errors="replace")):
         return "failed", "the hook list does not name the probe's hook"
     return "seen", "the hook list names the probe's hook"
 
 
 PROBES["X1"] = Probe(lambda h: "Run `../control-probe.sh x1` from the folder `sub`.", judge_x1, hook=True)
 PROBES["X2"] = Probe(lambda h: "", judge_x2, hook=True, direct=True)
-PROBES["A5"] = Probe(lambda h: f'Run `agy -p "/hooks" > {HOOKS_LIST}`.', judge_a5, hook=True)
+PROBES["A5"] = Probe(lambda h: f'Run `agy -p "/hooks" > {HOOKS_LIST}; echo $? > {HOOKS_STATUS}`.', judge_a5,
+                     hook=True)
 
 X7_MODES = {"bypass": "bypassPermissions", "auto": "auto"}
 
 
-def x7_command(harness: str, args: argparse.Namespace) -> list[str]:
+def x7_command(harness: str, args: argparse.Namespace, work: Path) -> list[str]:
     """The harness's terminal UI: Claude Code in the chosen mode, Cortex Code with --bypass."""
     if harness == "claude":
         return ["claude", "--setting-sources", "project", "--permission-mode", X7_MODES[args.mode]]
     if harness == "cortex":
-        return ["cortex", "--bypass", "-c", args.connection]
+        return ["env", f"{HIDE_VAR}={args.connection}", "cortex", "--bypass", "-c", args.connection]
     if harness == "codex":
-        return ["codex", *CODEX_HOOK]
+        return ["codex", *codex_hook(work)]
     return [COMMANDS[harness][0]]
 
 
@@ -598,7 +628,7 @@ def x7(args: argparse.Namespace) -> int:
         (work / ".codex" / "rules").mkdir(parents=True)
         (work / ".codex" / "rules" / "guards.rules").write_text(CODEX_RULE)
     name = "-".join(["probe", harness, "x7", *([mode] if mode else []), str(os.getpid())])
-    started = hc("run", "--bg", "--no-notify", "--name", name, "--cwd", str(work), *x7_command(harness, args))
+    started = hc("run", "--bg", "--no-notify", "--name", name, "--cwd", str(work), *x7_command(harness, args, work))
     if started.get("address") is None:
         shutil.rmtree(root, ignore_errors=True)
         print("probe_kit: hc run did not start the terminal", file=sys.stderr)

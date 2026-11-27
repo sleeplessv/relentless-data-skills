@@ -288,8 +288,8 @@ class Start(unittest.TestCase):
 
     def test_start_no_run(self):
         self.assert_ends(self.world.deliver("start", "--resume"), 10, (
-            "REFUSED start.no-run: no run mark in this checkout, so no run is in progress here, "
-            "so there is no run to resume\nNext: deliver.py start\n"))
+            "REFUSED start.no-run: no run mark in this checkout, so there is no run to resume\n"
+            "Next: deliver.py start\n"))
         self.assert_nothing_written()
 
     def test_start_not_built(self):

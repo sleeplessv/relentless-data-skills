@@ -12,8 +12,8 @@ Routes, for one author:
 
 In order, `start` then: refuses where a run mark exists; reads the route's input; on the default
 branch, a detached HEAD or a branch whose PR is merged, fetches `origin <default>` and cuts a
-fresh branch `deliver/<route>-<run>` from it with `git switch`, which carries the tree's changes or
-refuses with nothing changed; adds `.deliver/` to the shared git directory's `info/exclude`;
+fresh branch from it (`deliver/ticket-<N>-<run>`, `deliver/request-<run>` or `deliver/tree-<run>`)
+with `git switch`, which carries the tree's changes or refuses with nothing changed; adds `.deliver/` to the shared git directory's `info/exclude`;
 writes the run mark (role `session`); saves the request as the branch's `request.md` with its
 `Source:` line (`render.py` reads it) and a `save` record; and runs preflight without the probe
 check. Once that passes it prints the requirements of a ticket, the run grant line and the probe
@@ -156,9 +156,10 @@ def _branch(run: core.Run, route: str, run_id: str, rerun: str) -> str:
     """The run's branch: the checked-out one, or a fresh one from origin's default branch."""
     default = _out(run, "gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name").strip()
     branch = _git(run, "branch", "--show-current").stdout.strip()
-    if branch and branch != default and not json.loads(
-            _out(run, "gh", "pr", "list", "--head", branch, "--state", "merged", "--json", "number")):
-        return branch
+    if branch and branch != default:
+        merged = json.loads(_out(run, "gh", "pr", "list", "--head", branch, "--state", "merged", "--json", "number"))
+        if not merged:
+            return branch
     fresh = f"deliver/{route}-{run_id}"
     fetch = _git(run, "fetch", "origin", default)
     if fetch.returncode != 0:

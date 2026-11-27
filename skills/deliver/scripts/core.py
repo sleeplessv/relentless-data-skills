@@ -41,7 +41,7 @@ REFUSALS = {
     "start.not-a-repo": "{cwd} is not in a git working tree",
     "start.run-in-progress": "run {run} is in progress in this checkout (run mark: {mark}); "
                              "deliver.py start --resume resumes it",
-    "start.no-run": NO_MARK + ", so there is no run to resume",
+    "start.no-run": "no run mark in this checkout, so there is no run to resume",
     "start.not-built": "{form} is a multi-ticket run, and multi-ticket runs come with a later build stage",
     "start.nothing-to-start": "the tree has no changes and no ticket or request was named. start accepts: "
                               "start <ticket>; start request, after the request is written word for word "

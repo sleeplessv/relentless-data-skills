@@ -157,6 +157,20 @@ class Guard(unittest.TestCase):
         self.world.commit(self.world.work, "docs/agents/stack.toml", "[one_way]\nextra = 'apply'\n", "chore: stack settings")
         self.assertIsNone(deny(self.world.guard("ls -a")))
 
+    def test_a_stack_file_that_is_not_utf8_still_refuses_the_list(self):
+        (self.world.work / "docs" / "agents").mkdir(parents=True)
+        (self.world.work / "docs" / "agents" / "stack.toml").write_bytes(b'[one_way]\nextra = ["\xff"]\n')
+        result = self.world.guard("git push --force")
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        self.assertIsNotNone(deny(result))
+
+    def test_a_dot_git_file_that_is_not_utf8_finds_no_mark(self):
+        folder = self.world.root / "odd"
+        folder.mkdir()
+        (folder / ".git").write_bytes(b"gitdir: \xff\n")
+        result = self.world.guard("gh pr merge 1", cwd=folder)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
+
     def test_the_probe_is_a_raw_merge_refusal_of_its_own_class(self):
         reason = deny(self.world.probe())
         self.assertIn("guard probe", reason)
@@ -209,7 +223,7 @@ class Guard(unittest.TestCase):
 class Registration(unittest.TestCase):
     def setUp(self):
         self.world = deliver_kit.World(self.addCleanup)
-        self.world.write_mark()
+        self.mark = self.world.write_mark()
         hooks = json.loads(HOOKS.read_text(encoding="utf-8"))["hooks"]
         self.assertEqual(list(hooks), ["PreToolUse"])
         [entry] = hooks["PreToolUse"]
@@ -241,6 +255,20 @@ class Registration(unittest.TestCase):
     def test_without_uv_the_guard_runs_on_python3(self):
         (self.bin / "python3").symlink_to(sys.executable)
         self.assertIsNotNone(deny(self.run_hook(HOOKS.parent.parent)))
+
+    @unittest.skipIf(shutil.which("uv", path="/usr/bin:/bin"), "a uv in /usr/bin or /bin would be found first")
+    def test_an_old_python3_without_uv_exits_silently(self):
+        # A python3 older than 3.11, such as macOS's /usr/bin/python3: no tomllib.
+        (self.bin / "python3").write_text(
+            '#!/bin/sh\n[ "$1" = -c ] && exit 1\n'
+            'echo "ModuleNotFoundError: No module named tomllib" >&2\nexit 1\n', encoding="utf-8")
+        (self.bin / "python3").chmod(0o755)
+        for marked in (True, False):
+            with self.subTest(marked=marked):
+                if not marked:
+                    self.mark.unlink()
+                result = self.run_hook(HOOKS.parent.parent)
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "", ""))
 
     def test_a_missing_guard_file_exits_silently(self):
         empty = self.world.root / "plugin"
@@ -280,7 +308,9 @@ class GuardProbeCheck(unittest.TestCase):
 
     def test_a_damaged_log_line_is_skipped(self):
         self.world.state.mkdir()
-        (self.world.state / guard.LOG).write_text('{"class": "pro\n[1]\n', encoding="utf-8")
+        (self.world.state / guard.LOG).write_text(
+            '{"class": "pro\n[1]\n{"class": "probe", "run": "run-9", "at": 5}\n'
+            '{"class": "probe", "run": "run-9", "at": null}\n', encoding="utf-8")
         self.world.probe()
         self.assertEqual(self.preflight()[0], 0)
 

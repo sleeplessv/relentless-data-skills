@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """deliver's guard: a PreToolUse hook on the shell tool (#256 rules 12 to 16, #213 X7).
 
-`hooks/hooks.json` registers it. It reads Claude Code's hook input on standard input and finds
+`hooks/hooks.json` registers it, through `uv`, or else a `python3` of 3.11 or later; with neither
+it does not run. It reads Claude Code's hook input on standard input and finds
 a run mark (`deliver-mark.json` in the checkout's own git directory) by walking up from the
 input's `cwd` and from its own working directory to the nearest `.git`. It starts no `git`
 process and imports nothing of the program, so a broken program never breaks it.
@@ -66,7 +67,10 @@ def find_mark(start: Path) -> tuple[Path, Path] | None:
         if dot_git.is_dir():
             git_dir = dot_git
         elif dot_git.is_file():
-            line = dot_git.read_text(encoding="utf-8").strip()
+            try:
+                line = dot_git.read_text(encoding="utf-8").strip()
+            except (OSError, ValueError):
+                return None
             if not line.startswith("gitdir:"):
                 return None
             git_dir = folder / line.removeprefix("gitdir:").strip()
@@ -118,7 +122,7 @@ def one_way(command: str, checkout: Path) -> bool:
             extra = tomllib.load(f).get("one_way", {}).get("extra", [])
         if isinstance(extra, list):
             patterns += [p for p in extra if isinstance(p, str)]
-    except (OSError, tomllib.TOMLDecodeError, AttributeError):
+    except (OSError, ValueError, AttributeError):
         pass
     for pattern in patterns:
         try:

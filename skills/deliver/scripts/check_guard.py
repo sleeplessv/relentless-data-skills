@@ -32,7 +32,8 @@ def check_guard_probe(ctx):
         lines = []
     probes = [
         line for line in map(_read, lines)
-        if line.get("class") == "probe" and line.get("run") == mark["run"] and line.get("at", "") >= mark["started"]
+        if line.get("class") == "probe" and line.get("run") == mark["run"] and isinstance(line.get("at"), str)
+        and line["at"] >= mark["started"]
     ]
     if not probes:
         return preflight.Stop("preflight.guards-off", f"turn the hooks on, run {guard.PROBE}, then run {preflight.RERUN}",

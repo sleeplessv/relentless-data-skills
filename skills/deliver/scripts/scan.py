@@ -55,8 +55,11 @@ times with and without a time zone; or a helper's meta.json that is not a JSON
 object, or whose parentAgentId, toolUseId or description is neither text nor
 null.
 
-The record of a deliver PR. A session whose own lines hold a shell call of
-`deliver.py ready` is a deliver session. Its ready moment is the last such call
+The record of a deliver PR. A session whose own lines hold a shell call that
+runs `deliver.py ready` is a deliver session: deliver.py is the command, or the
+script that python or uv run runs, and ready is its first argument, without
+-h or --help. A command that only names the words, such as grep, echo or a
+commit message, is not a ready call. Its ready moment is the last such call
 whose result is not an error. Its row gains a "deliver" record:
 
 - pr, state, merged_at, closed_at: the PR, which the first scan finds with
@@ -77,13 +80,15 @@ whose result is not an error. Its row gains a "deliver" record:
 - after_ready_tokens: the tokens of every response after the ready moment on
   the PR's branch in the PR's repo, from every session's and helper's log,
   each response counted once.
-- final: true 14 days after the PR merged, or closed unmerged. A final record
-  is not read or asked about again, and its row stays as it is.
+- final: true 14 days after the PR merged, or closed unmerged, or 14 days
+  after the ready moment when gh has found no PR for the branch. A final
+  record is not read or asked about again, and its row stays as it is.
 - note: why gh gave no answer; the rest of the record stays as the last scan
   found it.
 
 A PR has one record. A later session that also called ready for it gets a
-note that names the session holding the record.
+final record of pr, ready_at, record_of (the session holding the record) and a
+note that says so.
 
 --refresh refreshes every record that is not final, and makes a record for
 each session log with a ready call. A log whose session is gone keeps its
@@ -100,6 +105,7 @@ import glob
 import json
 import os
 import re
+import shlex
 import stat
 import subprocess
 import sys
@@ -435,7 +441,9 @@ def write_private(path: Path, text: str) -> None:
 
 # The record of a deliver PR: the scan's second half.
 
-READY_CALL = re.compile(r"\bdeliver\.py\s+ready(?![\w.-])")
+READY_WORDS = re.compile(r"\bdeliver\.py\s+ready(?![\w.-])")  # a log that may hold a ready call
+RUNNERS = re.compile(r"(?:python[\d.]*|uv|env|exec|time)")  # commands that run the script they are given
+SEPARATORS = {"&&", "||", ";", "|", "&", "\n", "(", ")"}
 FINAL_AFTER = timedelta(days=14)  # a record is final this long after its PR merged, or closed unmerged
 BLOCK = re.compile(r"<details>\s*<summary>\s*Measurement\s*</summary>(.*?)</details>", re.S)
 VERSION_LINE = re.compile(r'^[+-]\s*"?version"?\s*[:=]')
@@ -485,6 +493,31 @@ def own(line: dict, session: str) -> bool:
     return not isinstance(line.get("sessionId"), str) or line["sessionId"] == session
 
 
+def runs_ready(command: str) -> bool:
+    """Whether the shell command runs `deliver.py ready`, not only names the words."""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace = " \t\r"
+    try:
+        tokens = list(lexer)
+    except ValueError:  # an unclosed quote
+        return False
+    simple: list[str] = []
+    for token in [*tokens, ";"]:
+        if token not in SEPARATORS:
+            simple.append(token)
+            continue
+        words = [word for word in simple if not re.match(r"[A-Za-z_]\w*=", word)] if simple else []
+        simple = []
+        script = next((at for at, word in enumerate(words) if Path(word).name == "deliver.py"), None)
+        if script is None or not all(RUNNERS.fullmatch(Path(word).name) or word.startswith("-") or word == "run"
+                                     or re.fullmatch(r"[\d.]+", word) for word in words[:script]):
+            continue
+        given = words[script + 1:]
+        if given[:1] == ["ready"] and not {"-h", "--help"} & set(given):
+            return True
+    return False
+
+
 def ready_call(lines: list[dict], session: str) -> dict | None:
     """The session's last own `deliver.py ready` call whose result is not an error: its time, folder and branch."""
     failed = {part.get("tool_use_id") for line in lines if line.get("type") == "user" for part in parts(line)
@@ -496,7 +529,7 @@ def ready_call(lines: list[dict], session: str) -> dict | None:
         for part in parts(line):
             given = part.get("input") if part.get("type") == "tool_use" else None
             command = given.get("command") if isinstance(given, dict) else None
-            if isinstance(command, str) and READY_CALL.search(command) and part.get("id") not in failed:
+            if isinstance(command, str) and runs_ready(command) and part.get("id") not in failed:
                 found = {"ready_at": line.get("timestamp"), "cwd": line.get("cwd"), "branch": line.get("gitBranch")}
     return found
 
@@ -678,11 +711,12 @@ def deliver_row(session: str, log: Path, rows: dict[str, dict]) -> dict | None:
             raise GhFailed("the ready call's line has no time or no branch")
         view = gh("pr", "view", part.get("pr") or call["branch"], "--json", PR_FIELDS,
                   cwd=None if part.get("pr") else call["cwd"])
-        first = next((other for other, kept in rows.items() if other != row["session"]
-                      and (kept.get("deliver") or {}).get("pr") == view["url"]
-                      and (kept["deliver"].get("ready_at") or "") < call["ready_at"]), None)
-        if first is not None:
-            row["deliver"] = {"pr": view["url"], "ready_at": call["ready_at"],
+        earlier = [(kept["deliver"].get("ready_at") or "", other) for other, kept in rows.items()
+                   if other != row["session"] and (kept.get("deliver") or {}).get("pr") == view["url"]
+                   and (kept["deliver"].get("ready_at") or "") < call["ready_at"]]
+        if earlier:
+            first = min(earlier)[1]  # the earliest holds the record: a note row always has an earlier one
+            row["deliver"] = {"pr": view["url"], "ready_at": call["ready_at"], "record_of": first, "final": True,
                               "note": f"the record of this PR is the row of session {first}, which called ready first"}
             return row
         fields, why = measurement(view.get("body"))
@@ -694,6 +728,8 @@ def deliver_row(session: str, log: Path, rows: dict[str, dict]) -> dict | None:
                     if part["git_dir"] else None)
     except (GhFailed, KeyError, TypeError, AttributeError) as error:  # gh gave an answer of another shape
         part["note"] = str(error) if isinstance(error, GhFailed) else f"gh gave an answer the scan cannot read ({error!r})"
+        if not part.get("pr") and ready_at and ready_at + FINAL_AFTER <= datetime.now(timezone.utc):
+            part["final"] = True  # gh found no PR for the branch in 14 days: it is not asked again
         print(f"scan: {row['session']}: {part['note']}", file=sys.stderr)
     return row
 
@@ -724,7 +760,7 @@ def refresh() -> int:
                 text = log.read_bytes().decode(errors="replace")
             except OSError:
                 continue
-            if READY_CALL.search(text):
+            if READY_WORDS.search(text):
                 targets.setdefault(log.stem, log)
         for session, row in rows.items():
             if isinstance(row.get("deliver"), dict) and not row["deliver"].get("final"):

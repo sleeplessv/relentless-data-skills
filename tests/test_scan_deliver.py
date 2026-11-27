@@ -223,8 +223,72 @@ class TestTheRecord(ScanTest):
         rows = self.rows()
         self.assertEqual(rows["s1"]["deliver"]["miss"], False)
         self.assertEqual(rows["s2"]["deliver"], {
-            "pr": URL, "ready_at": stamp(READY_AT + timedelta(hours=1)),
+            "pr": URL, "ready_at": stamp(READY_AT + timedelta(hours=1)), "record_of": "s1", "final": True,
             "note": "the record of this PR is the row of session s1, which called ready first"})
+
+    def test_a_later_sessions_note_names_the_record_row_never_another_note(self) -> None:
+        self.logs.ready_session()
+        for number in (2, 3):
+            self.logs.ready_session(f"s{number}", at=READY_AT + timedelta(hours=number))
+        # s3 first: it takes the record, and s2 and s1, scanned after it, each find an earlier ready.
+        for session in ("s3", "s2", "s1"):
+            self.assertEqual(self.scan(session).returncode, 0)
+        self.assertEqual(self.scan("--refresh").returncode, 0)
+        self.assertEqual(self.scan("s3").returncode, 0)
+        rows = self.rows()
+        self.assertEqual((rows["s2"]["deliver"].get("record_of"), rows["s3"]["deliver"].get("record_of")),
+                         ("s1", "s1"))
+
+class TestTheReadyCall(ScanTest):
+    """A ready call is a shell call that runs `deliver.py ready`; a command that only names it is not one."""
+
+    def session(self, *commands: str, session: str = "s1", at: datetime = READY_AT) -> None:
+        for step, command in enumerate(commands):
+            line, call = self.logs.response(session, at + timedelta(minutes=step), command=command)
+            self.logs.add(session, line, self.logs.result(session, at + timedelta(minutes=step, seconds=5), call))
+
+    def found(self, *commands: str) -> str | None:
+        """The ready moment the scan takes from a session with these shell calls; None when it finds no ready call."""
+        self.session(*commands)
+        result = self.scan("s1")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return (self.rows()["s1"].get("deliver") or {}).get("ready_at")
+
+    def test_the_plain_command_is_a_ready_call(self) -> None:
+        self.assertEqual(self.found("deliver.py ready"), stamp(READY_AT))
+
+    def test_uv_run_of_the_script_is_a_ready_call(self) -> None:
+        self.assertEqual(self.found("uv run --python 3.13 --no-project /x/skills/deliver/scripts/deliver.py ready"),
+                         stamp(READY_AT))
+
+    def test_python3_of_the_script_is_a_ready_call(self) -> None:
+        self.assertEqual(self.found("python3 /x/skills/deliver/scripts/deliver.py ready"), stamp(READY_AT))
+
+    def test_a_call_after_cd_is_a_ready_call(self) -> None:
+        self.assertEqual(self.found("cd /x/worktree && python3 skills/deliver/scripts/deliver.py ready"),
+                         stamp(READY_AT))
+
+    def test_a_grep_for_the_words_is_not_a_ready_call(self) -> None:
+        self.assertIsNone(self.found('grep -rn "deliver.py ready" skills/'))
+
+    def test_an_rg_for_the_words_is_not_a_ready_call(self) -> None:
+        self.assertIsNone(self.found("rg -n 'deliver.py ready' skills/"))
+
+    def test_a_cat_of_the_words_is_not_a_ready_call(self) -> None:
+        self.assertIsNone(self.found("cat skills/deliver/scripts/deliver.py ready"))
+
+    def test_an_echo_of_the_words_is_not_a_ready_call(self) -> None:
+        self.assertIsNone(self.found("echo deliver.py ready"))
+
+    def test_the_words_inside_quotes_are_not_a_ready_call(self) -> None:
+        self.assertIsNone(self.found('git commit -m "wire deliver.py ready"'))
+
+    def test_the_help_of_ready_is_not_a_ready_call(self) -> None:
+        self.assertIsNone(self.found("python3 skills/deliver/scripts/deliver.py ready --help"))
+
+    def test_a_mention_after_the_ready_call_leaves_the_ready_moment(self) -> None:
+        self.assertEqual(self.found(READY, 'grep -rn "deliver.py ready" skills/'), stamp(READY_AT))
+
 
 class TestTheMiss(ScanTest):
     def miss(self) -> tuple[bool | None, list[str]]:
@@ -362,6 +426,37 @@ class TestRefresh(ScanTest):
         # A refresh asks for the PR by the address the first scan kept, not by the branch.
         views = [call["args"][2] for call in self.world.gh_calls() if call["args"][:2] == ["pr", "view"]]
         self.assertEqual(views, [BRANCH, URL])
+
+    def views(self) -> int:
+        return len([call for call in self.world.gh_calls() if call["args"][:2] == ["pr", "view"]])
+
+    def test_a_later_sessions_note_is_not_asked_about_again(self) -> None:
+        self.logs.ready_session()
+        self.logs.ready_session("s2", at=READY_AT + timedelta(hours=1))
+        counts = []
+        for _ in range(3):
+            self.assertEqual(self.scan("--refresh").returncode, 0)
+            counts.append(self.views())
+        # The first refresh asks once for each session; s1's record is not final, so each later refresh asks once.
+        self.assertEqual(counts, [2, 3, 4])
+
+    def test_a_pr_gh_cannot_find_14_days_after_ready_is_not_asked_about_again(self) -> None:
+        self.answer(["pr", "view"], "", "no pull requests found\n", 1)
+        self.logs.ready_session(at=NOW - timedelta(days=15))
+        counts = []
+        for _ in range(3):
+            self.assertEqual(self.scan("--refresh").returncode, 0)
+            counts.append(self.views())
+        self.assertEqual(counts, [1, 1, 1])
+        self.assertTrue(self.rows()["s1"]["deliver"]["final"])
+
+    def test_a_pr_gh_cannot_find_less_than_14_days_after_ready_is_asked_about_again(self) -> None:
+        self.answer(["pr", "view"], "", "no pull requests found\n", 1)
+        self.logs.ready_session(at=NOW - timedelta(days=13))
+        for _ in range(2):
+            self.assertEqual(self.scan("--refresh").returncode, 0)
+        self.assertEqual(self.views(), 2)
+        self.assertNotIn("final", self.rows()["s1"]["deliver"])
 
     def test_a_refresh_keeps_a_record_whose_log_is_gone(self) -> None:
         self.logs.ready_session()

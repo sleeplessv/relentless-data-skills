@@ -14,12 +14,15 @@ fresh temporary folder with `git init` and no remote, writes the stand-in skill
 into the harness's project skill folder, and starts the harness's headless
 command with `hc run --bg`. It waits until `hc get` reports `state: finished`,
 never for `hc wait`, and past the time limit (default 300 seconds) it ends the
-terminal and records the entry as failed. The prompt types the stand-in skill as
-`/name`, or `$name` on Cortex Code.
+terminal and records the entry as failed. X6 and X9 type the stand-in skill as
+`/name`, or `$name` on Cortex Code. X8 types a skill name that is not installed,
+in the same form. K6 and A7 do not type the skill: their prompt is a request that
+matches its description.
 
 Cortex Code needs --connection, the Snowflake connection its runs spend. The kit
 passes it on the harness's command line only: it is not in the terminal name, it
-is replaced by <connection> in the saved output, and the kit never prints it.
+is replaced by <connection> before any output reaches a file, and the kit never
+prints it.
 
 The kit judges from files: marker files, the output stream and the folder. The
 raw output goes to probes/<run id>/ in the machine directory, $DELIVER_STATE_DIR
@@ -38,6 +41,7 @@ import argparse
 import json
 import os
 import secrets
+import threading
 import shlex
 import shutil
 import subprocess
@@ -110,11 +114,11 @@ MARKER = "probe-marker.txt"
 ENV_NAMES = "probe-env-names.txt"
 SKILL_TEXT = """---
 name: {name}
-description: Probe kit stand-in. Writes this probe's codeword to {marker}. Start it only when the owner types its name, never on your own.
+description: Records a probe run for the probe kit. Start it only when the owner types its name, never on your own.
 disable-model-invocation: true
 ---
 
-Write the word {codeword} and nothing else to the file {marker} in the current folder. Change nothing else.
+Write the word {codeword} and nothing else to the file {marker} in the current folder. Then carry out the rest of the request, if there is one.
 """
 # Codex's own switch that keeps a skill typed-only.
 CODEX_POLICY = "policy:\n  allow_implicit_invocation: false\n"
@@ -154,12 +158,30 @@ def judge_x8(harness: str, run: Finished) -> tuple[str, str]:
     return "recorded", f"harness exited {run.exit_code}, its output is kept"
 
 
+def reads_skill_file(event: object) -> bool:
+    """Whether a tool or command event names this stand-in's skill file; a message that names it does not count."""
+    if isinstance(event, list):
+        return any(reads_skill_file(item) for item in event)
+    if not isinstance(event, dict):
+        return False
+    kind = str(event.get("type", "")).lower()
+    if any(word in kind for word in ("tool", "command", "function_call")) or "tool_call" in event:
+        return f"{SKILL}/SKILL.md" in json.dumps(event)
+    return any(reads_skill_file(value) for value in event.values())
+
+
 def judge_x9(harness: str, run: Finished) -> tuple[str, str]:
     if not run.marker_holds_codeword():
         return "failed", "the typed command did not start the skill"
-    if "SKILL.md" in run.out:
+    events = []
+    for line in run.out.splitlines():
+        try:
+            events.append(json.loads(line))
+        except ValueError:
+            pass
+    if reads_skill_file(events):
         return "recorded", "the model read the skill file"
-    return "recorded", "the harness passed the skill in"
+    return "recorded", "the stream does not show who resolved it"
 
 
 def judge_from_description(harness: str, run: Finished) -> tuple[str, str]:
@@ -176,7 +198,7 @@ class Probe:
     any_exit: bool = False  # judged whatever the harness's exit code
 
 
-UNTYPED = f"Write this probe's codeword to {MARKER}."
+UNTYPED = "Record a probe run for the probe kit."
 PROBES = {
     "X6": Probe(lambda h: f"{typed(h, SKILL)} Then run this shell command: env | cut -d= -f1 | sort > {ENV_NAMES}",
                 judge_x6, env="CLAUDECODE=1"),
@@ -189,6 +211,24 @@ PROBES = {
 
 class KitError(Exception):
     """A wrong command line or a missing program: one line on standard error, exit 2."""
+
+
+def relay(out: str, err: str, secret: str, argv: list[str]) -> int:
+    """Run the harness inside the terminal, replacing the secret in its output before any byte reaches a file."""
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def copy(stream, path: str) -> None:
+        with open(path, "wb") as sink:
+            for line in stream:
+                sink.write(line.replace(secret.encode(), b"<connection>") if secret else line)
+                sink.flush()
+
+    copies = [threading.Thread(target=copy, args=pair) for pair in ((proc.stdout, out), (proc.stderr, err))]
+    for thread in copies:
+        thread.start()
+    for thread in copies:
+        thread.join()
+    return proc.wait()
 
 
 def hc(command: str, *args: str) -> dict:
@@ -232,7 +272,8 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
     argv = [part.replace("{prompt}", probe.prompt(harness)) for part in COMMANDS[harness]]
     if harness == "cortex":
         argv += ["-c", args.connection]
-    line = f"{probe.env} {shlex.join(argv)} > {shlex.quote(str(out))} 2> {shlex.quote(str(err))}".lstrip()
+    relayed = [sys.executable, str(Path(__file__).resolve()), "--relay", str(out), str(err), args.connection or "", *argv]
+    line = f"{probe.env} {shlex.join(relayed)}".lstrip()
     name = f"probe-{harness}-{entry.lower()}-{os.getpid()}"
     address, ended = None, False
     try:
@@ -244,8 +285,6 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
         ended = True
         for source in (out, err):
             text = source.read_text(errors="replace") if source.is_file() else ""
-            if args.connection:
-                text = text.replace(args.connection, "<connection>")
             (saved / f"{entry}-{harness}{source.suffix}").write_text(text)
         if info is None:
             return "failed", f"no finish within {args.time_limit:g} seconds, terminal ended"
@@ -307,6 +346,9 @@ def show_list() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["--relay"]:  # inside the terminal: python3 probe_kit.py --relay OUT ERR SECRET HARNESS-ARGV...
+        return relay(argv[1], argv[2], argv[3], argv[4:])
     parser = argparse.ArgumentParser(prog="probe_kit.py", description=__doc__.split("\n\n", 1)[1],
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     commands = parser.add_subparsers(dest="command", required=True)

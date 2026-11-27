@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -65,19 +66,27 @@ elif command == "get":
     except ProcessLookupError:
         alive = False
     if (term / "exit").exists():
-        print(json.dumps({"state": "finished", "exit_code": int((term / "exit").read_text())}))
+        reply = {"state": "finished", "exit_code": int((term / "exit").read_text())}
     elif not alive:
-        print(json.dumps({"state": "finished", "exit_code": None}))
-    else:  # STANDIN_HC_STATUS: the agent's status changes while the program still runs
-        print(json.dumps({"state": "running", "status": os.environ.get("STANDIN_HC_STATUS", "working")}))
+        reply = {"state": "finished", "exit_code": None}
+    else:  # STANDIN_HC_STATUS: the agent's successive statuses, comma-separated, while the program still runs
+        statuses = os.environ.get("STANDIN_HC_STATUS", "working").split(",")
+        count = term / "gets"
+        seen = int(count.read_text()) if count.exists() else 0
+        count.write_text(str(seen + 1))
+        reply = {"state": "running", "status": {"state": statuses[min(seen, len(statuses) - 1)]}}
+    with open(state / "replies.jsonl", "a") as log:
+        log.write(json.dumps(reply) + "\n")
+    print(json.dumps(reply))
 else:
     print("{}")
 '''
 
 # Knobs: STANDIN_SLEEP seconds before it acts; STANDIN_EXIT its exit code; STANDIN_NO_VAR leaves the
 # detection variable unset; STANDIN_TYPED_OFF ignores a typed skill command; STANDIN_MODEL_READS shows
-# a read of the skill file in the output; STANDIN_UNTYPED starts the skill from a prompt that does not
-# type it.
+# a read of the skill file in the output; STANDIN_MENTION names the skill file in an ordinary message;
+# STANDIN_UNTYPED starts the skill from a prompt that does not type it. It prints its arguments, which
+# hold the connection on Cortex Code, to both streams, and records what the output files held then.
 HARNESS = r'''#!{python}
 import json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -89,22 +98,32 @@ cwd = Path.cwd()
 skills = sorted(str(p.relative_to(cwd)) for p in cwd.glob(".*/skills/*/**/*") if p.is_file())
 skill_file = next((cwd / s for s in skills if s.endswith("SKILL.md")), None)
 remotes = subprocess.run(["git", "remote"], capture_output=True, text=True)
+print(json.dumps({"type": "system", "subtype": "init", "session_id": "''' + SESSION + r'''", "cwd": str(cwd),
+                  "args": args}), flush=True)
+print("stand-in log for " + str(cwd) + " started with " + " ".join(args), file=sys.stderr, flush=True)
+# The output files beside the folder, read while this run is still live, once both lines have reached them.
+for _ in range(100):
+    live = {p.name: p.read_text() for p in cwd.parent.iterdir() if p.is_file()}
+    if len(live) == 2 and all(text.endswith("\n") for text in live.values()):
+        break
+    time.sleep(0.02)
 with open(os.environ["STANDIN_STARTS"], "a") as starts:
     starts.write(json.dumps({
         "name": name, "args": args, "prompt": prompt, "claudecode": os.environ.get("CLAUDECODE"),
         "git": (cwd / ".git").is_dir(), "remotes": remotes.stdout, "remote_rc": remotes.returncode,
-        "skills": skills, "skill_text": skill_file.read_text() if skill_file else None}) + "\n")
+        "skills": skills, "skill_text": skill_file.read_text() if skill_file else None, "live": live}) + "\n")
 env = dict(os.environ)
 if not os.environ.get("STANDIN_NO_VAR"):
     env[var] = "1"
 time.sleep(float(os.environ.get("STANDIN_SLEEP", "0")))
-print(json.dumps({"type": "system", "subtype": "init", "session_id": "''' + SESSION + r'''", "cwd": str(cwd),
-                  "args": args}))
-print("stand-in log for " + str(cwd), file=sys.stderr)
 typed = prompt.startswith(("/probe-standin", "$probe-standin")) and not os.environ.get("STANDIN_TYPED_OFF")
 if typed or (os.environ.get("STANDIN_UNTYPED") and not prompt.startswith(("/", "$"))):
     if os.environ.get("STANDIN_MODEL_READS"):
-        print(json.dumps({"type": "tool_call", "read": str(skill_file)}))
+        print(json.dumps({"type": "tool_call", "subtype": "started",
+                          "tool_call": {"readToolCall": {"args": {"path": str(skill_file)}}}}))
+    if os.environ.get("STANDIN_MENTION"):
+        print(json.dumps({"type": "assistant", "message": {"content": [
+            {"type": "text", "text": "Done, as probe-standin/SKILL.md asks."}]}}))
     word = re.search(r"Write the word (\S+)", skill_file.read_text()).group(1)
     (cwd / "probe-marker.txt").write_text(word + "\n")
 if "shell command: " in prompt:
@@ -171,14 +190,24 @@ class ProbeKitTest(unittest.TestCase):
             self.assertNotIn(str(Path.home()), text)
 
 
+    def assert_probe_folder_gone(self) -> None:
+        """The temporary folder the kit made for the probe, the parent of the terminal's working folder, is gone."""
+        run = next(call for call in self.world.hc_calls() if call[0] == "run")
+        root = Path(run[run.index("--cwd") + 1]).parent
+        self.assertEqual((root.parent, root.name[:6]), (self.world.tmp, "probe-"))
+        self.assertFalse(root.exists())
+
+
 class TestHelpAndList(ProbeKitTest):
     def test_help_states_the_waiting_rule_the_limit_the_connection_rule_the_evidence_and_the_exits(self):
         code, out, err = self.world.kit("--help")
         self.assertEqual((code, err), (0, ""))
         text = " ".join(out.split())
         for fact in ("`hc run --bg`", "`state: finished`", "never for `hc wait`", "default 300 seconds",
-                     "ends the terminal and records the entry as failed", "`/name`, or `$name` on Cortex Code",
-                     "Cortex Code needs --connection", "replaced by <connection> in the saved output",
+                     "ends the terminal and records the entry as failed", "X6 and X9 type the stand-in skill as `/name`, or `$name` on Cortex Code",
+                     "X8 types a skill name that is not installed, in the same form",
+                     "K6 and A7 do not type the skill: their prompt is a request that matches its description",
+                     "Cortex Code needs --connection", "replaced by <connection> before any output reaches a file",
                      "the kit never prints it", "probes/<run id>/ in the machine directory",
                      "$DELIVER_STATE_DIR", "seen, failed or recorded", "no session id and no local path",
                      "0 when every entry is seen or recorded, 1 when any failed, 2 when hc or the harness command is missing",
@@ -223,16 +252,19 @@ class TestRuns(ProbeKitTest):
         self.assertEqual(start["skills"], [".agents/skills/probe-standin/SKILL.md",
                                            ".agents/skills/probe-standin/agents/openai.yaml"])
         self.assertIn("\ndisable-model-invocation: true\n", start["skill_text"])
-        self.assertIn("Start it only when the owner types its name", start["skill_text"])
+        self.assertIn("\ndescription: Records a probe run for the probe kit. Start it only when the owner types its "
+                      "name, never on your own.\n", start["skill_text"])
         self.assertRegex(start["skill_text"], r"Write the word probe-[0-9a-f]{8} and nothing else to the file "
-                                              r"probe-marker.txt in the current folder. Change nothing else.")
+                                              r"probe-marker.txt in the current folder. Then carry out the rest of "
+                                              r"the request, if there is one.\n$")
+        self.assertNotIn("Change nothing else", start["skill_text"])
         # The terminal: started in the background, named by harness, entry and run, waited on with get only.
         calls = self.world.hc_calls()
         self.assertEqual(calls[0][:6], ["run", "--json", "--bg", "--no-notify", "--name", f"probe-codex-x6-{calls[0][5].rsplit('-', 1)[1]}"])
         self.assertEqual({c[0] for c in calls}, {"run", "get", "rm"})
         self.assert_private(out, err)
         # The temporary folder is gone; the raw output is kept in the machine directory.
-        self.assertEqual(list(self.world.tmp.iterdir()), [])
+        self.assert_probe_folder_gone()
         saved = self.world.saved()
         self.assertEqual(sorted(saved), ["X6-codex.jsonl", "X6-codex.txt"])
         self.assertIn(SESSION, saved["X6-codex.jsonl"])
@@ -244,12 +276,16 @@ class TestRuns(ProbeKitTest):
         self.assertEqual((code, out), (1, "X6 cursor failed: CURSOR_AGENT not set beside CLAUDECODE\n"))
         self.assert_private(out, err)
 
-    def test_recorded_x9_says_whether_the_harness_or_the_model_resolved_the_typed_command(self):
+    def test_recorded_x9_names_the_model_only_on_a_read_of_the_skill_file(self):
         code, out, _ = self.world.kit("run", "antigravity", "X9")
-        self.assertEqual((code, out), (0, "X9 antigravity recorded: the harness passed the skill in\n"))
+        self.assertEqual((code, out), (0, "X9 antigravity recorded: the stream does not show who resolved it\n"))
         code, out, _ = self.world.kit("run", "antigravity", "X9", STANDIN_MODEL_READS="1")
         self.assertEqual((code, out), (0, "X9 antigravity recorded: the model read the skill file\n"))
-        self.assertEqual([s["prompt"] for s in self.world.harness_starts()], ["/probe-standin"] * 2)
+        code, out, _ = self.world.kit("run", "antigravity", "X9", STANDIN_MENTION="1")
+        self.assertEqual((code, out), (0, "X9 antigravity recorded: the stream does not show who resolved it\n"))
+        code, out, _ = self.world.kit("run", "antigravity", "X9", STANDIN_MENTION="1", STANDIN_MODEL_READS="1")
+        self.assertEqual((code, out), (0, "X9 antigravity recorded: the model read the skill file\n"))
+        self.assertEqual([s["prompt"] for s in self.world.harness_starts()], ["/probe-standin"] * 4)
         code, out, _ = self.world.kit("run", "antigravity", "X9", STANDIN_TYPED_OFF="1")
         self.assertEqual((code, out), (1, "X9 antigravity failed: the typed command did not start the skill\n"))
 
@@ -263,7 +299,7 @@ class TestRuns(ProbeKitTest):
         code, out, err = self.world.kit("run", "codex", "all")
         self.assertEqual((code, out), (0, "X6 codex seen: CODEX_THREAD_ID set beside CLAUDECODE\n"
                                           "X8 codex recorded: harness exited 0, its output is kept\n"
-                                          "X9 codex recorded: the harness passed the skill in\n"))
+                                          "X9 codex recorded: the stream does not show who resolved it\n"))
         self.assert_private(out, err)
 
     def test_cortex_types_dollar_names_and_keeps_the_connection_out_of_every_file_and_line(self):
@@ -275,8 +311,13 @@ class TestRuns(ProbeKitTest):
                                           "X6 cortex seen: CORTEX_SESSION_ID set beside CLAUDECODE\n"))
         starts = self.world.harness_starts()
         self.assertEqual([s["prompt"].split(" ")[0] for s in starts],
-                         ["$probe-not-installed", "Write", "$probe-standin"])
-        self.assertEqual(starts[1]["prompt"], "Write this probe's codeword to probe-marker.txt.")
+                         ["$probe-not-installed", "Record", "$probe-standin"])
+        self.assertEqual(starts[1]["prompt"], "Record a probe run for the probe kit.")
+        for start in starts:  # the output files as they stood while the harness still ran
+            self.assertEqual(sorted(start["live"]), ["err.txt", "out.jsonl"])
+            self.assertIn("<connection>", start["live"]["out.jsonl"])
+            self.assertIn("<connection>", start["live"]["err.txt"])
+            self.assertNotIn(connection, json.dumps(start["live"]))
         self.assertEqual([s["args"][-2:] for s in starts], [["-c", connection]] * 3)
         self.assertEqual([s["skills"][0] for s in starts], [".cortex/skills/probe-standin/SKILL.md"] * 3)
         saved = self.world.saved()
@@ -294,6 +335,13 @@ class TestRuns(ProbeKitTest):
         self.assertEqual((code, out), (0, "A7 antigravity recorded: the skill was not started untyped\n"))
         code, out, _ = self.world.kit("run", "antigravity", "A7", STANDIN_UNTYPED="1")
         self.assertEqual((code, out), (0, "A7 antigravity recorded: the model started the skill untyped\n"))
+        prompt = self.world.harness_starts()[0]["prompt"]
+        self.assertEqual(prompt, "Record a probe run for the probe kit.")
+        description = re.search(r"\ndescription: (.*)\n", self.world.harness_starts()[0]["skill_text"]).group(1)
+        self.assertIn("a probe run for the probe kit", description)  # the request matches the description
+        self.assertIn("a probe run for the probe kit", prompt)
+        for word in ("codeword", "probe-marker.txt", "probe-standin"):
+            self.assertNotIn(word, prompt)
 
     def test_past_the_time_limit_the_terminal_is_ended_and_the_entry_failed(self):
         code, out, err = self.world.kit("run", "codex", "X9", "--time-limit", "1", "--poll", "0.1",
@@ -302,15 +350,23 @@ class TestRuns(ProbeKitTest):
         calls = self.world.hc_calls()
         self.assertEqual(calls[-1], ["kill", "--json", "w1:" + calls[0][5]])
         self.assertEqual(sorted(self.world.saved()), ["X9-codex.jsonl", "X9-codex.txt"])  # what it printed so far
-        self.assertEqual(list(self.world.tmp.iterdir()), [])
+        self.assert_probe_folder_gone()
 
-    def test_a_status_change_before_the_end_does_not_stop_the_wait(self):
+    def test_the_wait_polls_through_working_and_done_statuses_until_the_state_is_finished(self):
+        # Herdr reports the agent's status as status.state; it turns to done before the program ends.
         code, out, _ = self.world.kit("run", "cursor", "X9", "--poll", "0.05",
-                                      STANDIN_SLEEP="0.6", STANDIN_HC_STATUS="done")
-        self.assertEqual((code, out), (0, "X9 cursor recorded: the harness passed the skill in\n"))
+                                      STANDIN_SLEEP="0.6", STANDIN_HC_STATUS="working,done")
+        self.assertEqual((code, out), (0, "X9 cursor recorded: the stream does not show who resolved it\n"))
         gets = [c for c in self.world.hc_calls() if c[0] == "get"]
         self.assertGreater(len(gets), 2)
         self.assertNotIn("wait", [c[0] for c in self.world.hc_calls()])
+        replies = [json.loads(line) for line in (self.world.hc_dir / "replies.jsonl").read_text().splitlines()]
+        statuses = [r["status"]["state"] for r in replies if r["state"] == "running"]
+        self.assertEqual(statuses[:2], ["working", "done"])
+        self.assertIn("done", statuses[2:])
+        self.assertEqual(replies[-1], {"state": "finished", "exit_code": 0})
+        self.assertEqual(sum(r["state"] == "finished" for r in replies), 1)
+        self.assertEqual([c[0] for c in self.world.hc_calls()][-2:], ["get", "rm"])
 
 
 class TestRefusals(ProbeKitTest):

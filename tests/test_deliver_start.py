@@ -44,6 +44,7 @@ class Start(unittest.TestCase):
         self.work = self.world.work
         self.git_dir = self.work / ".git"
         self.world.gh_answer(["repo", "view"], "main\n")
+        self.world.install_upstream()
 
     def issue(self, number: int, body: str = BODY, comments: tuple[str, ...] = ()) -> None:
         self.world.gh_answer(["issue", "view", str(number)], json.dumps(
@@ -225,7 +226,7 @@ class Start(unittest.TestCase):
     def test_the_mark_is_written_before_preflight_runs(self):
         (self.work / "new.txt").write_text("new\n", encoding="utf-8")
         result = subprocess.run(
-            [sys.executable, "-c", SPY, str(deliver_kit.SCRIPTS), "start"], cwd=self.work, env=self.world.env(),
+            [sys.executable, "-c", SPY, str(self.world.script.parent), "start"], cwd=self.work, env=self.world.env(),
             capture_output=True, text=True)
         run, branch = self.started(result)
         mark = (self.git_dir / "deliver-mark.json").read_text(encoding="utf-8")

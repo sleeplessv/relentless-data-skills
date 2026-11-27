@@ -39,7 +39,7 @@ Ubiquitous language for this repo's skills. Glossary only — no implementation 
 - **Baseline**: in generation one, the original base commit and its recorded check results. Later dispatch commits and integration failures remain distinct from this original evidence. _Avoid_: baseline for a comparison group (that is the single-agent baseline).
 - **Handoff files**: durable shared artifacts containing scope, ticket snapshots, exploration notes, commands, and decisions. Workers exchange their paths and update the run record as work completes and integrates.
 - **Generation one**: the implementation and orchestration skills in use before the redesign: orchestrator-mode, implement-ticket, implement-feature and implement-backlog. _Avoid_: v1, the old stack.
-- **Generation two**: the skills built beside generation one to replace it: deliver for ticket work and fan-out for non-ticket work. _Avoid_: v2, the new stack.
+- **Generation two**: the skills built beside generation one to replace it: deliver for ticket work and squad for non-ticket work. _Avoid_: v2, the new stack.
 - **Harness**: the agent program a session runs in, such as Claude Code, Cortex Code, Codex, Cursor or Antigravity. A harness is distinct from the model it runs. _Avoid_: tool, agent, IDE.
 - **Carry**: a **harness** carries a model when it can run a session or a **helper** on that model. One harness can carry models from several vendors. _Avoid_: support, host, have.
 - **Supported harness**: a harness on which every generation-two skill must reach the same result and pass the same checks as on any other supported harness.

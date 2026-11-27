@@ -1144,7 +1144,7 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(row["total_tokens"], 100)
 
     def test_a_session_that_loaded_a_skill_of_either_generation_is_marked_not_direct(self) -> None:
-        for skill, marked in (("implement-ticket", True), ("deliver", True), ("fan-out", True), ("tdd", False)):
+        for skill, marked in (("implement-ticket", True), ("deliver", True), ("squad", True), ("tdd", False)):
             with self.subTest(skill=skill):
                 self.world.clear()
                 result = self.replay("A", "7", STANDIN_SKILL=skill)

@@ -1,0 +1,17 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "prompt_id": "00000000-0000-4000-8000-000000000001",
+  "permission_mode": "default",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "gh pr merge 99999",
+    "description": "Merge pull request 99999"
+  },
+  "tool_use_id": "toolu_01YAE7DAAPfHNG6hC9aMtxE9"
+}

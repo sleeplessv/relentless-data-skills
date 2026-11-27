@@ -100,7 +100,8 @@ JOINED_ROWS = ("lock ownership",)
 
 # The standard output of a full run in which every stand-in check passed.
 EVERY_CHECK = [
-    line for name in ("skill lint", "registry check", "skill versions (base main)", "unit tests", "claude plugin validate")
+    line for name in (
+        "skill lint", "word count", "registry check", "skill versions (base main)", "unit tests", "claude plugin validate")
     for line in (f"==> {name}", f"PASS: {name}")
 ] + ["All checks passed."]
 
@@ -266,7 +267,7 @@ class CheckLockTest(unittest.TestCase):
         for name in ("check.sh", "check_lock.py"):
             shutil.copy2(REPO_ROOT / "scripts" / name, scripts / name)
         (scripts / "lint_skill.py").write_text(STANDIN_BODY)
-        for name in ("sync_registry.py", "skill_versions.py"):
+        for name in ("word_count.py", "sync_registry.py", "skill_versions.py"):
             (scripts / name).write_text("")
         (self.repo / "tests").mkdir()
         (self.repo / "tests" / "test_standin.py").write_text(

@@ -216,6 +216,9 @@ and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) e
 - `python3 -m unittest discover -s tests -v` runs the repository's Python tests.
 - `python3 scripts/lint_skill.py` checks skill frontmatter, invocation triggers,
   description lengths, line budgets, and YAML-safe values.
+- `python3 scripts/word_count.py` counts the words of each row of
+  `docs/path-map.toml` and fails when a row is over its limit, lists a missing
+  file, or lists a script.
 - `python3 scripts/check_doc_urls.py` checks HTTPS URLs marked with `=>` in
   `skills/*/references/docs-map.md`. It fails when a marked URL no longer resolves.
 - `python3 scripts/sync_registry.py --check` checks that the marketplace entries

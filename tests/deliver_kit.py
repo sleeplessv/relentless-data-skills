@@ -25,6 +25,10 @@ Claude Code as preflight reads it passes: `CLAUDE_CODE_EFFORT_LEVEL` is set, and
 marks a folder trusted in `home/.claude.json`, which the world does for the clone and each worktree.
 `tests/test_deliver_checks_claude.py` builds the other Claude Code files under `home/`.
 
+`world.install_upstream()` installs a stand-in of each upstream skill in the home's Claude Code
+skills folder, and from then on `world.deliver` runs a copy of the plugin whose upstream contract
+holds the stand-ins' folder hashes, so preflight finds every skill unchanged.
+
 Pass `self.addCleanup` from a test or `cls.addClassCleanup` from `setUpClass` to share one world
 across a class. Later tickets add helpers here rather than in their own test files.
 """
@@ -45,6 +49,7 @@ SCRIPTS = REPO_ROOT / "skills" / "deliver" / "scripts"
 DELIVER = SCRIPTS / "deliver.py"
 GUARD = SCRIPTS / "guard.py"
 GUARD_INPUTS = REPO_ROOT / "tests" / "deliver_guard_inputs"
+UPSTREAM = ("code-review", "ponytail-review", "pr", "to-spec", "to-tickets", "triage")
 
 GH = """\
 import json, os, sys
@@ -125,6 +130,7 @@ class World:
         self.commit(self.work, "README.md", "seed\n", "chore: seed")
         self.git(self.work, "push", "-q", "origin", "HEAD:refs/heads/main")
         self.trust(self.work)
+        self.script = DELIVER
 
     def env(self, **changes: str | None) -> dict[str, str]:
         """The world's environment; a change of None removes that variable."""
@@ -165,7 +171,7 @@ class World:
 
     def deliver(self, *args: str, cwd: Path | None = None, **env: str | None) -> subprocess.CompletedProcess:
         return subprocess.run(
-            [sys.executable, str(DELIVER), *args], cwd=cwd or self.work, env=self.env(**env),
+            [sys.executable, str(self.script), *args], cwd=cwd or self.work, env=self.env(**env),
             capture_output=True, text=True,
         )
 
@@ -182,6 +188,30 @@ class World:
 
     def probe(self, recorded: str = "session.json", cwd: Path | None = None) -> subprocess.CompletedProcess:
         return self.guard(load("guard").PROBE, recorded, cwd)
+
+    def install_skill(self, name: str, root: Path | None = None) -> Path:
+        """A stand-in skill folder `<root>/skills/<name>` (default root: the home's `.claude`)."""
+        folder = (root or self.home / ".claude") / "skills" / name
+        (folder / "references").mkdir(parents=True)
+        (folder / "SKILL.md").write_text(f"---\nname: {name}\n---\n", encoding="utf-8")
+        (folder / "references" / "notes.md").write_text(f"{name} notes\n", encoding="utf-8")
+        return folder
+
+    def install_upstream(self, names: tuple[str, ...] = UPSTREAM) -> dict[str, Path]:
+        """Install stand-ins of `names` and run deliver.py from a plugin copy whose contract fits them."""
+        folders = {name: self.install_skill(name) for name in names}
+        plugin = self.root / "plugin"
+        shutil.copytree(SCRIPTS.parent, plugin, ignore=shutil.ignore_patterns("__pycache__"))
+        deps = load("deps")
+        contract = deps.load_contract()
+        for name, folder in folders.items():
+            contract[name]["folder_hash"] = deps.folder_hash(folder)
+        (plugin / "upstream.toml").write_text("".join(
+            f"[{name}]\n" + "".join(f"{key} = {json.dumps(value)}\n" for key, value in entry.items())
+            for name, entry in contract.items()
+        ), encoding="utf-8")
+        self.script = plugin / "scripts" / "deliver.py"
+        return folders
 
     def write_mark(self, checkout: Path | None = None, run: str = "run-1", branch: str = "main",
                    role: str = "session", started: str = "2026-11-27T18:00:00Z") -> Path:

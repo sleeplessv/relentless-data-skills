@@ -49,6 +49,7 @@ REFUSALS = {
     "preflight.no-reader": "the deliver plugin has no reader role file: {path} is missing",
     "preflight.role-clash": "the role file {path} has the name of deliver's role {role}",
     "preflight.plugin-twice": "deliver is also in Claude Code's user-level skills folder: {path}",
+    "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,
     "save.missing-file": "there is no {file} to save",
@@ -63,6 +64,7 @@ REFUSALS = {
     "ready.no-mark": NO_MARK,
     "merge.no-mark": NO_MARK,
     "finish.no-mark": NO_MARK,
+    "deps.missing-skill": "a required upstream skill is not installed: {skills}",
 }
 
 

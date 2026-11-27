@@ -1,0 +1,38 @@
+# The upstream contract (#177 rules 5 to 8; #231 rule 41): what deliver takes from each skill it
+# depends on and does not own, what it supplies where that skill expects a person to answer,
+# and the skill's folder hash when it was last read against its entry.
+#
+# `scripts/deps.py` compares each installed copy's folder hash with `folder_hash` and prints one
+# line for a changed copy. Nobody edits an installed copy (#177 rule 20). After an update, one
+# agent reads the upstream diff against the entry; the new hash comes in through a normal PR
+# (#177 rule 17).
+
+[code-review]
+takes = "The Spec and Standards readings, the rule for finding a repo's standards files, and the list of 12 code smells. Not the step that starts two sub-agents: the requirements reviewer does both readings itself."
+supplies = "In the requirements reviewer's brief: the fixed point, the source of the requirements and the review target. A question not listed here goes under \"not checked\"; the reviewer does not guess and does not ask."
+folder_hash = "a8ef561571acbb611de8ff19ba6da75b197c63a8"
+
+[ponytail-review]
+takes = "The six things to look for, the rule that every finding needs a concrete case, and the three groups of the report."
+supplies = "In the defect reviewer's brief: the fixed point and the review target. A question not listed here goes under \"not checked\"; the reviewer does not guess and does not ask."
+folder_hash = "8ad8430c42a6f8cd18758dddb70cfee399725de6"
+
+[pr]
+takes = "Its three headings, Summary, Evidence and Merge Danger, and its rules for the Summary."
+supplies = "Nothing: it asks no person. The author writes the Summary once and a script assembles the description from the saved records."
+folder_hash = "00b896d811adffad747c7ca30078d909d60c7f93"
+
+[to-spec]
+takes = "The finished spec, labelled ready-for-agent. It runs before a run, with the owner present."
+supplies = "Nothing: the owner is present and answers its questions."
+folder_hash = "136b9651747cfccbfbb7c50a6b0dfb757e7547d2"
+
+[to-tickets]
+takes = "The tickets and their blocking edges. It runs before a run, with the owner present."
+supplies = "Nothing: the owner is present and answers its questions."
+folder_hash = "2dee20ad722a31c04ededf9f2d83842473573045"
+
+[triage]
+takes = "The ready-for-agent label on a ticket. It runs before a run, with the owner present."
+supplies = "Nothing: the owner is present and answers its questions."
+folder_hash = "4cb951d62ecccaed601cdc5f9a1b7b3d8a799635"

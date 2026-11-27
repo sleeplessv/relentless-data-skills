@@ -22,6 +22,8 @@ from pathlib import Path
 from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# The fixtures' git reads no global or system config, so a developer's signing program never starts.
+GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 sys.path.insert(0, str(REPO_ROOT / "skills" / "dbt-runner" / "scripts"))
 
 import preflight  # noqa: E402
@@ -170,8 +172,8 @@ class WorktreeContextTests(unittest.TestCase):
     """A worktree without the (gitignored) context file reads the main one."""
 
     def git(self, cwd, *args):
-        subprocess.run(["git", "-C", str(cwd), *args], check=True,
-                       capture_output=True)
+        subprocess.run(["git", "-C", str(cwd), *args], check=True, capture_output=True,
+                       env={**os.environ, **GIT_ENV})
 
     def make_repo(self, stack):
         main = Path(stack.enter_context(tempfile.TemporaryDirectory()))
@@ -322,7 +324,8 @@ class PackagesCheckTests(unittest.TestCase):
             root = Path(tmp)
 
             def git(*args):
-                subprocess.run(["git", *args], cwd=root, check=True, capture_output=True)
+                subprocess.run(["git", *args], cwd=root, check=True, capture_output=True,
+                               env={**os.environ, **GIT_ENV})
 
             git("init", "-q")
             project = root / "analytics"

@@ -28,6 +28,8 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 REPO = "example-org/alpha"
 CHECK = "test -e .setup-done && test ! -e broken"
 SETUP = "touch .setup-done"
+# The fixtures' git reads no global or system config, so a developer's signing program never starts.
+GIT_ENV = {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
 # Words that name generation one's version or the replay's: none may reach the reviewer.
 SECRETS = ("ticket-7-the-branch", "Branch work for ticket 7", "Fix after ready", "Gen One Author",
            "gen-one@example.com", "Replay commit message", "Replay Author", "replay@example.com")
@@ -121,7 +123,7 @@ def module():
 
 def git(cwd: Path, *args: str, env: dict | None = None) -> str:
     return subprocess.run(["git", "-C", str(cwd), *args], check=True, text=True, capture_output=True,
-                          env={**os.environ, **(env or {})}).stdout.strip()
+                          env={**os.environ, **GIT_ENV, **(env or {})}).stdout.strip()
 
 
 def commit(cwd: Path, message: str, author: tuple[str, str], files: dict[str, str | None]) -> str:
@@ -210,14 +212,14 @@ class World:
         self.exit = exit
 
     def env(self) -> dict[str, str]:
-        """What the judge runs with: the caller's environment, with the stand-ins first on PATH, a scratch home and
-        machine directory, CLAUDE_CONFIG_DIR and CLAUDE_CODE_SKIP_PROMPT_HISTORY as this world sets them, and the
-        stand-ins' controls."""
+        """What the judge runs with: the caller's environment, with no global or system git config, the stand-ins
+        first on PATH, a scratch home and machine directory, CLAUDE_CONFIG_DIR and CLAUDE_CODE_SKIP_PROMPT_HISTORY as
+        this world sets them, and the stand-ins' controls."""
         environ = {key: value for key, value in os.environ.items() if key not in (
             "PYTHONDONTWRITEBYTECODE", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_SKIP_PROMPT_HISTORY", "CLAUDE_STDERR")}
         return {**environ, **({} if self.config is None else {"CLAUDE_CONFIG_DIR": self.config}),
                 **({} if self.no_log is None else {"CLAUDE_CODE_SKIP_PROMPT_HISTORY": self.no_log}),
-                "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
+                **GIT_ENV, "HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state),
                 "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "GH_LOG": str(self.records / "gh"),
                 "GH_REMOTES": str(self.remotes), "CLAUDE_ANSWER": str(self.root / "answer"),
                 "CLAUDE_EXIT": str(self.exit), "CLAUDE_BREAK": self.breaking,
@@ -531,7 +533,7 @@ class TestJudge(unittest.TestCase):
             info, path = record.split("\t")
             mode, _, blob = info.split()
             tree[path] = (mode, subprocess.run(["git", "-C", str(clone), "cat-file", "blob", blob], check=True,
-                                               capture_output=True).stdout)
+                                               capture_output=True, env={**os.environ, **GIT_ENV}).stdout)
         # Every file but the link that leads out of the folder, and nothing else.
         self.assertEqual(sorted(path.name for path in copy.iterdir()), sorted(set(tree) - {"outside-link"}))
         for path, (mode, data) in tree.items():

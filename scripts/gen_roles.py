@@ -56,24 +56,25 @@ def main() -> int:
         print(f"usage: {Path(sys.argv[0]).name} --write | --check")
         return 1
 
-    targets = {AGENTS_DIR / f"{name}.md": render(name, role) for name, role in ROLES.items()}
+    # Bytes, not text: reading text would hide CRLF drift and crash on bytes that are not UTF-8.
+    targets = {AGENTS_DIR / f"{name}.md": render(name, role).encode() for name, role in ROLES.items()}
     stale = [
-        path for path, text in targets.items()
-        if not (REPO_ROOT / path).is_file() or (REPO_ROOT / path).read_text(encoding="utf-8") != text
+        path for path, data in targets.items()
+        if not (REPO_ROOT / path).is_file() or (REPO_ROOT / path).read_bytes() != data
     ]
 
     if mode == "--check":
         for path in stale:
             print(f"role files check FAILED: {path} differs from what scripts/gen_roles.py writes.")
         if stale:
-            print("fix: edit ROLES in scripts/gen_roles.py, run python3 scripts/gen_roles.py --write and commit.")
+            print("fix: run python3 scripts/gen_roles.py --write and commit. To change a role, edit ROLES there first.")
             return 1
         print(f"role files check OK ({len(targets)} file(s)).")
         return 0
 
     for path in stale:
         (REPO_ROOT / path).parent.mkdir(parents=True, exist_ok=True)
-        (REPO_ROOT / path).write_text(targets[path], encoding="utf-8")
+        (REPO_ROOT / path).write_bytes(targets[path])
         print(f"wrote {path}")
     if not stale:
         print("already in sync, nothing to write.")

@@ -27,6 +27,7 @@ FIXTURE = Path(__file__).resolve().parent / "fixture-repo"
 TIMEOUT = 120  # seconds for one run of the check command
 
 # Every file in the fixture: the parts #188 rule 11 lists, and the modules and their tests.
+# The copy leaves out __pycache__ and .DS_Store, which .gitignore keeps out of the repo.
 EXPECTED_FILES = {
     ".github/workflows/check.yml",
     "AGENTS.md",
@@ -73,7 +74,7 @@ class FixtureRepoTest(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.copy = Path(tmp.name) / "fixture-repo"
-        shutil.copytree(FIXTURE, self.copy, ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copytree(FIXTURE, self.copy, ignore=shutil.ignore_patterns("__pycache__", ".DS_Store"))
 
     def assert_check_passes(self):
         result = run_check(self.copy)

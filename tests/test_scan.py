@@ -1,4 +1,4 @@
-"""Exercise scripts/scan.py at its command line on session logs the tests build.
+"""Exercise `deliver.py scan` at its command line on session logs the tests build.
 
 Each log is written in the shape of a Claude Code session log: one JSON object per
 line, helpers' transcripts under <session>/subagents/. No line comes from a real
@@ -19,7 +19,8 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-SCAN = Path(__file__).resolve().parent.parent / "scripts" / "scan.py"
+SCRIPTS = Path(__file__).resolve().parent.parent / "skills" / "deliver" / "scripts"
+SCAN = [str(SCRIPTS / "deliver.py"), "scan"]
 MODEL = "claude-test-model-1"
 
 
@@ -152,7 +153,7 @@ class TestScan(unittest.TestCase):
                 "CLAUDE_CONFIG_DIR": str(self.config)}
 
     def scan(self, *args: str, umask: int = -1) -> subprocess.CompletedProcess[str]:
-        return subprocess.run([sys.executable, str(SCAN), *args], cwd=self.root, env=self.environment(),
+        return subprocess.run([sys.executable, *SCAN, *args], cwd=self.root, env=self.environment(),
                               text=True, capture_output=True, umask=umask)
 
     def rows(self, state: Path | None = None) -> list[dict]:
@@ -401,7 +402,7 @@ class TestScan(unittest.TestCase):
         environment = self.environment()
         del environment["DELIVER_STATE_DIR"]
 
-        result = subprocess.run([sys.executable, str(SCAN), str(self.log_path())], cwd=self.root,
+        result = subprocess.run([sys.executable, *SCAN, str(self.log_path())], cwd=self.root,
                                 env=environment, text=True, capture_output=True)
 
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -431,7 +432,7 @@ class TestScan(unittest.TestCase):
         self.assertFalse(self.state.exists())
 
     def test_scans_run_at_once_keep_every_row(self) -> None:
-        scans = [subprocess.Popen([sys.executable, str(SCAN), str(self.log_path(f"gone-{number}"))],
+        scans = [subprocess.Popen([sys.executable, *SCAN, str(self.log_path(f"gone-{number}"))],
                                   cwd=self.root, env=self.environment(),
                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                  for number in range(40)]
@@ -689,7 +690,7 @@ class TestScan(unittest.TestCase):
 
     def test_skills_read_lines_whose_times_the_scan_would_refuse_without_stopping(self) -> None:
         # The draw passes skills() lines whose times nothing has checked, so this calls it in the scan's module.
-        spec = importlib.util.spec_from_file_location("scan_under_test", SCAN)
+        spec = importlib.util.spec_from_file_location("scan_under_test", SCRIPTS / "scan.py")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         log = Log(self.session)

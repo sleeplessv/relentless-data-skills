@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Read one Claude Code session from its log and write one row about it.
 
-Usage: python3 scripts/scan.py SESSION
+Usage: deliver.py scan SESSION
 
 SESSION is a session id or the path of its .jsonl log. An id is looked up as
 $CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl (default ~/.claude). An argument that
@@ -383,7 +383,7 @@ def write_private(path: Path, text: str) -> None:
     partial.replace(path)
 
 
-def main(argv: list[str]) -> int:
+def cli(argv: list[str]) -> int:
     if argv in (["-h"], ["--help"]):
         print(__doc__.strip())
         return 0
@@ -396,5 +396,8 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+def main(args: list[str], run: object = None) -> None:
+    """deliver.py's entry: `run` is unused, since the scan reads the machine directory, not a checkout."""
+    code = cli(args)
+    if code:
+        raise SystemExit(code)

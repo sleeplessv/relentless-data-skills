@@ -4,12 +4,18 @@
 last, the repo's named commands. The GitHub check saves `gh repo view`'s answer in `ctx.repo`,
 and the push, issue and branch-rule checks read it from there. A reach command runs as
 `sh -c <command>` in the checkout, with no input. The dependents command runs through
-`small_test`, as the small test runs it, on one tracked path.
+`small_test`, as the small test runs it, on the first path `git ls-files` lists, or on no path
+when it lists none.
 
-A program that cannot be started counts as a run that failed with exit 127, so each check gives
-its own stop or warning for it. Output stays bytes: only diagnostics are decoded, with
-replacement, and JSON answers are parsed from bytes, so output that is not UTF-8 takes the
-check's unreadable path.
+Each runner handles a program it cannot start and output it cannot decode in its own way:
+
+- `_run` turns a program that cannot start into a run that failed with exit 127, and keeps the
+  output as bytes. Its callers decode diagnostics and the sample path with replacement, and give
+  JSON answers to `json.loads` as bytes, which also reads UTF-16 and UTF-32. Bytes it cannot
+  decode take the check's unreadable path.
+- `check_gh_signed_in` runs `gh` itself and stops with `preflight.no-gh` when `gh` cannot start.
+- `small_test` reads the dependents command's output as text. Preflight turns a program that
+  cannot start, or output that is not UTF-8, into a dependents warning.
 
 preflight imports this module, so each result type comes from the module that made `ctx`, as in
 `check_guard`: an import of preflight here would be circular, and a test loads it under another
@@ -190,8 +196,9 @@ def check_reach(ctx):
 def check_dependents(ctx):
     """Warn when the dependents command fails as the small test reads it; an empty one runs nothing (#407 reading 13).
 
-    It runs on the first tracked path, since preflight has no changed paths yet: any tracked path is
-    a real input, and a command that needs at least one path gets it. Its count is not judged.
+    It runs on a sample path, the first path `git ls-files` lists, since preflight has no changed
+    paths yet: any tracked path is a real input, and a command that needs at least one path gets
+    it. When git lists none, it runs on no path. Its count is not judged.
     """
     command = ctx.settings["small_edit"]["dependents_command"]
     if not command:
@@ -205,5 +212,7 @@ def check_dependents(ctx):
     if "error" not in result:
         return None
     run = " ".join([command, *map(shlex.quote, paths)])
-    return _warn(ctx, f"the dependents command `{run}` failed ({result['error']}), so every change gets a review: "
-                 f"fix [small_edit] dependents_command in {settings.PATH} until it prints a count first, or empty it")
+    sample = f"the sample path {paths[0]}" if paths else "no path"
+    return _warn(ctx, f"the dependents command `{run}` failed on {sample} ({result['error']}), and a failure on a "
+                 f"change's own paths sends that change to review: fix [small_edit] dependents_command in "
+                 f"{settings.PATH} until it prints a count first, or empty it")

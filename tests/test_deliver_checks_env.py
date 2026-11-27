@@ -3,8 +3,7 @@
 `Order` reads `preflight.CHECKS` in process and pins the order of the checks. Each test in
 `Checks` runs `deliver.py preflight` at its command line in one shared throwaway world with a run
 mark, a stand-in `gh` and, where a check reads them, its own git config, stack settings and
-stand-ins. A clean world passes every check, so a `Checks` test changes one thing and asserts the
-whole output and the exit code.
+stand-ins, and asserts the whole output and the exit code.
 
     python3 -m unittest tests.test_deliver_checks_env
 """
@@ -281,16 +280,16 @@ class Checks(unittest.TestCase):
     def test_failing_dependents_command_warns(self):
         self.dependents(self.tools / "bad-gpg")
         self.assertEqual(self.preflight(), (
-            0, f"warning: the dependents command `{self.tools / 'bad-gpg'} README.md` failed (exit 2), so every change "
-            "gets a review: fix [small_edit] dependents_command in docs/agents/stack.toml until it prints a count "
-            "first, or empty it\n" + CLEAN, ""))
+            0, f"warning: the dependents command `{self.tools / 'bad-gpg'} README.md` failed on the sample path "
+            "README.md (exit 2), and a failure on a change's own paths sends that change to review: fix [small_edit] "
+            "dependents_command in docs/agents/stack.toml until it prints a count first, or empty it\n" + CLEAN, ""))
 
     def test_dependents_command_that_prints_no_count_warns(self):
         self.dependents("true")
         self.assertEqual(self.preflight(), (
-            0, f"warning: the dependents command `true README.md` failed ({NO_COUNT}), so every change gets a review: "
-            "fix [small_edit] dependents_command in docs/agents/stack.toml until it prints a count first, or empty "
-            "it\n" + CLEAN, ""))
+            0, f"warning: the dependents command `true README.md` failed on the sample path README.md ({NO_COUNT}), "
+            "and a failure on a change's own paths sends that change to review: fix [small_edit] dependents_command "
+            "in docs/agents/stack.toml until it prints a count first, or empty it\n" + CLEAN, ""))
 
 if __name__ == "__main__":
     unittest.main()

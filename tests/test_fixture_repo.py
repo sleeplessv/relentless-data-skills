@@ -5,14 +5,15 @@ Standard library only. Run from the repo root:
     python3 -m unittest tests.test_fixture_repo -v
 
 The fixture repo is the repo the cross-harness test's runs work on (GLOSSARY.md). Its source is
-the folder tests/fixture-repo. The folder name has a hyphen, so it is not a Python package, and
-this repo's `unittest discover -s tests` does not run the fixture's own tests.
+the folder tests/fixture-repo. The folder has no __init__.py, so this repo's
+`unittest discover -s tests` does not descend into it and does not run the fixture's own tests.
 
 A test that runs the check command first copies the folder to a temporary directory and runs the
 command there, with PYTHONDONTWRITEBYTECODE=1, so nothing is written into the source folder.
 """
 from __future__ import annotations
 
+import itertools
 import os
 import re
 import shlex
@@ -52,13 +53,41 @@ def run_check(root: Path) -> subprocess.CompletedProcess:
                           text=True, timeout=TIMEOUT)
 
 
-def ticket_files(spec: str, ticket: str) -> list[set[str]]:
-    """Return the files each `Files:` line in the ticket's section names, one set per line."""
-    section = re.search(rf"^## Ticket {ticket}\n(.*?)(?=^## |\Z)", spec, re.M | re.S)
+def ticket(spec: str, name: str) -> tuple[set[str], str]:
+    """Return the files a ticket's section declares and the section's text without that line.
+
+    A section holds exactly one line that starts with `Files:`, and that whole line must read
+    `Files: ` followed by backticked file names separated by `, `.
+    """
+    section = re.search(rf"^## Ticket {name}\n(.*?)(?=^## |\Z)", spec, re.M | re.S)
     if section is None:
-        return []
-    return [set(re.findall(r"`([^`]+)`", line))
-            for line in re.findall(r"^Files: (`[^`]+`(?:, `[^`]+`)*)$", section.group(1), re.M)]
+        raise AssertionError(f"spec.md has no section for ticket {name}")
+    declarations = re.findall(r"^Files:.*$", section.group(1), re.M)
+    if len(declarations) != 1:
+        raise AssertionError(f"ticket {name} has {len(declarations)} Files: lines, not one")
+    if not re.fullmatch(r"Files: `[^`]+`(?:, `[^`]+`)*", declarations[0]):
+        raise AssertionError(f"ticket {name} has a Files: line this test cannot read: {declarations[0]!r}")
+    return set(re.findall(r"`([^`]+)`", declarations[0])), section.group(1).replace(declarations[0], "")
+
+
+def workflow_job(workflow: str) -> list[str]:
+    """Return the lines of the one job under the workflow's top-level `jobs:` key.
+
+    A strict reading of this one file, with no YAML library. Blank and comment lines are dropped.
+    The file has exactly one `jobs:` line in column 0. The lines after it, up to the next line in
+    column 0, are the jobs block. The block's first line is the one job's name, indented two
+    spaces, and every later line in the block is indented at least four spaces.
+    """
+    lines = [line for line in workflow.splitlines() if line.strip() and not line.lstrip().startswith("#")]
+    starts = [i for i, line in enumerate(lines) if line == "jobs:"]
+    if len(starts) != 1:
+        raise AssertionError(f"workflow has {len(starts)} top-level jobs: keys, not one")
+    block = list(itertools.takewhile(lambda line: line.startswith(" "), lines[starts[0] + 1:]))
+    if not block or not re.fullmatch(r"  [A-Za-z0-9_-]+:", block[0]):
+        raise AssertionError("the jobs block does not start with a job name")
+    if not all(line.startswith("    ") for line in block[1:]):
+        raise AssertionError("the jobs block holds more than one job, or a line this test cannot read")
+    return block[1:]
 
 
 def edit_line(text: str, label: str) -> str:
@@ -89,34 +118,39 @@ class FixtureRepoTest(unittest.TestCase):
             self.assertEqual(tomllib.load(f), {"check": "python3 -m unittest -v"})
 
     def test_ci_workflow_has_one_job_that_runs_the_check_command(self):
-        workflow = (self.copy / ".github/workflows/check.yml").read_text()
-        self.assertEqual(re.findall(r"^\s+runs-on: ", workflow, re.M), ["    runs-on: "])
-        self.assertEqual(re.findall(r"^\s+(?:- )?run: (.*)$", workflow, re.M), [check_command(self.copy)])
+        job = workflow_job((self.copy / ".github/workflows/check.yml").read_text())
+        self.assertEqual(len([line for line in job if re.fullmatch(r"    runs-on: \S+", line)]), 1)
+        runs = [m.group(1) for line in job if (m := re.fullmatch(r"\s+(?:- )?run: (.*)", line))]
+        self.assertEqual(runs, [check_command(self.copy)])
 
     def test_agents_md_ends_with_an_empty_agent_runs_heading(self):
         self.assertTrue((self.copy / "AGENTS.md").read_text().endswith("\n\n## Agent runs\n"))
-
-    def test_check_command_passes_on_a_copy(self):
-        self.assert_check_passes()
 
     def test_small_edit_applied_by_hand_still_passes(self):
         text = (self.copy / "tasks/small-edit.md").read_text()
         target = self.copy / re.search(r"^File: `([^`]+)`$", text, re.M).group(1)
         before, after = edit_line(text, "Before"), edit_line(text, "After")
-        source = target.read_text()
-        self.assertEqual(source.count(before), 1)
         self.assertNotEqual(before, after)
-        target.write_text(source.replace(before, after))
+        # The whole before line, indentation included, is one line of the file, exactly once,
+        # and the whole after line takes its place.
+        lines = target.read_text().split("\n")
+        self.assertEqual(lines.count(before), 1)
+        lines[lines.index(before)] = after
+        target.write_text("\n".join(lines))
         self.assert_check_passes()
 
-    def test_tickets_a_and_b_name_separate_files(self):
+    def test_check_passes_on_a_copy_and_tickets_a_and_b_name_separate_files(self):
+        self.assert_check_passes()
         spec = (self.copy / "tasks/spec.md").read_text()
-        files_a, files_b = ticket_files(spec, "A"), ticket_files(spec, "B")
-        self.assertEqual(files_a, [{"calc.py", "test_calc.py"}])
-        self.assertEqual(files_b, [{"fmt.py", "test_fmt.py"}])
-        self.assertEqual(files_a[0] & files_b[0], set())
+        (files_a, task_a), (files_b, task_b) = ticket(spec, "A"), ticket(spec, "B")
+        self.assertEqual(files_a, {"calc.py", "test_calc.py"})
+        self.assertEqual(files_b, {"fmt.py", "test_fmt.py"})
+        self.assertEqual(files_a & files_b, set())
+        # Each ticket says what to do, besides naming its files.
+        self.assertRegex(task_a, r"\w")
+        self.assertRegex(task_b, r"\w")
         # Neither ticket creates a file, so every file it names exists in the fixture.
-        for name in files_a[0] | files_b[0]:
+        for name in files_a | files_b:
             self.assertTrue((self.copy / name).is_file(), name)
 
 

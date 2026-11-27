@@ -225,7 +225,8 @@ def repo(drawer: draw.Draw, label: str) -> dict:
 
 
 def settings(clone: Path, version: str = VERSION) -> dict:
-    """The confinement every session starts with; the deliver version's also reads, but may not write, its plugin and runs its hook."""
+    """The confinement every session starts with; the deliver version's also reads its plugin, may not write it, and
+    runs its hook."""
     home, deliver = Path.home(), version == "deliver"
     caches = [str(home / cache) for cache in CACHES]
     return {

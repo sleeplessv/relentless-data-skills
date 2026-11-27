@@ -2,7 +2,9 @@
 
 One argument after `--` is run as a shell command line and saved as written; several are joined
 with `shlex.join` first, so both spellings of one command save the same text for `ready` to match.
-It runs in the checkout's top folder, wherever `deliver.py` is called from. The check waits for a slot, runs the command, and saves its stdout and stderr together to
+The command runs in the checkout's top folder, wherever `deliver.py` is called from.
+
+The check waits for a slot, runs the command, and saves its stdout and stderr together to
 `checks/<n>.txt` in the branch's records, then appends a `check` record: `command`, `exit`,
 `output` (that file, relative to the records folder), `commit`, `selected_nothing` and
 `slot_wait_s`. `commit` is null when a tracked file was changed before or after the command, or
@@ -31,9 +33,9 @@ from save import tied_commit
 WAITING = "Waiting for a check slot."
 # The three signs of a command that selected nothing (#256 rule 29), each matched on one line.
 SELECTED_NOTHING = re.compile(
-    r"^Ran 0 tests in "                                            # unittest
-    r"|^[= ]*no tests ran in [\d.]+s[= ]*$"                         # pytest
-    r"|^(?:\d\d:\d\d:\d\d\s+|.*?:\s+)?Nothing to do\.",                # dbt
+    r"^Ran 0 tests in "                                  # unittest
+    r"|^[= ]*no tests ran in [\d.]+s[= ]*$"               # pytest
+    r"|^(?:\d\d:\d\d:\d\d\s+|.*?:\s+)?Nothing to do\.",   # dbt
     re.M,
 )
 ANSI = re.compile(r"\x1b\[[0-9;]*m")

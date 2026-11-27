@@ -74,9 +74,8 @@ class Checks(unittest.TestCase):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
 
-    def preflight(self, *, github: bool = True, **env: str | None) -> tuple[int, str, str]:
-        if github:
-            deliver_kit.github_ok(self.world)
+    def preflight(self, **env: str | None) -> tuple[int, str, str]:
+        deliver_kit.github_ok(self.world)
         result = self.world.deliver("preflight", **env)
         return result.returncode, result.stdout, result.stderr
 

@@ -26,8 +26,8 @@ command, with no pipe, chain, variable or glob.
      and the proof of each, your assumptions, and one line `door: two-way — <reason>` or
      `door: one-way — <reason>`.
 4. Edit.
-5. Run every check, test runs included, as `deliver.py check -- <command>`.
-6. Commit with plain `git commit`.
+5. Commit with plain `git commit -m "<message>"`.
+6. After the last commit, run every check, test runs included, as `deliver.py check -- <command>`.
 7. Write `.deliver/summary.md` and run `deliver.py save summary`.
 8. Run `deliver.py pr`, then `deliver.py ready`, then `deliver.py merge`.
 9. Run `deliver.py finish`, however the run ended. It prints the state line.
@@ -36,8 +36,9 @@ command, with no pipe, chain, variable or glob.
 
 On exit 10 or 20, do what the output says; a question goes to the owner.
 
-When the guard or the permission system refuses a command, never retry it in another form: finish
-what does not depend on it, run `deliver.py finish`, and stop, naming the exact command refused.
+When the guard or the permission system refuses a command other than the probe, never retry it in
+another form: finish what does not depend on it, run `deliver.py finish`, and stop, naming the exact
+command refused.
 
 ## Reading
 

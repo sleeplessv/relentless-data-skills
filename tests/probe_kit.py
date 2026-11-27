@@ -27,6 +27,8 @@ project level, in the form the guard research note gives for each harness:
 written to a user-level settings file. The hook appends each input it gets to
 logs/hook.jsonl. It refuses `gh pr merge` and `gh pr ready`, refuses
 merge-script.sh when the input marks an agent, and asks on oneway-probe.sh.
+The hook and the judges share one rule for merge-script.sh: a command runs it
+when its name is a command word, so reading the script is not refused.
 merge-script.sh, oneway-probe.sh and control-probe.sh each write a marker file
 in logs/ when they run, so a refused command leaves none.
 
@@ -49,17 +51,20 @@ X3, X4 and X5 start one agent. The kit writes a stand-in reader role and a
 stand-in reviewer role into the harness's project definition folder, cuts the
 agent's own worktree inside the probe folder, and saves the entry's brief in the
 shared git directory under deliver/branches/probe-agent/. The prompt asks the
-session to start the reader with the one line `Read <path> and follow it.` The
-brief asks for a word of its own and the role's word. The kit draws each word at
-random, and none is in the prompt. X3 is seen when both words are in the marker
-file the brief names. X4 is seen when both are in the file the brief names in
-.deliver/ of the agent's worktree. A word the kit did not give the reader, such
-as the reviewer's, fails the entry. X5 needs the X3 marker too, then reads the
-model and the token counts from the fields each harness's output keeps them in,
-and prints where. A field counts as the agent's only in an event the output ties
-to the agent's tool call; the rest prints as not tied to the agent. A field the
-output lacks prints as absent, and a token count the output leaves empty or out
-prints blank, never as 0.
+session to start the reader with the one line `Read <path> and follow it.`, and
+on Cortex Code and Codex to wait for it. Codex loads no project role file in a
+folder it has not trusted, so the kit passes each role file it wrote as -c
+overrides on the Codex command line, as it passes the hook: nothing is saved to
+the user's Codex settings. The brief asks for a word of its own and the role's
+word. The kit draws each word at random, and none is in the prompt. X3 is seen
+when both words are in the marker file the brief names. X4 is seen when both are
+in the file the brief names in .deliver/ of the agent's worktree. A word the kit
+did not give the reader, such as the reviewer's, fails the entry. X5 needs the
+X3 marker too, then reads the model and the token counts from the fields each
+harness's output keeps them in, and prints where. A field counts as the agent's
+only in an event the output ties to the agent's tool call; the rest prints as
+not tied to the agent. A field the output lacks prints as absent, and a token
+count the output leaves empty or out prints blank, never as 0.
 
 C1, C3 and R4 change Claude Code's user-level plugins, under ~/.claude/. Each
 writes a stand-in plugin (the stand-in skill, one role file in agents/ and a
@@ -96,15 +101,17 @@ for D6. On Codex the hook's -c override matches every tool and runs
 hooks/guard.py of the probe folder, which it finds with `git rev-parse
 --git-common-dir` from any folder inside the probe folder. Its text is the same
 in every probe folder, so one trust covers every run. Codex runs no hook it has
-not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1,
-D2 and D6 fail with that step and the harness's exit status when their hook
-logged no input. The hook writes a refusal line to logs/hook.jsonl after the
-input of each command it refuses. D1 is seen when an agent's input, marked by
-agent_id, reached the hook for a command that runs merge-script.sh, the hook
-logged its refusal of that command and the merge marker is absent. D2 records
-the tool name of the session's call whose input holds the line that hands the
-brief to the agent. D6 runs only after D1 was seen and D2 recorded in the same
-run, and otherwise prints failed with the reason. The hook refuses the edit tool
+not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1 to
+D4 and D6 fail with that step and the harness's exit status when their hook
+logged no input and the output shows a tool call; with no tool call in the
+output, the line says so and names no trust step. The hook writes a refusal line
+to logs/hook.jsonl after the input of each command it refuses. D1 is seen when
+an agent's input, marked by agent_id, reached the hook for a command that runs
+merge-script.sh, the hook logged its refusal of that command and the merge
+marker is absent. D2 records the tool name of the session's call whose input
+names the reader role as its agent_type; it never reads the message the call
+hands over. D6 runs only after D1 was seen and D2 recorded in the same run, and
+otherwise prints failed with the reason. The hook refuses the edit tool
 (apply_patch, Edit or Write) when the input's agent_type is the reviewer role.
 D6 is seen when the hook logged that refusal and the file the brief names is
 absent. R3 registers subagentStart in .cursor/hooks.json and records whether the
@@ -125,23 +132,31 @@ which of task, agent, agent_output and kill_agent it has; one that has task or
 agent must show its refused call in the output. K2 and K3 need both leaves'
 lists empty and the output to show each start's mode and parent; K2 also needs
 the leaves at once, and K3 the session's agent_output wait and a second author
-whose leaves start in the background, which it reports. K4, K5 and D4 count
-the agent as called back only when its second marker holds a word its first
-brief gave it to remember and write nowhere; that brief deleted itself. K4
-needs a kill_agent call that names the agent and succeeded, before the resume,
-and no finished sleep. K5 reads the model from the events tied to the call that
-resumed the agent and fails when they name none. D4 needs a close_agent call
-that names the agent's thread and completed, then a call to that thread. D3 is
-seen only when both spawn_agent calls started before either ended. D5 runs Codex
-with the temporary folders kept out of its writable directories and cuts the
-agent's worktree beside the session's folder. R2 and A4 ask for 4 agents at
-once, never more; each agent keeps the longest list of agents it saw running
-beside it. They record no cap up to 4 when a list holds all 4, and otherwise
-the most at once, naming no cap. R5 names each file it makes in
-~/.cursor/agents/ before making it, never touches one it did not make, and
-removes it when the probe ends, also when it fails or is interrupted. A2 and A3
-add the guard hook: A2 is seen when the hook logged the agent's write_file call
-to its marker, no file was written, and the agent reported the call refused. A3
+whose leaves start in the background, which it reports. K4, K5 and D4 count the
+agent as called back only when its second marker holds a word its first brief
+gave it to remember and write nowhere; that brief deleted itself. K4 needs a
+kill_agent call that names the agent and succeeded, before the resume, and no
+finished sleep. When the resume call failed, K4 and K5 say so, with the
+harness's reason, its ids and paths left out. K5 reads the model from the events
+tied to the call that resumed the agent and fails when they name none. D3 and D4
+add the guard hook and read the agents from its log, since Codex's output shows
+no agent start: a start is the session's call whose input names the reader role
+as its agent_type, and an agent's call carries its agent_id. D4 needs the
+session's interrupt_agent call that names the agent, then its followup_task call
+that names it, then a call of that agent's. D3 needs two starts and two agents,
+and is seen only when the output shows both spawn_agent calls started before
+either ended. D5 runs Codex with the temporary folders kept out of its writable
+directories and cuts the agent's worktree beside the session's folder. R2 and A4
+ask for 4 agents at once, never more; each agent keeps the longest list of
+agents it saw running beside it. They record no cap up to 4 when a list holds
+all 4, and otherwise the most at once, naming no cap. R5 names each file it
+makes in ~/.cursor/agents/ before making it, never touches one it did not make,
+and removes it when the probe ends, also when it fails or is interrupted. A2 and
+A3 add the guard hook: A2 is seen when no file was written and the agent
+reported the write refused, with the hook having logged its write_file call to
+the marker or, as Antigravity takes a withheld tool away, no write_file call at
+all. On Antigravity the author role's file lists the reader's tools and
+invoke_subagent, since a file with no tools line gives no shell and no write. A3
 starts the agent whose file names flash with Model pro beside two agents whose
 files name no tier, one called with pro and one with flash, and compares the
 models in their hook inputs; it names the winner only when pro and flash gave
@@ -167,6 +182,7 @@ The kit is never installed. Its tests are tests/test_probe_kit.py.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import re
@@ -180,6 +196,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import tomllib
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -233,7 +250,9 @@ COMMANDS = {
     "cortex": ["cortex", "-p", "{prompt}", "--output-format", "stream-json", "--private", "--bypass"],
     "codex": ["codex", "exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "{prompt}"],
     "cursor": ["cursor-agent", "-p", "--output-format", "stream-json", "--force", "{prompt}"],
-    "antigravity": ["agy", "-p", "{prompt}", "--output-format", "stream-json", "--mode", "accept-edits"],
+    # accept-edits alone refuses every command in print mode; the allow rule holds for this run only, never saved.
+    "antigravity": ["agy", "-p", "{prompt}", "--output-format", "stream-json", "--mode", "accept-edits",
+                    "--settings", '{"permissions": {"allow": ["command(*)"]}}'],
 }
 SKILL_DIRS = {"cortex": ".cortex/skills", "codex": ".agents/skills", "cursor": ".cursor/skills",
               "antigravity": ".agents/skills"}
@@ -408,10 +427,16 @@ def setup_agent(entry: str, task: str) -> Callable[[str, Path, str], None]:
     return setup
 
 
+# What makes the session wait for the agent: a headless Cortex Code or Codex session that ends first cancels it
+# (#405). Cortex Code's is K1 to K3's WAIT; Codex's is the wording that made `codex exec` wait in a real run.
+CODEX_WAIT = "Then call wait_agent for it and end only when it has finished. "
+
+
 def agent_prompt(entry: str) -> Callable[[str], str]:
     line = f"Read {{work}}/.git/{BRIEFS}/brief-{entry.lower()}.md and follow it."
     return lambda harness: (f"Start one agent of the role {READER} and give it this line, word for word, as its "
-                            f"whole prompt: {line} Do not open that file yourself, and do nothing else.")
+                            f"whole prompt: {line} {({'cortex': WAIT, 'codex': CODEX_WAIT}).get(harness, '')}"
+                            f"Do not open that file yourself, and do nothing else.")
 
 
 def written_by(path: Path, run: Finished) -> str:
@@ -614,6 +639,8 @@ def run_in_folder(harness: str, entry: str, args: argparse.Namespace, saved: Pat
             argv += ["-c", args.connection]
         if probe.hook and harness == "codex":
             argv[-1:-1] = codex_hook(root / "work")  # before the prompt, which comes last
+        if harness == "codex":
+            argv[-1:-1] = codex_roles(root / "work")
         argv[-1:-1] = probe.args
         relayed = [sys.executable, str(Path(__file__).resolve()), "--relay", str(out), str(err),
                    args.connection or "", *argv]
@@ -723,10 +750,21 @@ def codex_hook(work: Path) -> list[str]:
                   f'command="{hook_command("codex", work)}",timeout=20}}]}}]']
 
 
+def codex_roles(work: Path) -> list[str]:
+    """Each Codex role file the kit wrote, as session settings: Codex loads no project role file in a folder it
+    has not trusted, and a per-run trust override does not change that (#405). Nothing is saved."""
+    argv = []
+    for path in sorted((work / DEFINITION_DIRS["codex"]).glob("*.toml")):
+        role = tomllib.loads(path.read_text())
+        argv += ["-c", f"agents.{role['name']}.config_file={json.dumps(str(path))}",
+                 "-c", f"agents.{role['name']}.description={json.dumps(role['description'])}"]
+    return argv
+
+
 CODEX_RULE = ('prefix_rule(pattern = ["./oneway-probe.sh"], decision = "prompt",\n'
               '    justification = "one-way command, needs the owner\'s answer")\n')
 GUARD = r'''import json, os, sys
-import glob
+import glob, re
 from pathlib import Path
 
 # The stand-in guard hook, seeded from the guard research fixture. Its argument names the
@@ -761,6 +799,13 @@ with open(Path(__file__).resolve().parent.parent / "logs" / "hook.jsonl", "a") a
     log.write(line + "\n")
 if form == "sessionStart":  # Cursor's session start: logged only, no decision
     sys.exit(0)
+shell = cmd
+if form == "pre":  # Antigravity: the shell command of a run_command call
+    args = (data.get("toolCall") or {}).get("args")
+    shell = str(args.get("CommandLine") or "") if isinstance(args, dict) else ""
+
+
+{runs_merge}
 
 
 def out(decision, reason):
@@ -782,7 +827,7 @@ def out(decision, reason):
 
 if "gh pr merge" in cmd or "gh pr ready" in cmd:
     out("deny", "GUARD-A: raw gh pr merge/ready is refused to every agent")
-if "merge-script.sh" in cmd and is_helper:
+if runs_merge(shell) and is_helper:  # the judges' rule: reading the script is allowed, running it is not
     out("deny", "GUARD-B: the merge script is refused to a helper")
 if "oneway-probe" in cmd:
     out("ask", "GUARD-C: one-way command, needs the owner's answer")
@@ -813,7 +858,7 @@ def write_guard(harness: str, work: Path) -> None:
     """The hook, its project-level registration, the stand-in commands, logs/ and an empty folder sub/."""
     for folder in ("hooks", "logs", "sub"):
         (work / folder).mkdir()
-    (work / "hooks" / "guard.py").write_text(GUARD)
+    (work / "hooks" / "guard.py").write_text(GUARD.replace("{runs_merge}", inspect.getsource(runs_merge)))
     for name, body in STANDINS.items():
         (work / name).write_text("#!/bin/sh\n" + body.format(logs=shlex.quote(str(work / "logs"))))
         (work / name).chmod(0o755)
@@ -1289,8 +1334,15 @@ TRUST = (f"Trust the stand-in hook once in Codex: in a terminal in the root of t
          f"{shlex.join(['codex', *codex_hook(Path('.'))])}, type /hooks, trust the hook, then quit.")
 
 
+TALK = ("agent_message", "reasoning", "error", "todo_list")  # Codex's output items that are not tool calls
+
+
 def no_input(run: Finished) -> str:
-    """D1, D2 and D6's verdict when the hook logged no input: Codex runs no hook it has not trusted."""
+    """The verdict when the hook logged no input: Codex runs no hook it has not trusted, which matters only when
+    the output shows the session made a tool call."""
+    if not any(str(event.get("type")).startswith("item.") and isinstance(event.get("item"), dict)
+               and event["item"].get("type") not in TALK for event in events_of(run.out)):
+        return f"the hook logged no input, the output shows no tool call, and the harness exited {run.exit_code}"
     return (f"the hook logged no input and the harness exited {run.exit_code}. "
             f"Codex runs no hook it has not trusted. {TRUST}")
 EDIT_TOOLS = ("apply_patch", "Edit", "Write")  # the edit tool's names in Codex's hook input, as in GUARD's rule D
@@ -1392,6 +1444,19 @@ def holds(value: object, text: str) -> bool:
     return isinstance(value, list) and any(holds(item, text) for item in value)
 
 
+def starts_of(log: list[dict]) -> list[dict]:
+    """The session's agent starts: its calls whose input names the reader role as agent_type. The message the
+    call hands over is not read: Codex's hook input does not show it as text (#405)."""
+    return [i for i in inputs(log) if "agent_id" not in i and isinstance(i.get("tool_input"), dict)
+            and i["tool_input"].get("agent_type") == READER]
+
+
+def agents_of(log: list[dict]) -> list[str]:
+    """The distinct agent_id values of the reader role's calls, in the order they reached the hook."""
+    ids = [str(i["agent_id"]) for i in inputs(log) if i.get("agent_id") and i.get("agent_type") == READER]
+    return list(dict.fromkeys(ids))
+
+
 def judge_d2(harness: str, run: Finished) -> tuple[str, str]:
     log = hook_log(run.work)
     if not log:
@@ -1400,15 +1465,14 @@ def judge_d2(harness: str, run: Finished) -> tuple[str, str]:
         return "failed", f"harness exited {run.exit_code}"
     if not any("agent_id" in i for i in inputs(log)):
         return "failed", "no agent's call reached the hook"
-    handoff = f"Read {run.work}/.git/{BRIEFS}/brief-d2.md and follow it."  # the line the prompt asks to hand over
-    starts = [i for i in inputs(log) if "agent_id" not in i and holds(i.get("tool_input"), handoff)]
+    starts = starts_of(log)
     if not starts:
-        return "failed", "no call of the session's that hands the brief's line to an agent reached the hook"
+        return "failed", "no call of the session's that starts an agent of the reader role reached the hook"
     names = sorted({i.get("tool_name") for i in starts}, key=str)
     if not all(isinstance(name, str) and name for name in names):
         return "failed", "the hook input of the agent-starting call holds no tool name"
     if len(names) > 1:
-        return "failed", f"{len(names)} tools of the session's named the brief"
+        return "failed", f"{len(names)} tools of the session's started an agent of the reader role"
     if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", names[0]):
         return "failed", "the agent-starting tool's name is not a plain name"
     return "recorded", f"the agent-starting tool reaches the hook as {names[0]}"
@@ -1510,6 +1574,11 @@ def together(entry: str, key: str, count: int) -> str:
             f"then best=$n; ls {live}-* > {seen}; fi; [ $n -ge {count} ] && break; sleep 1; done; rm {live}-{key}")
 
 
+# On Antigravity a role file with no tools line gives no shell and no file write, so the author's names the
+# reader's tools and invoke_subagent (#405). Elsewhere the author's file has no tools line and keeps every tool.
+AUTHOR_TOOLS = {"antigravity": TOOLS["antigravity"][0].replace("]", ", invoke_subagent]")}
+
+
 def setup_limit(entry: str, briefs: dict[str, str], roles: tuple[str, ...] = (READER,), count: int = 0,
                 tier: str | None = None, worktree: bool = False) -> Callable[[str, Path, str], None]:
     """The roles' files, a brief per key, and for D5 a worktree beside the probe folder."""
@@ -1520,6 +1589,8 @@ def setup_limit(entry: str, briefs: dict[str, str], roles: tuple[str, ...] = (RE
         for role in roles:
             folder.mkdir(parents=True, exist_ok=True)
             tools = None if role in (AUTHOR, LEAF) else TOOLS.get(harness, (None, None))[role == REVIEWER]
+            if role == AUTHOR and harness in AUTHOR_TOOLS:
+                tools = AUTHOR_TOOLS[harness]
             text = role_file(harness, role, role.removeprefix("probe-"), tools, words[role])
             if tier and role == READER:
                 text = text.replace("\n---\n\n", f"\nmodel: {tier}\n---\n\n", 1)
@@ -1582,14 +1653,20 @@ def tool_calls(events: list[dict]) -> list[Call]:
 
 
 def call_results(events: list[dict]) -> dict[str, tuple[str, bool]]:
-    """Each tool_result item by the id of its call: its content as text, and whether it is an error."""
+    """Each tool_result item by the id of its call: its content as text, and whether it is an error.
+
+    Cortex Code gives a failed call's error as plain content with no flag, such as "task tool failed: ..." (#405).
+    """
     found = {}
     for event in events:
         message = event.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         for item in content if isinstance(content, list) else ():
             if isinstance(item, dict) and item.get("type") == "tool_result" and item.get("tool_use_id"):
-                found[str(item["tool_use_id"])] = (json.dumps(item.get("content")), item.get("is_error") is True)
+                given = item.get("content")
+                error = item.get("is_error") is True or (isinstance(given, str)
+                                                         and re.match(r"\w+ tool failed:", given) is not None)
+                found[str(item["tool_use_id"])] = (json.dumps(given), error)
     return found
 
 
@@ -1732,6 +1809,16 @@ def resumed(run: Finished, entry: str, calls: list[Call], target: str, after: in
         return "failed", "the output shows no task call that resumes that agent"
     if again < after:
         return "failed", "the agent was resumed before it was killed"
+    text, error = call_results(events_of(run.out)).get(calls[again].id, ("", False))
+    if error:  # with the harness's reason, its ids and paths left out
+        content = json.loads(text or "null")
+        if isinstance(content, list):
+            content = " ".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
+        said = content if isinstance(content, str) else ""
+        # A word goes when it holds a digit, a slash or an id the kit knows for that agent, quotes and all.
+        known = "".join(f"|{re.escape(str(k))}" for k in (target, calls[again].id) if k)
+        reason = " ".join(re.sub(rf"\S*(?:[\d/\\]{known})\S*", "...", said).split())[:200]
+        return "failed", "the resume call failed" + (f": {reason}" if reason else "")
     return called_back(run, entry)
 
 
@@ -1779,21 +1866,17 @@ def judge_k5(harness: str, run: Finished) -> tuple[str, str]:
                         f".message.model")
 
 
-def collab_items(events: list[dict], kind: str = "item.completed") -> list[dict]:
-    """Codex's collab_tool_call items of the events of that type, in order."""
-    return [event["item"] for event in events if event.get("type") == kind and isinstance(event.get("item"), dict)
-            and event["item"].get("type") == "collab_tool_call"]
-
-
-def receivers(item: dict) -> list[str]:
-    ids = item.get("receiver_thread_ids")
-    return [str(i) for i in ids if i] if isinstance(ids, list) else []
-
-
 def judge_d3(harness: str, run: Finished) -> tuple[str, str]:
     ran = sum(marker(run, "D3", key, READER) for key in ("one", "two"))
     if ran < 2:
         return "failed", f"{ran} of the 2 agents asked for in one message ran"
+    log = hook_log(run.work)  # Codex's output shows no agent start; its hook log does (#405)
+    if not log:
+        return "failed", no_input(run)
+    starts, agents = len(starts_of(log)), len(agents_of(log))
+    if (starts, agents) != (2, 2):
+        return "failed", (f"both agents ran, but the hook log shows {starts} starts of the reader role and "
+                          f"{agents} agents of it, not 2 and 2")
     # Two calls under way at once come from one model step: the next step waits for the calls before it.
     under_way = set()
     for event in events_of(run.out):
@@ -1807,30 +1890,51 @@ def judge_d3(harness: str, run: Finished) -> tuple[str, str]:
     if len(under_way) >= 2:
         return "seen", ("both agents ran, and both spawn_agent calls started before either ended, so one model step "
                         "made them")
+    if not any(isinstance(event.get("item"), dict) and event["item"].get("tool") == "spawn_agent"
+               for event in events_of(run.out)):  # this Codex version's output shows no agent start (#405)
+        return "recorded", ("both agents ran and the hook log shows 2 starts and 2 agents; the output shows no "
+                            "spawn_agent item, so whether one model step made them was not measured")
     return "failed", ("both agents ran, but the output does not show both starts in one model step, so the step "
                       "was not measured")
+
+
+def session_call(log: list[dict], tool: str, start: int) -> int | None:
+    """The index in the hook inputs of the session's first call of that tool from `start` on. Codex's hook names
+    a collaboration tool with a prefix, as collaborationspawn_agent (#405), so the name ends with the tool's."""
+    calls = inputs(log)
+    return next((n for n in range(start, len(calls)) if "agent_id" not in calls[n]
+                 and str(calls[n].get("tool_name")).endswith(tool)), None)
 
 
 def judge_d4(harness: str, run: Finished) -> tuple[str, str]:
     if not marker(run, "D4", "first", READER):
         return "failed", "no agent of the reader role ran"
-    items = collab_items(events_of(run.out))
-    spawn = next((item for item in items if item.get("tool") == "spawn_agent" and receivers(item)), None)
-    if spawn is None:
-        return "failed", "the output shows no spawn_agent call that names the agent's thread"
-    target = receivers(spawn)[0]
-    closes = [n for n, item in enumerate(items) if item.get("tool") == "close_agent"]
-    if not closes:
-        return "failed", "the output shows no close_agent call, so the agent was not unloaded"
-    close = next((n for n in closes if target in receivers(items[n])), None)
-    if close is None:
-        return "failed", "the close_agent call names another agent"
-    if items[close].get("status") != "completed":
-        return "failed", "the close_agent call did not succeed"
-    if not any(target in receivers(item) and item.get("tool") not in ("close_agent", "wait", "wait_agent")
-               for item in items[close + 1:]):
-        return "failed", "the output shows no call to the agent after its close"
-    return called_back(run, "D4") or ("seen", "the closed agent answered with its earlier context")
+    log = hook_log(run.work)  # Codex's output shows no agent start and no interrupt; its hook log does (#405)
+    if not log:
+        return "failed", no_input(run)
+    calls, agents = inputs(log), agents_of(log)
+    if not agents:
+        return "failed", "the hook log shows no call of an agent of the reader role"
+    target = agents[0]
+    first = next(n for n, i in enumerate(calls) if str(i.get("agent_id")) == target)
+    # The calls may name the agent by its agent_id or by the task_name its start gave it (#405).
+    start = next((i for i in reversed(calls[:first]) if i in starts_of(log)), {})
+    task = start.get("tool_input", {}).get("task_name")
+    def named(n: int) -> bool:
+        given = calls[n].get("tool_input")
+        return holds(given, target) or (isinstance(task, str) and task in strings(given))
+    stop = session_call(log, "interrupt_agent", first)
+    if stop is None:
+        return "failed", "the hook log shows no interrupt_agent call of the session's after the agent's first call"
+    if not named(stop):
+        return "failed", "the interrupt_agent call names another agent"
+    again = session_call(log, "followup_task", stop)
+    if again is None or not named(again):
+        return "failed", "the hook log shows no followup_task call to the agent after its interrupt"
+    if not any(str(i.get("agent_id")) == target for i in calls[again + 1:]):
+        return "failed", "the hook log shows no call of the agent's after the follow-up"
+    return called_back(run, "D4") or ("seen", "the interrupted agent answered the follow-up with its earlier "
+                                              "context")
 
 
 def judge_d5(harness: str, run: Finished) -> tuple[str, str]:
@@ -1902,12 +2006,16 @@ def judge_a2(harness: str, run: Finished) -> tuple[str, str]:
                               for line in hook_log(run.work)):
             return "failed", "the agent wrote the file through run_command, not the withheld tool"
         return "failed", "the withheld tool wrote the file"
-    if not writes:
-        return "failed", "the agent made no write_file call to the marker, so the withheld tool's absence is not shown"
     said = []  # the first ending after `result` in each report the hook saw
     for line in lines:
         words = re.findall(r"[\w-]+", str(line.get("command")))
         said += [word for word in words[words.index("result"):] if word in ENDINGS][:1] if "result" in words else []
+    if not writes:  # Antigravity takes a withheld tool away, so the agent has none to call (#405)
+        if said[-1:] == ["refused"]:
+            return "seen", ("the withheld write_file tool was absent: the agent made no call to it, wrote no file "
+                            "and reported it could not")
+        return "failed", "the agent made no write_file call and did not report it refused, so the tool's absence is " \
+                         "not shown"
     if said[-1:] == ["refused"]:
         return "seen", "the agent's write_file call to the marker was refused, as it reported"
     if said[-1:] == ["failed"]:
@@ -2061,10 +2169,14 @@ def cap_prompt(tool: str, unit: str) -> Callable[[str], str]:
                       f"Then wait for all four. Do not open those files yourself, and do nothing else.")
 
 
+# The arguments the prompts give spawn_agent besides the message; the tool also takes task_name, which the model
+# fills, and offers the kit's roles as agent_type once codex_roles() loads them (#405).
+CODEX_START = "agent_type {role}, fork_turns none"
+
+
 def spawn_prompt(entry: str) -> Callable[[str], str]:
-    return lambda h: (f"Call spawn_agent once with agent_type {READER}, fork_turns none and the message: "
-                      f"{line_of(entry, 'inside')} Wait for it with wait_agent. Do not open that file yourself, and "
-                      f"do nothing else.")
+    return lambda h: (f"Call spawn_agent once with {CODEX_START.format(role=READER)} and the message: "
+                      f"{line_of(entry, 'inside')} {CODEX_WAIT}Do not open that file yourself, and do nothing else.")
 
 
 def a3_prompt(harness: str) -> str:
@@ -2074,6 +2186,8 @@ def a3_prompt(harness: str) -> str:
 
 
 A3_BRIEF = CONTROL + " Then " + WRITE[0].lower() + WRITE[1:]
+# Resume reads the saved session, and --private saves none, so K4 and K5 run without it (#405).
+RESUMABLE = [part for part in COMMANDS["cortex"] if part != "--private"]
 PROBES.update({
     "K1": Probe(lambda h: (f"Call the task tool once with {start(AUTHOR, 'false', 'K1', 'fg')} Then call the task "
                            f"tool once with {start(AUTHOR, 'true', 'K1', 'bg')} Then call agent_output with wait "
@@ -2088,21 +2202,21 @@ PROBES.update({
                 setup=setup_limit("K3", {"author": author_brief("first", "second", "false"), "first": LEAF_BRIEF,
                                          "second": LEAF_BRIEF, "variant": author_brief("vfirst", "vsecond", "true"),
                                          "vfirst": WRITE, "vsecond": WRITE}, roles=(AUTHOR, LEAF), count=2)),
-    "K4": Probe(resume_prompt("K4", True), judge_k4, setup=setup_limit("K4", {
+    "K4": Probe(resume_prompt("K4", True), judge_k4, command=RESUMABLE, setup=setup_limit("K4", {
         "first": KEEP + WRITE + FORGET + " Then run the bash command `sleep 300 && touch {work}/probe-k4-slept.txt`.",
         "second": RECALL})),
-    "K5": Probe(resume_prompt("K5", False), judge_k5, setup=setup_limit("K5", {"first": KEEP + WRITE + FORGET,
-                                                                               "second": RECALL})),
-    "D3": Probe(lambda h: (f"In one message, make two spawn_agent calls, both with agent_type {READER} and fork_turns "
-                           f"none: the first with the message: {line_of('D3', 'one')} and the second with the "
-                           f"message: {line_of('D3', 'two')} Then wait for both with wait_agent. Do not open those "
-                           f"files yourself, and do nothing else."),
-                judge_d3, setup=setup_limit("D3", {"one": WRITE, "two": WRITE})),
-    "D4": Probe(lambda h: (f"Step 1: call spawn_agent with agent_type {READER}, fork_turns none and the message: "
-                           f"{line_of('D4', 'first')} Wait for it with wait_agent. Step 2: call close_agent for it. "
-                           f"Step 3: send it this message with followup_task: {line_of('D4', 'second')} Wait for its "
-                           f"reply with wait_agent. Do not open those files yourself, and do nothing else."),
-                judge_d4, setup=setup_limit("D4", {"first": KEEP + WRITE + FORGET, "second": RECALL})),
+    "K5": Probe(resume_prompt("K5", False), judge_k5, command=RESUMABLE,
+                setup=setup_limit("K5", {"first": KEEP + WRITE + FORGET, "second": RECALL})),
+    "D3": Probe(lambda h: (f"In one message, make two spawn_agent calls, both with {CODEX_START.format(role=READER)}: "
+                           f"the first with the message: {line_of('D3', 'one')} and the second with the "
+                           f"message: {line_of('D3', 'two')} Then call wait_agent for both and end only when both "
+                           f"have finished. Do not open those files yourself, and do nothing else."),
+                judge_d3, hook=True, setup=setup_limit("D3", {"one": WRITE, "two": WRITE})),
+    "D4": Probe(lambda h: (f"Step 1: call spawn_agent with {CODEX_START.format(role=READER)} and the message: "
+                           f"{line_of('D4', 'first')} Wait for it with wait_agent. Step 2: call interrupt_agent for "
+                           f"it. Step 3: send it this message with followup_task: {line_of('D4', 'second')} "
+                           f"{CODEX_WAIT}Do not open those files yourself, and do nothing else."),
+                judge_d4, hook=True, setup=setup_limit("D4", {"first": KEEP + WRITE + FORGET, "second": RECALL})),
     "D5": Probe(spawn_prompt("D5"), judge_d5, args=CODEX_NO_TMP, setup=setup_limit("D5", {
         "inside": WRITE + " Then write the word {outside}, a space and your role word to the file probe-d5-outside.txt "
                           "in your worktree, the folder {root}/outside."}, worktree=True)),

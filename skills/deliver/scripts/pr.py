@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 import tempfile
+from pathlib import Path
 
 import core
 import render
@@ -69,7 +70,7 @@ def main(args: list[str], run: core.Run) -> None:
     run.record("pr", number=number, url=url)
 
 
-def _unsaved(run: core.Run, folder) -> list[str]:
+def _unsaved(run: core.Run, folder: Path) -> list[str]:
     """The kinds still to save: missing from the records, or still in the drop folder."""
     request = folder / "request.md"
     ticket = request.is_file() and request.read_text(encoding="utf-8").startswith("Source: ticket #")

@@ -20,12 +20,17 @@ import deliver_kit  # noqa: E402
 
 entry_check = deliver_kit.load("entry_check")
 start = deliver_kit.load("start")
-MISSING = "warning: no docs/agents/stack.toml: every stack setting has its default"
+EMPTY_CHECK = ("warning: check_command is empty in docs/agents/stack.toml, so ready relies on the check plan's "
+               "commands: set check_command there to the command that runs this repo's checks")
+NO_STACK = "warning: no docs/agents/stack.toml: every stack setting has its default"
+MISSING = f"{NO_STACK}\n{EMPTY_CHECK}"
 GRANT = ("Run grant: push this branch, open and update its PR, mark it ready and merge it through the scripts, "
          "file follow-up tickets.")
 PROBE = "Next: run gh pr merge --deliver-guard-probe, which the guard refuses, then deliver.py start --resume"
 BODY = "## What to build\n\nAdd a --json flag.\n\n## Acceptance criteria\n\n- [ ] it parses\n- [ ] the help names it\n"
 REPO_VIEW = ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
+PREFLIGHT_GH = [["auth", "token"], ["repo", "view", "--json", "nameWithOwner,defaultBranchRef,viewerPermission,hasIssuesEnabled"],
+                ["api", "repos/owner/repo/rules/branches/main"]]
 TREE = "Source: working tree, requirements written from the diff\n"
 SPY = """\
 import sys
@@ -43,7 +48,8 @@ class Start(unittest.TestCase):
         self.world = deliver_kit.World(self.addCleanup)
         self.work = self.world.work
         self.git_dir = self.work / ".git"
-        self.world.gh_answer(["repo", "view"], "main\n")
+        self.world.gh_answer(REPO_VIEW, "main\n")
+        deliver_kit.github_ok(self.world)
         self.world.install_upstream()
 
     def issue(self, number: int, body: str = BODY, comments: tuple[str, ...] = ()) -> None:
@@ -120,7 +126,7 @@ class Start(unittest.TestCase):
         self.assertEqual(self.without_at(self.world.records(branch)),
                          [{"event": "save", "kind": "request", "file": "request.md", "commit": tip}])
         self.assertEqual(self.excluded(), [".deliver/"])
-        self.assertEqual(self.calls(), [["issue", "view", "7", "--json", "title,body,comments"], REPO_VIEW])
+        self.assertEqual(self.calls(), [["issue", "view", "7", "--json", "title,body,comments"], REPO_VIEW, *PREFLIGHT_GH])
         self.assertEqual(self.world.state_lines("preflight-stops.jsonl"), [])
 
     def test_after_start_the_probe_and_preflight_pass(self):
@@ -162,7 +168,7 @@ class Start(unittest.TestCase):
         self.assertEqual(self.without_at(self.world.records("feat/flag")),
                          [{"event": "save", "kind": "request", "file": "request.md", "commit": head}])
         self.assertEqual(self.calls(), [REPO_VIEW, ["pr", "list", "--head", "feat/flag", "--state", "merged",
-                                                    "--json", "number"]])
+                                                    "--json", "number"], *PREFLIGHT_GH])
 
     def test_a_request_on_the_command_line_is_a_usage_error(self):
         result = self.world.deliver("start", "request", "Add a --json flag.")
@@ -216,7 +222,7 @@ class Start(unittest.TestCase):
                                                                   encoding="utf-8")
         result = self.world.deliver("start")
         run, branch = self.started(result)
-        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n{PROBE}\n")
+        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n{EMPTY_CHECK}\n{PROBE}\n")
         self.world.probe()
         self.assertEqual(self.world.deliver("start", "--resume").stdout.splitlines()[-2:], [
             "Preflight passed.",
@@ -320,7 +326,7 @@ class Start(unittest.TestCase):
         run, branch = self.started(self.world.deliver("start", "7"))
         self.assert_ends(self.world.deliver("start", "--resume"), 10, "\n".join([
             f"Resuming run {run} on branch {branch}, started {self.mark()['started']}.",
-            "Saved: request.", "Checks: none.", MISSING,
+            "Saved: request.", "Checks: none.", NO_STACK,
             f"REFUSED preflight.guards-off: the guards are off: no refusal of the guard probe is logged for run {run} "
             "since its mark was written",
             "Next: turn the hooks on, run gh pr merge --deliver-guard-probe, then run deliver.py preflight"]) + "\n")

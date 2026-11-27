@@ -20,11 +20,13 @@ the same way, and a pass prints only its warnings and saves nothing.
 """
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import check_guard
 import checks_claude
+import checks_env
 import core
 import deps
 import settings
@@ -53,6 +55,7 @@ class Context:
     harness: str = "claude-code"
     guard_probe: str = "missing"
     permission_mode: str | None = None
+    repo: dict | None = None
 
 
 Check = Callable[[Context], "Stop | Warn | None"]
@@ -79,6 +82,17 @@ CHECKS: list[Check] = [
     checks_claude.check_agents_at_once,
     checks_claude.check_effort,
     check_guard.check_guard_probe,
+    checks_env.check_python,
+    checks_env.check_writable,
+    checks_env.check_signing,
+    checks_env.check_gh_signed_in,
+    checks_env.check_github,
+    checks_env.check_push,
+    checks_env.check_issues,
+    checks_env.check_branch_rules,
+    checks_env.check_check_command,
+    checks_env.check_reach,
+    checks_env.check_dependents,
     deps.check_required_skills,
     deps.check_skill_hashes,
 ]
@@ -110,14 +124,17 @@ def run(run: core.Run, checks: list[Check] | None = None, *, probe: bool = True)
             print(f"warning: {line}")
         return
     run_id = run.mark["run"]
-    run.record(
-        "preflight", run=run_id, result="stop" if stop else "pass", stops=[stop.code] if stop else [],
-        warnings=warnings, guard_probe=ctx.guard_probe, permission_mode=ctx.permission_mode, harness=ctx.harness,
-    )
+    unsaved = (OSError,) if stop and stop.code == "preflight.cannot-write" else ()
+    with contextlib.suppress(*unsaved):
+        run.record(
+            "preflight", run=run_id, result="stop" if stop else "pass", stops=[stop.code] if stop else [],
+            warnings=warnings, guard_probe=ctx.guard_probe, permission_mode=ctx.permission_mode, harness=ctx.harness,
+        )
     for line in warnings:
         print(f"warning: {line}")
     if stop:
-        core.append_state(STOP_LOG, run=run_id, code=stop.code, harness=ctx.harness)
+        with contextlib.suppress(*unsaved):
+            core.append_state(STOP_LOG, run=run_id, code=stop.code, harness=ctx.harness)
         raise core.Refused(stop.code, stop.next_command, **stop.fields)
     print(CLEAN)
 

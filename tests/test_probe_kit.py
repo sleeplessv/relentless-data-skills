@@ -147,14 +147,25 @@ sys.exit(int(os.environ.get("STANDIN_EXIT", "0")))
 # the agent reads the brief the one-line prompt names and writes the brief's word and its role's word
 # where the brief says. It prints the session's and the agent's model and tokens in its harness's output
 # format, with a tool call that has a `model` argument (Codex) and a token limit in modelUsage (Claude
-# Code, Cortex Code) beside them. Knobs: STANDIN_AGENT_OFF starts no agent; STANDIN_SESSION_DOES has the
+# Code, Cortex Code) beside them. Codex loads a role only from the role files its -c overrides name, and on
+# Cortex Code and Codex an agent the prompt does not wait for is cancelled before it writes (#405). Knobs:
+# STANDIN_AGENT_OFF starts no agent; STANDIN_SESSION_DOES has the
 # session read the brief itself, so the file lacks a role's word; STANDIN_ROLE starts that role instead
 # of the one asked for; STANDIN_ROLE_ONLY writes the role's word without the brief's; STANDIN_PARENT_ONLY
 # prints no event of the agent's; STANDIN_COUNT makes each output count null, omit or zero;
 # STANDIN_NO_MODEL and STANDIN_NO_TOKENS leave that field out.
+LOADED_ROLES = r'''
+
+def loaded_roles(args):
+    """The role files Codex loads: each named by an agents.<name>.config_file override that has a description."""
+    given = dict(arg.split("=", 1) for arg in args if arg.startswith("agents.") and "=" in arg)
+    return [Path(json.loads(value)) for key, value in given.items() if key.endswith(".config_file")
+            and key.removesuffix(".config_file") + ".description" in given]
+'''
 AGENT_HARNESS = r'''#!{python}
 import json, os, re, subprocess, sys, tomllib
 from pathlib import Path
+{loaded_roles}
 name, args = Path(sys.argv[0]).name, sys.argv[1:]
 prompt = args[args.index("-p") + 1] if name in ("claude", "cortex", "agy") else args[-1]
 cwd = Path.cwd()
@@ -169,9 +180,13 @@ worktrees = subprocess.run(["git", "worktree", "list", "--porcelain"], capture_o
 
 
 def role_words():
-    """Each role's word by its name, read in this harness's format from its own folder only."""
+    """Each role's word by its name, read in this harness's format from its own folder only, or on Codex from
+    the role files the command line names."""
     words = {}
-    for path in sorted((cwd / folder).glob("*.toml" if name == "codex" else "*.md")):
+    paths = sorted((cwd / folder).glob("*.toml" if name == "codex" else "*.md"))
+    if name == "codex":  # Codex loads no project role file in an untrusted folder: only the -c overrides
+        paths = loaded_roles(args)
+    for path in paths:
         text = path.read_text()
         if name == "codex":
             role = tomllib.loads(text)
@@ -191,7 +206,10 @@ def follow(own_word):
 
 
 words = role_words()
-word = None if os.environ.get("STANDIN_AGENT_OFF") else words.get(role_name)
+WAITS = {"cortex": "Then call agent_output with wait true for it.",
+         "codex": "Then call wait_agent for it and end only when it has finished."}
+cancelled = name in WAITS and WAITS[name] not in prompt  # the session ended first, which cancels its agent
+word = None if os.environ.get("STANDIN_AGENT_OFF") or cancelled else words.get(role_name)
 skill = next(cwd.glob(".*/skills/probe-standin/SKILL.md"))
 with open(os.environ["STANDIN_STARTS"], "a") as starts:
     starts.write(json.dumps({
@@ -429,8 +447,9 @@ class TestRuns(ProbeKitTest):
                                           # This world's stand-in calls no hook and has no uv (see TestGuardHook).
                                           "X1 codex failed: the hook logged no input for the control stand-in\n"
                                           "X2 codex failed: uv is not on PATH\n"
-                                          f"D1 codex failed: {UNTRUSTED}\n"
-                                          f"D2 codex failed: {UNTRUSTED}\n"
+                                          # This world's stand-in makes no tool call, so trust is not blamed.
+                                          f"D1 codex failed: {NO_CALL.format(0)}\n"
+                                          f"D2 codex failed: {NO_CALL.format(0)}\n"
                                           "D6 codex failed: skipped, D1 failed in this run\n"
                                           # TestLimitEntries has the stand-in that follows these briefs
                                           "D3 codex failed: 0 of the 2 agents asked for in one message ran\n"
@@ -511,7 +530,8 @@ class TestAgentEntries(ProbeKitTest):
     def setUp(self) -> None:
         super().setUp()
         script = self.world.bin / "standin-agent-harness"
-        script.write_text(AGENT_HARNESS.replace("{python}", sys.executable).replace("{session}", SESSION))
+        script.write_text(AGENT_HARNESS.replace("{loaded_roles}", LOADED_ROLES).replace("{python}", sys.executable)
+                          .replace("{session}", SESSION))
         script.chmod(0o755)
         for command in COMMAND_NAMES.values():
             (self.world.bin / command).unlink(missing_ok=True)
@@ -582,8 +602,9 @@ class TestAgentEntries(ProbeKitTest):
         line = start["line"]
         self.assertRegex(line, r"^Read /\S+/work/\.git/deliver/branches/probe-agent/brief-x3\.md and follow it\.$")
         self.assertEqual(start["prompt"], f"Start one agent of the role probe-reader and give it this line, word "
-                                          f"for word, as its whole prompt: {line} Do not open that file yourself, "
-                                          f"and do nothing else.")
+                                          f"for word, as its whole prompt: {line} Then call wait_agent for it and "
+                                          f"end only when it has finished. Do not open that file yourself, and do "
+                                          f"nothing else.")
         self.assertTrue(start["brief_in_common_dir"])
         brief_word = re.fullmatch(r"# Probe brief\n\nWrite the word (brief-[0-9a-f]{8}), a space and your role word "
                                   r"to the file probe-brief-marker\.txt in the folder /\S+/work\. Change nothing "
@@ -612,6 +633,29 @@ class TestAgentEntries(ProbeKitTest):
         for harness, knobs, fact in cases:
             code, out, _ = self.run_entry(harness, "X3", **knobs)
             self.assertEqual((code, out), (1, f"X3 {harness} failed: {fact}\n"), knobs)
+
+    def test_on_cortex_and_codex_the_prompt_waits_for_the_agent_and_elsewhere_it_does_not(self):
+        waits = {"cortex": "Then call agent_output with wait true for it. ",
+                 "codex": "Then call wait_agent for it and end only when it has finished. "}
+        for harness in ("cortex", "codex", "cursor"):
+            for entry in ("X3", "X4", "X5"):
+                code, out, _ = self.run_entry(harness, entry)
+                self.assertEqual(code, 0, out)
+                start = self.world.harness_starts()[-1]
+                self.assertEqual(start["prompt"], f"Start one agent of the role probe-reader and give it this line, "
+                                                  f"word for word, as its whole prompt: {start['line']} "
+                                                  f"{waits.get(harness, '')}Do not open that file yourself, and do "
+                                                  f"nothing else.", (harness, entry))
+
+    def test_codex_loads_the_kits_role_files_from_the_command_line_and_nothing_reaches_the_users_settings(self):
+        for entry in ("X3", "X4", "X5"):
+            code, out, _ = self.run_entry("codex", entry)
+            self.assertEqual(code, 0, out)
+            args = self.world.harness_starts()[-1]["args"]
+            self.assertEqual(args, ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check",
+                                    *role_args(work_of(args)), args[-1]])
+            self.assertTrue(work_of(args).startswith(str(self.world.tmp)))
+        self.assertEqual(sorted(self.world.home.rglob("*")), [])  # no ~/.codex: no trust or role is saved
 
     def test_x4_is_seen_on_every_harness_when_the_agent_writes_into_deliver_of_its_worktree(self):
         for harness in COMMAND_NAMES:
@@ -894,6 +938,19 @@ def codex_c(work: str) -> str:
             '--path-format=absolute --git-common-dir)/../hooks/guard.py settings",timeout=20}]}]')
 
 
+def role_args(work: str, kinds: tuple[str, ...] = ("reader", "reviewer")) -> list[str]:
+    """The -c overrides that load the kit's Codex role files of the probe folder `work` (#405)."""
+    return [arg for kind in kinds for arg in (
+        "-c", f'agents.probe-{kind}.config_file="{work}/.codex/agents/probe-{kind}.toml"',
+        "-c", f'agents.probe-{kind}.description="Stand-in {kind} for the probe kit. Start it only when asked for '
+              f'probe-{kind} by name."')]
+
+
+def work_of(args: list[str]) -> str:
+    """The probe folder a Codex command line's role overrides name."""
+    return re.search(r'config_file="(\S+)/\.codex/agents/', " ".join(args)).group(1)
+
+
 CONNECTION = "probe_conn_q7"
 
 
@@ -960,7 +1017,8 @@ class TestGuardHook(HookTest):
             "cortex": ["-p", x1, "--output-format", "stream-json", "--private", "--bypass", "-c", CONNECTION],
             "codex": ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "-c", "{codex_c}", x1],
             "cursor": ["-p", "--output-format", "stream-json", "--force", x1],
-            "antigravity": ["-p", x1, "--output-format", "stream-json", "--mode", "accept-edits"],
+            "antigravity": ["-p", x1, "--output-format", "stream-json", "--mode", "accept-edits",
+                            "--settings", '{"permissions": {"allow": ["command(*)"]}}'],
         }
         for harness in HARNESS_COMMANDS:
             for where, fact in (("session", "the session's directory"), ("command", "the command's directory")):
@@ -1741,6 +1799,37 @@ class TestPlugin(ProbeKitTest):
             kit.setup_skilled_role("claude", work, "probe-1234abcd")
 
 
+# PENDING the cleaned fixture from a real run (#405): what Codex CLI v0.172.0 gave around one agent start, built
+# from the chief of staff's description of a real `codex exec` run, every id and path made up. A cleaned real
+# fixture replaces this constant as it is; the stand-ins below send and print what it holds. "session" holds the
+# keys of each of the session's hook inputs besides cwd and the call; "spawn" and "wait" are the session's two
+# calls; "agent" holds the two keys an agent's own call adds; "stream" is the JSON output, which shows no spawn
+# item and no item for the agent's commands.
+CODEX_RUN = {
+    "session": {"hook_event_name": "PreToolUse", "model": "standin-codex-model", "permission_mode": "default",
+                "session_id": "thread-made-up-0001", "transcript_path": "/standin/sessions/rollout-0001.jsonl",
+                "turn_id": "turn-made-up-0001"},
+    "spawn": {"tool_name": "collaborationspawn_agent", "tool_use_id": "call-made-up-0001",
+              "tool_input": {"agent_type": "probe-reader", "task_name": "probe_reader_task",
+                             "message": "<not readable>"}},
+    "wait": {"tool_name": "collaborationwait_agent", "tool_use_id": "call-made-up-0002",
+             "tool_input": {"timeout_ms": 60000}},
+    "agent": {"agent_id": "thread-made-up-0002", "agent_type": "probe-reader"},
+    "stream": [
+        {"type": "thread.started", "thread_id": "thread-made-up-0001"},
+        {"type": "turn.started"},
+        {"type": "item.completed", "item": {"id": "item_0", "type": "agent_message", "text": "Starting the agent."}},
+        {"type": "item.started", "item": {"id": "item_1", "type": "collab_tool_call", "tool": "wait",
+                                          "sender_thread_id": "thread-made-up-0001", "receiver_thread_ids": [],
+                                          "prompt": None, "agents_states": {}, "status": "in_progress"}},
+        {"type": "item.completed", "item": {"id": "item_1", "type": "collab_tool_call", "tool": "wait",
+                                            "sender_thread_id": "thread-made-up-0001", "receiver_thread_ids": [],
+                                            "prompt": None, "agents_states": {}, "status": "completed"}},
+        {"type": "item.completed", "item": {"id": "item_2", "type": "agent_message", "text": "The agent finished."}},
+        {"type": "turn.completed", "usage": {"input_tokens": 12, "output_tokens": 340}},
+    ],
+}
+
 # D1, D2, D6, R3 and A6 (#386): a stand-in harness, installed as all five harness commands, that sends the
 # session's agent start and then the agent's one call to the hook in its harness's input shape, and runs the
 # call only on an allow. The agent's call is the brief's command, or for D6 an apply_patch that adds the file
@@ -1750,7 +1839,9 @@ class TestPlugin(ProbeKitTest):
 # makes the call the session's; STANDIN_FORCE_ALLOW runs the call whatever the hook said;
 # STANDIN_NO_AGENT_TYPE leaves agent_type out; STANDIN_SPAWN_TOOL names the agent-starting tool (default
 # spawn_agent) and STANDIN_SPAWN_ALSO sends a second start under that name; STANDIN_SUBAGENT_START calls
-# Cursor's subagentStart hook; STANDIN_NO_AGENT_FILE writes no agent file on Antigravity.
+# Cursor's subagentStart hook; STANDIN_NO_AGENT_FILE writes no agent file on Antigravity. On Codex it prints
+# CODEX_RUN's stream; STANDIN_FIXTURE sends CODEX_RUN's calls in place of its own start, and STANDIN_NO_CALL
+# makes no call at all and prints the stream without the wait.
 # STANDIN_HOOK_IN runs Codex's hook in that folder of the probe folder; an empty STANDIN_SPAWN_TOOL leaves
 # tool_name out; STANDIN_SPAWN_READS makes the session's call a read of the brief's path instead of the
 # handoff; STANDIN_AGENT_CMD is the agent's command instead of the brief's; STANDIN_DROP_REFUSALS takes the
@@ -1768,6 +1859,7 @@ registered = {path: json.loads((cwd / path).read_text()) for path in (".cursor/h
               if (cwd / path).is_file()}
 agent = not knob("STANDIN_SESSION_DOES")
 sent, decisions, answers = [], [], []
+RUN = json.loads("""{codex_run}""")
 
 
 def call(hook, data, hook_dir, form):
@@ -1791,7 +1883,9 @@ def call(hook, data, hook_dir, form):
 ran = re.search(r"Run the command `([^`]+)` in the folder (\S+)\.", brief)
 command = knob("STANDIN_AGENT_CMD") or (ran.group(1) if ran else None)
 edit = re.search(r"Create the file (\S+) holding the word (\S+) with your file-editing tool", brief)
-if name == "codex":
+if name == "codex" and knob("STANDIN_NO_CALL"):
+    decision = None
+elif name == "codex":
     hook = re.search(r'command="([^"]*)"', args[args.index("-c") + 1]).group(1)
     spawns = [knob("STANDIN_SPAWN_TOOL", "spawn_agent")] + ([knob("STANDIN_SPAWN_ALSO")] if knob("STANDIN_SPAWN_ALSO") else [])
     hook_dir = cwd / knob("STANDIN_HOOK_IN", "")
@@ -1801,10 +1895,14 @@ if name == "codex":
                  "tool_input": given}
         if not tool:
             del start["tool_name"]
+        if knob("STANDIN_FIXTURE"):
+            start = {**RUN["session"], "cwd": str(cwd), **RUN["spawn"]}
         call(hook, start, hook_dir, "settings")
+    if knob("STANDIN_FIXTURE"):
+        call(hook, {**RUN["session"], "cwd": str(cwd), **RUN["wait"]}, hook_dir, "settings")
     data = {"session_id": "{session}", "cwd": str(cwd), "hook_event_name": "PreToolUse"}
     if agent:
-        data["agent_id"] = "agent-1"
+        data["agent_id"] = RUN["agent"]["agent_id"] if knob("STANDIN_FIXTURE") else "agent-1"
         if not knob("STANDIN_NO_AGENT_TYPE"):
             data["agent_type"] = role
     if edit:
@@ -1851,6 +1949,10 @@ with open(knob("STANDIN_STARTS"), "a") as starts:
                              "logs": sorted(p.name for p in logs.iterdir()),
                              "hook_log": (logs / "hook.jsonl").read_text() if (logs / "hook.jsonl").is_file() else ""})
                  + "\n")
+if name == "codex":
+    for event in RUN["stream"]:
+        if not (knob("STANDIN_NO_CALL") and event.get("item", {}).get("type") == "collab_tool_call"):
+            print(json.dumps(event))
 print(json.dumps({"type": "result", "session_id": "{session}", "result": "done"}))
 sys.exit(int(knob("STANDIN_EXIT", "0")))
 '''
@@ -1874,6 +1976,7 @@ if sys.argv[1:2] == ["run"]:
         seen.write(json.dumps(open(err).read() if os.path.isfile(err) else None) + "\n")
 os.execv("{hc}", ["{hc}", *sys.argv[1:]])
 """
+NO_CALL = "the hook logged no input, the output shows no tool call, and the harness exited {}"
 D1_SEEN = "D1 codex seen: the hook saw the agent marker and refused the merge stand-in\n"
 D2_SEEN = "D2 codex recorded: the agent-starting tool reaches the hook as spawn_agent\n"
 FORBIDDEN = ("ephemeral", "bypass", "trust")  # no Codex argv of these entries holds one of these words
@@ -1885,7 +1988,8 @@ class TestHookAgentEntries(HookTest):
     def setUp(self) -> None:
         super().setUp()
         script = self.world.bin / "hook-agent-harness"
-        script.write_text(HOOK_AGENT_HARNESS.replace("{python}", sys.executable).replace("{session}", SESSION))
+        script.write_text(HOOK_AGENT_HARNESS.replace("{python}", sys.executable).replace("{session}", SESSION)
+                          .replace("{codex_run}", json.dumps(CODEX_RUN)))
         script.chmod(0o755)
         self.world.install("hook-agent-harness")
         (self.world.bin / "hc").rename(self.world.bin / "hc-standin")
@@ -1899,7 +2003,7 @@ class TestHookAgentEntries(HookTest):
 
     def assert_codex_argv(self, start: dict) -> None:
         self.assertEqual(start["args"], ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check",
-                                         "-c", codex_c(""), start["prompt"]])
+                                         "-c", codex_c(""), *role_args(work_of(start["args"])), start["prompt"]])
         for word in FORBIDDEN:
             self.assertNotIn(word, " ".join(start["args"][:-1]))
 
@@ -1927,9 +2031,9 @@ class TestHookAgentEntries(HookTest):
         self.assertEqual(first[first.index("-c") + 1], second[second.index("-c") + 1])
         trust = re.search(r"start (codex -c '[^']*')", err).group(1)
         self.assertEqual(shlex.split(trust)[1:], ["-c", third[third.index("-c") + 1]])
-        for arg in (first, second, third):
-            self.assertNotIn(str(self.world.root), " ".join(arg[:-1]))
-            self.assertNotIn(str(Path.home()), " ".join(arg[:-1]))
+        for arg in (first, second, third):  # the role overrides name the probe folder; the hook's text does not
+            self.assertNotIn(str(self.world.root), " ".join(a for a in arg[:-1] if not a.startswith("agents.")))
+            self.assertNotIn(str(Path.home()), " ".join(a for a in arg[:-1] if not a.startswith("agents.")))
 
     def test_d1_finds_its_hook_from_a_subfolder_and_from_the_agents_worktree(self):
         for folder in ("sub", ".probe-worktrees/agent"):
@@ -1943,7 +2047,9 @@ class TestHookAgentEntries(HookTest):
                  (("STANDIN_FORCE_ALLOW", "1"),): "the merge stand-in ran",
                  (("STANDIN_AGENT_CMD", "ls -l ./merge-script.sh"),): "no agent's call of the merge stand-in reached the hook",
                  (("STANDIN_DROP_REFUSALS", "1"),): "the hook logged no refusal of the merge stand-in",
-                 (("STANDIN_EXIT", "1"),): "harness exited 1"}
+                 (("STANDIN_EXIT", "1"),): "harness exited 1",
+                 (("STANDIN_NO_CALL", "1"),): NO_CALL.format(0),
+                 (("STANDIN_NO_CALL", "1"), ("STANDIN_EXIT", "1")): NO_CALL.format(1)}
         for knobs, fact in cases.items():
             code, out, err = self.world.kit("run", "codex", "D1", **dict(knobs))
             self.assertEqual((code, out), (1, f"D1 codex failed: {fact}\n"), knobs)
@@ -1956,13 +2062,23 @@ class TestHookAgentEntries(HookTest):
             self.assert_private(out, err)
         self.assertIn("control-ran-d2.marker", self.world.harness_starts()[-1]["logs"])
 
+    def test_d2_records_the_real_runs_tool_name_from_an_input_whose_message_is_not_readable(self):
+        code, out, err = self.world.kit("run", "codex", "D2", STANDIN_FIXTURE="1")
+        self.assertEqual((code, out), (0, "D2 codex recorded: the agent-starting tool reaches the hook as "
+                                          "collaborationspawn_agent\n"))
+        self.assert_private(out, err)
+        start = self.world.harness_starts()[-1]
+        self.assertEqual([s["tool_name"] for s in start["sent"]], ["collaborationspawn_agent",
+                                                                     "collaborationwait_agent", "Bash"])
+        self.assertNotIn("brief-d2.md", start["hook_log"])  # the handoff line is nowhere in what the hook saw
+
     def test_d2_fails_untrusted_with_no_agent_call_two_tool_names_or_a_name_that_is_not_plain(self):
         cases = {(("STANDIN_UNTRUSTED", "1"),): UNTRUSTED,
                  (("STANDIN_SESSION_DOES", "1"),): "no agent's call reached the hook",
-                 (("STANDIN_SPAWN_ALSO", "Agent"),): "2 tools of the session's named the brief",
+                 (("STANDIN_SPAWN_ALSO", "Agent"),): "2 tools of the session's started an agent of the reader role",
                  (("STANDIN_SPAWN_TOOL", "/tmp/x y"),): "the agent-starting tool's name is not a plain name",
                  (("STANDIN_SPAWN_TOOL", ""),): "the hook input of the agent-starting call holds no tool name",
-                 (("STANDIN_SPAWN_READS", "1"),): "no call of the session's that hands the brief's line to an agent "
+                 (("STANDIN_SPAWN_READS", "1"),): "no call of the session's that starts an agent of the reader role "
                                                   "reached the hook"}
         for knobs, fact in cases.items():
             code, out, err = self.world.kit("run", "codex", "D2", **dict(knobs))
@@ -2004,7 +2120,8 @@ class TestHookAgentEntries(HookTest):
 
     def test_d6_is_skipped_and_failed_when_d2_failed_or_did_not_run_first(self):
         code, out, _ = self.world.kit("run", "codex", "D1", "D2", "D6", STANDIN_SPAWN_ALSO="Agent")
-        self.assertEqual((code, out), (1, D1_SEEN + "D2 codex failed: 2 tools of the session's named the brief\n"
+        self.assertEqual((code, out), (1, D1_SEEN + "D2 codex failed: 2 tools of the session's started an agent of "
+                                                     "the reader role\n"
                                           "D6 codex failed: skipped, D2 failed in this run\n"))
         code, out, _ = self.world.kit("run", "codex", "D1", "D6")
         self.assertEqual((code, out), (1, D1_SEEN + "D6 codex failed: skipped, D2 did not run before it in this run\n"))
@@ -2050,7 +2167,10 @@ class TestHookAgentEntries(HookTest):
                      "D1, D2 and D6 fail with that step and the harness's exit status when their hook logged no input",
                      "writes a refusal line to logs/hook.jsonl",
                      "marked by agent_id, reached the hook for a command that runs merge-script.sh",
-                     "D2 records the tool name of the session's call whose input holds the line that hands the brief",
+                     "D2 records the tool name of the session's call whose input names the reader role as its "
+                     "agent_type; it never reads the message",
+                     "when their hook logged no input and the output shows a tool call; with no tool call in the "
+                     "output, the line says so and names no trust step",
                      "D6 runs only after D1 was seen and D2 recorded in the same run",
                      "refuses the edit tool (apply_patch, Edit or Write) when the input's agent_type is the reviewer role",
                      "R3 registers subagentStart in .cursor/hooks.json", "conversation id other than the session's",
@@ -2067,7 +2187,11 @@ class TestHookAgentEntries(HookTest):
 # limit (maxSubagentDepth from the variable, default 1) has task, agent, agent_output and kill_agent, and one at
 # the limit has none and starts nothing; elsewhere there is no limit. Cortex Code's output shows each task call
 # with its parent and its result, which gives the agentId or the depth error, and each kill_agent and
-# agent_output call; Codex's shows each collab_tool_call item started and completed, with its thread. The kill
+# agent_output call; Codex's shows each collab_tool_call item started and completed, with its thread, and
+# Codex loads a role only from the role files its -c overrides name. With the inline hook, Codex sends the
+# session's spawn, interrupt and follow-up calls and each agent's call that wrote its marker to the hook, in
+# CODEX_RUN's shape (#405). On Antigravity an agent whose role file has no tools line has no shell and no file
+# write, so it makes no call the hook sees (#405). The kill
 # lands while the agent's sleep runs. A resume or follow-up first waits for the agents before it. On
 # Antigravity the session's invoke_subagent calls and the agents' run_command and write_file calls go to the
 # registered hook, with the caller's model, and run only on an allow; the agents' other writes and the session's
@@ -2077,13 +2201,17 @@ class TestHookAgentEntries(HookTest):
 # that many agents of one prompt or brief run at once, the rest queued, or refused with STANDIN_CAP_REFUSE;
 # STANDIN_STEP_APART lets each start end before the next; STANDIN_NO_KILL lets the sleep finish, with no
 # kill_agent call; STANDIN_HIDE_KILL leaves the kill out of the output; STANDIN_KILL_OTHER names another agent
-# in it; STANDIN_KILL_FAILS gives it an error; STANDIN_NO_CLOSE leaves close_agent out; STANDIN_CLOSE_OTHER
-# names another thread in it; STANDIN_CLOSE_FAILS marks it failed; STANDIN_RESUME_FRESH resumes without the
+# in it; STANDIN_KILL_FAILS gives it an error; STANDIN_NO_CLOSE leaves interrupt_agent out; STANDIN_CLOSE_OTHER
+# names another thread in it; STANDIN_NO_COLLAB leaves Codex's spawn and follow-up items out of the output, as
+# the real one does; STANDIN_UNTRUSTED calls no inline hook; STANDIN_NO_AGENT_TYPE leaves agent_type out of a
+# spawn call; STANDIN_RESUME_ERROR=text or =empty fails the resume call with or without a reason;
+# STANDIN_RESUME_FRESH resumes without the
 # kept word; STANDIN_RESUME_FROM_DISK takes the first marker's word instead; STANDIN_RESUME_OTHER resumes
 # another agent; STANDIN_RESUME_FAIL leaves a resume unanswered; STANDIN_OUTSIDE_DENIED refuses the write
 # outside the folder; STANDIN_NO_USER_AGENTS ignores ~/.cursor/agents/; STANDIN_TOOLS_IGNORED lets a withheld
-# tool run; STANDIN_NO_TRY makes no write_file call but reports it refused; STANDIN_OTHER_TOOL calls view_file
-# on the marker instead; STANDIN_SHELL_WRITE writes through run_command instead; STANDIN_WRITE_ERROR lets the
+# tool run; STANDIN_NO_TRY makes no write_file call but reports it refused, or failed with =failed;
+# STANDIN_OTHER_TOOL calls view_file on the marker instead; STANDIN_SHELL_WRITE writes through run_command
+# instead; STANDIN_WRITE_ERROR lets the
 # write_file call fail another way; STANDIN_TIER_WINS=file lets the file's tier win over the call's;
 # STANDIN_SAME_TIERS gives every tier one model; STANDIN_NO_TIER drops the call's tier; STANDIN_FOREGROUND
 # starts every agent in the foreground, or with =inner every agent an agent starts; STANDIN_NO_MODEL leaves the
@@ -2092,6 +2220,7 @@ class TestHookAgentEntries(HookTest):
 LIMIT_HARNESS = r'''#!{python}
 import json, os, re, signal, subprocess, sys, threading, time, tomllib
 from pathlib import Path
+{loaded_roles}
 name, args = Path(sys.argv[0]).name, sys.argv[1:]
 prompt = args[args.index("-p") + 1] if name in ("cortex", "agy") else args[-1]
 cwd, knob = Path.cwd(), os.environ.get
@@ -2101,25 +2230,31 @@ user_agents = Path(os.environ["HOME"]) / ".cursor" / "agents"
 if name == "cursor-agent" and not knob("STANDIN_NO_USER_AGENTS"):
     folders.append(user_agents)
 roles = {}
-for folder in folders:
-    for path in sorted(folder.glob("*.toml" if name == "codex" else "*.md")):
-        text = path.read_text()
-        if name == "codex":
-            role = tomllib.loads(text)
-            found, head, body = role["name"], "", role["developer_instructions"]
-        else:
-            head, body = text.split("---\n", 2)[1:]
-            found = re.search(r"^name: (\S+)$", head, re.M).group(1)
-        tools, tier = re.search(r"^tools: \[(.*)\]$", head, re.M), re.search(r"^model: (\S+)$", head, re.M)
-        roles[found] = {"word": re.search(r"Your role word is (\S+)\.", body).group(1),
-                        "tools": tools.group(1).split(", ") if tools else None, "tier": tier and tier.group(1)}
+paths = [path for folder in folders for path in sorted(folder.glob("*.toml" if name == "codex" else "*.md"))]
+if name == "codex":  # Codex loads no project role file in an untrusted folder: only the -c overrides
+    paths = loaded_roles(args)
+for path in paths:
+    text = path.read_text()
+    if name == "codex":
+        role = tomllib.loads(text)
+        found, head, body = role["name"], "", role["developer_instructions"]
+    else:
+        head, body = text.split("---\n", 2)[1:]
+        found = re.search(r"^name: (\S+)$", head, re.M).group(1)
+    tools, tier = re.search(r"^tools: \[(.*)\]$", head, re.M), re.search(r"^model: (\S+)$", head, re.M)
+    roles[found] = {"word": re.search(r"Your role word is (\S+)\.", body).group(1),
+                    "tools": tools.group(1).split(", ") if tools else None, "tier": tier and tier.group(1)}
 features = json.loads(knob("CORTEX_CODE_EXPERIMENTAL_FEATURES") or "{}")
 limit = int(knob("STANDIN_DEPTH") or (features.get("maxSubagentDepth", 1) if name == "cortex" else 9))
 hooks = cwd / ".agents" / "hooks.json"
 hook = next(iter(json.loads(hooks.read_text()).values()))["PreToolUse"][0]["hooks"][0]["command"] \
     if hooks.is_file() else None
+inline = next((arg for arg in args if arg.startswith("hooks.PreToolUse=")), None)
+codex_hook = re.search(r'command="([^"]*)"', inline).group(1) \
+    if name == "codex" and inline and not knob("STANDIN_UNTRUSTED") else None
 user_files = sorted(p.name for p in user_agents.glob("*")) if user_agents.is_dir() else []
 lock, events, records, sent, counter = threading.Lock(), [], [], [], [0]
+RUN = json.loads("""{codex_run}""")
 memory, markers, ids, ready, sleepers = {}, {}, {}, {}, {}
 WRITES = re.compile(r"[Ww]rite the word (?P<word>\S+), a space(?P<recall>, the word your first brief asked you to "
                     r"remember, a space)? and your role word to the file (?P<file>\S+) in (?P<outside>your worktree, )?"
@@ -2128,7 +2263,7 @@ LISTS = re.compile(r"write the word (\S+), a space and the names of those of the
                    r"agent_output, kill_agent, or the word none, to the file (\S+) in the folder (\S+?)\.(?:\s|$)")
 TOKENS = re.compile(r"(?:subagent_type|agent_type|of the role) (?P<role>probe-[a-z-]+)|run_in_background "
                     r"(?P<bg>true|false)|Model (?P<tier>\w+)|(?P<resume>resume set to that agentId|with "
-                    r"followup_task)|call (?P<stop>kill_agent|close_agent) |(?P<wait>call agent_output with wait "
+                    r"followup_task)|call (?P<stop>kill_agent|interrupt_agent) |(?P<wait>call agent_output with wait "
                     r"true)|Read (?P<line>\S+) and follow it\.")
 AGENT_TOOLS = "task agent agent_output kill_agent"
 time.sleep(float(knob("STANDIN_SLEEP", "0")))
@@ -2157,6 +2292,15 @@ def tool(model, call, given, run):
             return
     if run:
         run()
+
+
+def codex_call(tool_name, given, agent_id=None, role=None):
+    """Codex sends each call to the inline hook, in CODEX_RUN's shape; an agent's call carries its id and role."""
+    if codex_hook:
+        data = {**RUN["session"], "cwd": str(cwd), "tool_name": tool_name, "tool_input": given}
+        if agent_id:
+            data.update(agent_id=agent_id, agent_type=role)
+        subprocess.run(codex_hook, shell=True, cwd=cwd, input=json.dumps(data), capture_output=True, text=True)
 
 
 def result(parent, call, text, error=False):
@@ -2195,12 +2339,24 @@ def run(own, role_name, role, line, depth, parent, resume, background, call_tier
         if depth > limit:
             result(parent, own, "Maximum subagent nesting depth of 1 reached.", True)
             return
+        if resume and knob("STANDIN_RESUME_ERROR"):  # as with --private, which keeps no session history
+            result(parent, own, [{"type": "text", "text": f"Agent session {named} not found under "
+                                                          f"/standin/sessions. Cannot resume."}]
+                   if knob("STANDIN_RESUME_ERROR") == "text" else "", True)
+            return
         result(parent, own, f"Agent started. agentId: {named}")
     elif name == "codex":
-        emit(type="item.completed", item={"id": f"item_{own}", "type": "collab_tool_call",
-                                          "tool": "followup_task" if resume else "spawn_agent",
-                                          "receiver_thread_ids": [named], "status": "completed"})
+        codex_call("collaborationfollowup_task" if resume else "collaborationspawn_agent",
+                   {"id": named, "message": "<not readable>"} if resume else
+                   {**({} if knob("STANDIN_NO_AGENT_TYPE") else {"agent_type": role_name}),
+                    "task_name": f"task_{own}", "message": "<not readable>"})
+        if not knob("STANDIN_NO_COLLAB"):
+            emit(type="item.completed", item={"id": f"item_{own}", "type": "collab_tool_call",
+                                              "tool": "followup_task" if resume else "spawn_agent",
+                                              "receiver_thread_ids": [named], "status": "completed"})
     if depth > limit or (resume and (knob("STANDIN_RESUME_FAIL") or knob("STANDIN_RESUME_OTHER"))):
+        return
+    if name == "agy" and role["tools"] is None:  # no tools line: no shell and no file write (#405)
         return
     if knob("STANDIN_RESUME_FRESH"):
         first = None
@@ -2244,7 +2400,7 @@ def run(own, role_name, role, line, depth, parent, resume, background, call_tier
             tool(model, "view_file", {"AbsolutePath": str(target), "Note": body.strip()}, None)
             ended = "refused"
         elif knob("STANDIN_NO_TRY"):
-            ended = "refused"
+            ended = "failed" if knob("STANDIN_NO_TRY") == "failed" else "refused"
         else:
             withheld = role["tools"] is not None and "write_file" not in role["tools"]
             refused = withheld and not knob("STANDIN_TOOLS_IGNORED")
@@ -2252,6 +2408,8 @@ def run(own, role_name, role, line, depth, parent, resume, background, call_tier
             tool(model, "write_file", {"TargetFile": str(target), "CodeContent": body},
                  None if refused or failing else lambda: target.write_text(body))
             ended = "failed" if failing else "refused" if refused else "wrote"
+    if name == "codex" and markers.get(own):  # the agent's own call that wrote its marker
+        codex_call("Bash", {"command": f"echo ... > {markers[own]}"}, ids[own], role_name)
     report = re.search(r"run the shell command `([^`]+)` in the folder (\S+), with your role word and then one word "
                        r"for how the write_file call ended", text)
     if report and ended:
@@ -2287,7 +2445,7 @@ def follow(text, depth, parent, model, able=True):
 
     def begin(args):
         own, resumed = args[0], args[5]
-        if name == "codex":
+        if name == "codex" and not knob("STANDIN_NO_COLLAB"):
             emit(type="item.started", item={"id": f"item_{own}", "type": "collab_tool_call",
                                             "tool": "followup_task" if resumed else "spawn_agent",
                                             "receiver_thread_ids": [], "status": "in_progress"})
@@ -2338,13 +2496,11 @@ def follow(text, depth, parent, model, able=True):
             if last in sleepers and not knob("STANDIN_NO_KILL"):
                 os.killpg(sleepers[last].pid, signal.SIGTERM)
             settle()
-        elif token["stop"] == "close_agent":
+        elif token["stop"] == "interrupt_agent":
             settle()
             if not knob("STANDIN_NO_CLOSE"):
-                emit(type="item.completed", item={
-                    "id": next_id("item_close"), "type": "collab_tool_call", "tool": "close_agent",
-                    "receiver_thread_ids": ["thread-other" if knob("STANDIN_CLOSE_OTHER") else ids.get(last)],
-                    "status": "failed" if knob("STANDIN_CLOSE_FAILS") else "completed"})
+                codex_call("collaborationinterrupt_agent",
+                           {"id": "thread-other" if knob("STANDIN_CLOSE_OTHER") else ids.get(last)})
         elif token["resume"]:
             settle()
             resume = True
@@ -2392,7 +2548,8 @@ class TestLimitEntries(HookTest):
     def setUp(self) -> None:
         super().setUp()
         script = self.world.bin / "limit-harness"
-        script.write_text(LIMIT_HARNESS.replace("{python}", sys.executable).replace("{session}", SESSION))
+        script.write_text(LIMIT_HARNESS.replace("{loaded_roles}", LOADED_ROLES).replace("{python}", sys.executable)
+                          .replace("{session}", SESSION).replace("{codex_run}", json.dumps(CODEX_RUN)))
         script.chmod(0o755)
         self.world.install("limit-harness")
 
@@ -2533,6 +2690,12 @@ class TestLimitEntries(HookTest):
                  "STANDIN_AGENT_OFF": "no agent of the reader role ran"}
         for knob, fact in cases.items():
             self.assertEqual(self.run_entry("cortex", "K4", **{knob: "1"}), f"K4 cortex failed: {fact}\n")
+        for entry in ("K4", "K5"):  # a failed resume, as under --private, says so with the reason, no id or path
+            self.assertEqual(self.run_entry("cortex", entry, STANDIN_RESUME_ERROR="text"),
+                             f"{entry} cortex failed: the resume call failed: Agent session ... not found under ... "
+                             f"Cannot resume.\n")
+            self.assertEqual(self.run_entry("cortex", entry, STANDIN_RESUME_ERROR="empty"),
+                             f"{entry} cortex failed: the resume call failed\n")
 
     def test_k5_records_the_models_of_the_calls_that_started_and_resumed_the_agent(self):
         line = ("K5 cortex recorded: the resumed agent ran on standin-resumed-model-cortex, its first run on "
@@ -2561,24 +2724,50 @@ class TestLimitEntries(HookTest):
                          "D3 codex failed: both agents ran, but the output does not show both starts in one model "
                          "step, so the step was not measured\n")
 
-    def test_d4_sees_the_closed_agent_answer_and_fails_without_its_own_successful_close_or_its_kept_word(self):
-        self.assertEqual(self.run_entry("codex", "D4"),
-                         "D4 codex seen: the closed agent answered with its earlier context\n")
-        cases = {"STANDIN_NO_CLOSE": "the output shows no close_agent call, so the agent was not unloaded",
-                 "STANDIN_CLOSE_OTHER": "the close_agent call names another agent",
-                 "STANDIN_CLOSE_FAILS": "the close_agent call did not succeed",
+    def test_d4_sees_the_interrupted_agent_answer_from_the_hook_log_and_fails_without_its_interrupt_or_kept_word(self):
+        seen = "D4 codex seen: the interrupted agent answered the follow-up with its earlier context\n"
+        self.assertEqual(self.run_entry("codex", "D4"), seen)
+        self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_COLLAB="1"), seen)  # the stream is not read
+        start = self.world.harness_starts()[-1]
+        self.assertIn("Step 2: call interrupt_agent for it. Step 3: send it this message with followup_task: ",
+                      start["prompt"])
+        self.assertNotIn("close_agent", start["prompt"])
+        self.assertIn("-c", start["args"])
+        self.assertIn(codex_c(""), start["args"])
+        cases = {"STANDIN_NO_CLOSE": "the hook log shows no interrupt_agent call of the session's after the "
+                                     "agent's first call",
+                 "STANDIN_CLOSE_OTHER": "the interrupt_agent call names another agent",
+                 "STANDIN_RESUME_OTHER": "the hook log shows no followup_task call to the agent after its interrupt",
+                 "STANDIN_RESUME_FAIL": "the hook log shows no call of the agent's after the follow-up",
                  "STANDIN_RESUME_FRESH": "the agent that answered lacks its first brief's word, so it was not the "
                                          "same agent",
                  "STANDIN_RESUME_FROM_DISK": "the agent that answered lacks its first brief's word, so it was not "
                                              "the same agent"}
         for knob, fact in cases.items():
-            self.assertEqual(self.run_entry("codex", "D4", **{knob: "1"}), f"D4 codex failed: {fact}\n")
+            self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_COLLAB="1", **{knob: "1"}),
+                             f"D4 codex failed: {fact}\n", knob)
+        # With the spawn items in the output the session made a tool call, so an empty hook log blames trust.
+        self.assertEqual(self.run_entry("codex", "D4", STANDIN_UNTRUSTED="1"), f"D4 codex failed: {UNTRUSTED}\n")
+        self.assert_home_empty()
+
+    def test_d3_reads_the_starts_and_agents_from_the_hook_log_and_measures_no_step_without_the_spawn_items(self):
+        self.assertEqual(self.run_entry("codex", "D3", STANDIN_NO_COLLAB="1"),
+                         "D3 codex failed: both agents ran, but the output does not show both starts in one model "
+                         "step, so the step was not measured\n")
+        self.assertIn("both with agent_type probe-reader, fork_turns none: the first",
+                      self.world.harness_starts()[-1]["prompt"])
+        self.assertEqual(self.run_entry("codex", "D3", STANDIN_NO_AGENT_TYPE="1"),
+                         "D3 codex failed: both agents ran, but the hook log shows 0 starts of the reader role and 2 "
+                         "agents of it, not 2 and 2\n")
+        self.assertEqual(self.run_entry("codex", "D3", STANDIN_UNTRUSTED="1"), f"D3 codex failed: {UNTRUSTED}\n")
+        self.assert_home_empty()
 
     def test_d5_runs_codex_without_the_temporary_folders_and_sees_the_write_outside(self):
         self.assertEqual(self.run_entry("codex", "D5"), "D5 codex seen: the agent wrote in its worktree outside the "
                                                         "session's writable directories\n")
         args = self.world.harness_starts()[-1]["args"]
         self.assertEqual(args[:-1], ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check",
+                                     *role_args(work_of(args), ("reader",)),
                                      "-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
                                      "-c", "sandbox_workspace_write.exclude_slash_tmp=true"])
         self.assertEqual(self.run_entry("codex", "D5", STANDIN_OUTSIDE_DENIED="1"),
@@ -2728,12 +2917,25 @@ class TestLimitEntries(HookTest):
         self.assertEqual([s["toolCall"]["name"] for s in start["sent"]],
                          ["invoke_subagent", "run_command", "write_file", "run_command"])
 
+    def test_a2_is_seen_when_the_withheld_tool_was_absent_with_no_call_no_file_and_a_refused_ending(self):
+        # As in Antigravity's real run: the tool is taken away, so the agent makes no write_file call at all.
+        self.assertEqual(self.run_entry("antigravity", "A2", STANDIN_NO_TRY="1"),
+                         "A2 antigravity seen: the withheld write_file tool was absent: the agent made no call to it, "
+                         "wrote no file and reported it could not\n")
+        start = self.world.harness_starts()[-1]
+        self.assertEqual([s["toolCall"]["name"] for s in start["sent"]],
+                         ["invoke_subagent", "run_command", "run_command"])
+        self.assertEqual(self.run_entry("antigravity", "A2", STANDIN_NO_TRY="failed"),
+                         "A2 antigravity failed: the agent made no write_file call and did not report it refused, so "
+                         "the tool's absence is not shown\n")
+        # A call of another tool to the marker is no write: with no file and a refused report the tool was absent.
+        self.assertEqual(self.run_entry("antigravity", "A2", STANDIN_OTHER_TOOL="1"),
+                         "A2 antigravity seen: the withheld write_file tool was absent: the agent made no call to it, "
+                         "wrote no file and reported it could not\n")
+
     def test_a2_fails_on_a_written_file_another_tool_no_call_another_error_or_no_agent(self):
-        no_call = "the agent made no write_file call to the marker, so the withheld tool's absence is not shown"
         cases = {"STANDIN_TOOLS_IGNORED": "the withheld tool wrote the file",
                  "STANDIN_SHELL_WRITE": "the agent wrote the file through run_command, not the withheld tool",
-                 "STANDIN_NO_TRY": no_call,
-                 "STANDIN_OTHER_TOOL": no_call,
                  "STANDIN_WRITE_ERROR": "the agent's write_file call failed another way, as it reported, so no "
                                         "refusal is shown",
                  "STANDIN_AGENT_OFF": "no agent of the reviewer role ran a command the hook saw"}
@@ -2748,7 +2950,8 @@ class TestLimitEntries(HookTest):
         definitions = start["definitions"]
         self.assertIn("\nmodel: flash\n---\n", definitions[".agents/agents/probe-reader.md"])
         self.assertNotIn("model:", definitions[".agents/agents/probe-author.md"])
-        self.assertNotIn("tools:", definitions[".agents/agents/probe-author.md"])
+        self.assertIn("\ntools: [view_file, run_command, write_file, edit_file, invoke_subagent]\n",
+                      definitions[".agents/agents/probe-author.md"])
         self.assertEqual([s["toolCall"]["args"].get("Model") for s in start["sent"]
                           if s["toolCall"]["name"] == "invoke_subagent"], ["pro", "pro", "flash"])
         self.assertEqual(self.run_entry("antigravity", "A3", STANDIN_TIER_WINS="file"),

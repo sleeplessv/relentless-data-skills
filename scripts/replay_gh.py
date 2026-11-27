@@ -4,28 +4,33 @@
 scripts/replay.py copies this file to <clone>/.git/replay-deliver/bin/gh, where the sandboxed session can read and
 run it, and writes gh.json beside bin/: the repo's name, the bare remote's path and the ticket's number, title and
 body. The stand-in appends each call to gh-calls.jsonl there as one JSON line, {"args", "cwd"}, with the text of a
---body-file argument under "body", and keeps the PRs it has opened in prs.json. It answers:
+--body-file argument under "body" when it can read the file, and keeps the PRs it has opened in prs.json. It answers:
 
 - auth token; repo view --json F [--jq .a.b]; api repos/<repo>/rules/branches/<branch> (no rules);
 - issue view <the ticket> --json F, with the ticket's title and body and no comments;
 - pr list --head B --state S --json F; pr create --base D --head B --title T --body-file P [--draft];
 - pr edit N --body-file P; pr ready N; pr view N|B --json F;
 - pr checks N, as gh does when no check is reported; run list --commit C --json F (none);
-- pr merge N --squash --match-head-commit H: one commit holding the PR's change, made on the default branch of the
-  bare remote, whose tip it moves.
+- pr merge N --squash|--merge|--rebase --match-head-commit H: whichever method the call names, one commit holding the
+  PR's change, made on the PR's base branch in the bare remote, whose tip it moves. The clone then fetches that branch,
+  and its own branch of the same name moves to the new commit when it is still at the old tip and not checked out:
+  deliver's cleanup switches the clone to that branch after a merge, and it pulls nothing.
 
-Any other call, or one it cannot answer, exits 1 with one line that names the call.
+--json names fields the stand-in has, and --jq is a path of plain keys such as .defaultBranchRef.name. Any other call,
+a field it lacks, or another --jq exits 1 with one line that names the call.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
 
 HOME = Path(__file__).resolve().parent.parent  # <clone>/.git/replay-deliver
-BARE = ("draft", "squash", "merge", "rebase", "delete-branch")  # flags that take no value
+METHODS = ("squash", "merge", "rebase")  # the flags of `pr merge`, each answered by a squash
+BARE = ("draft", "delete-branch", *METHODS)  # flags that take no value
 
 
 class NoAnswer(Exception):
@@ -61,10 +66,15 @@ def fields(data: dict, given: dict) -> str:
     """`data` cut to the --json fields, then read with a --jq path of plain keys, as gh prints it."""
     if not isinstance(given.get("json"), str):
         raise NoAnswer("no --json fields")
-    picked = {name: data[name] for name in given["json"].split(",") if name in data}
+    names = given["json"].split(",")
+    if missing := [name for name in names if name not in data]:
+        raise NoAnswer(f"no field {', '.join(missing)}")
+    picked = {name: data[name] for name in names}
     jq = given.get("jq")
     if jq is None:
         return json.dumps(picked) + "\n"
+    if not re.fullmatch(r"(\.[A-Za-z_][A-Za-z0-9_]*)+", str(jq)):
+        raise NoAnswer(f"--jq {jq} is not a path of plain keys")
     value: object = picked
     for key in str(jq).split(".")[1:]:
         if not isinstance(value, dict) or key not in value:
@@ -116,7 +126,7 @@ def answer(args: list[str], config: dict, prs: list[dict]) -> str:
         return ""
     if args[1] == "checks":
         raise Fails(f"no checks reported on the '{pr['headRefName']}' branch")
-    if args[1] == "merge" and given.get("squash") is True:
+    if args[1] == "merge" and [method for method in METHODS if given.get(method) is True]:
         return merge(origin, pr, str(given.get("match-head-commit", "")))
     raise NoAnswer("not a call the stand-in answers")
 
@@ -136,7 +146,8 @@ def view(origin: str, pr: dict) -> dict:
 
 
 def merge(origin: str, pr: dict, match: str) -> str:
-    """Squash the PR's branch onto its base branch in the bare remote."""
+    """Squash the PR's branch onto its base branch in the bare remote, then bring the clone's branch of that name to
+    the new commit where it is still at the old tip and not checked out."""
     if pr["state"] != "OPEN":
         raise NoAnswer("the PR is not open")
     head = git(origin, "rev-parse", f"refs/heads/{pr['headRefName']}")
@@ -150,17 +161,34 @@ def merge(origin: str, pr: dict, match: str) -> str:
                            f"{pr['title']} (#{pr['number']})"], capture_output=True, text=True, env=env)
     if made.returncode:
         raise NoAnswer(f"git commit-tree exited {made.returncode}")
-    git(origin, "update-ref", f"refs/heads/{pr['baseRefName']}", made.stdout.strip(), base)
-    pr.update(state="MERGED", headRefOid=head, mergeCommit={"oid": made.stdout.strip()})
+    target, new = f"refs/heads/{pr['baseRefName']}", made.stdout.strip()
+    git(origin, "update-ref", target, new, base)
+    pr.update(state="MERGED", headRefOid=head, mergeCommit={"oid": new})
+    clone = str(HOME.parent)  # the clone's .git/
+    git(clone, "fetch", "-q", origin, f"+{target}:refs/remotes/origin/{pr['baseRefName']}")
+    checked_out = subprocess.run(["git", "--git-dir", clone, "symbolic-ref", "-q", "HEAD"], capture_output=True,
+                                 text=True).stdout.strip()
+    local = subprocess.run(["git", "--git-dir", clone, "rev-parse", "--verify", "-q", target], capture_output=True,
+                           text=True).stdout.strip()
+    if checked_out != target and local == base:
+        git(clone, "update-ref", target, new, base)
     return ""
 
 
 def main(args: list[str]) -> int:
     call: dict = {"args": args, "cwd": os.getcwd()}
+    unread = None
     if "--body-file" in args[:-1]:
-        call["body"] = Path(args[args.index("--body-file") + 1]).read_text()
+        try:
+            call["body"] = Path(args[args.index("--body-file") + 1]).read_text()
+        except (OSError, UnicodeDecodeError) as error:
+            unread = error
     with open(HOME / "gh-calls.jsonl", "a") as calls:
         calls.write(json.dumps(call) + "\n")
+    if unread is not None:
+        print(f"stand-in gh: no answer for gh {' '.join(args)} (the --body-file cannot be read: {unread})",
+              file=sys.stderr)
+        return 1
     config = json.loads((HOME / "gh.json").read_text())
     store = HOME / "prs.json"
     prs = json.loads(store.read_text()) if store.is_file() else []

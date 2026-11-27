@@ -50,8 +50,9 @@ Usage: python3 scripts/replay.py LABEL TICKET
        python3 scripts/replay.py --version deliver LABEL TICKET
 
 With no --version, the replay is the {VERSION} version. Steps 1 to 6 and the
-confinement after them hold for both versions; the deliver version's
-differences follow them.
+confinement after them describe the {VERSION} version. The deliver version
+follows them too, except where the paragraph after the confinement says it
+differs.
 
 LABEL and TICKET name an entry of a replay-set-<n>.json in the machine
 directory, $DELIVER_STATE_DIR (default ~/.local/state/deliver). Sets, the repo
@@ -123,18 +124,23 @@ The deliver version differs from {VERSION} in these ways and no other. Its
 session loads the plugin in this tree's skills/deliver/ for that session only,
 with --plugin-dir, may read that folder from the sandbox, and runs with hooks
 on: deliver's own hook, and any hook in the clone's project settings. Its prompt
-is the typed command /deliver:deliver TICKET. Before setup, the replay copies the stand-in gh,
-scripts/replay_gh.py, to .git/replay-deliver/bin/gh in the clone, and the
-session finds it first on its PATH. The stand-in answers issue view with the
-ticket's title and body from the replay set, records every call in
-.git/replay-deliver/gh-calls.jsonl, and merges a PR by squashing its branch
-onto the default branch of the clone's bare remote, where the session's pushes
-go. A call it has no answer for exits 1 with one line that names the call. The
-session's DELIVER_STATE_DIR is .git/replay-deliver/state/ in the clone, a
-scratch folder; the replay's own records stay in the machine directory. All of
+is the typed command /deliver:deliver TICKET. Its environment also leaves out
+every variable whose name, in any case, starts with GH_ or holds GITHUB.
+Before setup, the replay copies the stand-in gh, scripts/replay_gh.py, to
+.git/replay-deliver/bin/gh in the clone, and the session finds it first on its
+PATH. The stand-in answers issue view with the ticket's title and body from the
+replay set, records every call in .git/replay-deliver/gh-calls.jsonl, and
+merges a PR by squashing its branch onto the default branch of the clone's bare
+remote, where the session's pushes go, whichever merge method the call names.
+After the merge it moves the clone's own default branch to the new commit when
+that branch is still at the old tip and not checked out. A call it has no
+answer for exits 1 with one line that names the call. The session's
+DELIVER_STATE_DIR is .git/replay-deliver/state/ in the clone, a scratch folder;
+the replay's own records stay in the machine directory. All of
 .git/replay-deliver/ is outside the version's commit, which is taken from the
-working tree as for {VERSION}: after deliver.py finish it holds the merged
-change, or the branch when ready refused.
+working tree as for {VERSION}: after deliver's cleanup switches the clone to
+its default branch it holds the merged change, and when ready refused it holds
+the branch.
 
 Files, all in the machine directory:
 
@@ -246,11 +252,12 @@ def command(clone: Path, model: str, session: str, version: str = VERSION) -> li
 
 
 def environment(clone: Path, version: str = VERSION) -> dict[str, str]:
-    """The session's, with the git settings --help gives; the deliver version's finds the stand-in gh first and keeps
-    its state in the clone."""
+    """The session's, with the git settings --help gives; the deliver version's finds the stand-in gh first, keeps
+    its state in the clone and carries no GH_* or *GITHUB* variable."""
     env = {key: value for key, value in plain().items()
            if not (key.startswith("CLAUDE") and key not in KEPT) and key not in DROPPED}
-    if version == "deliver":
+    if version == "deliver":  # the stand-in needs no credential, so no GitHub variable of any name reaches it
+        env = {key: value for key, value in env.items() if not key.upper().startswith("GH_") and "GITHUB" not in key.upper()}
         folder = clone / ".git" / STAND_IN
         env.update(PATH=f"{folder / 'bin'}{os.pathsep}{env.get('PATH', os.defpath)}",
                    DELIVER_STATE_DIR=str(folder / "state"))

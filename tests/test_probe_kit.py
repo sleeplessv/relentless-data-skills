@@ -347,7 +347,7 @@ class TestHelpAndList(ProbeKitTest):
         }
         for entry, line in expected.items():
             self.assertEqual(lines[ids.index(entry)], line)
-        self.assertEqual(sum("(not built)" not in line for line in lines), 12)
+        self.assertEqual(sum("(not built)" not in line for line in lines), 17)
 
 
 class TestRuns(ProbeKitTest):
@@ -417,7 +417,10 @@ class TestRuns(ProbeKitTest):
                                           "X5 codex failed: no agent of the reader role ran\n"
                                           # This world's stand-in calls no hook and has no uv (see TestGuardHook).
                                           "X1 codex failed: the hook logged no input for the control stand-in\n"
-                                          "X2 codex failed: uv is not on PATH\n"))
+                                          "X2 codex failed: uv is not on PATH\n"
+                                          f"D1 codex failed: {UNTRUSTED}\n"
+                                          f"D2 codex failed: {UNTRUSTED}\n"
+                                          "D6 codex failed: skipped, D1 failed in this run\n"))
         self.assert_private(out, err)
 
     def test_cortex_types_dollar_names_and_keeps_the_connection_out_of_every_file_and_line(self):
@@ -866,9 +869,8 @@ HARNESS_COMMANDS = {"claude": "claude", "cortex": "cortex", "codex": "codex", "c
 
 
 def codex_c(work: str) -> str:
-    """The Codex -c override of the research note, with the probe folder's absolute script path."""
-    return (f'hooks.PreToolUse=[{{matcher="Bash",hooks=[{{type="command",command="python3 {work}/hooks/guard.py '
-            f'settings",timeout=20}}]}}]')
+    """The Codex -c override of the research note, matching every tool, the same in every probe folder (#386)."""
+    return 'hooks.PreToolUse=[{matcher="",hooks=[{type="command",command="python3 hooks/guard.py settings",timeout=20}]}]'
 
 
 CONNECTION = "probe_conn_q7"
@@ -1158,6 +1160,228 @@ class TestX7(HookTest):
         (self.world.bin / "hc").unlink()
         self.assertEqual(self.world.kit("x7", "cursor"), (2, "", "probe_kit: hc is not on PATH\n"))
         self.assertEqual((self.world.hc_calls(), self.world.harness_starts()), ([], []))
+
+
+# D1, D2, D6, R3 and A6 (#386): a stand-in harness, installed as all five harness commands, that sends the
+# session's agent start and then the agent's one call to the hook in its harness's input shape, and runs the
+# call only on an allow. The agent's call is the brief's command, or for D6 an apply_patch that adds the file
+# the brief names. Codex marks the agent with agent_id and agent_type, Cursor with a conversation id of its
+# own, and Antigravity with the file the parent writes in .system_generated/subagents/ of its artifact folder.
+# Knobs: STANDIN_UNTRUSTED calls no hook, as Codex does with a hook it has not trusted; STANDIN_SESSION_DOES
+# makes the call the session's; STANDIN_FORCE_ALLOW runs the call whatever the hook said;
+# STANDIN_NO_AGENT_TYPE leaves agent_type out; STANDIN_SPAWN_TOOL names the agent-starting tool (default
+# spawn_agent) and STANDIN_SPAWN_ALSO sends a second start under that name; STANDIN_SUBAGENT_START calls
+# Cursor's subagentStart hook; STANDIN_NO_AGENT_FILE writes no agent file on Antigravity.
+HOOK_AGENT_HARNESS = r'''#!{python}
+import json, os, re, subprocess, sys
+from pathlib import Path
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+prompt = args[args.index("-p") + 1] if name in ("claude", "cortex", "agy") else args[-1]
+cwd, knob = Path.cwd(), os.environ.get
+role = re.search(r"of the role (\S+)", prompt).group(1)
+line = re.search(r"whole prompt: (Read (\S+) and follow it\.)", prompt)
+brief = Path(line.group(2)).read_text()
+registered = {path: json.loads((cwd / path).read_text()) for path in (".cursor/hooks.json", ".agents/hooks.json")
+              if (cwd / path).is_file()}
+agent = not knob("STANDIN_SESSION_DOES")
+sent, decisions = [], []
+
+
+def call(hook, data, hook_dir, form):
+    """Send one input to the hook; return its decision, or allow when no hook runs."""
+    if knob("STANDIN_UNTRUSTED") or hook is None:
+        return "allow"
+    sent.append(data)
+    done = subprocess.run(hook, shell=True, cwd=hook_dir, input=json.dumps(data), capture_output=True, text=True)
+    answer = json.loads(done.stdout) if done.stdout.strip() else {}
+    if form == "settings":
+        return answer.get("hookSpecificOutput", {}).get("permissionDecision", "allow")
+    if form == "beforeShell":
+        return answer.get("permission", "allow")
+    return answer.get("decision", "deny")
+
+
+ran = re.search(r"Run the command `([^`]+)` in the folder (\S+)\.", brief)
+edit = re.search(r"Create the file (\S+) holding the word (\S+) with your file-editing tool", brief)
+if name == "codex":
+    hook = re.search(r'command="([^"]*)"', args[args.index("-c") + 1]).group(1)
+    spawns = [knob("STANDIN_SPAWN_TOOL", "spawn_agent")] + ([knob("STANDIN_SPAWN_ALSO")] if knob("STANDIN_SPAWN_ALSO") else [])
+    for tool in spawns:
+        call(hook, {"session_id": "{session}", "cwd": str(cwd), "hook_event_name": "PreToolUse", "tool_name": tool,
+                    "tool_input": {"agent_type": role, "message": line.group(1)}}, cwd, "settings")
+    data = {"session_id": "{session}", "cwd": str(cwd), "hook_event_name": "PreToolUse"}
+    if agent:
+        data["agent_id"] = "agent-1"
+        if not knob("STANDIN_NO_AGENT_TYPE"):
+            data["agent_type"] = role
+    if edit:
+        patch = f"*** Begin Patch\n*** Add File: {edit.group(1)}\n+{edit.group(2)}\n*** End Patch\n"
+        data.update(tool_name="apply_patch", tool_input={"command": patch})
+    else:
+        data.update(tool_name="Bash", tool_input={"command": ran.group(1)})
+    decision = call(hook, data, cwd, "settings")
+elif name == "cursor-agent":
+    hooks = registered[".cursor/hooks.json"]["hooks"]
+    call(hooks["sessionStart"][0]["command"], {"conversation_id": "{session}", "hook_event_name": "sessionStart"},
+         cwd, "sessionStart")
+    if knob("STANDIN_SUBAGENT_START") and "subagentStart" in hooks:
+        call(hooks["subagentStart"][0]["command"], {"subagent_id": "agent-1", "parent_conversation_id": "{session}",
+                                                    "hook_event_name": "subagentStart"}, cwd, "subagentStart")
+    decision = call(hooks["beforeShellExecution"][0]["command"], {
+        "conversation_id": "conv-agent-2" if agent else "{session}", "command": ran.group(1), "cwd": str(cwd)},
+        cwd, "beforeShell")
+else:  # agy: the hook runs in the folder that holds hooks.json
+    hook = next(iter(registered[".agents/hooks.json"].values()))["PreToolUse"][0]["hooks"][0]["command"]
+    brain = cwd.parent / "brain"
+    conversation = "conv-agent-2" if agent else "{session}"
+    (brain / conversation).mkdir(parents=True, exist_ok=True)
+    if agent and not knob("STANDIN_NO_AGENT_FILE"):
+        made = brain / "{session}" / ".system_generated" / "subagents"
+        made.mkdir(parents=True)
+        (made / f"{conversation}.json").write_text("{}")
+    decision = call(hook, {"conversationId": conversation, "artifactDirectoryPath": str(brain / conversation),
+                           "cwd": str(cwd), "toolCall": {"name": "run_command",
+                                                         "args": {"CommandLine": ran.group(1), "Cwd": ran.group(2)}}},
+                    cwd / ".agents", "pre")
+if knob("STANDIN_FORCE_ALLOW"):
+    decision = "allow"
+decisions.append(decision)
+if decision == "allow":
+    if edit:
+        Path(edit.group(1)).write_text(edit.group(2) + "\n")
+    else:
+        subprocess.run(ran.group(1), shell=True, cwd=ran.group(2), stdout=subprocess.DEVNULL)
+logs = cwd / "logs"
+with open(knob("STANDIN_STARTS"), "a") as starts:
+    starts.write(json.dumps({"name": name, "args": args, "prompt": prompt, "brief": brief, "registered": registered,
+                             "sent": sent, "decisions": decisions, "logs": sorted(p.name for p in logs.iterdir()),
+                             "hook_log": (logs / "hook.jsonl").read_text() if (logs / "hook.jsonl").is_file() else ""})
+                 + "\n")
+print(json.dumps({"type": "result", "session_id": "{session}", "result": "done"}))
+'''
+UNTRUSTED = ("the hook logged nothing, so Codex has not trusted it. Trust the stand-in hook once in Codex: start "
+             f"codex -c '{codex_c('')}' in a terminal, type /hooks, trust the hook, then quit.")
+
+
+class TestHookAgentEntries(HookTest):
+    """D1, D2, D6, R3 and A6 against the stand-in that starts one agent and sends its call to the hook."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        script = self.world.bin / "hook-agent-harness"
+        script.write_text(HOOK_AGENT_HARNESS.replace("{python}", sys.executable).replace("{session}", SESSION))
+        script.chmod(0o755)
+        self.world.install("hook-agent-harness")
+
+    def test_d1_prints_the_trust_step_first_and_is_seen_when_the_hook_refuses_an_agents_merge_script(self):
+        code, out, err = self.world.kit("run", "codex", "D1")
+        self.assertEqual((code, out), (0, "D1 codex seen: the hook saw the agent marker and refused the merge stand-in\n"))
+        self.assertTrue(err.startswith("probe_kit: D1 needs a trusted hook. " + UNTRUSTED.split(". ", 1)[1] + "\n"), err)
+        self.assert_private(out, err)
+        start = self.world.harness_starts()[-1]
+        self.assertEqual(start["args"][-3:-1], ["-c", codex_c("")])
+        self.assertIn("Start one agent of the role probe-reader", start["prompt"])
+        self.assertRegex(start["brief"], r"Run the command `\./merge-script\.sh` in the folder \S+\. Change nothing else\.")
+        self.assertEqual((start["decisions"], start["logs"]), (["deny"], ["hook.jsonl"]))
+        self.assert_home_empty()
+
+    def test_the_codex_hook_text_is_the_same_in_every_probe_folder(self):
+        for _ in range(2):
+            self.world.kit("run", "codex", "D2")
+        first, second = (s["args"] for s in self.world.harness_starts())
+        self.assertEqual(first[first.index("-c") + 1], second[second.index("-c") + 1])
+        self.assertNotIn("/", codex_c("").replace("hooks/guard.py", ""))
+
+    def test_d1_fails_untrusted_with_the_trust_step_and_on_a_session_call_or_a_merge_script_that_ran(self):
+        cases = {"STANDIN_UNTRUSTED": UNTRUSTED,
+                 "STANDIN_SESSION_DOES": "no agent's call of the merge stand-in reached the hook",
+                 "STANDIN_FORCE_ALLOW": "the merge stand-in ran"}
+        for knob, fact in cases.items():
+            code, out, err = self.world.kit("run", "codex", "D1", **{knob: "1"})
+            self.assertEqual((code, out), (1, f"D1 codex failed: {fact}\n"), knob)
+            self.assert_private(out, err)
+
+    def test_d2_records_the_tool_name_of_the_session_call_that_names_the_brief(self):
+        for tool in ("spawn_agent", "Agent"):
+            code, out, err = self.world.kit("run", "codex", "D2", STANDIN_SPAWN_TOOL=tool)
+            self.assertEqual((code, out), (0, f"D2 codex recorded: the agent-starting tool reaches the hook as {tool}\n"))
+            self.assert_private(out, err)
+        self.assertIn("control-ran-d2.marker", self.world.harness_starts()[-1]["logs"])
+
+    def test_d2_fails_untrusted_with_no_agent_call_two_tool_names_or_a_name_that_is_not_plain(self):
+        cases = {(("STANDIN_UNTRUSTED", "1"),): UNTRUSTED,
+                 (("STANDIN_SESSION_DOES", "1"),): "no agent's call reached the hook",
+                 (("STANDIN_SPAWN_ALSO", "Agent"),): "2 tools of the session's named the brief",
+                 (("STANDIN_SPAWN_TOOL", "/tmp/x y"),): "the agent-starting tool's name is not a plain name"}
+        for knobs, fact in cases.items():
+            code, out, err = self.world.kit("run", "codex", "D2", **dict(knobs))
+            self.assertEqual((code, out), (1, f"D2 codex failed: {fact}\n"), knobs)
+
+    def test_d6_runs_after_d1_and_d2_and_is_seen_when_the_hook_refuses_the_reviewers_edit(self):
+        code, out, err = self.world.kit("run", "codex", "D1", "D2", "D6")
+        self.assertEqual((code, out), (0, "D1 codex seen: the hook saw the agent marker and refused the merge stand-in\n"
+                                          "D2 codex recorded: the agent-starting tool reaches the hook as spawn_agent\n"
+                                          "D6 codex seen: the hook refused the edit tool to a reviewer\n"))
+        self.assert_private(out, err)
+        start = self.world.harness_starts()[-1]
+        self.assertIn("Start one agent of the role probe-reviewer", start["prompt"])
+        self.assertEqual(start["sent"][-1]["tool_name"], "apply_patch")
+        self.assertEqual(start["decisions"], ["deny"])
+
+    def test_d6_fails_when_the_agents_edit_input_names_no_reviewer(self):
+        code, out, _ = self.world.kit("run", "codex", "D1", "D2", "D6", STANDIN_NO_AGENT_TYPE="1")
+        self.assertEqual((code, out), (1, "D1 codex seen: the hook saw the agent marker and refused the merge stand-in\n"
+                                          "D2 codex recorded: the agent-starting tool reaches the hook as spawn_agent\n"
+                                          "D6 codex failed: the hook input of the agent's edit call does not name the "
+                                          "reviewer role\n"))
+
+    def test_d6_is_skipped_and_failed_when_d1_failed_or_did_not_run_first(self):
+        code, out, _ = self.world.kit("run", "codex", "D1", "D2", "D6", STANDIN_UNTRUSTED="1")
+        self.assertEqual((code, out), (1, f"D1 codex failed: {UNTRUSTED}\nD2 codex failed: {UNTRUSTED}\n"
+                                          "D6 codex failed: skipped, D1 failed in this run\n"))
+        self.assertEqual(len(self.world.harness_starts()), 2)  # D6 started no session
+        code, out, _ = self.world.kit("run", "codex", "D6")
+        self.assertEqual((code, out), (1, "D6 codex failed: skipped, D1 did not run before it in this run\n"))
+        self.assertEqual(len(self.world.harness_starts()), 2)
+
+    def test_r3_records_whether_subagent_start_fired_and_fails_with_no_agent_call(self):
+        cases = {(("STANDIN_SUBAGENT_START", "1"),): (0, "R3 cursor recorded: subagentStart fired\n"),
+                 (): (0, "R3 cursor recorded: subagentStart did not fire, though an agent ran\n"),
+                 (("STANDIN_SESSION_DOES", "1"),): (1, "R3 cursor failed: no agent's call of the control stand-in "
+                                                       "reached the hook\n"),
+                 (("STANDIN_UNTRUSTED", "1"),): (1, "R3 cursor failed: the hook logged no session start\n")}
+        for knobs, expected in cases.items():
+            code, out, err = self.world.kit("run", "cursor", "R3", **dict(knobs))
+            self.assertEqual((code, out), expected, knobs)
+            self.assert_private(out, err)
+        hooks = self.world.harness_starts()[0]["registered"][".cursor/hooks.json"]["hooks"]
+        self.assertEqual(hooks["subagentStart"], [{"command": "python3 hooks/guard.py subagentStart"}])
+
+    def test_a6_is_seen_when_the_marker_is_absent_and_the_hook_logged_a_refusal(self):
+        code, out, err = self.world.kit("run", "antigravity", "A6")
+        self.assertEqual((code, out), (0, "A6 antigravity seen: the hook refused the merge stand-in to an agent\n"))
+        self.assert_private(out, err)
+        start = self.world.harness_starts()[-1]
+        refusal = json.loads(start["hook_log"].splitlines()[-1])
+        self.assertEqual((refusal["decision"], refusal["reason"]), ("deny", "GUARD-B: the merge script is refused to a helper"))
+        for knobs in ({"STANDIN_NO_AGENT_FILE": "1"}, {"STANDIN_SESSION_DOES": "1"}):
+            code, out, _ = self.world.kit("run", "antigravity", "A6", **knobs)
+            self.assertEqual((code, out), (1, "A6 antigravity failed: the merge stand-in ran\n"), knobs)
+
+    def test_help_states_the_trust_step_the_refusal_line_and_each_entrys_evidence(self):
+        code, out, err = self.world.kit("--help")
+        self.assertEqual((code, err), (0, ""))
+        text = " ".join(out.split())
+        for fact in ("matches every tool", "the same in every probe folder, so one trust covers every run",
+                     "Codex runs no hook it has not trusted", "Before D1 runs, the kit prints the step that trusts the hook",
+                     "fails with that step", "writes a refusal line to logs/hook.jsonl",
+                     "marked by agent_id, reached the hook for merge-script.sh",
+                     "D2 records the tool name of the session's call whose input names the brief",
+                     "D6 runs only after D1 was seen and D2 recorded in the same run",
+                     "refuses the edit tool (apply_patch, Edit or Write) when the input's agent_type is the reviewer role",
+                     "R3 registers subagentStart in .cursor/hooks.json", "conversation id other than the session's",
+                     ".system_generated/subagents/", "A6 is seen when the merge marker is absent and the hook logged a refusal"):
+            self.assertIn(fact, text)
 
 
 if __name__ == "__main__":

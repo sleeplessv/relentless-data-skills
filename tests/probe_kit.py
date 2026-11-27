@@ -115,6 +115,38 @@ Antigravity the hook marks an agent by the file the parent writes in
 conversation id. A6 is seen when the merge marker is absent and the hook logged
 a refusal of a command that runs merge-script.sh.
 
+K1 to K5, D3 to D5, R2, R5 and A2 to A4 probe each harness's own agent limits.
+Each agent's brief asks for a word of its own and its role's word, as X3's does,
+and a brief that has the agent start another names that agent's brief, so no
+nested path is in the prompt. K1 to K4 follow the four draft tests of the Cortex
+Code nesting note: K1 sets CORTEX_CODE_EXPERIMENTAL_FEATURES to {} and K2 and K3
+to a maxSubagentDepth of 2, on the command line only. In K1 each author lists
+which of task, agent, agent_output and kill_agent it has; one that has task or
+agent must show its refused call in the output. K2 and K3 need both leaves'
+lists empty and the output to show each start's mode and parent; K2 also needs
+the leaves at once, and K3 the session's agent_output wait and a second author
+whose leaves start in the background, which it reports. K4, K5 and D4 count
+the agent as called back only when its second marker holds a word its first
+brief gave it to remember and write nowhere; that brief deleted itself. K4
+needs a kill_agent call that names the agent and succeeded, before the resume,
+and no finished sleep. K5 reads the model from the events tied to the call that
+resumed the agent and fails when they name none. D4 needs a close_agent call
+that names the agent's thread and completed, then a call to that thread. D3 is
+seen only when both spawn_agent calls started before either ended. D5 runs Codex
+with the temporary folders kept out of its writable directories and cuts the
+agent's worktree beside the session's folder. R2 and A4 ask for 4 agents at
+once, never more; each agent keeps the longest list of agents it saw running
+beside it. They record no cap up to 4 when a list holds all 4, and otherwise
+the most at once, naming no cap. R5 names each file it makes in
+~/.cursor/agents/ before making it, never touches one it did not make, and
+removes it when the probe ends, also when it fails or is interrupted. A2 and A3
+add the guard hook: A2 is seen when the hook logged the agent's write_file call
+to its marker, no file was written, and the agent reported the call refused. A3
+starts the agent whose file names flash with Model pro beside two agents whose
+files name no tier, one called with pro and one with flash, and compares the
+models in their hook inputs; it names the winner only when pro and flash gave
+two models.
+
 Cortex Code needs --connection, the Snowflake connection its runs spend. The kit
 passes it on the harness's command line only: it is not in the terminal name, it
 is replaced by <connection> before any output reaches a file, the hook writes
@@ -142,6 +174,7 @@ import secrets
 import threading
 import shlex
 import shutil
+import signal
 import statistics
 import subprocess
 import sys
@@ -169,7 +202,7 @@ ENTRIES = {
     "C2": (("claude",), "A role's definition file loads a skill closed to model invocation"),
     "C3": (("claude",), "claude plugin uninstall after the marketplace entry is gone"),
     "K1": (("cortex",), "Default nesting limit"),
-    "K2": (("cortex",), "maxSubagentDepth at 2, two reviewers under an author"),
+    "K2": (("cortex",), "maxSubagentDepth at 2, two leaf agents under an author"),
     "K3": (("cortex",), "A background agent starts foreground agents"),
     "K4": (("cortex",), "Resuming a killed agent"),
     "K5": (("cortex",), "The model a resumed agent runs on"),
@@ -298,6 +331,7 @@ class Probe:
     hook: bool = False  # the folder gets the stand-in guard hook, its registration and the stand-in commands
     direct: bool = False  # judged without a terminal or a harness session
     setup: Callable[[str, Path, str], None] | None = None  # writes the entry's stand-ins: harness, folder, codeword
+    args: tuple[str, ...] = ()  # put before the prompt, which comes last on the Codex line
     command: list[str] | None = None  # the headless command, when the entry needs another than the harness's
 
 
@@ -326,7 +360,7 @@ READER, REVIEWER = "probe-reader", "probe-reviewer"
 DEFINITION_DIRS = {"claude": ".claude/agents", "cortex": ".cortex/agents", "codex": ".codex/agents",
                    "cursor": ".cursor/agents", "antigravity": ".agents/agents"}
 # The tools list of the reader and of the reviewer. Codex and Cursor cannot withhold a tool in a
-# definition file (#189), so their role files carry none. No role file names a model.
+# definition file (#189), so their role files carry none. No role file names a model but A3's reader.
 TOOLS = {"claude": ("Read, Grep, Glob, Bash, Write, Edit", "Read, Grep, Glob, Bash"),
          "cortex": ("[read, grep, glob, bash, write, edit]", "[read, grep, glob, bash]"),
          "antigravity": ("[view_file, run_command, write_file, edit_file]", "[view_file, run_command]")}
@@ -557,27 +591,36 @@ def wait(address: str, limit: float, poll: float) -> dict | None:
 
 
 def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -> tuple[str, str]:
-    probe = PROBES[entry]
     codeword = f"probe-{secrets.token_hex(4)}"
+    try:  # outermost, so what the probe wrote outside its folder goes on every way out
+        return run_in_folder(harness, entry, args, saved, codeword)
+    finally:
+        remove_outside(codeword)
+
+
+def run_in_folder(harness: str, entry: str, args: argparse.Namespace, saved: Path, codeword: str) -> tuple[str, str]:
+    probe = PROBES[entry]
     root = make_folder(harness, codeword)
-    if probe.hook:
-        write_guard(harness, root / "work")
-    out, err = root / "out.jsonl", root / "err.txt"
-    prompt = probe.prompt(harness).replace("{work}", str(root / "work"))
-    argv = [part.replace("{prompt}", prompt) for part in probe.command or COMMANDS[harness]]
-    if harness == "cortex":
-        argv += ["-c", args.connection]
-    if probe.hook and harness == "codex":
-        argv[-1:-1] = codex_hook(root / "work")  # before the prompt, which comes last
-    relayed = [sys.executable, str(Path(__file__).resolve()), "--relay", str(out), str(err), args.connection or "", *argv]
-    line = f"{probe.env} {shlex.join(relayed)}".lstrip()
-    if args.connection:  # the hook hides it in its log, as the relay does in the output
-        line = f"{HIDE_VAR}={shlex.quote(args.connection)} {line}"
-    name = f"probe-{harness}-{entry.lower()}-{os.getpid()}"
     address, ended = None, False
     try:
+        if probe.hook:
+            write_guard(harness, root / "work")
         if probe.setup is not None:
             probe.setup(harness, root / "work", codeword)
+        out, err = root / "out.jsonl", root / "err.txt"
+        prompt = probe.prompt(harness).replace("{work}", str(root / "work"))
+        argv = [part.replace("{prompt}", prompt) for part in probe.command or COMMANDS[harness]]
+        if harness == "cortex":
+            argv += ["-c", args.connection]
+        if probe.hook and harness == "codex":
+            argv[-1:-1] = codex_hook(root / "work")  # before the prompt, which comes last
+        argv[-1:-1] = probe.args
+        relayed = [sys.executable, str(Path(__file__).resolve()), "--relay", str(out), str(err),
+                   args.connection or "", *argv]
+        line = f"{probe.env} {shlex.join(relayed)}".lstrip()
+        if args.connection:  # the hook hides it in its log, as the relay does in the output
+            line = f"{HIDE_VAR}={shlex.quote(args.connection)} {line}"
+        name = f"probe-{harness}-{entry.lower()}-{os.getpid()}"
         if probe.direct:
             return probe.judge(harness, Finished(root / "work", "", None, codeword))
         started = hc("run", "--bg", "--no-notify", "--name", name, "--cwd", str(root / "work"), "bash", "-c", line)
@@ -603,10 +646,12 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
     except SetupFailed as error:
         return "failed", str(error)
     finally:
-        if address is not None and not ended:
-            hc("kill", address)  # interrupted while waiting: end the terminal
-        undo_user_level()
-        shutil.rmtree(root, ignore_errors=True)
+        try:
+            if address is not None and not ended:
+                hc("kill", address)  # interrupted while waiting: end the terminal
+        finally:
+            undo_user_level()
+            shutil.rmtree(root, ignore_errors=True)
 
 
 def chosen_entries(harness: str, wanted: list[str]) -> list[str]:
@@ -1424,6 +1469,659 @@ PROBES.update({
 })
 
 
+# K1 to K5, D3 to D5, R2, R5 and A2 to A4: each harness's own agent limits (#385). Every brief asks for a
+# word of its own and the role's word, as X3's does. A brief that has its agent start another holds that
+# agent's one line, so no nested path is in the prompt. The rule each judge follows is in the run's
+# ticket snapshot: the files and the output show who acted, never the reply alone.
+AUTHOR = "probe-author"  # no tools line: it keeps the tools that start, wait on and stop agents
+LEAF = "probe-leaf"  # no tools line either, so the tools it lists show the depth limit alone
+USER_ROLE = "probe-user-reader"  # R5's role, defined only in ~/.cursor/agents/
+CAP = 4  # the cap probes ask for 4 agents, one more than the 3 authors deliver starts at once (#381)
+AGENT_TOOLS = ("task", "agent", "agent_output", "kill_agent")  # what Cortex Code takes from an agent at the limit
+WRITE = "Write the word {word}, a space and your role word to the file {marker} in the folder {work}."
+KEEP = "Remember the word {keep} for later, and write it nowhere. "  # the call-back word: only in this brief
+RECALL = ("Write the word {word}, a space, the word your first brief asked you to remember, a space and your role "
+          "word to the file {marker} in the folder {work}.")
+FORGET = " Then delete this brief file."
+LIST_TOOLS = (" Then write the word {word}, a space and the names of those of these tools you have: task, agent, "
+              "agent_output, kill_agent, or the word none, to the file {tools} in the folder {work}.")
+CONTROL = ("Run the shell command `./control-probe.sh {control} {word}` in the folder {work}, with your role word as a "
+           "third argument.")
+TOGETHER = " Then run this shell command in the folder {work}: `{together}`"
+DEPTH_VAR = "CORTEX_CODE_EXPERIMENTAL_FEATURES"
+# Codex writes only in the session's folder: the temporary folders, which hold the probe folder, are left out.
+CODEX_NO_TMP = ("-c", "sandbox_workspace_write.exclude_tmpdir_env_var=true",
+                "-c", "sandbox_workspace_write.exclude_slash_tmp=true")
+OUTSIDE: dict[str, list[tuple[Path, str | None]]] = {}  # by codeword: what a probe made outside its folder
+
+
+def marker_of(entry: str, key: str) -> str:
+    return f"probe-{entry.lower()}-{key}.txt"
+
+
+def line_of(entry: str, key: str) -> str:
+    return f"Read {{work}}/.git/{BRIEFS}/brief-{entry.lower()}-{key}.md and follow it."
+
+
+def together(entry: str, key: str, count: int) -> str:
+    """Make this agent's live file and wait up to 30 seconds for `count` of them, keeping the longest list seen."""
+    live, seen = f"probe-{entry.lower()}-live", f"probe-{entry.lower()}-seen-{key}.txt"
+    return (f"touch {live}-{key}; best=0; for i in $(seq 30); do n=$(ls {live}-* | wc -l); if [ $n -gt $best ]; "
+            f"then best=$n; ls {live}-* > {seen}; fi; [ $n -ge {count} ] && break; sleep 1; done; rm {live}-{key}")
+
+
+def setup_limit(entry: str, briefs: dict[str, str], roles: tuple[str, ...] = (READER,), count: int = 0,
+                tier: str | None = None, worktree: bool = False) -> Callable[[str, Path, str], None]:
+    """The roles' files, a brief per key, and for D5 a worktree beside the probe folder."""
+    def setup(harness: str, work: Path, codeword: str) -> None:
+        words = WORDS[codeword] = {use: f"{use}-{secrets.token_hex(4)}"
+                                   for use in (*briefs, *roles, "control", "outside", "keep")}
+        folder = work / DEFINITION_DIRS[harness]
+        for role in roles:
+            folder.mkdir(parents=True, exist_ok=True)
+            tools = None if role in (AUTHOR, LEAF) else TOOLS.get(harness, (None, None))[role == REVIEWER]
+            text = role_file(harness, role, role.removeprefix("probe-"), tools, words[role])
+            if tier and role == READER:
+                text = text.replace("\n---\n\n", f"\nmodel: {tier}\n---\n\n", 1)
+            (folder / (role + (".toml" if harness == "codex" else ".md"))).write_text(text)
+        if worktree:
+            subprocess.run(["git", "-C", str(work), "worktree", "add", "-q", "--orphan", "-b", "probe-outside",
+                            str(work.parent / "outside")], check=True)
+        fill = {"work": work, "root": work.parent, "control": words["control"], "outside": words["outside"],
+                "keep": words["keep"], **{f"line_{key}": line_of(entry, key).replace("{work}", str(work))
+                                          for key in briefs}}
+        shared = work / ".git" / BRIEFS
+        shared.mkdir(parents=True, exist_ok=True)
+        for key, text in briefs.items():
+            body = text.format(word=words[key], marker=marker_of(entry, key), tools=marker_of(entry, f"{key}-tools"),
+                               together=together(entry, key, count), **fill)
+            (shared / f"brief-{entry.lower()}-{key}.md").write_text(f"# Probe brief\n\n{body} Change nothing else.\n")
+    return setup
+
+
+def file_holds(path: Path, run: Finished, *uses: str) -> bool:
+    """Whether the file holds the word the kit drew for each use: a brief's key or a role."""
+    words, drawn = path.read_text(errors="replace").split() if path.is_file() else [], WORDS.get(run.codeword, {})
+    return all(drawn.get(use) in words for use in uses)
+
+
+def marker(run: Finished, entry: str, key: str, *uses: str) -> bool:
+    return file_holds(run.work / marker_of(entry, key), run, key, *uses)
+
+
+def tools_listed(run: Finished, entry: str, key: str) -> tuple[str, ...] | None:
+    """The agent tools the agent of that key listed beside its brief's word; None when it listed nothing."""
+    path = run.work / marker_of(entry, f"{key}-tools")
+    if not file_holds(path, run, key):
+        return None
+    words = path.read_text(errors="replace").split()
+    return tuple(tool for tool in AGENT_TOOLS if tool in words)
+
+
+@dataclass(frozen=True)
+class Call:
+    """A tool_use item of an assistant event (Claude Code's format, which Cortex Code shares)."""
+    id: str
+    parent: str | None  # the event's parent_tool_use_id: the call that started the agent that made this one
+    name: str
+    input: dict
+
+
+def tool_calls(events: list[dict]) -> list[Call]:
+    """The stream's tool calls in order; one with no id or no input is left out."""
+    calls = []
+    for event in events:
+        message = event.get("message")
+        content = message.get("content") if event.get("type") == "assistant" and isinstance(message, dict) else None
+        for item in content if isinstance(content, list) else ():
+            if isinstance(item, dict) and item.get("type") == "tool_use" and item.get("id") \
+                    and isinstance(item.get("input"), dict):
+                calls.append(Call(str(item["id"]), event.get("parent_tool_use_id") or None, str(item.get("name")),
+                                  item["input"]))
+    return calls
+
+
+def call_results(events: list[dict]) -> dict[str, tuple[str, bool]]:
+    """Each tool_result item by the id of its call: its content as text, and whether it is an error."""
+    found = {}
+    for event in events:
+        message = event.get("message")
+        content = message.get("content") if isinstance(message, dict) else None
+        for item in content if isinstance(content, list) else ():
+            if isinstance(item, dict) and item.get("type") == "tool_result" and item.get("tool_use_id"):
+                found[str(item["tool_use_id"])] = (json.dumps(item.get("content")), item.get("is_error") is True)
+    return found
+
+
+def started(calls: list[Call], entry: str, key: str) -> Call | None:
+    """The first task call, not a resume, whose prompt names the brief of that key."""
+    brief = f"brief-{entry.lower()}-{key}.md"
+    return next((call for call in calls if call.name == "task" and brief in str(call.input.get("prompt"))
+                 and not call.input.get("resume")), None)
+
+
+def agent_id(results: dict[str, tuple[str, bool]], call: Call | None) -> str | None:
+    """The agentId the result of a successful call gives."""
+    text, error = results.get(call.id, ("", True)) if call else ("", True)
+    found = None if error else re.search(r"agentId\W+([A-Za-z0-9_-]+)", text)
+    return found[1] if found else None
+
+
+def waited(calls: list[Call], results: dict[str, tuple[str, bool]], call: Call | None) -> bool:
+    """Whether an agent_output call with wait true names the agent the call started."""
+    target = agent_id(results, call)
+    return target is not None and any(c.name == "agent_output" and c.input.get("wait") is True
+                                      and target in c.input.values() for c in calls)
+
+
+def model_under(events: list[dict], call: Call) -> str | None:
+    """The model of the last assistant event tied to the call by parent_tool_use_id."""
+    found = None
+    for event in events:
+        message = event.get("message")
+        if event.get("type") == "assistant" and event.get("parent_tool_use_id") == call.id \
+                and isinstance(message, dict) and model_name(message.get("model")):
+            found = message["model"]
+    return found
+
+
+def judge_k1(harness: str, run: Finished) -> tuple[str, str]:
+    events = events_of(run.out)
+    calls, results = tool_calls(events), call_results(events)
+    facts = []
+    for outer, leaf, label in (("fg", "fgleaf", "foreground"), ("bg", "bgleaf", "background")):
+        if not marker(run, "K1", outer, AUTHOR):
+            return "failed", f"no {label} agent of the author role ran"
+        if marker(run, "K1", leaf, REVIEWER):
+            return "failed", f"a {label} agent started an agent of the reviewer role"
+        tools = tools_listed(run, "K1", outer)
+        if tools is None:
+            return "failed", f"the {label} author did not list its tools, so the nested start was not tried"
+        if not {"task", "agent"} & set(tools):
+            facts.append(f"the {label} author had none of {', '.join(AGENT_TOOLS[:2])}")
+            continue
+        own = started(calls, "K1", outer)
+        tried = [call for call in calls if own and call.parent == own.id and call.name in ("task", "agent")]
+        if not tried:
+            return "failed", (f"the {label} author had {', '.join(tools)}, but the output shows no call of its "
+                              f"to start an agent")
+        if not all(results.get(call.id, ("", False))[1] for call in tried):
+            return "failed", (f"the {label} author's call to start an agent ended in no error, yet no agent of the "
+                              f"reviewer role wrote its marker")
+        facts.append(f"the {label} author's call to start an agent was refused")
+    if not waited(calls, results, started(calls, "K1", "bg")):
+        return "failed", "the output shows no agent_output call that waits for the background author"
+    return "seen", "neither a foreground nor a background agent could start an agent: " + "; ".join(facts)
+
+
+def most_at_once(run: Finished, entry: str, keys: list[str]) -> int | None:
+    """The longest list of live agents any of them wrote; None when one left no list."""
+    lists = [run.work / f"probe-{entry.lower()}-seen-{key}.txt" for key in keys]
+    if not all(path.is_file() for path in lists):
+        return None
+    return max(len(path.read_text(errors="replace").split()) for path in lists)
+
+
+def two_leaves(entry: str, background: bool) -> Callable[[str, Finished], tuple[str, str]]:
+    """K2 and K3: an author two layers above two foreground leaves (draft tests 2 and 3)."""
+    mode = "background" if background else "foreground"
+
+    def judge(harness: str, run: Finished) -> tuple[str, str]:
+        if not marker(run, entry, "author", AUTHOR):
+            return "failed", "no agent of the author role ran"
+        ran = [key for key in ("first", "second") if marker(run, entry, key, LEAF)]
+        if len(ran) < 2:
+            return "failed", f"{len(ran)} of the 2 agents of the leaf role ran under the author"
+        lists = [tools_listed(run, entry, key) for key in ran]
+        if None in lists:
+            return "failed", "an agent of the leaf role did not list its tools"
+        kept = [tool for tool in AGENT_TOOLS if any(tool in tools for tools in lists)]
+        if kept:
+            return "failed", (f"an agent of the leaf role, two layers down, has {', '.join(kept)}, so the limit is "
+                              f"deeper than 2")
+        events = events_of(run.out)
+        calls, results = tool_calls(events), call_results(events)
+        author = started(calls, entry, "author")
+        if author is None or author.parent is not None or author.input.get("run_in_background") is not background:
+            return "failed", f"the output does not show the session starting the author in the {mode}"
+        leaves = [started(calls, entry, key) for key in ("first", "second")]
+        if any(leaf is None or leaf.parent != author.id or leaf.input.get("run_in_background") is not False
+               for leaf in leaves):
+            return "failed", ("the output does not show the author starting both agents of the leaf role in the "
+                              "foreground")
+        if background and not waited(calls, results, author):
+            return "failed", "the output shows no agent_output call that waits for the background author"
+        most = most_at_once(run, entry, ran)
+        if most is None:
+            return "failed", "an agent of the leaf role left no list of the agents running beside it"
+        if not background:
+            if most < 2:
+                return "failed", "both agents of the leaf role ran under the author, but one after the other"
+            return "seen", ("both agents of the leaf role ran at once under the foreground author, two layers down, "
+                            "and neither had task, agent, agent_output or kill_agent")
+        if marker(run, entry, "variant", AUTHOR):
+            variant_author = started(calls, entry, "variant")
+            inner = [started(calls, entry, key) for key in ("vfirst", "vsecond")]
+            if variant_author is None or any(call is None or call.parent != variant_author.id
+                                             or call.input.get("run_in_background") is not True for call in inner):
+                return "failed", ("the output does not show the author for background inner calls starting both its "
+                                  "agents in the background")
+            count = sum(marker(run, entry, key, LEAF) for key in ("vfirst", "vsecond"))
+            variant = f"with background inner calls, {count} of 2 agents of the leaf role ran"
+        else:
+            variant = "the author for background inner calls did not run"
+        return "seen", (f"both foreground agents of the leaf role ran under the background author, "
+                        f"{'at once' if most >= 2 else 'one after the other'}; {variant}")
+    return judge
+
+
+def called_back(run: Finished, entry: str) -> tuple[str, str] | None:
+    """The failure of a call-back, if any: the second marker must hold the word only the first brief gave."""
+    if marker(run, entry, "second", READER, "keep"):
+        return None
+    if marker(run, entry, "second", READER):
+        return "failed", "the agent that answered lacks its first brief's word, so it was not the same agent"
+    return "failed", "no agent answered the call-back"
+
+
+def resumed(run: Finished, entry: str, calls: list[Call], target: str, after: int) -> tuple[str, str] | None:
+    """The failure, if any, of a task call that resumes the agent, made after the call at index `after`."""
+    again = next((n for n, call in enumerate(calls) if call.name == "task" and call.input.get("resume") == target),
+                 None)
+    if again is None:
+        return "failed", "the output shows no task call that resumes that agent"
+    if again < after:
+        return "failed", "the agent was resumed before it was killed"
+    return called_back(run, entry)
+
+
+def judge_k4(harness: str, run: Finished) -> tuple[str, str]:
+    if not marker(run, "K4", "first", READER):
+        return "failed", "no agent of the reader role ran"
+    if (run.work / "probe-k4-slept.txt").is_file():
+        return "failed", "the agent was not killed: its sleep finished"
+    events = events_of(run.out)
+    calls, results = tool_calls(events), call_results(events)
+    target = agent_id(results, started(calls, "K4", "first"))
+    if target is None:
+        return "failed", "the output shows no agentId for the agent"
+    kills = [call for call in calls if call.name == "kill_agent"]
+    if not kills:
+        return "failed", "the output shows no kill_agent call"
+    kill = next((call for call in kills if target in call.input.values()), None)
+    if kill is None:
+        return "failed", "the kill_agent call names another agent"
+    if results.get(kill.id, ("", True))[1]:
+        return "failed", "the kill_agent call did not succeed"
+    return resumed(run, "K4", calls, target, calls.index(kill)) or \
+        ("seen", "the killed agent resumed with its earlier context")
+
+
+def judge_k5(harness: str, run: Finished) -> tuple[str, str]:
+    if not marker(run, "K5", "first", READER):
+        return "failed", "no agent of the reader role ran"
+    events = events_of(run.out)
+    calls, results = tool_calls(events), call_results(events)
+    first = started(calls, "K5", "first")
+    target = agent_id(results, first)
+    if target is None:
+        return "failed", "the output shows no agentId for the agent"
+    failure = resumed(run, "K5", calls, target, 0)
+    if failure:
+        return failure
+    again = next(call for call in calls if call.name == "task" and call.input.get("resume") == target)
+    after, before = model_under(events, again), model_under(events, first)
+    if after is None:
+        return "failed", "no assistant event tied to the call that resumed the agent names a model"
+    if before is None:
+        return "failed", "no assistant event tied to the call that started the agent names a model"
+    return "recorded", (f"the resumed agent ran on {after}, its first run on {before}, at assistant event "
+                        f".message.model")
+
+
+def collab_items(events: list[dict], kind: str = "item.completed") -> list[dict]:
+    """Codex's collab_tool_call items of the events of that type, in order."""
+    return [event["item"] for event in events if event.get("type") == kind and isinstance(event.get("item"), dict)
+            and event["item"].get("type") == "collab_tool_call"]
+
+
+def receivers(item: dict) -> list[str]:
+    ids = item.get("receiver_thread_ids")
+    return [str(i) for i in ids if i] if isinstance(ids, list) else []
+
+
+def judge_d3(harness: str, run: Finished) -> tuple[str, str]:
+    ran = sum(marker(run, "D3", key, READER) for key in ("one", "two"))
+    if ran < 2:
+        return "failed", f"{ran} of the 2 agents asked for in one message ran"
+    # Two calls under way at once come from one model step: the next step waits for the calls before it.
+    under_way = set()
+    for event in events_of(run.out):
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        if item.get("tool") != "spawn_agent" or not item.get("id"):
+            continue
+        if event.get("type") == "item.completed":
+            break
+        if event.get("type") == "item.started":
+            under_way.add(item["id"])
+    if len(under_way) >= 2:
+        return "seen", ("both agents ran, and both spawn_agent calls started before either ended, so one model step "
+                        "made them")
+    return "failed", ("both agents ran, but the output does not show both starts in one model step, so the step "
+                      "was not measured")
+
+
+def judge_d4(harness: str, run: Finished) -> tuple[str, str]:
+    if not marker(run, "D4", "first", READER):
+        return "failed", "no agent of the reader role ran"
+    items = collab_items(events_of(run.out))
+    spawn = next((item for item in items if item.get("tool") == "spawn_agent" and receivers(item)), None)
+    if spawn is None:
+        return "failed", "the output shows no spawn_agent call that names the agent's thread"
+    target = receivers(spawn)[0]
+    closes = [n for n, item in enumerate(items) if item.get("tool") == "close_agent"]
+    if not closes:
+        return "failed", "the output shows no close_agent call, so the agent was not unloaded"
+    close = next((n for n in closes if target in receivers(items[n])), None)
+    if close is None:
+        return "failed", "the close_agent call names another agent"
+    if items[close].get("status") != "completed":
+        return "failed", "the close_agent call did not succeed"
+    if not any(target in receivers(item) and item.get("tool") not in ("close_agent", "wait", "wait_agent")
+               for item in items[close + 1:]):
+        return "failed", "the output shows no call to the agent after its close"
+    return called_back(run, "D4") or ("seen", "the closed agent answered with its earlier context")
+
+
+def judge_d5(harness: str, run: Finished) -> tuple[str, str]:
+    if not marker(run, "D5", "inside", READER):
+        return "failed", "no agent of the reader role ran"
+    if file_holds(run.work.parent / "outside" / marker_of("D5", "outside"), run, "outside", READER):
+        return "seen", "the agent wrote in its worktree outside the session's writable directories"
+    return "failed", "the agent ran, but its file in the worktree outside the writable directories is missing"
+
+
+def judge_cap(entry: str) -> Callable[[str, Finished], tuple[str, str]]:
+    keys = [f"agent{n}" for n in range(1, CAP + 1)]
+
+    def judge(harness: str, run: Finished) -> tuple[str, str]:
+        ran = [key for key in keys if marker(run, entry, key, READER)]
+        if len(ran) < CAP:
+            return "failed", (f"{len(ran)} of the {CAP} agents ran, so a cap is not told apart from agents "
+                              f"never started")
+        most = most_at_once(run, entry, ran)
+        if most is None:
+            return "failed", "an agent left no list of the agents running beside it"
+        if most >= CAP:
+            return "recorded", f"no cap up to {CAP}: all {CAP} agents ran at once"
+        # Fewer at once can be a slow start as well as a queue: the files show no limit, so none is named.
+        return "recorded", (f"all {CAP} agents ran, at most {most} at once; nothing shows a limit or a queue, so no "
+                            f"cap is named")
+    return judge
+
+
+def judge_r5(harness: str, run: Finished) -> tuple[str, str]:
+    path = run.work / marker_of("R5", "user")
+    if not path.is_file():
+        return "failed", "no marker the brief names"
+    if not file_holds(path, run, "user", USER_ROLE):
+        return "failed", "the marker the brief names lacks the brief's word or the user-level role's word"
+    return "seen", "an agent of the role defined only in ~/.cursor/agents/ wrote the marker its brief names"
+
+
+def agent_hook_lines(run: Finished, role: str, key: str) -> list[dict]:
+    """The hook log lines of the agent's control commands: the control word, its brief's word and its role's word."""
+    drawn = WORDS.get(run.codeword, {})
+    return [line for line in hook_log(run.work)
+            if all(drawn.get(use) and drawn[use] in str(line.get("command")) for use in ("control", key, role))]
+
+
+def tool_of(line: dict) -> str:
+    call = (line.get("input") or {}).get("toolCall") if isinstance(line.get("input"), dict) else None
+    name = call.get("name") if isinstance(call, dict) else None
+    return name if isinstance(name, str) and re.fullmatch(r"[A-Za-z_]+", name) else "unnamed"
+
+
+ENDINGS = ("refused", "failed", "wrote")  # how A2's agent says its write_file call ended
+A2_BRIEF = (CONTROL + " Then write the word {word}, a space and your role word to the file {marker} in the folder "
+            "{work} with the write_file tool, not with run_command. Then run the shell command `./control-probe.sh "
+            "{control} {word} result` in the folder {work}, with your role word and then one word for how the "
+            "write_file call ended: refused if the tool was refused or unavailable, failed if it failed another "
+            "way, wrote if it wrote the file.")
+
+
+def judge_a2(harness: str, run: Finished) -> tuple[str, str]:
+    lines = agent_hook_lines(run, REVIEWER, "write")
+    if not lines:
+        return "failed", "no agent of the reviewer role ran a command the hook saw"
+    target, role_word = marker_of("A2", "write"), WORDS.get(run.codeword, {}).get(REVIEWER)
+    writes = [line for line in hook_log(run.work) if tool_of(line) == "write_file"
+              and all(found and found in str(line.get("command")) for found in (target, role_word))]
+    if (run.work / target).is_file():
+        if not writes and any(tool_of(line) == "run_command" and target in str(line.get("command"))
+                              for line in hook_log(run.work)):
+            return "failed", "the agent wrote the file through run_command, not the withheld tool"
+        return "failed", "the withheld tool wrote the file"
+    if not writes:
+        return "failed", "the agent made no write_file call to the marker, so the withheld tool's absence is not shown"
+    said = []  # the first ending after `result` in each report the hook saw
+    for line in lines:
+        words = re.findall(r"[\w-]+", str(line.get("command")))
+        said += [word for word in words[words.index("result"):] if word in ENDINGS][:1] if "result" in words else []
+    if said[-1:] == ["refused"]:
+        return "seen", "the agent's write_file call to the marker was refused, as it reported"
+    if said[-1:] == ["failed"]:
+        return "failed", "the agent's write_file call failed another way, as it reported, so no refusal is shown"
+    return "failed", "the agent did not report how its write_file call ended, so no refusal is shown"
+
+
+A3_CALLS = (("tiered", READER, "pro"), ("pro", AUTHOR, "pro"), ("flash", AUTHOR, "flash"))  # key, role, call's tier
+
+
+def asked_tier(run: Finished, key: str) -> str | None:
+    """The Model of the invoke_subagent call the hook saw for the brief of that key."""
+    for line in hook_log(run.work):
+        call = (line.get("input") or {}).get("toolCall") if isinstance(line.get("input"), dict) else None
+        given = call.get("args") if isinstance(call, dict) else None
+        if tool_of(line) == "invoke_subagent" and isinstance(given, dict) and f"brief-a3-{key}.md" in json.dumps(given):
+            tiers = [value for name, value in given.items() if "model" in name.lower() and isinstance(value, str)]
+            return tiers[0].lower() if tiers else None
+    return None
+
+
+def judge_a3(harness: str, run: Finished) -> tuple[str, str]:
+    models = {}
+    for key, role, tier in A3_CALLS:
+        if not marker(run, "A3", key, role):
+            return "failed", f"no agent of the {role.removeprefix('probe-')} role ran for the {key} brief"
+        if asked_tier(run, key) != tier:
+            return "failed", f"the hook saw no invoke_subagent call with Model {tier} for the {key} brief"
+        lines = agent_hook_lines(run, role, key)
+        if not lines:
+            return "failed", f"the hook saw no command of the agent of the {key} brief"
+        model = (lines[-1].get("input") or {}).get("modelName")
+        if not model_name(model):
+            return "failed", f"the hook input of the {key} brief's agent's command holds no model"
+        models[key] = model
+    tiered, pro, flash = models["tiered"], models["pro"], models["flash"]
+    if pro == flash:
+        return "failed", f"precedence could not be told: pro and flash both ran on {pro}"
+    winner = {pro: "the call's tier won", flash: "the file's tier won"}.get(tiered)
+    if winner is None:
+        return "failed", (f"precedence could not be told: the agent whose file names flash ran on {tiered}, which "
+                          f"neither pro ({pro}) nor flash ({flash}) gave")
+    return "recorded", (f"{winner}: the agent whose file names flash, called with pro, ran on {tiered}; pro gave {pro} "
+                        f"and flash {flash}")
+
+
+def setup_r5(harness: str, work: Path, codeword: str) -> None:
+    """The brief, and the role's file in ~/.cursor/agents/, named on standard error before it is made."""
+    setup_limit("R5", {"user": WRITE}, roles=())(harness, work, codeword)
+    WORDS[codeword][USER_ROLE] = f"{USER_ROLE}-{secrets.token_hex(4)}"
+    text = role_file("cursor", USER_ROLE, "reader", None, WORDS[codeword][USER_ROLE])
+    folder = Path.home() / ".cursor" / "agents"
+    made = OUTSIDE.setdefault(codeword, [])
+    # Ctrl-C waits while a folder or the file is made and recorded, so nothing is made unrecorded.
+    blocked = hasattr(signal, "pthread_sigmask")
+    for parent in (folder.parent, folder):
+        if blocked:
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        try:
+            parent.mkdir()
+            made.append((parent, None))
+        except FileExistsError:
+            pass
+        finally:
+            if blocked:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+    for _ in range(3):
+        name = f"probe-r5-{secrets.token_hex(4)}.md"
+        shown = f"~/.cursor/agents/{name}"
+        print(f"probe_kit: R5 writes {shown} and removes it when the probe ends", file=sys.stderr, flush=True)
+        if blocked:
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        try:
+            handle = os.open(folder / name, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
+            made.append((folder / name, shown))
+        except FileExistsError:
+            print(f"probe_kit: R5 leaves {shown}, which was there already, and picks another name", file=sys.stderr,
+                  flush=True)
+            continue
+        finally:
+            if blocked:
+                signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
+        with os.fdopen(handle, "w") as role:
+            role.write(text)
+        return
+    raise KitError("R5 found no free file name in ~/.cursor/agents/")
+
+
+def remove_outside(codeword: str) -> None:
+    """Remove what the probe made outside its folder, last first; a folder only if it is empty."""
+    for path, shown in reversed(OUTSIDE.pop(codeword, [])):
+        if shown is None:
+            try:
+                path.rmdir()
+            except OSError:
+                pass
+            continue
+        path.unlink(missing_ok=True)
+        print(f"probe_kit: R5 removed {shown}", file=sys.stderr, flush=True)
+
+
+def depth(features: dict) -> str:
+    return f"{DEPTH_VAR}={shlex.quote(json.dumps(features))}"
+
+
+def start(role: str, background: str, entry: str, key: str) -> str:
+    return f"subagent_type {role}, run_in_background {background} and the prompt: {line_of(entry, key)}"
+
+
+def outer(leaf: str) -> str:
+    """K1's author brief: list the agent tools, then try to start the leaf (draft test 1)."""
+    return (WRITE + LIST_TOOLS + " If you have task or agent, call it once with subagent_type " + REVIEWER +
+            ", run_in_background false and the prompt: {line_" + leaf + "} Report its reply or the exact error text.")
+
+
+def author_brief(first: str, second: str, background: str) -> str:
+    """K2 and K3's author brief: start two leaves in one message (draft tests 2 and 3)."""
+    wait = " Then call agent_output with wait true for each." if background == "true" else ""
+    return (WRITE + f" Then, in one message, make two task calls, both with subagent_type {LEAF} and "
+            f"run_in_background {background}: the first with the prompt: {{line_{first}}} and the second with the "
+            f"prompt: {{line_{second}}}{wait} Return both replies word for word.")
+
+
+LEAF_BRIEF = WRITE + LIST_TOOLS + TOGETHER
+WAIT = "Then call agent_output with wait true for it. "
+
+
+def author_prompt(entry: str, background: bool) -> Callable[[str], str]:
+    variant = (f"Then call the task tool once with {start(AUTHOR, 'true', entry, 'variant')} {WAIT}"
+               if background else "")
+    return lambda h: (f"Call the task tool once with {start(AUTHOR, str(background).lower(), entry, 'author')} "
+                      f"{WAIT if background else ''}{variant}Then print the agents' replies word for word and stop. "
+                      f"Do not open those files yourself.")
+
+
+def resume_prompt(entry: str, kill: bool) -> Callable[[str], str]:
+    first = start(READER, "true" if kill else "false", entry, "first")
+    step = (f"Step 2: wait until the file {{work}}/{marker_of(entry, 'first')} exists, then call kill_agent with that "
+            f"agentId. Step 3: " if kill else "Step 2: ")
+    return lambda h: (f"Step 1: call the task tool with {first} Note the agentId in the result. {step}call the "
+                      f"task tool again with resume set to that agentId, {start(READER, 'false', entry, 'second')} "
+                      f"Print the second reply word for word. Do not open those files yourself, and do nothing else.")
+
+
+def cap_prompt(tool: str, unit: str) -> Callable[[str], str]:
+    entry = "R2" if tool == "Task" else "A4"
+    lines = " ".join(f"{n}: {line_of(entry, f'agent{i}')}" for i, n in enumerate(("First", "Second", "Third",
+                                                                                   "Fourth"), 1))
+    return lambda h: (f"Start four agents of the role {READER} at once, with four {tool} calls in one {unit}, each "
+                      f"in the background. Give each its own line, word for word, as its whole prompt. {lines} "
+                      f"Then wait for all four. Do not open those files yourself, and do nothing else.")
+
+
+def spawn_prompt(entry: str) -> Callable[[str], str]:
+    return lambda h: (f"Call spawn_agent once with agent_type {READER}, fork_turns none and the message: "
+                      f"{line_of(entry, 'inside')} Wait for it with wait_agent. Do not open that file yourself, and "
+                      f"do nothing else.")
+
+
+def a3_prompt(harness: str) -> str:
+    calls = " ".join(f"Start one agent of the role {role} with invoke_subagent, with Model {tier}, and give it this "
+                     f"line, word for word, as its whole prompt: {line_of('A3', key)}" for key, role, tier in A3_CALLS)
+    return f"{calls} Do not open those files yourself, and do nothing else."
+
+
+A3_BRIEF = CONTROL + " Then " + WRITE[0].lower() + WRITE[1:]
+PROBES.update({
+    "K1": Probe(lambda h: (f"Call the task tool once with {start(AUTHOR, 'false', 'K1', 'fg')} Then call the task "
+                           f"tool once with {start(AUTHOR, 'true', 'K1', 'bg')} Then call agent_output with wait "
+                           f"true for it. Do not open those files yourself, and do nothing else."),
+                judge_k1, env=depth({}), setup=setup_limit("K1", {
+                    "fg": outer("fgleaf"), "fgleaf": WRITE, "bg": outer("bgleaf"), "bgleaf": WRITE},
+                    roles=(AUTHOR, REVIEWER))),
+    "K2": Probe(author_prompt("K2", False), two_leaves("K2", False), env=depth({"maxSubagentDepth": 2}),
+                setup=setup_limit("K2", {"author": author_brief("first", "second", "false"), "first": LEAF_BRIEF,
+                                         "second": LEAF_BRIEF}, roles=(AUTHOR, LEAF), count=2)),
+    "K3": Probe(author_prompt("K3", True), two_leaves("K3", True), env=depth({"maxSubagentDepth": 2}),
+                setup=setup_limit("K3", {"author": author_brief("first", "second", "false"), "first": LEAF_BRIEF,
+                                         "second": LEAF_BRIEF, "variant": author_brief("vfirst", "vsecond", "true"),
+                                         "vfirst": WRITE, "vsecond": WRITE}, roles=(AUTHOR, LEAF), count=2)),
+    "K4": Probe(resume_prompt("K4", True), judge_k4, setup=setup_limit("K4", {
+        "first": KEEP + WRITE + FORGET + " Then run the bash command `sleep 300 && touch {work}/probe-k4-slept.txt`.",
+        "second": RECALL})),
+    "K5": Probe(resume_prompt("K5", False), judge_k5, setup=setup_limit("K5", {"first": KEEP + WRITE + FORGET,
+                                                                               "second": RECALL})),
+    "D3": Probe(lambda h: (f"In one message, make two spawn_agent calls, both with agent_type {READER} and fork_turns "
+                           f"none: the first with the message: {line_of('D3', 'one')} and the second with the "
+                           f"message: {line_of('D3', 'two')} Then wait for both with wait_agent. Do not open those "
+                           f"files yourself, and do nothing else."),
+                judge_d3, setup=setup_limit("D3", {"one": WRITE, "two": WRITE})),
+    "D4": Probe(lambda h: (f"Step 1: call spawn_agent with agent_type {READER}, fork_turns none and the message: "
+                           f"{line_of('D4', 'first')} Wait for it with wait_agent. Step 2: call close_agent for it. "
+                           f"Step 3: send it this message with followup_task: {line_of('D4', 'second')} Wait for its "
+                           f"reply with wait_agent. Do not open those files yourself, and do nothing else."),
+                judge_d4, setup=setup_limit("D4", {"first": KEEP + WRITE + FORGET, "second": RECALL})),
+    "D5": Probe(spawn_prompt("D5"), judge_d5, args=CODEX_NO_TMP, setup=setup_limit("D5", {
+        "inside": WRITE + " Then write the word {outside}, a space and your role word to the file probe-d5-outside.txt "
+                          "in your worktree, the folder {root}/outside."}, worktree=True)),
+    "R2": Probe(cap_prompt("Task", "message"), judge_cap("R2"),
+                setup=setup_limit("R2", {f"agent{n}": WRITE + TOGETHER for n in range(1, CAP + 1)}, count=CAP)),
+    "R5": Probe(lambda h: (f"Start one agent of the role {USER_ROLE} and give it this line, word for word, as its "
+                           f"whole prompt: {line_of('R5', 'user')} Do not open that file yourself, and do nothing "
+                           f"else."), judge_r5, setup=setup_r5),
+    "A2": Probe(lambda h: (f"Start one agent of the role {REVIEWER} with invoke_subagent and give it this line, word "
+                           f"for word, as its whole prompt: {line_of('A2', 'write')} Do not open that file yourself, "
+                           f"and do nothing else."), judge_a2, hook=True,
+                setup=setup_limit("A2", {"write": A2_BRIEF}, roles=(REVIEWER,))),
+    "A3": Probe(a3_prompt, judge_a3, hook=True, setup=setup_limit(
+        "A3", {key: A3_BRIEF for key, _, _ in A3_CALLS}, roles=(READER, AUTHOR), tier="flash")),
+    "A4": Probe(cap_prompt("invoke_subagent", "turn"), judge_cap("A4"),
+                setup=setup_limit("A4", {f"agent{n}": WRITE + TOGETHER for n in range(1, CAP + 1)}, count=CAP)),
+})
+
+
 def show_list() -> int:
     for entry, (harnesses, what) in ENTRIES.items():
         built = "" if entry in PROBES or entry == "X7" else " (not built)"
@@ -1455,7 +2153,8 @@ def main(argv: list[str] | None = None) -> int:
     except KitError as error:
         print(f"probe_kit: {error}", file=sys.stderr)
         return 2
-    except KeyboardInterrupt:  # the probe's clean-up has run
+    except KeyboardInterrupt:  # each probe's finally has run; a traceback would print local paths
+        print("probe_kit: interrupted", file=sys.stderr)
         return 130
     finally:
         if USER_LEVEL["made"]:  # the last line, after every other

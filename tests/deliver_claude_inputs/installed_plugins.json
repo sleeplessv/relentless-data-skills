@@ -1,0 +1,14 @@
+{
+  "version": 2,
+  "plugins": {
+    "deliver@relentless-data-skills": [
+      {
+        "scope": "user",
+        "installPath": "<home>/.claude/plugins/cache/relentless-data-skills/deliver/0.1.0",
+        "version": "0.1.0",
+        "installedAt": "2026-11-27T18:00:00.000Z",
+        "lastUpdated": "2026-11-27T18:00:00.000Z"
+      }
+    ]
+  }
+}

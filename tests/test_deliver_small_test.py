@@ -8,6 +8,8 @@ worktree and measures it against `main`.
 """
 from __future__ import annotations
 
+import json
+import shlex
 import shutil
 import sys
 import tempfile
@@ -142,6 +144,127 @@ class Critical(Case):
 
     def test_a_path_on_no_list_is_not_critical(self):
         self.assertEqual(self.measure({"billing/rates.py": "x\n"})["small_test"]["critical_paths"], [])
+
+
+DEPENDENTS = """\
+import json, sys
+calls, code, out, paths = sys.argv[1], int(sys.argv[2]), sys.argv[3], sys.argv[4:]
+with open(calls, "a") as f:
+    f.write(json.dumps(paths) + "\\n")
+sys.stdout.write(out)
+sys.exit(code)
+"""
+
+
+class Dependents(Case):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.script = cls.world.root / "dependents.py"
+        cls.script.write_text(DEPENDENTS, encoding="utf-8")
+        cls.calls = cls.world.root / "dependents-calls.jsonl"
+
+    def stand_in(self, out: str, code: int = 0, limit: int | None = None) -> str:
+        """Stack settings naming a stand-in dependents command that prints `out` and exits `code`."""
+        command = shlex.join([sys.executable, "-I", str(self.script), str(self.calls), str(code), out])
+        text = f"[small_edit]\ndependents_command = {json.dumps(command)}\n"
+        return text + (f"dependents_limit = {limit}\n" if limit is not None else "")
+
+    def judged(self, out: str, code: int = 0, limit: int | None = None) -> tuple[dict | None, str]:
+        result = self.measure({"src/app.py": lines(11)}, self.stand_in(out, code, limit))
+        return result["small_test"]["dependents"], result["reason"]
+
+    def test_an_empty_dependents_command_adds_no_clause(self):
+        result = self.measure({"src/app.py": lines(11)})
+        self.assertEqual((result["small_test"]["dependents"], result["passed"]), (None, True))
+
+    def test_the_command_gets_every_changed_path(self):
+        self.calls.unlink(missing_ok=True)
+        self.measure({"src/app.py": None, "src/new.py": "x\n", "data/cache.lock": "x\n"}, self.stand_in("0\n"))
+        self.assertEqual(deliver_kit.read_lines(self.calls), [["data/cache.lock", "src/app.py", "src/new.py"]])
+
+    def test_a_count_up_to_the_limit_is_low(self):
+        self.assertEqual(self.judged("5\n"), ({"count": 5, "feeds": []},
+                                              "small edit: a two-way door, 1 line and a low blast radius"))
+        self.assertEqual(self.judged("6\n", limit=6), ({"count": 6, "feeds": []},
+                                                       "small edit: a two-way door, 1 line and a low blast radius"))
+
+    def test_a_count_over_the_limit_is_high(self):
+        self.assertEqual(self.judged("6\n"), (
+            {"count": 6, "feeds": []},
+            "needs review: high blast radius, the change feeds 6 dependents, over the limit of 5"))
+
+    def test_a_named_report_or_exposure_is_high(self):
+        self.assertEqual(self.judged("1\nreport weekly_revenue\n"), (
+            {"count": 1, "feeds": ["report weekly_revenue"]},
+            "needs review: high blast radius, the change feeds report weekly_revenue"))
+        self.assertEqual(self.judged("0\nexposure kpi_dashboard\n\nexposure board_pack\n"), (
+            {"count": 0, "feeds": ["exposure kpi_dashboard", "exposure board_pack"]},
+            "needs review: high blast radius, the change feeds exposure kpi_dashboard, exposure board_pack"))
+
+    def test_a_failing_command_is_high(self):
+        cases = {
+            "a non-zero exit": (("2\n", 3), "exit 3"),
+            "no count": (("many\n", 0), "it printed no count"),
+            "no output": (("", 0), "it printed no count"),
+            "a negative count": (("-1\n", 0), "it printed no count"),
+        }
+        for name, ((out, code), error) in cases.items():
+            with self.subTest(name):
+                self.assertEqual(self.judged(out, code), (
+                    {"error": error}, f"needs review: high blast radius, the dependents command failed: {error}"))
+
+
+class Door(Case):
+    def door(self, changes: dict[str, str | None], door: str | None, stack: str = "") -> tuple:
+        result = self.measure(changes, stack, door)
+        return result["door"], result["door_paths"], result["passed"], result["reason"]
+
+    def test_a_one_way_door_line_stays_one_way(self):
+        self.assertEqual(self.door({"src/app.py": lines(11)}, "one-way"),
+                         ("one-way", [], False, "needs review: the plan's door is one-way"))
+
+    def test_a_missing_or_unknown_door_line_is_one_way(self):
+        reason = "needs review: the plan names no two-way or one-way door, so the door is one-way"
+        for door in (None, "two way", ""):
+            with self.subTest(door):
+                self.assertEqual(self.door({"src/app.py": lines(11)}, door), ("one-way", [], False, reason))
+
+    def test_a_default_one_way_path_raises_two_way_and_is_named(self):
+        self.assertEqual(self.door({"src/app.py": lines(11), ".github/ISSUE_TEMPLATE/bug.md": "x\n"}, "two-way"), (
+            "one-way", [".github/ISSUE_TEMPLATE/bug.md"], False,
+            "needs review: one-way paths changed: .github/ISSUE_TEMPLATE/bug.md"))
+
+    def test_a_repo_one_way_path_raises_two_way_and_is_named(self):
+        stack = '[one_way]\npaths = ["infra/**"]\n'
+        self.assertEqual(self.door({"infra/main.tf": "x\n", "src/app.py": lines(11)}, "two-way", stack), (
+            "one-way", ["infra/main.tf"], False, "needs review: one-way paths changed: infra/main.tf"))
+
+    def test_nothing_lowers_a_one_way_door(self):
+        self.assertEqual(self.door({"infra/main.tf": "x\n"}, "one-way", '[one_way]\npaths = ["infra/**"]\n'), (
+            "one-way", ["infra/main.tf"], False,
+            "needs review: the plan's door is one-way; one-way paths changed: infra/main.tf"))
+
+
+class Proofs(Case):
+    def judged(self, proofs: dict[str, str]) -> tuple[bool, str]:
+        result = self.measure({"src/app.py": lines(11)}, proofs=proofs)
+        return result["passed"], result["reason"]
+
+    def test_no_check_exists_meaning_unchanged_passes(self):
+        for proof in ("no check exists, meaning unchanged", " No check exists, meaning unchanged \n"):
+            with self.subTest(proof):
+                self.assertEqual(self.judged({"R1": "tests.test_app passes", "R2": proof}),
+                                 (True, "small edit: a two-way door, 1 line and a low blast radius"))
+
+    def test_any_other_no_check_exists_proof_fails(self):
+        self.assertEqual(self.judged({
+            "R1": "no check exists",
+            "R2": "tests.test_app passes",
+            "R3": "no check exists, judged by review",
+            "R4": "tests.test_app passes; No check exists for the help text",
+        }), (False, 'needs review: requirements with no check, not recorded '
+                    '"no check exists, meaning unchanged": R1, R3, R4'))
 
 
 if __name__ == "__main__":

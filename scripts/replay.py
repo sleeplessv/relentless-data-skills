@@ -303,38 +303,40 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
 
 
 def shared_index(data: bytes) -> str | None:
-    """The hex name of the shared index that the `link` extension of the index bytes `data` names; None when there is
-    none. The entries are stepped over as git's single-threaded read steps over them, in versions 2 to 4 with 20-byte
-    object names, the size of the private folder's. Where git cannot read the bytes, any answer does: the listing
-    fails."""
+    """The hex name of the shared index that the last `link` extension of the index bytes `data` names, as git reads
+    it; None when there is none. The entries are stepped over as git's single-threaded read steps over them, in
+    versions 2 to 4 with 20-byte object names, the size of the private folder's. Where git cannot read the bytes, any
+    answer does: the listing fails."""
     end = len(data) - 20  # the checksum
     if end < 12 or data[:4] != b"DIRC" or not 2 <= int.from_bytes(data[4:8]) <= 4:
         return None
-    version, at, previous = int.from_bytes(data[4:8]), 12, 0
+    version, at, previous_length = int.from_bytes(data[4:8]), 12, None
     try:
         for _ in range(int.from_bytes(data[8:12])):
             flags = int.from_bytes(data[at + 60:at + 62])
-            name = at + 62 + (2 if flags & 0x4000 else 0)  # the extended flag adds two bytes of flags
+            name_at = at + 62 + (2 if flags & 0x4000 else 0)  # the extended flag adds two bytes of flags
             length, copied = flags & 0xFFF, 0
             if version == 4:  # a varint of bytes to strip from the previous name, then the rest of this one
-                strip, name = data[name] & 127, name + 1
-                while data[name - 1] & 128:
-                    strip, name = ((strip + 1) << 7) + (data[name] & 127), name + 1
-                copied = previous - strip
+                strip, name_at = data[name_at] & 127, name_at + 1
+                while data[name_at - 1] & 128:
+                    strip, name_at = ((strip + 1) << 7) + (data[name_at] & 127), name_at + 1
+                if previous_length is not None:  # the first entry has no name before it, and git ignores its strip
+                    copied = previous_length - strip
             if length == 0xFFF:  # too long for the flags: the name runs to its NUL
-                length = data.index(b"\0", name) - name + copied
-            at = name + length + 1 - copied if version == 4 else at + ((name - at + length + 8) & ~7)
+                length = data.index(b"\0", name_at) - name_at + copied
+            at = name_at + length + 1 - copied if version == 4 else at + ((name_at - at + length + 8) & ~7)
             if copied < 0 or at > end:
                 return None
-            previous = length
+            previous_length = length
     except (IndexError, ValueError):  # the bytes end inside an entry
         return None
-    while at + 8 <= end:
+    base = None
+    while at + 8 <= end:  # each link extension git reads replaces the base the one before it named
         size = int.from_bytes(data[at + 4:at + 8])
         if data[at:at + 4] == b"link":
-            return data[at + 8:at + 28].hex() if size >= 20 else None
+            base = data[at + 8:at + 28].hex()
         at += 8 + size
-    return None
+    return base
 
 
 def borrowed(objects: Path, meta: Path) -> list[str]:

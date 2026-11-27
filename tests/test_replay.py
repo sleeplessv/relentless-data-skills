@@ -621,15 +621,22 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(sorted(path.name for path in self.world.store.glob("replay-*")), ["replay-index"])
         self.assertEqual(list(self.world.store.glob("sharedindex.*")), [])
 
+    def native_listing(self) -> subprocess.CompletedProcess[bytes]:
+        """Native git's `ls-files -z` in the clone, under the test's own git settings."""
+        return subprocess.run(["git", "ls-files", "-z"], cwd=self.world.clone, env=self.world.git_env(),
+                              capture_output=True)
+
+    def assert_git_lists(self, name: bytes) -> None:
+        native = self.native_listing()
+        self.assertEqual((native.returncode, native.stderr), (0, b""))
+        self.assertIn(name + b"\0", native.stdout)
+
     def test_a_split_index_in_a_git_folder_that_can_be_searched_but_not_read_is_listed_as_git_lists_it(self) -> None:
         git_folder = self.world.clone / ".git"
         self.addCleanup(lambda: git_folder.chmod(0o755) if git_folder.exists() else None)
         result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_SPLIT="1", STANDIN_PREPARE="chmod 111 .git")
         self.skip_unless_refused(lambda: os.listdir(git_folder))
-        native = subprocess.run(["git", "ls-files", "-z"], cwd=self.world.clone, env=self.world.git_env(),
-                                capture_output=True)
-        self.assertEqual((native.returncode, native.stderr), (0, b""))
-        self.assertIn(b"dep.lock\0", native.stdout)
+        self.assert_git_lists(b"dep.lock")
         self.assert_version_holds(result, b"dep.lock")
 
     def test_a_split_index_whose_named_shared_index_is_missing_ends_in_one_line_though_another_is_there(self) -> None:
@@ -640,55 +647,60 @@ class ReplayTest(unittest.TestCase):
                              STANDIN_PREPARE=f'for f in .git/sharedindex.*; do mv "$f" .git/{other}; done')
         self.assert_index_refused(result, "git ls-files exited 128")
         self.assertEqual([path.name for path in (self.world.clone / ".git").glob("sharedindex.*")], [other])
-        native = subprocess.run(["git", "ls-files"], cwd=self.world.clone, env=self.world.git_env(),
-                                capture_output=True)
-        self.assertNotEqual(native.returncode, 0)
+        self.assertNotEqual(self.native_listing().returncode, 0)
 
-    # Moves the link extension of the index in the working folder after the others and writes the checksum again:
-    # git writes it first and reads it wherever it is.
-    MOVE_LINK = ("import hashlib, pathlib\n"
-                 "git = pathlib.Path('.git')\n"
-                 "[shared] = git.glob('sharedindex.*')\n"
-                 "data = (git / 'index').read_bytes()[:-20]\n"
-                 "start = data.index(bytes.fromhex(shared.name[12:])) - 8\n"
-                 "assert data[start:start + 4] == b'link'\n"
-                 "end = start + 8 + int.from_bytes(data[start + 4:start + 8])\n"
-                 "data = data[:start] + data[end:] + data[start:end]\n"
-                 "(git / 'index').write_bytes(data + hashlib.sha1(data).digest())\n")
+    # Rewrites the index in the working folder as git reads it and does not write it, then writes the checksum again.
+    # "last" moves the link extension after the others; "twice" puts a link extension naming another base before it,
+    # and git takes the last; "strip" gives the first entry of a version 4 index a strip count, which git ignores.
+    DOCTOR = ("import hashlib, pathlib, sys\n"
+              "git = pathlib.Path('.git')\n"
+              "[shared] = git.glob('sharedindex.*')\n"
+              "data = (git / 'index').read_bytes()[:-20]\n"
+              "start = data.index(bytes.fromhex(shared.name[12:])) - 8\n"
+              "assert data[start:start + 4] == b'link'\n"
+              "end = start + 8 + int.from_bytes(data[start + 4:start + 8])\n"
+              "if sys.argv[1] == 'last':\n"
+              "    data = data[:start] + data[end:] + data[start:end]\n"
+              "elif sys.argv[1] == 'twice':\n"
+              "    data = data[:start] + b'link' + (20).to_bytes(4) + bytes([17] * 20) + data[start:]\n"
+              "else:\n"
+              "    assert data[4:8] == (4).to_bytes(4) and data[74] == 0\n"
+              "    data = data[:74] + b'\\1' + data[75:]\n"
+              "(git / 'index').write_bytes(data + hashlib.sha1(data).digest())\n")
 
-    def test_the_shared_index_is_found_in_each_index_layout_git_writes(self) -> None:
+    def test_the_shared_index_is_found_in_each_index_layout_git_reads(self) -> None:
         # After the split, each preparation leaves entries in the split index for the replay to step over before the
-        # link extension: version 2, version 3 with an extended flag, version 4 with its compressed names, and names
-        # too long for an entry's flags, in versions 2 and 4. Each long name is in the index and not in the clone.
-        mover = self.world.root / "move-link.py"
-        mover.write_text(self.MOVE_LINK)
+        # link extension: version 2, version 3 with an extended flag, version 4 with its compressed names (newer reuses
+        # the name new), and names too long for an entry's flags, in versions 2 and 4; then three indexes git reads and
+        # does not write. Each name added by --cacheinfo is in the index and not in the clone.
+        doctor = self.world.root / "doctor.py"
+        doctor.write_text(self.DOCTOR)
         git = "git -c splitIndex.maxPercentChange=100"
         added = f"echo new > new && {git} add new && {git} update-index --add --cacheinfo 100644,$(git hash-object new)"
-        v4 = f"{git} update-index --index-version 4 && {git} update-index --split-index"
+        v2 = f"{git} update-index --split-index"
+        v4 = f"{git} update-index --index-version 4 && {v2}"
+        doctored = f"{shlex.quote(sys.executable)} {shlex.quote(str(doctor))}"
         layouts = {
-            "version 2": f"{git} update-index --split-index && {added},late",
-            "version 3": f"{git} update-index --split-index && {added},late && "
-                         f"{git} update-index --skip-worktree .gitignore",
-            "version 4": f"{v4} && {added},late",
-            "version 2, a long name": f"{git} update-index --split-index && {added},{'L' * 4200}",
-            "version 4, a long name": f"{v4} && {added},{'L' * 4200}",
-            "version 2, the link extension last": f"{git} update-index --split-index && {added},late && "
-                                                  f"{shlex.quote(sys.executable)} {shlex.quote(str(mover))}",
+            "version 2": (2, f"{v2} && {added},newer"),
+            "version 3": (3, f"{v2} && {added},newer && {git} update-index --skip-worktree .gitignore"),
+            "version 4": (4, f"{v4} && {added},newer"),
+            "version 2, a long name": (2, f"{v2} && {added},{'L' * 4200}"),
+            "version 4, a long name": (4, f"{v4} && {added},{'L' * 4200}"),
+            "version 2, the link extension last": (2, f"{v2} && {added},newer && {doctored} last"),
+            "version 2, a link extension before the last": (2, f"{v2} && {added},newer && {doctored} twice"),
+            "version 4, a strip count on the first entry": (4, f"{v4} && {added},newer && {doctored} strip"),
         }
-        for layout, prepare in layouts.items():
+        for layout, (index_version, prepare) in layouts.items():
             with self.subTest(layout=layout):
                 self.world.clear()
                 result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
                 data = (self.world.clone / ".git" / "index").read_bytes()
-                self.assertEqual(int.from_bytes(data[4:8]), 4 if "4" in layout else 3 if "3" in layout else 2)
+                self.assertEqual(int.from_bytes(data[4:8]), index_version)
                 self.assertGreater(int.from_bytes(data[8:12]), 0)
                 [shared] = (self.world.clone / ".git").glob("sharedindex.*")
                 self.assertIn(b"link\0\0\0", data)
                 self.assertIn(bytes.fromhex(shared.name[12:]), data)
-                native = subprocess.run(["git", "ls-files", "-z"], cwd=self.world.clone, env=self.world.git_env(),
-                                        capture_output=True)
-                self.assertEqual((native.returncode, native.stderr), (0, b""))
-                self.assertIn(b"dep.lock\0", native.stdout)
+                self.assert_git_lists(b"dep.lock")
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
                 [version] = self.world.versions()
                 self.assertEqual(self.world.names(version["commit"]), [*self.BASE_FILES, b"dep.lock", b"new"])

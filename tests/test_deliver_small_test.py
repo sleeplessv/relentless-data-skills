@@ -1,6 +1,6 @@
 """The small test: counted lines, the critical lists, the dependents command and the door.
 
-small_test.py is called by `ready` and imports only settings and core, so these tests load it
+small_test.py is called by `ready` and imports only core, so these tests load it
 alone. Each class shares one throwaway world; each test cuts its own branch from `main` in a
 worktree and measures it against `main`.
 

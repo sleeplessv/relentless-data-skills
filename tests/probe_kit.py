@@ -99,8 +99,8 @@ for D6. On Codex the hook's -c override matches every tool and runs
 hooks/guard.py of the probe folder, which it finds with `git rev-parse
 --git-common-dir` from any folder inside the probe folder. Its text is the same
 in every probe folder, so one trust covers every run. Codex runs no hook it has
-not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1,
-D2 and D6 fail with that step and the harness's exit status when their hook
+not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1 to
+D4 and D6 fail with that step and the harness's exit status when their hook
 logged no input and the output shows a tool call; with no tool call in the
 output, the line says so and names no trust step. The hook writes a refusal line
 to logs/hook.jsonl after the input of each command it refuses. D1 is seen when
@@ -1799,6 +1799,8 @@ def resumed(run: Finished, entry: str, calls: list[Call], target: str, after: in
         if isinstance(content, list):
             content = " ".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
         said = content if isinstance(content, str) else ""
+        for known in (target, calls[again].id):  # the ids the kit knows for that agent, whatever their letters
+            said = said.replace(str(known), "...")
         reason = " ".join(re.sub(r"\S*[\d/\\]\S*", "...", said).split())[:200]
         return "failed", "the resume call failed" + (f": {reason}" if reason else "")
     return called_back(run, entry)
@@ -1872,6 +1874,10 @@ def judge_d3(harness: str, run: Finished) -> tuple[str, str]:
     if len(under_way) >= 2:
         return "seen", ("both agents ran, and both spawn_agent calls started before either ended, so one model step "
                         "made them")
+    if not any(isinstance(event.get("item"), dict) and event["item"].get("tool") == "spawn_agent"
+               for event in events_of(run.out)):  # this Codex version's output shows no agent start (#405)
+        return "recorded", ("both agents ran and the hook log shows 2 starts and 2 agents; the output shows no "
+                            "spawn_agent item, so whether one model step made them was not measured")
     return "failed", ("both agents ran, but the output does not show both starts in one model step, so the step "
                       "was not measured")
 
@@ -1895,13 +1901,19 @@ def judge_d4(harness: str, run: Finished) -> tuple[str, str]:
         return "failed", "the hook log shows no call of an agent of the reader role"
     target = agents[0]
     first = next(n for n, i in enumerate(calls) if str(i.get("agent_id")) == target)
+    # The calls may name the agent by its agent_id or by the task_name its start gave it (#405).
+    start = next((i for i in reversed(calls[:first]) if i in starts_of(log)), {})
+    task = start.get("tool_input", {}).get("task_name")
+    def named(n: int) -> bool:
+        given = calls[n].get("tool_input")
+        return holds(given, target) or (isinstance(task, str) and task in strings(given))
     stop = session_call(log, "interrupt_agent", first)
     if stop is None:
         return "failed", "the hook log shows no interrupt_agent call of the session's after the agent's first call"
-    if not holds(calls[stop].get("tool_input"), target):
+    if not named(stop):
         return "failed", "the interrupt_agent call names another agent"
     again = session_call(log, "followup_task", stop)
-    if again is None or not holds(calls[again].get("tool_input"), target):
+    if again is None or not named(again):
         return "failed", "the hook log shows no followup_task call to the agent after its interrupt"
     if not any(str(i.get("agent_id")) == target for i in calls[again + 1:]):
         return "failed", "the hook log shows no call of the agent's after the follow-up"

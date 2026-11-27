@@ -2164,7 +2164,8 @@ class TestHookAgentEntries(HookTest):
         for fact in ("matches every tool", "from any folder inside the probe folder",
                      "the same in every probe folder, so one trust covers every run",
                      "Codex runs no hook it has not trusted", "Before D1 runs, the kit prints the step that trusts the hook",
-                     "D1, D2 and D6 fail with that step and the harness's exit status when their hook logged no input",
+                     "D1 to D4 and D6 fail with that step and the harness's exit status when their hook logged no "
+                     "input",
                      "writes a refusal line to logs/hook.jsonl",
                      "marked by agent_id, reached the hook for a command that runs merge-script.sh",
                      "D2 records the tool name of the session's call whose input names the reader role as its "
@@ -2205,7 +2206,8 @@ class TestHookAgentEntries(HookTest):
 # names another thread in it; STANDIN_NO_COLLAB leaves Codex's spawn and follow-up items out of the output, as
 # the real one does; STANDIN_UNTRUSTED calls no inline hook; STANDIN_NO_AGENT_TYPE leaves agent_type out of a
 # spawn call; STANDIN_RESUME_ERROR=text or =empty fails the resume call with or without a reason;
-# STANDIN_RESUME_FRESH resumes without the
+# STANDIN_BY_TASK names the agent by its task_name in the interrupt and follow-up; STANDIN_LETTER_IDS gives
+# Cortex Code agents ids of letters only; STANDIN_RESUME_FRESH resumes without the
 # kept word; STANDIN_RESUME_FROM_DISK takes the first marker's word instead; STANDIN_RESUME_OTHER resumes
 # another agent; STANDIN_RESUME_FAIL leaves a resume unanswered; STANDIN_OUTSIDE_DENIED refuses the write
 # outside the folder; STANDIN_NO_USER_AGENTS ignores ~/.cursor/agents/; STANDIN_TOOLS_IGNORED lets a withheld
@@ -2329,6 +2331,8 @@ def agent(own, role_name, line, depth, parent, resume, background, call_tier, sl
 
 def run(own, role_name, role, line, depth, parent, resume, background, call_tier, record):
     target = ids[resume] if resume else f"{'thread' if name == 'codex' else 'agent'}-{own}"
+    if knob("STANDIN_LETTER_IDS") and not resume:  # an id of letters only, which the digit rule cannot catch
+        target = "agent-" + str(own).translate(str.maketrans("0123456789_", "abcdefghijk"))
     named = ("thread-other" if name == "codex" else "agent-other") if resume and knob("STANDIN_RESUME_OTHER") \
         else target
     ids[own] = target
@@ -2347,7 +2351,8 @@ def run(own, role_name, role, line, depth, parent, resume, background, call_tier
         result(parent, own, f"Agent started. agentId: {named}")
     elif name == "codex":
         codex_call("collaborationfollowup_task" if resume else "collaborationspawn_agent",
-                   {"id": named, "message": "<not readable>"} if resume else
+                   ({"task_name": f"task_{resume}"} if knob("STANDIN_BY_TASK") else {"id": named}) | {
+                       "message": "<not readable>"} if resume else
                    {**({} if knob("STANDIN_NO_AGENT_TYPE") else {"agent_type": role_name}),
                     "task_name": f"task_{own}", "message": "<not readable>"})
         if not knob("STANDIN_NO_COLLAB"):
@@ -2499,8 +2504,10 @@ def follow(text, depth, parent, model, able=True):
         elif token["stop"] == "interrupt_agent":
             settle()
             if not knob("STANDIN_NO_CLOSE"):
+                other = knob("STANDIN_CLOSE_OTHER")
                 codex_call("collaborationinterrupt_agent",
-                           {"id": "thread-other" if knob("STANDIN_CLOSE_OTHER") else ids.get(last)})
+                           {"task_name": "task_other" if other else f"task_{last}"} if knob("STANDIN_BY_TASK") else
+                           {"id": "thread-other" if other else ids.get(last)})
         elif token["resume"]:
             settle()
             resume = True
@@ -2696,6 +2703,9 @@ class TestLimitEntries(HookTest):
                              f"Cannot resume.\n")
             self.assertEqual(self.run_entry("cortex", entry, STANDIN_RESUME_ERROR="empty"),
                              f"{entry} cortex failed: the resume call failed\n")
+            line = self.run_entry("cortex", entry, STANDIN_RESUME_ERROR="text", STANDIN_LETTER_IDS="1")
+            self.assertEqual(line, f"{entry} cortex failed: the resume call failed: Agent session ... not found under "
+                                   f"... Cannot resume.\n")  # the letters-only id the kit knew is gone too
 
     def test_k5_records_the_models_of_the_calls_that_started_and_resumed_the_agent(self):
         line = ("K5 cortex recorded: the resumed agent ran on standin-resumed-model-cortex, its first run on "
@@ -2746,14 +2756,23 @@ class TestLimitEntries(HookTest):
         for knob, fact in cases.items():
             self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_COLLAB="1", **{knob: "1"}),
                              f"D4 codex failed: {fact}\n", knob)
+        # The interrupt and the follow-up may name the agent by the task_name its start gave it.
+        self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_COLLAB="1", STANDIN_BY_TASK="1"), seen)
+        self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_COLLAB="1", STANDIN_BY_TASK="1",
+                                        STANDIN_CLOSE_OTHER="1"),
+                         "D4 codex failed: the interrupt_agent call names another agent\n")
         # With the spawn items in the output the session made a tool call, so an empty hook log blames trust.
         self.assertEqual(self.run_entry("codex", "D4", STANDIN_UNTRUSTED="1"), f"D4 codex failed: {UNTRUSTED}\n")
         self.assert_home_empty()
 
     def test_d3_reads_the_starts_and_agents_from_the_hook_log_and_measures_no_step_without_the_spawn_items(self):
+        # The real output shows no spawn item, so the step is recorded as not measured, not failed.
         self.assertEqual(self.run_entry("codex", "D3", STANDIN_NO_COLLAB="1"),
-                         "D3 codex failed: both agents ran, but the output does not show both starts in one model "
-                         "step, so the step was not measured\n")
+                         "D3 codex recorded: both agents ran and the hook log shows 2 starts and 2 agents; the output "
+                         "shows no spawn_agent item, so whether one model step made them was not measured\n")
+        self.assertEqual(self.run_entry("codex", "D3", STANDIN_NO_COLLAB="1", STANDIN_STEP_APART="1"),
+                         "D3 codex recorded: both agents ran and the hook log shows 2 starts and 2 agents; the output "
+                         "shows no spawn_agent item, so whether one model step made them was not measured\n")
         self.assertIn("both with agent_type probe-reader, fork_turns none: the first",
                       self.world.harness_starts()[-1]["prompt"])
         self.assertEqual(self.run_entry("codex", "D3", STANDIN_NO_AGENT_TYPE="1"),

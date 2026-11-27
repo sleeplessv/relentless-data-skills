@@ -116,7 +116,8 @@ def one_way(command: str, checkout: Path) -> bool:
     try:
         with (checkout / STACK).open("rb") as f:
             extra = tomllib.load(f).get("one_way", {}).get("extra", [])
-        patterns += [p for p in extra if isinstance(p, str)]
+        if isinstance(extra, list):
+            patterns += [p for p in extra if isinstance(p, str)]
     except (OSError, tomllib.TOMLDecodeError, AttributeError):
         pass
     for pattern in patterns:

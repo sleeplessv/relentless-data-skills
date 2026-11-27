@@ -31,7 +31,7 @@ def check_guard_probe(ctx):
     except FileNotFoundError:
         lines = []
     probes = [
-        line for line in map(json.loads, lines)
+        line for line in map(_read, lines)
         if line.get("class") == "probe" and line.get("run") == mark["run"] and line.get("at", "") >= mark["started"]
     ]
     if not probes:
@@ -40,3 +40,12 @@ def check_guard_probe(ctx):
     ctx.guard_probe = "seen"
     ctx.permission_mode = probes[-1].get("permission_mode")
     return preflight.Warn(BYPASS_WARNING) if ctx.permission_mode == BYPASS else None
+
+
+def _read(text: str) -> dict:
+    """One log line, or an empty one where a line is damaged."""
+    try:
+        line = json.loads(text)
+    except ValueError:
+        return {}
+    return line if isinstance(line, dict) else {}

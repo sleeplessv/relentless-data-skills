@@ -153,6 +153,10 @@ class Guard(unittest.TestCase):
         self.assertIsNotNone(deny(self.world.guard("terraform apply -auto-approve")))
         self.assertIsNone(deny(self.world.guard("terraform plan")))
 
+    def test_a_repo_extra_that_is_not_a_list_adds_nothing(self):
+        self.world.commit(self.world.work, "docs/agents/stack.toml", "[one_way]\nextra = 'apply'\n", "chore: stack settings")
+        self.assertIsNone(deny(self.world.guard("ls -a")))
+
     def test_the_probe_is_a_raw_merge_refusal_of_its_own_class(self):
         reason = deny(self.world.probe())
         self.assertIn("guard probe", reason)
@@ -262,7 +266,7 @@ class GuardProbeCheck(unittest.TestCase):
         self.assertEqual(out, (
             "warning: no docs/agents/stack.toml: every stack setting has its default\n"
             "REFUSED preflight.guards-off: the guards are off: no refusal of the guard probe is logged for run run-9 "
-            "since its mark\n"
+            "since its mark was written\n"
             f"Next: turn the hooks on, run {guard.PROBE}, then run deliver.py preflight\n"))
         self.assertEqual((record["result"], record["stops"], record["guard_probe"]), ("stop", ["preflight.guards-off"], "missing"))
         self.assertEqual([s["code"] for s in self.world.state_lines("preflight-stops.jsonl")], ["preflight.guards-off"])
@@ -273,6 +277,12 @@ class GuardProbeCheck(unittest.TestCase):
         self.world.write_mark(run="run-9")
         self.assertEqual(len(self.world.state_lines(guard.LOG)), 1)
         self.assertEqual(self.preflight()[0], 10)
+
+    def test_a_damaged_log_line_is_skipped(self):
+        self.world.state.mkdir()
+        (self.world.state / guard.LOG).write_text('{"class": "pro\n[1]\n', encoding="utf-8")
+        self.world.probe()
+        self.assertEqual(self.preflight()[0], 0)
 
     def test_a_probe_before_the_mark_does_not_count(self):
         self.world.probe()

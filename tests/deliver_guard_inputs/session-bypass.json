@@ -1,0 +1,17 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "prompt_id": "00000000-0000-4000-8000-000000000001",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "./oneway-probe.sh bypass",
+    "description": "Run oneway-probe.sh with bypass argument once"
+  },
+  "tool_use_id": "toolu_01K1YTEfiJEVspU9At4QbHam"
+}

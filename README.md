@@ -229,13 +229,18 @@ and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) e
   - no outward side-effect command, such as `git push` or `gh pr merge`, in any text
     file in a model-invocable skill's folder, unless the skill is listed in
     `SIDE_EFFECT_ALLOWLIST`.
+- `python3 scripts/word_count.py` counts the words of each row of
+  `docs/path-map.toml` and fails when a row is over its limit, lists a missing
+  file, or lists a script.
 - `python3 scripts/check_doc_urls.py` checks HTTPS URLs marked with `=>` in
   `skills/*/references/docs-map.md`. It fails when a marked URL no longer resolves.
 - `python3 scripts/sync_registry.py --check` checks that the marketplace entries
   and README skills table match each skill's `plugin.json`.
 - `python3 scripts/skill_versions.py --check --base origin/main` checks skill
   versions against the fetched `main` branch. CI compares the proposed merge
-  with its base branch, or a push with its previous commit. Scheduled and manual
+  with its base branch, or a push with its previous commit. A PR into a branch
+  other than `main`, such as an integration branch, is compared with its merge
+  base with `main`, as `scripts/check.sh` does. Scheduled and manual
   runs validate current metadata without requiring a historical bump.
 
 After editing a skill's `plugin.json`, run

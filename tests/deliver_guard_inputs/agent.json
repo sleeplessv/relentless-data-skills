@@ -1,0 +1,19 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "prompt_id": "00000000-0000-4000-8000-000000000001",
+  "permission_mode": "default",
+  "agent_id": "a3164b7ec6fc3aa06",
+  "agent_type": "helper",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "gh pr ready 99999",
+    "description": "Mark PR 99999 as ready for review"
+  },
+  "tool_use_id": "toolu_01PUtc3xpzbtarQXRK6KUp5g"
+}

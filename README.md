@@ -39,6 +39,8 @@ the [compatible pair described below](#implementation-workflow-updates).
 This table is generated from each skill's `plugin.json`. Edit there, then
 run `python scripts/sync_registry.py --write`.
 
+`deliver` replaces `orchestrator-mode`, `implement-ticket`, `implement-feature`, `implement-backlog` and `land`, which take repairs only.
+
 ## External skills (references)
 
 Skills we run alongside this collection but don't maintain here. Install them
@@ -161,8 +163,9 @@ reach for outside Cursor too, so it is worth symlinking into `~/.claude/skills`.
 
 ## Install
 
-Every skill installs the same three ways. Substitute `<skill>` with a skill
-directory name from the table above (e.g. `prefect`).
+Every skill but `deliver` installs the same three ways. Substitute `<skill>` with a skill
+directory name from the table above (e.g. `prefect`). `deliver` installs as a Claude Code
+plugin only, as [its own section](#deliver) says.
 
 ### `npx skills` (cross-agent: Claude Code, Cursor, Codex, OpenCode, …)
 
@@ -191,10 +194,42 @@ git clone https://github.com/sleeplessv/relentless-data-skills.git
 ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 ```
 
+### `deliver`
+
+`deliver` comes as a Claude Code plugin: the plugin brings its skill, its guard hook
+(`hooks/hooks.json`) and its reader agent (`agents/`).
+
+1. Add this repo as a marketplace and install the plugin:
+
+   ```text
+   /plugin marketplace add sleeplessv/relentless-data-skills
+   /plugin install deliver@relentless-data-skills
+   ```
+
+2. Do not also link `skills/deliver` into Claude Code's user-level skills folder
+   (`~/.claude/skills`). A linked copy is a second `deliver` skill, while the guard hook
+   runs from the plugin's copy only.
+3. Install `code-review`, `ponytail-review` and `pr`. They are required: preflight stops
+   when any of them is missing. `deliver.py` looks for each in `~/.claude/skills`, in the
+   repo's `.claude/skills`, and in the installed Claude Code plugins.
+
+   ```bash
+   npx skills add mattpocock/skills -g -y -s code-review -s pr
+   npx skills add DietrichGebert/ponytail -g -y -s ponytail-review
+   ```
+
+`deliver` reads a repo's settings from `docs/agents/stack.toml` in that repo, and a
+missing file gives every default. Set `check_command` to the command that runs the repo's
+checks. When you set `[small_edit] dependents_command`, `deliver` runs it in the checkout
+with each changed path as an argument. The command prints the count of the change's
+dependents on its first line. Each further non-blank line names a report or exposure the change
+feeds. The change goes to review when the count is over `dependents_limit` (default 5),
+when a line follows the count, or when the command exits non-zero or prints no count first.
+
 ## Repo layout
 
 - `skills/<skill>/`: each skill has `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`. Workflow skills can depend on companion skills.
-- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`.
+- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `gate_check.py`, the CI check that a PR changing `skills/deliver/` carries the evidence its `## Change kind` needs, `gen_roles.py`, which writes `deliver`'s role files in `skills/deliver/agents/` and checks them, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`. `deliver.py report` imports `draw.py`, `judge.py` and `replay.py` from this repo's `scripts/` by path, so it runs only from this repo's tree, not from an installed copy.
 - `.claude-plugin/marketplace.json`: declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
 ## Maintenance and CI

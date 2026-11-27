@@ -3,8 +3,9 @@
 Each test runs `deliver.py` at its command line, and the guard on a hook input recorded from
 Claude Code, in a throwaway world of tests/deliver_kit.py: a clone, its bare remote and the
 stand-in gh. The world's plugin copy has the stand-in scan of tests/test_deliver_ready.py, and
-its gh merges a PR by moving the bare remote's `main` to the PR's head. Nothing touches the
-network or the real machine directory.
+its gh merges a PR as GitHub squashes one: a new commit on the bare remote's `main` whose parent
+is the old `main` and whose tree is the PR head's. Nothing touches the network or the real
+machine directory.
 
     python3 -m unittest tests.test_deliver_end_to_end
 """
@@ -18,7 +19,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deliver_kit  # noqa: E402
-from test_deliver_merge import PASS, answer, wrapped  # noqa: E402
+
+core = deliver_kit.load("core")
+from test_deliver_merge import CHECKS, PASS, answer, wrapped  # noqa: E402
 from test_deliver_ready import SCAN_STUB  # noqa: E402
 
 CHECK = "python3 -m unittest"
@@ -84,18 +87,22 @@ class EndToEnd(unittest.TestCase):
 
     def begin(self) -> str:
         """Steps 1 to 3: start the ticket's run, pass the probe and preflight, save the plan. Returns the branch."""
-        found = re.match(r"Started run ([0-9a-f]{8}) on branch (\S+)\.\n", self.deliver("start", TICKET))
-        self.assertIsNotNone(found)
+        started = self.deliver("start", TICKET)
+        found = re.match(r"Started run ([0-9a-f]{8}) on branch (\S+)\.\n", started)
+        self.assertIsNotNone(found, started)
         run, branch = found.groups()
         self.assertEqual(self.world.git(self.work, "branch", "--show-current"), branch)
-        probe = self.world.probe()
+        step = re.search(r"^Next: run (.+), which the guard refuses, then deliver\.py (start --resume)$", started, re.M)
+        self.assertIsNotNone(step, started)
+        probe = self.world.guard(step[1])
         self.assertEqual(probe.returncode, 0, probe.stderr)
         self.assertEqual(json.loads(probe.stdout)["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.assertEqual(self.deliver("start", "--resume").splitlines()[-2:], ["Preflight passed.", GRANT])
+        self.assertEqual(self.deliver(*step[2].split()).splitlines()[-2:], ["Preflight passed.", GRANT])
         self.drop("plan", PLAN)
         self.assertEqual(self.events(branch), [
             ("start", None), ("save", "request"), ("preflight", "pass"), ("save", "plan")])
-        self.assertEqual(self.world.records(branch)[2]["run"], run)
+        preflight = self.world.records(branch)[2]
+        self.assertEqual((preflight["run"], preflight["guard_probe"]), (run, "seen"))
         return branch
 
     def edit(self, files: dict[str, str]) -> str:
@@ -118,6 +125,37 @@ class EndToEnd(unittest.TestCase):
     def gh_args(self) -> list[list[str]]:
         return [call["args"] for call in self.world.gh_calls()]
 
+    def folder(self, branch: str) -> Path:
+        """The branch's records folder in the clone's common git directory."""
+        common = self.world.git(self.work, "rev-parse", "--path-format=absolute", "--git-common-dir")
+        return core.records_dir(Path(common), branch)
+
+    def assert_body_files_removed(self) -> None:
+        """Each --body-file deliver.py handed the stand-in gh is gone once the call returned."""
+        files = [call["args"][call["args"].index("--body-file") + 1] for call in self.world.gh_calls()
+                 if "--body-file" in call["args"]]
+        self.assertTrue(files)
+        self.assertEqual([f for f in files if Path(f).exists()], [])
+
+    def edit_bodies(self) -> list[str]:
+        """The bodies of the `gh pr edit` calls, each of which must name PR #12."""
+        edits = [call for call in self.world.gh_calls() if call["args"][:2] == ["pr", "edit"]]
+        self.assertEqual([call["args"][2] for call in edits], ["12"] * len(edits))
+        return [call["body"] for call in edits]
+
+    def github_merges(self, commit: str) -> str:
+        """A PATH whose gh squashes the PR on `pr merge`: a new commit on the bare remote's main."""
+        origin = str(self.world.origin)
+        return wrapped(self.world, "gh", (
+            "if args[:2] == ['pr', 'merge']:\n"
+            "    import subprocess\n"
+            f"    git = lambda *a: subprocess.run(['git', '--git-dir', {origin!r}, *a], check=True,"
+            " capture_output=True, text=True).stdout.strip()\n"
+            "    base = git('rev-parse', 'refs/heads/main')\n"
+            f"    tree = git('merge-tree', '--write-tree', base, {commit!r}).splitlines()[0]\n"
+            "    squash = git('commit-tree', tree, '-p', base, '-m', 'feat: add double (#12)')\n"
+            "    git('update-ref', 'refs/heads/main', squash, base)"))
+
     def test_a_small_edit_runs_from_start_to_finish(self):
         branch = self.begin()
         commit = self.edit({
@@ -133,6 +171,9 @@ class EndToEnd(unittest.TestCase):
                          {"event": "check", "command": CHECK, "exit": 0, "commit": commit, "selected_nothing": False})
         self.assertEqual(self.events(branch)[4:], [("check", 0), ("save", "summary"), ("pr", None)])
         self.assertEqual((records[5]["commit"], records[6]["number"], records[6]["url"]), (commit, 12, URL))
+        output = (self.folder(branch) / check["output"]).read_text(encoding="utf-8").splitlines()
+        self.assertIn("Ran 2 tests", "\n".join(output))
+        self.assertEqual(output[-1], "OK")
 
         self.assertEqual(self.world.git(self.world.origin, "rev-parse", f"refs/heads/{branch}"), commit)
         create = [call for call in self.world.gh_calls() if call["args"][:2] == ["pr", "create"]]
@@ -142,36 +183,39 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(create[0]["body"].startswith("## Summary\n"))
         self.assertIn("double returns twice its argument", create[0]["body"])
         self.assertIn("Closes #7", create[0]["body"])
+        self.assertIn(SUMMARY, create[0]["body"])
         self.assertEqual(self.world.git(self.work, "status", "--porcelain"), "")
 
         self.assertEqual(self.deliver("ready").splitlines(), [
             "small edit: a two-way door, 7 lines and a low blast radius.", f"Marked PR #12 ready: {URL}"])
         self.assertIn(["pr", "ready", "12"], self.gh_args())
-        [described] = [call["body"] for call in self.world.gh_calls() if call["args"][:2] == ["pr", "edit"]]
+        [described] = self.edit_bodies()
         self.assertIn("merge: pending\n", described)
         self.assertEqual(self.events(branch)[7:], [("ready", "small edit")])
         self.assertEqual((self.world.records(branch)[7]["commit"], (self.world.root / "scan-starts.txt").read_text()),
                          (commit, "start\n"))
+        self.assert_body_files_removed()  # pr's and ready's, before the reset drops their calls
 
         self.world.gh_reset()
         answer(self.world, commit, checks=PASS, body=described)
-        github_merges = wrapped(self.world, "gh", (
-            "if args[:2] == ['pr', 'merge']:\n"
-            f"    import subprocess; subprocess.run(['git', '--git-dir', {str(self.world.origin)!r}, "
-            f"'update-ref', 'refs/heads/main', {commit!r}], check=True)"))
-        self.assertEqual(self.deliver("merge", PATH=github_merges), (
+        base = self.world.git(self.world.origin, "rev-parse", "refs/heads/main")
+        self.assertEqual(self.deliver("merge", PATH=self.github_merges(commit)), (
             f"Merged PR #12 with squash at {commit[:7]}.\nSwitched this checkout to main.\n"
             f"Removed the remote branch origin/{branch} and the local branch {branch}.\n"))
-        self.assertIn(["pr", "merge", "12", "--squash", "--match-head-commit", commit], self.gh_args())
-        [merged] = [call["body"] for call in self.world.gh_calls() if call["args"][:2] == ["pr", "edit"]]
+        merge = ["pr", "merge", "12", "--squash", "--match-head-commit", commit]
+        self.assertLess(self.gh_args().index(CHECKS), self.gh_args().index(merge))
+        [merged] = self.edit_bodies()
         self.assertEqual(merged, described.replace("merge: pending\n", "merge: by the session, squash\n"))
         self.assertEqual(self.events(branch)[8:], [("merge", None)])
-        self.assertEqual(self.world.git(self.world.origin, "rev-parse", "refs/heads/main"), commit)
+        main = self.world.git(self.world.origin, "rev-parse", "refs/heads/main")
+        self.assertNotEqual(main, commit)
+        self.assertEqual(self.world.git(self.world.origin, "rev-parse", "main^@"), base)
+        self.assertEqual(*(self.world.git(self.world.origin, "rev-parse", f"{c}^{{tree}}") for c in (main, commit)))
+        self.assert_body_files_removed()
 
         self.assertEqual(self.deliver("finish"), f"#7 merged: PR #12\nRemoved the records of {branch}.\n")
-        self.assertEqual(self.world.records(branch), [])
+        self.assertFalse(self.folder(branch).exists())
         self.assertFalse((self.work / ".git" / "deliver-mark.json").exists())
-        self.assertEqual(list(self.tmp.iterdir()), [])
         self.assertEqual(self.world.git(self.work, "status", "--porcelain"), "")
 
     def test_ready_refuses_a_change_that_needs_a_review(self):
@@ -187,6 +231,7 @@ class EndToEnd(unittest.TestCase):
         self.assertEqual(self.events(branch)[-1], ("ready", "needs review"))
         self.assertEqual([a[:2] for a in self.gh_args() if a[:2] in (["pr", "edit"], ["pr", "ready"])], [])  # still draft
         self.assertFalse((self.world.root / "scan-starts.txt").exists())
+        self.assert_body_files_removed()
 
 
 if __name__ == "__main__":

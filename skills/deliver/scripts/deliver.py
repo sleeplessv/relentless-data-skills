@@ -11,7 +11,8 @@ refuses where the checkout has no run mark, before its module loads. A name in `
 whose module does not exist yet exits 2 with the usage text. To build a subcommand, add its
 module; to add a subcommand, also add its name to `SUBCOMMANDS`, and a `<name>.no-mark` code
 to `core.REFUSALS` with its test unless it is in `NO_MARK_NEEDED`. `finish` is in it but keeps
-its code: it refuses for itself, since it also runs on a branch's records once the mark is gone.
+its code: it refuses for itself, since it runs with no mark to finish the cleanup an earlier
+`finish` left waiting.
 """
 from __future__ import annotations
 
@@ -31,7 +32,8 @@ USAGE = f"""\
 usage: deliver.py <subcommand> [arguments]
 
 Subcommands: {", ".join(SUBCOMMANDS)}.
-Every subcommand but start, deps, scan and report needs a run mark; finish also runs on a branch's records.
+Every subcommand but start, deps, scan and report needs a run mark. finish runs without one only
+to finish the cleanup an earlier finish left waiting, such as a PR the owner merges later.
 Exit codes: 0 done, 10 refused, 20 a question for the owner, any other a crash."""
 
 

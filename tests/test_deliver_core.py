@@ -22,7 +22,8 @@ USAGE = """\
 usage: deliver.py <subcommand> [arguments]
 
 Subcommands: start, preflight, check, save, pr, ready, merge, finish, deps, scan, report.
-Every subcommand but start, deps, scan and report needs a run mark; finish also runs on a branch's records.
+Every subcommand but start, deps, scan and report needs a run mark. finish runs without one only
+to finish the cleanup an earlier finish left waiting, such as a PR the owner merges later.
 Exit codes: 0 done, 10 refused, 20 a question for the owner, any other a crash.
 """
 NO_MARK = "REFUSED {}.no-mark: no run mark in this checkout, so no run is in progress here\nNext: deliver.py start\n"
@@ -83,10 +84,10 @@ class Dispatch(unittest.TestCase):
     def test_finish_no_mark(self):
         self.assert_no_mark("finish")
 
-    def test_every_subcommand_outside_the_four_needs_a_mark(self):
+    def test_every_subcommand_but_start_deps_scan_and_report_needs_a_mark_and_finish_checks_its_own(self):
         deliver = deliver_kit.load("deliver")
         core = deliver_kit.load("core")
-        # finish refuses finish.no-mark itself: with no mark it still runs on the branch's records (#256 rule 47).
+        # finish refuses finish.no-mark itself: it runs without a mark only to finish an earlier finish's cleanup.
         self.assertEqual(deliver.NO_MARK_NEEDED, {"start", "finish", "deps", "scan", "report"})
         needs = [name for name in deliver.SUBCOMMANDS if name not in deliver.NO_MARK_NEEDED]
         self.assertEqual([name for name in needs if f"{name}.no-mark" not in core.REFUSALS], [])

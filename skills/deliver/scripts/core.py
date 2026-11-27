@@ -62,6 +62,9 @@ REFUSALS = {
     "merge.ci-red": "CI is red on {commit}: {checks}",
     "merge.ci-unknown": "GitHub reports no checks on {commit}, but {why}, so CI may not have started yet",
     "merge.not-merged": "gh pr merge did not merge PR #{number}: GitHub shows it {state}",
+    "merge.bad-body": "the measurement block in PR #{number}'s description has no closing line",
+    "merge.mergeable-unknown": "GitHub has not worked out yet whether PR #{number} can merge",
+    "merge.no-history": "the history of origin/{base} cannot be read: {error}",
     "finish.no-mark": NO_MARK,
 }
 

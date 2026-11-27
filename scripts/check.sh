@@ -114,6 +114,7 @@ run() {
 }
 
 run "skill lint" python3 scripts/lint_skill.py
+run "word count" python3 scripts/word_count.py
 run "registry check" python3 scripts/sync_registry.py --check
 run "skill versions (base $base)" python3 scripts/skill_versions.py --check --base "$base"
 run "role files" python3 scripts/gen_roles.py --check

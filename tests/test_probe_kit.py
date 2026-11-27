@@ -13,6 +13,7 @@ touches the network or reads the real machine directory.
 """
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import re
@@ -695,7 +696,8 @@ class TestAgentEntries(ProbeKitTest):
                                           # (see TestGuardHook).
                                           "X1 claude failed: harness exited 1\n"
                                           "X2 claude failed: uv is not on PATH\n"
-                                          # It runs no `claude plugin` command (see TestPlugin).
+                                          # This stand-in `claude` has no plugin subcommand, so C1 and C3
+                                          # stop at the registration (TestPlugin covers them).
                                           "C1 claude failed: claude plugin marketplace add exited 1\n"
                                           "C2 claude failed: harness exited 1\n"
                                           "C3 claude failed: claude plugin marketplace add exited 1\n"))
@@ -1056,7 +1058,8 @@ class TestGuardHook(HookTest):
                               r"X5 claude failed: harness exited 1\n"
                               r"X1 claude recorded: hook input cwd is the session's directory\n"
                               r"X2 claude recorded: uv run adds -?\d+ ms a call \(median of 5: \d+ ms, \d+ ms without\)\n"
-                              # It runs no `claude plugin` command (see TestPlugin).
+                              # This stand-in `claude` has no plugin subcommand, so C1 and C3 stop at
+                              # the registration (TestPlugin covers them).
                               r"C1 claude failed: claude plugin marketplace add exited 1\n"
                               r"C2 claude failed: harness exited 1\n"
                               r"C3 claude failed: claude plugin marketplace add exited 1\n$")
@@ -1181,7 +1184,14 @@ class TestX7(HookTest):
 # STANDIN_SESSION_WRITES has the session write it with no read shown; STANDIN_UNINSTALL_NEEDS_ENTRY makes
 # uninstall refuse a plugin its marketplace no longer offers; STANDIN_BREAK_SOURCE deletes the probe's
 # marketplace file on install; STANDIN_LOCK leaves the plugin cache folder read-only; STANDIN_SLEEP waits
-# before the session acts.
+# before the session acts. Fix round 1: hooks run only when their matcher matches Bash. STANDIN_LOCK_SETTINGS
+# leaves settings.json read-only after install; STANDIN_MATCHER sets the installed hook's matcher;
+# STANDIN_HOOK_PAYLOAD=description sends `pwd` as the command and the prompt's command in the description;
+# STANDIN_PLUGIN_READS has the session read the plugin's skill and role files and write both words with no
+# agent; STANDIN_ROLE_TOP has the session, not the plugin role's agent, write the role word;
+# STANDIN_SESSION_READS=glob reads the skill with `cat .claude/skills/*/SKILL.md`; STANDIN_AGENT_TYPE starts
+# another role than the one asked for; STANDIN_FOREIGN has the session write the marker, then sends the word
+# in a user tool result of the agent's call (user) or in an assistant event of another call (other).
 PLUGIN_CLAUDE = r'''#!{python}
 import json, os, re, shutil, subprocess, sys, time
 from pathlib import Path
@@ -1238,6 +1248,12 @@ if args[0] == "plugin":
         prefs = load(settings, {})
         prefs.setdefault("enabledPlugins", {})[target] = True
         save(settings, prefs)
+        if knob("STANDIN_LOCK_SETTINGS"):
+            settings.chmod(0o444)
+        if knob("STANDIN_MATCHER"):
+            hooks = json.loads((path / "hooks" / "hooks.json").read_text())
+            hooks["hooks"]["PreToolUse"][0]["matcher"] = knob("STANDIN_MATCHER")
+            (path / "hooks" / "hooks.json").write_text(json.dumps(hooks))
     elif action == "uninstall":
         plugin, market = target.split("@")
         offered = plugins / "marketplaces" / market / ".claude-plugin" / "marketplace.json"
@@ -1261,6 +1277,7 @@ with open(knob("STANDIN_STARTS"), "a") as starts:
     starts.write(json.dumps({
         "name": "claude", "args": args, "prompt": prompt,
         "project_skills": sorted(str(p.relative_to(cwd)) for p in cwd.glob(".claude/skills/*/SKILL.md")),
+        "skill_texts": {str(p.relative_to(cwd)): p.read_text() for p in cwd.glob(".claude/skills/*/SKILL.md")},
         "definitions": {str(p.relative_to(cwd)): p.read_text() for p in sorted(cwd.glob(".claude/agents/*"))},
         "plugins": [sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()) for root in roots],
         "plugin_texts": [{str(p.relative_to(root)): p.read_text() for p in root.rglob("*") if p.is_file()}
@@ -1277,33 +1294,58 @@ typed = re.match(r"/(\S+):(\S+) ", prompt)
 role = re.search(r"of the role (\S+):(\S+) and", prompt)
 for root in roots:
     name = json.loads((root / ".claude-plugin" / "plugin.json").read_text())["name"]
+    if knob("STANDIN_PLUGIN_READS") and typed and role:  # the words from plain reads, with no agent
+        files = [root / "skills" / typed.group(2) / "SKILL.md", root / "agents" / (role.group(2) + ".md")]
+        for number, path in enumerate(files):
+            emit(type="assistant", parent_tool_use_id=None, message={"content": [
+                {"type": "tool_use", "id": f"toolu_read{number}", "name": "Read", "input": {"file_path": str(path)}}]})
+        (cwd / "probe-marker.txt").write_text(word_of(files[0].read_text()))
+        task = re.search(r"Write your role word to the file (\S+) in the folder (.+)\. Then run", prompt)
+        word = re.search(r"Your role word is (\S+)\.", files[1].read_text())
+        (Path(task.group(2)) / task.group(1)).write_text(word.group(1) + "\n")
+        continue
     if typed and typed.group(1) == name and "skill" not in off:
         (cwd / "probe-marker.txt").write_text(word_of((root / "skills" / typed.group(2) / "SKILL.md").read_text()))
     if role and role.group(1) == name and "role" not in off:
         task = re.search(r"Write your role word to the file (\S+) in the folder (.+)\. Then run", prompt)
         word = re.search(r"Your role word is (\S+)\.", (root / "agents" / (role.group(2) + ".md")).read_text())
+        emit(type="assistant", parent_tool_use_id=None, message={"content": [
+            {"type": "tool_use", "id": "toolu_role", "name": "Agent",
+             "input": {"subagent_type": role.group(1) + ":" + role.group(2), "prompt": task.group(0)}}]})
         (Path(task.group(2)) / task.group(1)).write_text(word.group(1) + "\n")
+        emit(type="assistant", parent_tool_use_id=None if knob("STANDIN_ROLE_TOP") else "toolu_role", message={
+            "content": [{"type": "tool_use", "id": "toolu_role_write", "name": "Write",
+                         "input": {"file_path": task.group(1), "content": word.group(1)}}]})
 command = re.search(r"shell command `([^`]+)`", prompt)
 if command:
+    sent = {"command": command.group(1)}
+    if knob("STANDIN_HOOK_PAYLOAD") == "description":
+        sent = {"command": "pwd", "description": "not " + command.group(1)}
     for root in [] if "hook" in off else roots:
         for group in json.loads((root / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]:
+            if group.get("matcher", "") not in ("", "*") and not re.fullmatch(group["matcher"], "Bash"):
+                continue
             for hook in group["hooks"]:
                 subprocess.run(hook["command"], shell=True, check=True, text=True, input=json.dumps(
-                    {"hook_event_name": "PreToolUse", "tool_name": "Bash",
-                     "tool_input": {"command": command.group(1)}, "cwd": str(cwd)}))
+                    {"hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": sent, "cwd": str(cwd)}))
     subprocess.run(command.group(1), shell=True, check=True)
 skilled = re.search(r"of the role ([\w-]+) and give it", prompt)
 if skilled:
     head = (cwd / ".claude" / "agents" / (skilled.group(1) + ".md")).read_text().split("---\n")[1]
     skill = cwd / ".claude" / "skills" / "probe-standin" / "SKILL.md"
     emit(type="assistant", parent_tool_use_id=None, message={"content": [
-        {"type": "tool_use", "id": "toolu_1", "name": "Agent", "input": {"subagent_type": skilled.group(1)}}]})
+        {"type": "tool_use", "id": "toolu_1", "name": "Agent",
+         "input": {"subagent_type": knob("STANDIN_AGENT_TYPE") or skilled.group(1)}}]})
     writer = "toolu_1"
-    if knob("STANDIN_SESSION_READS"):
+    if knob("STANDIN_SESSION_READS") == "glob":
+        emit(type="assistant", parent_tool_use_id=None, message={"content": [
+            {"type": "tool_use", "id": "toolu_2", "name": "Bash", "input": {"command": "cat .claude/skills/*/SKILL.md"}}]})
+        writer = None
+    elif knob("STANDIN_SESSION_READS"):
         emit(type="assistant", parent_tool_use_id=None, message={"content": [
             {"type": "tool_use", "id": "toolu_2", "name": "Read", "input": {"file_path": str(skill)}}]})
         writer = None
-    if knob("STANDIN_SESSION_WRITES"):
+    if knob("STANDIN_SESSION_WRITES") or knob("STANDIN_FOREIGN"):
         writer = None
     if writer is None or (re.search(r"^skills:\n  - probe-standin$", head, re.M) and "skills" not in off):
         word = word_of(skill.read_text())
@@ -1311,13 +1353,20 @@ if skilled:
         emit(type="assistant", parent_tool_use_id=writer, message={"content": [
             {"type": "tool_use", "id": "toolu_3", "name": "Write",
              "input": {"file_path": str(cwd / "probe-marker.txt"), "content": word}}]})
+        if knob("STANDIN_FOREIGN") == "user":
+            emit(type="user", parent_tool_use_id="toolu_1", message={"content": [
+                {"type": "tool_result", "tool_use_id": "toolu_4", "content": "the marker holds " + word}]})
+        elif knob("STANDIN_FOREIGN") == "other":
+            emit(type="assistant", parent_tool_use_id="toolu_9", message={"content": [
+                {"type": "text", "text": "The word is " + word}]})
 emit(type="result", session_id="{session}", result="done")
 '''
 
 # R4: a stand-in `cursor-agent` that loads each plugin of Claude Code's installed list STANDIN_CURSOR_LOADS
 # times (default 1): from the cache, then from the marketplace copy. Its init event names each loaded skill
 # file; a typed /probe-standin runs the first; each loaded hook gets the shell command, which then runs
-# unless STANDIN_NO_SHELL is set.
+# unless STANDIN_NO_SHELL is set. Like the stand-in `claude`, it runs a hook only when its matcher matches
+# Bash, and STANDIN_HOOK_PAYLOAD=description sends `pwd` as the command.
 PLUGIN_CURSOR = r'''#!{python}
 import json, os, re, subprocess, sys
 from pathlib import Path
@@ -1339,11 +1388,15 @@ if prompt.startswith("/probe-standin") and skills:
     word = re.search(r"Write the word (\S+)", Path(skills[0]).read_text()).group(1)
     (cwd / "probe-marker.txt").write_text(word + "\n")
 command = re.search(r"shell command `([^`]+)`", prompt).group(1)
+sent = {"command": command}
+if os.environ.get("STANDIN_HOOK_PAYLOAD") == "description":
+    sent = {"command": "pwd", "description": "not " + command}
 for copy in copies:
     for group in json.loads((copy / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]:
+        if group.get("matcher", "") not in ("", "*") and not re.fullmatch(group["matcher"], "Bash"):
+            continue
         for hook in group["hooks"]:
-            subprocess.run(hook["command"], shell=True, check=True, text=True,
-                           input=json.dumps({"command": command, "cwd": str(cwd)}))
+            subprocess.run(hook["command"], shell=True, check=True, text=True, input=json.dumps({**sent, "cwd": str(cwd)}))
 if not os.environ.get("STANDIN_NO_SHELL"):
     subprocess.run(command, shell=True, check=True)
 print(json.dumps({"type": "result", "session_id": "{session}", "result": "done"}))
@@ -1394,9 +1447,9 @@ class TestPlugin(ProbeKitTest):
     def assert_home_empty(self) -> None:
         self.assertEqual(sorted(self.world.home.rglob("*")), [])
 
-    def assert_changes_undone(self, entry: str, err: str) -> str:
+    def assert_changes_undone(self, entry: str, err: str, raw: bool = True) -> str:
         """The two changes named first, the last line, an empty HOME and the folder gone; the marketplace's name."""
-        found = re.fullmatch(user_level_lines(entry) + RAW + LEFT_AS_IT_WAS + "\n", err)
+        found = re.fullmatch(user_level_lines(entry) + RAW * raw + LEFT_AS_IT_WAS + "\n", err)
         self.assertIsNotNone(found, err)
         self.assert_home_empty()
         self.assertEqual(list(self.world.tmp.iterdir()), [])
@@ -1457,7 +1510,7 @@ class TestPlugin(ProbeKitTest):
             code, out, err = self.world.kit("run", "claude", "C1", STANDIN_PLUGIN_FAIL=action)
             self.assertEqual((code, out), (1, f"C1 claude failed: claude plugin {action} exited 1\n"))
             named = user_level_lines("C1") if made == 2 else user_level_lines("C1").split(r"\n")[0] + r"\n"
-            self.assertRegex(err, "^" + named + RAW + LEFT_AS_IT_WAS + "\n$")
+            self.assertRegex(err, "^" + named + LEFT_AS_IT_WAS + "\n$")  # no session, so no raw output (F13)
             self.assert_home_empty()
             self.assertEqual((self.world.hc_calls(), self.world.harness_starts()), ([], []))
             self.assertEqual(self.world.plugin_calls()[-2:], [["plugin", "uninstall", self.world.plugin_calls()[-2][2]],
@@ -1509,6 +1562,7 @@ class TestPlugin(ProbeKitTest):
         self.assertEqual(start["project_skills"], [".claude/skills/probe-standin/SKILL.md"])
         role = start["definitions"][".claude/agents/probe-skilled.md"]
         self.assertIn("\nskills:\n  - probe-standin\n", role)
+        self.assertIn("\ndisable-model-invocation: true\n", start["skill_texts"][".claude/skills/probe-standin/SKILL.md"])
         codeword = re.search(r"probe-[0-9a-f]{8}", self.world.saved()["C2-claude.jsonl"]).group(0)
         for text in (role, start["prompt"]):
             self.assertNotIn(codeword, text)
@@ -1521,7 +1575,13 @@ class TestPlugin(ProbeKitTest):
                  "STANDIN_SESSION_READS": ("1", "a tool read the skill file, so the codeword need not have come "
                                                 "through the role file"),
                  "STANDIN_SESSION_WRITES": ("1", "no event of the agent's holds the codeword")}
-        for name, (value, fact) in cases.items():
+        for name, (value, fact) in [*cases.items(), *[
+                # Fix round 1 (F7): a shell read by glob, a word in a user tool result of the agent's call or in
+                # an event of another call, and an agent of another role.
+                ("STANDIN_SESSION_READS", ("glob", cases["STANDIN_SESSION_READS"][1])),
+                ("STANDIN_FOREIGN", ("user", cases["STANDIN_SESSION_WRITES"][1])),
+                ("STANDIN_FOREIGN", ("other", cases["STANDIN_SESSION_WRITES"][1])),
+                ("STANDIN_AGENT_TYPE", ("probe-other", "no agent of the role probe-skilled was started"))]]:
             code, out, err = self.world.kit("run", "claude", "C2", **{name: value})
             self.assertEqual((code, out), (1, f"C2 claude failed: {fact}\n"))
             self.assert_private(out, err)
@@ -1532,7 +1592,8 @@ class TestPlugin(ProbeKitTest):
             self.world.claude_calls.unlink(missing_ok=True)
             code, out, err = self.world.kit("run", "claude", "C3", **knobs)
             self.assertEqual((code, out), (0, f"C3 claude recorded: {fact}\n"))
-            market = self.assert_changes_undone("C3", err)
+            market = self.assert_changes_undone("C3", err, raw=False)  # C3 keeps no file (F13)
+            self.assertEqual(list((self.world.state / "probes").iterdir()), [])
             self.assertEqual(self.world.plugin_calls(), [
                 ["plugin", "marketplace", "add"], ["plugin", "install", f"probe-plugin@{market}"],
                 ["plugin", "marketplace", "update"], ["plugin", "uninstall", f"probe-plugin@{market}"],
@@ -1545,7 +1606,7 @@ class TestPlugin(ProbeKitTest):
                             ({"STANDIN_BREAK_SOURCE": "1"}, "the probe stopped on FileNotFoundError")):
             code, out, err = self.world.kit("run", "claude", "C3", **knobs)
             self.assertEqual((code, out), (1, f"C3 claude failed: {fact}\n"))
-            self.assert_changes_undone("C3", err)
+            self.assert_changes_undone("C3", err, raw=False)
 
     def test_r4_records_how_often_cursor_shows_the_installed_plugin_s_skill_and_fires_its_hook(self):
         for loads, fact in (("1", "skill file in the output once, skill ran, hook fired once"),
@@ -1567,7 +1628,7 @@ class TestPlugin(ProbeKitTest):
         (self.world.bin / "claude").unlink()
         code, out, err = self.world.kit("run", "cursor", "R4")
         self.assertEqual((code, out), (1, "R4 cursor failed: claude is not on PATH\n"))
-        self.assertRegex(err, "^" + RAW + "$")  # nothing was changed, so no line about the machine
+        self.assertEqual(err, "")  # nothing was changed or kept, so no line about the machine or raw output
         self.assert_home_empty()
 
     def test_all_on_cursor_and_claude_runs_the_plugin_entries_with_their_own_lines(self):
@@ -1585,6 +1646,78 @@ class TestPlugin(ProbeKitTest):
         self.assert_home_empty()
         self.assert_private(out, err)
 
+
+    # Fix round 1 (#387 review of c2b121c).
+    def populate_home(self) -> dict[Path, bytes]:
+        """The user's own settings and plugin registry, in a form the stand-in would write differently."""
+        files = {self.world.home / ".claude" / "settings.json": b'{"theme": "dark"}\n',
+                 self.world.home / ".claude" / "plugins" / "known_marketplaces.json":
+                     b'{"my-market": {"source": {"source": "github", "repo": "someone/tools"}}}\n',
+                 self.world.home / ".claude" / "plugins" / "installed_plugins.json":
+                     b'{"version": 2, "plugins": {"tool@my-market": [{"scope": "user", "version": "2.0.0"}]}}\n'}
+        for path, data in files.items():
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        return files
+
+    def test_existing_user_files_hold_the_same_bytes_after_a_pass_and_a_failure(self):
+        files = self.populate_home()
+        tree = sorted(self.world.home.rglob("*"))
+        for entry, knobs, fact in (
+                ("C1", {}, "C1 claude seen: the installed plugin loaded its skill, role file and hook\n"),
+                ("C1", {"STANDIN_OFF": "role"}, "C1 claude failed: the installed plugin's role file did not load\n"),
+                ("C1", {"STANDIN_PLUGIN_FAIL": "install"}, "C1 claude failed: claude plugin install exited 1\n"),
+                ("C3", {}, "C3 claude recorded: uninstall exited 0 and the plugin is gone\n")):
+            code, out, err = self.world.kit("run", "claude", entry, **knobs)
+            self.assertEqual(out, fact)
+            raw = RAW if (entry, knobs.keys() & {"STANDIN_PLUGIN_FAIL"}) == ("C1", set()) else ""
+            self.assertRegex(err, "^" + user_level_lines(entry) + raw + LEFT_AS_IT_WAS + "\n$")
+            self.assertEqual({path: path.read_bytes() for path in files}, files)
+            self.assertEqual(sorted(self.world.home.rglob("*")), tree)
+
+    def test_the_last_line_names_a_user_file_it_could_not_put_back(self):
+        settings = self.world.home / ".claude" / "settings.json"
+        settings.parent.mkdir()
+        settings.write_bytes(b'{"theme": "dark"}\n')
+        self.addCleanup(settings.chmod, 0o644)
+        code, out, err = self.world.kit("run", "claude", "C1", STANDIN_LOCK_SETTINGS="1")
+        self.assertEqual((code, out), (0, "C1 claude seen: the installed plugin loaded its skill, role file and hook\n"))
+        self.assertRegex(err, "^" + user_level_lines("C1") + RAW + r"probe_kit: could not restore ~/\.claude/settings"
+                         r"\.json to what it held before; fix by hand\n$")
+        self.assertNotEqual(settings.read_bytes(), b'{"theme": "dark"}\n')
+        self.assert_private(out, err)
+
+    def test_c1_is_not_seen_when_the_session_reads_the_plugin_s_files_or_writes_the_role_word_itself(self):
+        for knobs, fact in (({"STANDIN_PLUGIN_READS": "1"}, "a tool read the installed plugin's files, so its words "
+                                                             "need not have come from loading them"),
+                            ({"STANDIN_ROLE_TOP": "1"}, "the installed plugin's role file did not load")):
+            code, out, err = self.world.kit("run", "claude", "C1", **knobs)
+            self.assertEqual((code, out), (1, f"C1 claude failed: {fact}\n"))
+            self.assert_changes_undone("C1", err)
+
+    def test_a_hook_line_counts_only_with_the_command_in_its_command_field_and_a_matching_matcher(self):
+        for knobs in ({"STANDIN_HOOK_PAYLOAD": "description"}, {"STANDIN_MATCHER": "Edit"}):
+            code, out, err = self.world.kit("run", "claude", "C1", **knobs)
+            self.assertEqual((code, out), (1, "C1 claude failed: the installed plugin's hook did not load\n"))
+            self.assert_changes_undone("C1", err)
+            code, out, err = self.world.kit("run", "cursor", "R4", **knobs)
+            self.assertEqual((code, out), (0, "R4 cursor recorded: skill file in the output once, skill ran, hook "
+                                              "fired not at all\n"))
+            self.assert_changes_undone("R4", err)
+
+    def test_c2_fails_before_launch_when_the_codeword_is_in_another_file_of_the_folder(self):
+        sys.path.insert(0, str(KIT.parent))
+        self.addCleanup(sys.path.remove, str(KIT.parent))
+        kit = importlib.import_module("probe_kit")
+        work = self.world.tmp / "work"
+        (work / ".claude" / "skills" / "probe-standin").mkdir(parents=True)
+        (work / ".claude" / "skills" / "probe-standin" / "SKILL.md").write_text("Write the word probe-1234abcd\n")
+        kit.setup_skilled_role("claude", work, "probe-1234abcd")  # the skill file alone holds it
+        shutil.rmtree(work / ".claude" / "agents")
+        (work / "notes.txt").write_text("probe-1234abcd\n")
+        with self.assertRaisesRegex(kit.SetupFailed, "^the codeword is in a file of the folder other than the skill "
+                                                     "file$"):
+            kit.setup_skilled_role("claude", work, "probe-1234abcd")
 
 if __name__ == "__main__":
     unittest.main()

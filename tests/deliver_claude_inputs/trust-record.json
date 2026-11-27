@@ -1,0 +1,7 @@
+{
+  "projects": {
+    "<checkout>": {
+      "hasTrustDialogAccepted": true
+    }
+  }
+}

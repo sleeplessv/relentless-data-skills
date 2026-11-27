@@ -177,6 +177,39 @@ class Pr(unittest.TestCase):
         self.assertEqual(self.remote_tip("feat/rejected"), other)
         self.assertEqual(len(self.calls()), 1)
 
+    def test_pr_push_rejected_without_advising_a_pull_when_a_hook_declines(self):
+        hook = self.world.origin / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\necho '[rejected] unsigned commit'\nexit 1\n", encoding="utf-8")
+        hook.chmod(0o755)
+        self.addCleanup(hook.unlink)
+        checkout = self.branch("feat/hooked")
+        result = self.pr(checkout)
+        self.assert_ends(result, 10, (
+            "REFUSED pr.push-rejected: the push of feat/hooked to origin failed, and nothing was forced\n"
+            "Next: fix the error above, then deliver.py pr\n"))
+        self.assertIn("[remote rejected]", result.stderr)
+        self.assertEqual(self.remote_tip("feat/hooked"), "")
+
+    def without_origin_main(self) -> None:
+        """Take the local origin/main ref away for one test, as a single-branch checkout lacks it."""
+        tip = self.world.git(self.world.work, "rev-parse", "refs/remotes/origin/main")
+        self.world.git(self.world.work, "update-ref", "-d", "refs/remotes/origin/main")
+        self.addCleanup(self.world.git, self.world.work, "update-ref", "refs/remotes/origin/main", tip)
+
+    def test_edits_the_open_pr_without_a_local_origin_default_ref(self):
+        checkout = self.branch("feat/no-base-edit")
+        self.without_origin_main()
+        self.answer(open_prs=[{"number": 7, "url": URL.format(7)}])
+        self.assert_ends(self.pr(checkout), 0, f"Updated the description of PR #7: {URL.format(7)}\n")
+        self.assertEqual(self.calls()[2][:3], ["pr", "edit", "7"])
+
+    def test_the_title_falls_back_to_the_branch_name_without_a_local_origin_default_ref(self):
+        checkout = self.branch("feat/no-base-open")
+        self.without_origin_main()
+        self.assert_ends(self.pr(checkout), 0, f"Opened draft PR #12: {URL.format(12)}\n")
+        create = self.calls()[2]
+        self.assertEqual(create[create.index("--title") + 1], "feat/no-base-open")
+
     def test_pr_push_rejected_without_advising_a_pull_when_origin_cannot_be_reached(self):
         checkout = self.branch("feat/unreachable")
         tmp = self.world.root / "tmp"

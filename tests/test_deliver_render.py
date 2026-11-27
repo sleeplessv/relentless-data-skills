@@ -202,6 +202,12 @@ door: one-way
             "- A1 (R1): the stand-in gh records the body file. Tested by reading gh-calls.jsonl: held."])
         self.assertEqual(plan.door, "two-way")
 
+    def test_an_indented_line_continues_its_assumption_and_the_list_goes_on(self):
+        plan = render.read_plan("| R1 | a | `make test` |\n\nAssumptions\n\n- A1 (R1): one.\n"
+                                "  Tested by reading the fixture: held.\n- A2 (R1): two.\n\n## Notes\n- a note\n")
+        self.assertEqual(plan.assumptions, [
+            "- A1 (R1): one.", "  Tested by reading the fixture: held.", "- A2 (R1): two."])
+
     def test_evidence_matches_the_unmasked_command_and_shows_it_masked(self):
         plan = PLAN.replace("`python3 -m unittest tests.test_deliver_pr`", "`pytest ~/work/repo/tests`")
         records = [{"event": "check", "command": "pytest ~/work/repo/tests", "exit": 0, "commit": "2222222b",
@@ -327,6 +333,8 @@ class Mask(unittest.TestCase):
             ("`token: abcdefgh1234`", "a password or token assignment"),
             ('password = "four ordinary test words"', "a password or token assignment"),
             ("secret: 'two words here'", "a password or token assignment"),
+            ('password = " four ordinary test words"', "a password or token assignment"),
+            ('password = "one\\"two more words"', "a password or token assignment"),
         ]:
             with self.subTest(text):
                 self.assertEqual(mask.find_secret(f"line one\n{text}"), (kind, 2))

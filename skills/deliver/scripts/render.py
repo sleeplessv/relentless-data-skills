@@ -14,7 +14,8 @@ The record contract this reads, which `start`, `save` and `check` write:
 - `summary.md`: the author's Summary, rendered as written.
 - `plan.md`: the check plan. Its requirement rows are `| R<n> | <requirement> | <proof> |`; a
   proof that is one code span, such as `` `python3 -m unittest tests.test_x` ``, is a command. Its
-  assumptions are the `- ` lines after a line reading `Assumptions`, up to the next other text. Its door line is
+  assumptions are the `- ` lines after a line reading `Assumptions`, with their indented continuations, up to the next heading or other unindented
+  line. Its door line is
   `door: two-way` or `door: one-way` followed by a one-line reason. A plan with no door line, or
   with another word after `door:`, is one-way (#256 rule 26). A plan with no requirement row, or a
   row without exactly three cells, raises `Unreadable`. `Plan` and `Requirement` have the shape of
@@ -87,18 +88,20 @@ def read_plan(text: str) -> Plan:
     """The requirements, the door and the assumption lines of a saved check plan.
 
     A row's cells follow `plan.parse` (#414): a trailing `|` is optional, and `\\|` is a `|`
-    inside a cell. The assumption lines are the `- ` lines after a line reading `Assumptions`, up to
-    the next line that is neither blank nor one of them.
+    inside a cell. The assumption lines are the `- ` lines after a line reading `Assumptions`, each
+    with its indented continuation lines, up to the next line that is unindented and not a bullet,
+    such as a heading.
     """
     rows, assumptions, door, in_assumptions = [], [], None, False
     for line in text.splitlines():
         if in_assumptions:
-            if line.startswith("- "):
+            continued = assumptions and line[:1] in (" ", "\t") and line.strip()
+            if line.startswith("- ") or continued:
                 assumptions.append(line)
                 continue
-            in_assumptions = not line.strip()
-            if in_assumptions:
+            if not line.strip():
                 continue
+            in_assumptions = False
         if ROW.match(line):
             cells = _cells(line)
             if len(cells) != 3:

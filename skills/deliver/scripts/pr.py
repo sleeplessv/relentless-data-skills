@@ -12,18 +12,21 @@ the blast radius pending until `ready` runs the small test. In order, `pr`:
    holds a secret, before anything is pushed or sent to `gh`, and refuses `pr.unreadable` when a
    saved text cannot be read with certainty;
 4. refuses `pr.default-branch` on the repo's default branch (`gh repo view`);
-5. takes the title, the branch's first commit subject, through the same secret check (exit 20)
-   and mask as the description;
+5. takes the title, the branch's first commit subject after `origin/<default>` or the branch name
+   when that history cannot be read, through the same secret check (exit 20) and mask as the
+   description;
 6. pushes the branch to `origin`, never forced, and refuses `pr.push-rejected` when the push fails,
-   advising a pull only when git reports a rejection;
+   advising a pull only when git's ref-status line refuses it as not a fast-forward;
 7. edits the body of the branch's open PR, or opens a draft PR into the default branch with that
-   title, passing the body as a temporary file under `TMPDIR` that is deleted after the call;
+   title, passing the body as a temporary file in Python's temporary directory
+   (`tempfile.gettempdir()`) that is deleted after the call;
 8. appends a `pr` record with the PR's `number` and `url`.
 """
 from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -36,6 +39,8 @@ import render
 DROP = ".deliver"
 KINDS = ("request", "requirements", "plan", "summary")
 RERUN = "deliver.py pr"
+# git's ref-status line for a push refused as not a fast-forward; a hook's `[remote rejected]` is not one.
+NOT_FAST_FORWARD = re.compile(r"^\s*! \[rejected\] .*\((?:non-fast-forward|fetch first)\)\s*$", re.MULTILINE)
 
 
 def main(args: list[str], run: core.Run) -> None:
@@ -57,14 +62,15 @@ def main(args: list[str], run: core.Run) -> None:
     default = _gh(run, "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name").strip()
     if branch == default:
         raise core.Refused("pr.default-branch", "git switch -c <type>/<name>", branch=branch)
-    subjects = _git(run, "log", "--reverse", "--format=%s", f"origin/{default}..HEAD").stdout.splitlines()
+    log = _git(run, "log", "--reverse", "--format=%s", f"origin/{default}..HEAD", check=False)
+    subjects = log.stdout.splitlines() if log.returncode == 0 else []
     title = subjects[0] if subjects else branch
     render.refuse_secret("The PR title, the branch's first commit subject,", "commit subject", title)
     title = mask.mask(title)[0]
     push = _git(run, "push", "--set-upstream", "origin", branch, check=False)
     if push.returncode != 0:
         sys.stderr.write(push.stderr)
-        rejected = "[rejected]" in push.stderr
+        rejected = NOT_FAST_FORWARD.search(push.stderr)
         fix = f"git pull --no-rebase origin {branch}" if rejected else f"fix the error above, then {RERUN}"
         raise core.Refused("pr.push-rejected", fix, branch=branch)
     found = json.loads(_gh(run, "pr", "list", "--head", branch, "--state", "open", "--json", "number,url"))

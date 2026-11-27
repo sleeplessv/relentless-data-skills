@@ -9,7 +9,7 @@ fenced blocks get no exemption. An email address is not a mention, and issue-clo
 `Closes #415` pass unchanged.
 
 A value assigned to a secret name counts from 8 characters; a quoted value is measured whole,
-spaces included. A value that starts with `$`, `{`, `<` or `%` is a template reference, not a secret.
+leading spaces and escaped quotes included. A value that starts with `$`, `{`, `<` or `%` is a template reference, not a secret.
 
 `find_secret(text)` returns the kind and line number of the first text that looks like a secret,
 or None. The caller stops with a question and never prints the text.
@@ -39,7 +39,8 @@ SECRETS = (
     ("an API key", re.compile(r"(?<![A-Za-z0-9])sk-[\w-]{20,}")),
     ("a password or token assignment", re.compile(
         r"(?i)(?:password|passwd|secret|token|api_?key)[\w-]*[\"']?\s*[:=]\s*"
-        r"(?:\"[^\"\s${<%][^\"]{7,}|'[^'\s${<%][^']{7,}|[^\s\"'${<%][^\s\"']{7,})")),
+        r"(?:\"(?=\s*[^\s\"${<%])(?:[^\"\\\n]|\\.){8,}|'(?=\s*[^\s'${<%])(?:[^'\\\n]|\\.){8,}"
+        r"|[^\s\"'${<%][^\s\"']{7,})")),
 )
 
 

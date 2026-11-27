@@ -390,6 +390,54 @@ def counts(result: subprocess.CompletedProcess[str]) -> tuple[int, int, int]:
     return pools["0-50"], pools["51-300"], (skipped or [0])[0]
 
 
+# The shape of the calls behind the PRs the first real draw vetoed: a body written to a file, a cd, and gh pr create
+# after a variable set for it alone.
+BY_TIME = ("cat > \"$F\" <<'EOF'\nBody: gh pr create runs once.\nEOF\ncd \"$D\"\n"
+           "GH_PAGER= gh pr create --title \"t\" --body-file \"$F\"")
+# Whether a call names gh pr create: its three words, plain, start one command after nothing but NAME=value words.
+# The reader answers "does not name" wherever it cannot read the text before the words with certainty.
+NAMES = {
+    BY_TIME: True, "A=1 B=2 gh pr create": True, "git push && gh pr create --fill": True,
+    'A="x $Y" gh pr create': True, "cd x || exit 1\ngh pr create": True, "git push |& tail -1; gh pr create": True,
+    "cat <<-'EOF' >out\n\tbody\n\tEOF\ngh pr create": True, "cat <<EOF 2>&1\nbody\nEOF\ngh pr create": True,
+    'cd "${D}" && gh pr create': True, 'echo "a\\"b" $1 $#; gh pr create': True, "echo a\\ b; gh pr create": True,
+    "make &>log </dev/null; gh pr create": True,
+    # The three words only inside a here-document's body or only inside quotes.
+    "cat <<'EOF'\ngh pr create\nEOF": False, "cat <<EOF\ngh pr create\nEOF": False,
+    "cat <<-EOF\n\tgh pr create\n\tEOF": False, "cat <<\"EOF\"\ngh pr create\nEOF\necho done": False,
+    'echo "gh pr create"': False, "git commit -m 'gh pr create'": False, '"gh" pr create': False,
+    # env is a program, not a NAME=value word; and words that are not gh pr create.
+    "env A=1 gh pr create": False, "gh pr view": False, "xgh pr create": False, "gh pr create-preview": False,
+    # Text the reader cannot be sure of before the words: a here-document with no end, or one whose line holds a
+    # quoted new line; an expansion that runs a command; a here-string; a command with nothing before an operator.
+    "cat <<'EOF'\nbody\ngh pr create": False, "cat <<'EOF' 'x\n'\nEOF\ngh pr create": False,
+    'echo "$(date)"; gh pr create': False, "echo `date`; gh pr create": False, "cat <<< x; gh pr create": False,
+    "&& gh pr create": False, "; gh pr create": False, "true ;; gh pr create": False,
+    "true ;& gh pr create": False, 'echo "${D:-x}"; gh pr create': False,
+    # A line of an unquoted body that ends in a backslash may join the next, so its delimiter line may not end it;
+    # a quoted body, or an unquoted one with no such line, still ends there.
+    "cat <<EOF\nUsage: \\\nEOF\ngh pr create --fill\nEOF\ngh pr view --json url --jq .url": False,
+    "cat <<'EOF'\nUsage: \\\nEOF\ngh pr create --fill": True, "cat <<EOF\nUsage: x\nEOF\ngh pr create --fill": True,
+    # A < or > touching create may make it another word; one after a blank is a redirection.
+    "gh pr create<(printf body) || gh pr view --json url --jq .url": False, "gh pr create>(cat)": False,
+    "gh pr create<1-3> || gh pr view": False, "gh pr create --fill > out.txt": True, "gh pr create 2>&1": True}
+# The rows of FORMS["maybe"] that name gh pr create; the others do not.
+NAMED_MAYBE = {
+    "gh pr create --fill || gh pr view --json url --jq .url", f"gh pr create --fill | cat <<'URL'\n{URL}\nURL",
+    "gh pr create --fill | tail -1 notes.txt", "gh pr create --fill | tail -n5", "gh pr create --fill | tail -1 | cat",
+    "cat body.md | gh pr create --body-file -", AT_THE_LIMIT + "x", "gh pr create --fill 2>&1 > out.txt",
+    "cat>>log.txt; gh pr create", "git log >log.txt; gh pr create", "git push 2>err.txt; gh pr create",
+    'gh pr create --title "costs \\$5"', "gh pr create --body =gh", "'git' push && gh pr create",
+    "cat url.txt; gh pr create --fill | tail -1", "gh pr create --fill | tail -1 && cat url.txt",
+    "cd x && gh pr create --fill 2>&1 | tail -1", "gh pr create --title =SUM --fill 2>&1 | tail -1",
+    "git push && gh pr create --fill; cd .", f"false && gh pr create --fill; printf '%s\\n' {URL}",
+    "exit 0; gh pr create", "exec true; gh pr create", "PATH=/absent; gh pr create",
+    f"gh pr create > missing-folder/out; printf '%s\\n' {URL}", f"gh pr create < missing-file; printf '%s\\n' {URL}",
+    "gh pr view --json url || gh pr create --fill", "git push ||\ngh pr create", "git push && gh pr create &",
+    "gh pr create  # open it", "GH=1 gh pr create", "gh pr create; gh pr create",
+    "gh pr create --body \"$(cat <<'EOF'\nEOF)\nEOF\n)\""}
+
+
 class World:
     """The repos, logs and saved `gh` answers for one test, under one temporary folder."""
 
@@ -806,6 +854,76 @@ class TestDraw(unittest.TestCase):
                                                                 f"that may have opened each, or another PR of the "
                                                                 f"session that opened it, keeps it out of the pool.")
 
+    def test_a_call_names_gh_pr_create_only_when_its_three_words_plainly_start_one_command(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        table = {**NAMES, **{command: command in NAMED_MAYBE for command in FORMS["maybe"]},
+                 **dict.fromkeys(FORMS["opens"], True), **dict.fromkeys(FORMS["neither"], False)}
+        self.assertLessEqual(NAMED_MAYBE, set(FORMS["maybe"]))
+        for command, names in table.items():
+            with self.subTest(command=label(command)):
+                self.assertIs(draw.names_gh_pr_create(command), names)
+
+    def draw_once(self, tickets: list[Ticket], untimed: str = "") -> list[str]:
+        """What a draw with seed 1 prints, as lines; with `untimed`, the first ticket's log lines of that kind have
+        no time. Every bucket but 0-50 is empty."""
+        world = self.world(tickets)
+        if untimed:
+            retime(world.log_path(tickets[0]), None, untimed)
+        result = world.draw("--seed", "1")
+        self.assertEqual((result.returncode, result.stderr), (3, ""))
+        return result.stdout.splitlines()
+
+    @staticmethod
+    def printed(pool: int, vetoed: int, skipped: int = 0) -> list[str]:
+        """What a draw with seed 1 prints when the 0-50 pool holds `pool` tickets that pass and the others none."""
+        return ["Seed 1.", *([f"Skipped {skipped} session logs that could not be read."] if skipped else []),
+                f"Vetoed {vetoed} PRs of the listed repos: a call that may have opened each, or another PR of the "
+                "session that opened it, keeps it out of the pool.",
+                "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read "
+                "with certainty keeps each out of the pool.",
+                f"0-50: pool {pool}, set aside 0, kept {pool}.", "51-300: pool 0, set aside 0, kept 0.",
+                "301-1500: pool 0, set aside 0, kept 0.", "No set written: a bucket holds no ticket that passes."]
+
+    def test_a_call_that_names_gh_pr_create_opens_its_pr_when_github_s_time_falls_inside_it(self) -> None:
+        # GitHub's time is inside the call, outside it, or the result's time is missing; and calls that hold the
+        # three words only inside a here-document's body or inside quotes, with GitHub's time inside.
+        for name, ticket, untimed, printed in (
+                ("inside", Ticket(1, 20, command=BY_TIME), "", self.printed(1, 0)),
+                ("outside", Ticket(1, 20, command=BY_TIME, created="2026-01-04T09:00:00Z"), "", self.printed(0, 0)),
+                ("no time", Ticket(1, 20, command=BY_TIME), "user", self.printed(0, 1, skipped=1)),
+                ("here-document", Ticket(1, 20, command="cat <<'EOF'\ngh pr create\nEOF"), "", self.printed(0, 1)),
+                ("quotes", Ticket(1, 20, command="echo 'gh pr create' \"gh pr create\""), "", self.printed(0, 1))):
+            with self.subTest(case=name):
+                self.assertEqual(self.draw_once([ticket], untimed), printed)
+
+    def test_a_pr_opened_by_time_stays_out_beside_another_opener_or_another_pr_of_its_session(self) -> None:
+        # A second session may have opened the PR, or opened it by time too; the session may have opened a PR in a
+        # repo outside the list, which the draw does not ask GitHub about, so a call that names gh pr create only
+        # may have opened it; or the session opened a second PR of the listed repo by time.
+        maybe = "env A=1 gh pr create"
+        for name, ticket, vetoed_count in (
+                ("a rival that may have", Ticket(1, 20, command=BY_TIME, rival=maybe), 1),
+                ("a rival that did", Ticket(1, 20, command=BY_TIME, rival=BY_TIME), 0),
+                ("an unlisted PR named", Ticket(1, 20, unlisted_pr_command=BY_TIME), 1),
+                ("an unlisted PR it may have", Ticket(1, 20, command=BY_TIME, unlisted_pr_command=maybe), 1),
+                ("a second PR", Ticket(1, 20, command=BY_TIME, prs=2), 0)):
+            with self.subTest(case=name):
+                self.assertEqual(self.draw_once([ticket]), self.printed(0, vetoed_count))
+
+    def test_help_gives_the_second_way_and_what_it_takes_for_granted(self) -> None:
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        second = help_text[help_text.index("by time and not by form"):help_text.index("Any other call")]
+        for terms in (("draw asked GitHub about the PR",), ("result", "not an error", "PR's URL"),
+                      ("GitHub's time", "span"), ("names gh pr create",), ("plain", "unquoted", "in that order"),
+                      ("NAME=value",), ("here-document's body", "quotes"),
+                      ("takes for granted", "no other program opened the PR during that one call")):
+            with self.subTest(terms=terms):
+                for term in terms:
+                    self.assertIn(term, second)
+        self.assertEqual(help_text.count("by time and not by form"), 1)
+
     def test_pool_holds_only_tickets_that_meet_readings_2_and_3_in_listed_repos(self) -> None:
         kept = [
             Ticket(1, 20, command="cd .\ngh pr create --fill"), Ticket(2, 20, command="gh\tpr\tcreate --title 'Ticket 2' --fill"),
@@ -865,18 +983,22 @@ class TestDraw(unittest.TestCase):
             self.assertEqual((entry["ready_commit"], entry["model"]), (ticket.commit("b" if ticket.draft else "a"), MODEL),
                              ticket.number)
 
-    def test_a_command_makes_its_session_the_opener_only_when_it_surely_ran_gh_pr_create(self) -> None:
+    def test_a_command_makes_its_session_the_opener_by_its_form_or_by_time_when_it_names_gh_pr_create(self) -> None:
         for does, commands in FORMS.items():
             for command in commands:
                 with self.subTest(command=label(command)):
                     # Ticket 1's session runs the command. Ticket 101's opens its PR and a second session runs it.
                     # Ticket 102's opens its PR and later runs it, printing the URL of a PR in an unlisted repo.
+                    # GitHub's time for the listed PRs of tickets 1 and 101 falls inside each call, so a "maybe" call
+                    # that names gh pr create opens them by time; ticket 102's unlisted PR has no GitHub time and
+                    # counts on the form alone.
                     world = self.world([Ticket(1, 20, command=command), Ticket(101, 100, rival=command),
                                         Ticket(102, 100, unlisted_pr_command=command)])
                     result = world.draw()
+                    by_time = command in NAMED_MAYBE
                     self.assertEqual(result.returncode, 3, result.stderr)
-                    self.assertEqual(counts(result), (does == "opens", 2 * (does == "neither"), 0))
-                    self.assertEqual(vetoed(result), 3 * (does == "maybe"))
+                    self.assertEqual(counts(result), (does == "opens" or by_time, 2 * (does == "neither"), 0))
+                    self.assertEqual(vetoed(result), (1 if by_time else 3) * (does == "maybe"))
 
     def shell(self, name: str) -> tuple[str, Path]:
         """A shell --help takes for granted, and a folder holding the stand-ins and the files the forms use. A host

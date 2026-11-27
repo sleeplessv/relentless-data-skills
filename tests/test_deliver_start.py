@@ -23,7 +23,7 @@ start = deliver_kit.load("start")
 MISSING = "warning: no docs/agents/stack.toml: every stack setting has its default"
 GRANT = ("Run grant: push this branch, open and update its PR, mark it ready and merge it through the scripts, "
          "file follow-up tickets.")
-PROBE = "Next: run gh pr merge --deliver-guard-probe, which the guard refuses, then deliver.py preflight"
+PROBE = "Next: run gh pr merge --deliver-guard-probe, which the guard refuses, then deliver.py start --resume"
 BODY = "## What to build\n\nAdd a --json flag.\n\n## Acceptance criteria\n\n- [ ] it parses\n- [ ] the help names it\n"
 REPO_VIEW = ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
 TREE = "Source: working tree, requirements written from the diff\n"

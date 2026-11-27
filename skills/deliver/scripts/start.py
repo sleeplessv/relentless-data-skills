@@ -19,7 +19,7 @@ writes the run mark (role `session`); saves the request as the branch's `request
 `Source:` line (`render.py` reads it) and a `save` record; prints the requirements of a ticket,
 so a preflight stop leaves them on screen; and runs preflight without the probe check. Once that
 passes it prints the probe step. The session then runs the probe, which the guard refuses, and
-`deliver.py preflight`. `start` prints no run grant: the grant needs the probe check passed.
+`deliver.py start --resume`. `start` prints no run grant: the grant needs the probe check passed.
 
 `start --resume` keeps the mark, prints where the run stands from its records, runs the whole
 preflight, probe check included, and prints the grant line once it passes.
@@ -82,7 +82,7 @@ def main(args: list[str], run: core.Run | None) -> None:
     for number, requirement in enumerate(requirements, 1):
         print(f"R{number}: {requirement}")
     preflight.run(run, probe=False)
-    print(f"Next: run {guard.PROBE}, which the guard refuses, then deliver.py preflight")
+    print(f"Next: run {guard.PROBE}, which the guard refuses, then deliver.py start --resume")
 
 
 def resume(run: core.Run) -> None:

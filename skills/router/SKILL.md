@@ -1,5 +1,5 @@
 ---
-name: model-router
+name: router
 description: "Model routing for delegated work. Read it before the first subagent call of any task you split up, fan out or hand off, so each piece runs on the cheapest model that fits (Haiku, Sonnet, Opus, GPT, Gemini) at the right effort and harness. Use when delegating, or when the user asks which model or effort should handle a task or wants a review from another vendor's model."
 argument-hint: "[task or plan to route]"
 ---

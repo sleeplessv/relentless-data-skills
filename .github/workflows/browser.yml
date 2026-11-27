@@ -36,4 +36,16 @@ jobs:
       - name: Install Chromium's system libraries
         run: uv run --python 3.13 --no-project --with playwright playwright install-deps chromium
       - name: Run the checks with the browser tests
-        run: scripts/check.sh --fast --browser --base "$(git rev-parse HEAD^1)"
+        env:
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        # The version baseline is ci.yml's: the base tip (HEAD^1) for a PR into
+        # the default branch, the merge base with it for a PR into another branch.
+        run: |
+          baseline=$(git rev-parse HEAD^1)
+          if [ -n "$PR_BASE_REF" ] && [ "$PR_BASE_REF" != "$DEFAULT_BRANCH" ]; then
+            git rev-parse -q --verify "origin/$DEFAULT_BRANCH" >/dev/null ||
+              git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+            baseline=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
+          fi
+          scripts/check.sh --fast --browser --base "$baseline"

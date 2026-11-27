@@ -131,9 +131,9 @@ class EndToEnd(unittest.TestCase):
         return core.records_dir(Path(common), branch)
 
     def assert_body_files_removed(self) -> None:
-        """Each --body-file deliver.py handed the stand-in gh is gone once the call returned."""
-        files = [call["args"][call["args"].index("--body-file") + 1] for call in self.world.gh_calls()
-                 if "--body-file" in call["args"]]
+        """Each --body-file deliver.py handed the stand-in gh, read from that call's cwd, is gone once it returned."""
+        files = [Path(call["cwd"]) / call["args"][call["args"].index("--body-file") + 1]
+                 for call in self.world.gh_calls() if "--body-file" in call["args"]]
         self.assertTrue(files)
         self.assertEqual([f for f in files if Path(f).exists()], [])
 

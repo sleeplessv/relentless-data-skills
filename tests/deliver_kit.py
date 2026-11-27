@@ -8,7 +8,7 @@
 - `origin.git`, a bare repo standing in for the remote, whose `main` holds one commit;
 - `work/`, a clone of it on `main`;
 - `bin/gh`, a stand-in first on PATH. It appends each call as one JSON line to
-  `gh-calls.jsonl` and answers from `gh-answers.json` with the first saved answer, in the order
+  `gh-calls.jsonl`, with the text of a `--body-file` argument under `body`, and answers from `gh-answers.json` with the first saved answer, in the order
   saved, whose arguments are the call's leading arguments (or all of them). So save the longer
   answer first: `["pr"]` saved before `["pr", "view"]` answers `gh pr view` too. With no answer
   it prints `stand-in gh: no answer for <args>` and exits 1.
@@ -47,8 +47,11 @@ import json, os, sys
 from pathlib import Path
 world = Path(os.environ["DELIVER_KIT_WORLD"])
 args = sys.argv[1:]
+call = {"args": args, "cwd": os.getcwd()}
+if "--body-file" in args[:-1]:
+    call["body"] = Path(args[args.index("--body-file") + 1]).read_text()
 with (world / "gh-calls.jsonl").open("a") as calls:
-    calls.write(json.dumps({"args": args, "cwd": os.getcwd()}) + "\\n")
+    calls.write(json.dumps(call) + "\\n")
 answers = json.loads((world / "gh-answers.json").read_text())
 for answer in answers:
     if args[:len(answer["args"])] == answer["args"]:

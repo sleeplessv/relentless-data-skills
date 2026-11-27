@@ -8,7 +8,7 @@
 - `origin.git`, a bare repo standing in for the remote, whose `main` holds one commit;
 - `work/`, a clone of it on `main`;
 - `bin/gh`, a stand-in first on PATH. It appends each call as one JSON line to
-  `gh-calls.jsonl` and answers from `gh-answers.json` with the first saved answer, in the order
+  `gh-calls.jsonl`, with the text of a `--body-file` argument under `body`, and answers from `gh-answers.json` with the first saved answer, in the order
   saved, whose arguments are the call's leading arguments (or all of them). So save the longer
   answer first: `["pr"]` saved before `["pr", "view"]` answers `gh pr view` too. With no answer
   it prints `stand-in gh: no answer for <args>` and exits 1.
@@ -16,6 +16,10 @@
 `world.deliver(*args)` runs deliver.py as a session would, with only the world's environment, so
 no test reads a real session's variables, touches the network or writes to the real machine
 directory. A test that needs another stand-in puts it in `world.bin`.
+
+`world.guard(command)` runs the guard hook as Claude Code does, on a hook input recorded from
+Claude Code (`deliver_guard_inputs/`) with its `cwd` set to the clone and its command replaced.
+`world.probe()` runs the guard probe that way, so a marked run's preflight finds its refusal.
 
 Pass `self.addCleanup` from a test or `cls.addClassCleanup` from `setUpClass` to share one world
 across a class. Later tickets add helpers here rather than in their own test files.
@@ -35,14 +39,19 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SCRIPTS = REPO_ROOT / "skills" / "deliver" / "scripts"
 DELIVER = SCRIPTS / "deliver.py"
+GUARD = SCRIPTS / "guard.py"
+GUARD_INPUTS = REPO_ROOT / "tests" / "deliver_guard_inputs"
 
 GH = """\
 import json, os, sys
 from pathlib import Path
 world = Path(os.environ["DELIVER_KIT_WORLD"])
 args = sys.argv[1:]
+call = {"args": args, "cwd": os.getcwd()}
+if "--body-file" in args[:-1]:
+    call["body"] = Path(args[args.index("--body-file") + 1]).read_text()
 with (world / "gh-calls.jsonl").open("a") as calls:
-    calls.write(json.dumps({"args": args, "cwd": os.getcwd()}) + "\\n")
+    calls.write(json.dumps(call) + "\\n")
 answers = json.loads((world / "gh-answers.json").read_text())
 for answer in answers:
     if args[:len(answer["args"])] == answer["args"]:
@@ -145,6 +154,20 @@ class World:
             [sys.executable, str(DELIVER), *args], cwd=cwd or self.work, env=self.env(**env),
             capture_output=True, text=True,
         )
+
+    def guard(self, command: str, recorded: str = "session.json", cwd: Path | None = None,
+              shell_cwd: Path | None = None, **env: str | None) -> subprocess.CompletedProcess:
+        """Run the guard on a recorded hook input, from `shell_cwd` (default: outside every repo)."""
+        data = json.loads((GUARD_INPUTS / recorded).read_text(encoding="utf-8"))
+        data["cwd"] = str(cwd or self.work)
+        data["tool_input"]["command"] = command
+        return subprocess.run(
+            [sys.executable, str(GUARD)], input=json.dumps(data), cwd=shell_cwd or self.root,
+            env=self.env(**env), capture_output=True, text=True,
+        )
+
+    def probe(self, recorded: str = "session.json", cwd: Path | None = None) -> subprocess.CompletedProcess:
+        return self.guard(load("guard").PROBE, recorded, cwd)
 
     def write_mark(self, checkout: Path | None = None, run: str = "run-1", branch: str = "main",
                    role: str = "session", started: str = "2026-11-27T18:00:00Z") -> Path:

@@ -210,8 +210,10 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
    (`~/.claude/skills`). A linked copy is a second `deliver` skill, while the guard hook
    runs from the plugin's copy only.
 3. Install `code-review`, `ponytail-review` and `pr`. They are required, and preflight
-   stops when any of them is missing. `deliver.py` looks for each in `~/.claude/skills`, in the
-   repo's `.claude/skills`, and in the installed Claude Code plugins.
+   stops when any of them is missing. `deliver.py` looks for each in the `skills/` folder of
+   Claude Code's config folder (`$CLAUDE_CONFIG_DIR`, or `~/.claude` when it is unset), then
+   in the checkout's `.claude/skills`, then in the Claude Code plugins installed for the user,
+   by the organisation, or for this checkout.
 
    ```bash
    npx skills add mattpocock/skills -g -y -s code-review -s pr
@@ -220,16 +222,18 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 
 `deliver` reads a repo's settings from `docs/agents/stack.toml` in that repo, and a
 missing file gives every default. Set `check_command` to the command that runs the repo's
-checks. When you set `[small_edit] dependents_command`, `deliver` runs it in the checkout
+checks. When you set `[small_edit] dependents_command`, `ready` runs it in the checkout
 with each changed path as an argument. The command prints the count of the change's
 dependents on its first line. Each further non-blank line names a report or exposure
-the change feeds. The change goes to review when the count is over `dependents_limit` (default 5),
-when a line follows the count, or when the command exits non-zero or prints no count first.
+the change feeds. The change goes to review when the count is over `dependents_limit`
+(default 5), when a non-blank line follows the count, or when the command exits non-zero,
+prints no count first or prints output that is not UTF-8. Preflight runs the command once
+on the first tracked path, or on no path in an empty repo, and warns when it fails.
 
 ## Repo layout
 
 - `skills/<skill>/`: each skill has `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`. Workflow skills can depend on companion skills.
-- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `gate_check.py`, the CI check that a PR changing `skills/deliver/` carries the evidence its `## Change kind` needs, `gen_roles.py`, which writes `deliver`'s role files in `skills/deliver/agents/` and checks them, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`. `deliver.py report` imports `draw.py`, `judge.py` and `replay.py` from this repo's `scripts/` by path, so it runs only from this repo's tree, not from an installed copy.
+- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `gate_check.py`, the CI check that a PR into the default branch that changes `skills/deliver/` carries the evidence its `## Change kind` needs, checked only when the PR's base already holds `skills/deliver/`, `gen_roles.py`, which writes `deliver`'s role files in `skills/deliver/agents/` and checks them, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`. `deliver.py report` imports `draw.py`, `judge.py` and `replay.py` from the `scripts/` folder of the repo that holds its own copy. The plugin does not ship them, so run `deliver.py report` from a clone of this repo.
 - `.claude-plugin/marketplace.json`: declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
 ## Maintenance and CI

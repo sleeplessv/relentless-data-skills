@@ -21,16 +21,19 @@ matches its description.
 
 X3, X4 and X5 start one agent. The kit writes a stand-in reader role and a
 stand-in reviewer role into the harness's project definition folder, cuts the
-agent's own worktree inside the probe folder, and saves the entry's brief in
-the shared git directory under deliver/branches/probe-agent/. The prompt asks
-the session to start the reader with the one line `Read <path> and follow it.`
-The brief asks for a word of its own and the role's word, and neither word is
-in the prompt. X3 is seen when both words are in the marker file the brief
-names. X4 is seen when both are in the file the brief names in .deliver/ of the
-agent's worktree. X5 needs that marker too, then reads the output stream: each
-model it names and where, and the last token counts and where. A field the
-output lacks prints as absent, and a token count the output leaves empty prints
-blank, never as 0.
+agent's own worktree inside the probe folder, and saves the entry's brief in the
+shared git directory under deliver/branches/probe-agent/. The prompt asks the
+session to start the reader with the one line `Read <path> and follow it.` The
+brief asks for a word of its own and the role's word. The kit draws each word at
+random, and none is in the prompt. X3 is seen when both words are in the marker
+file the brief names. X4 is seen when both are in the file the brief names in
+.deliver/ of the agent's worktree. A word the kit did not give the reader, such
+as the reviewer's, fails the entry. X5 needs the X3 marker too, then reads the
+model and the token counts from the fields each harness's output keeps them in,
+and prints where. A field counts as the agent's only in an event the output ties
+to the agent's tool call; the rest prints as not tied to the agent. A field the
+output lacks prints as absent, and a token count the output leaves empty or out
+prints blank, never as 0.
 
 Cortex Code needs --connection, the Snowflake connection its runs spend. The kit
 passes it on the harness's command line only: it is not in the terminal name, it
@@ -51,7 +54,6 @@ The kit is never installed. Its tests are tests/test_probe_kit.py.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import secrets
@@ -227,8 +229,9 @@ PROBES = {
 # X3 to X5: one agent of a stand-in role, started by the session with the one line
 # `Read <path> and follow it.`, its brief kept in the shared git directory (#256 rules 6, 23, 25).
 # Claude Code names its allowed tools: a project's allow rules are ignored in an untrusted folder.
-COMMANDS["claude"] = ["claude", "-p", "{prompt}", "--output-format", "json", "--permission-mode", "acceptEdits",
-                      "--allowedTools", "Agent,Read,Write,Edit,Bash,Glob,Grep"]
+# Its stream marks a sub-agent's messages with parent_tool_use_id, which X5 needs.
+COMMANDS["claude"] = ["claude", "-p", "{prompt}", "--output-format", "stream-json", "--verbose",
+                      "--permission-mode", "acceptEdits", "--allowedTools", "Agent,Read,Write,Edit,Bash,Glob,Grep"]
 SKILL_DIRS["claude"] = ".claude/skills"
 READER, REVIEWER = "probe-reader", "probe-reviewer"
 DEFINITION_DIRS = {"claude": ".claude/agents", "cortex": ".cortex/agents", "codex": ".codex/agents",
@@ -244,15 +247,13 @@ WORKTREE = ".probe-worktrees/agent"  # the agent's own worktree, on the branch p
 BRIEFS = "deliver/branches/probe-agent"  # in the shared git directory, as #256 rule 6 keeps briefs
 AGENT_MARKER = "probe-brief-marker.txt"
 DROP = "probe-drop.txt"
+# The words of each probe by its codeword: drawn at random apart from the codeword, so neither the
+# stand-in skill nor one role file gives another's word. They stay in the kit's process.
+WORDS: dict[str, dict[str, str]] = {}
 
 
-def word(codeword: str, use: str) -> str:
-    """A word only the brief or only the role file holds; the judge derives it again from the codeword."""
-    return f"{use}-" + hashlib.sha256(f"{codeword}:{use}".encode()).hexdigest()[:8]
-
-
-def role_file(harness: str, name: str, kind: str, tools: str | None, codeword: str) -> str:
-    text = ROLE_TEXT.format(kind=kind, word=word(codeword, "role"))
+def role_file(harness: str, name: str, kind: str, tools: str | None, word: str) -> str:
+    text = ROLE_TEXT.format(kind=kind, word=word)
     description = f"Stand-in {kind} for the probe kit. Start it only when asked for {name} by name."
     if harness == "codex":
         return f'name = "{name}"\ndescription = "{description}"\ndeveloper_instructions = """\n{text}\n"""\n'
@@ -263,12 +264,13 @@ def role_file(harness: str, name: str, kind: str, tools: str | None, codeword: s
 def setup_agent(entry: str, task: str) -> Callable[[str, Path, str], None]:
     """Role files, the agent's worktree with its drop folder, and the entry's brief."""
     def setup(harness: str, work: Path, codeword: str) -> None:
+        words = WORDS[codeword] = {use: f"{use}-{secrets.token_hex(4)}" for use in ("brief", READER, REVIEWER)}
         folder = work / DEFINITION_DIRS[harness]
         folder.mkdir(parents=True)
         suffix = ".toml" if harness == "codex" else ".md"
         reader, reviewer = TOOLS.get(harness, (None, None))
-        (folder / (READER + suffix)).write_text(role_file(harness, READER, "reader", reader, codeword))
-        (folder / (REVIEWER + suffix)).write_text(role_file(harness, REVIEWER, "reviewer", reviewer, codeword))
+        (folder / (READER + suffix)).write_text(role_file(harness, READER, "reader", reader, words[READER]))
+        (folder / (REVIEWER + suffix)).write_text(role_file(harness, REVIEWER, "reviewer", reviewer, words[REVIEWER]))
         subprocess.run(["git", "-C", str(work), "worktree", "add", "-q", "--orphan", "-b", "probe-agent",
                         str(work / WORKTREE)], check=True)
         (work / WORKTREE / ".deliver").mkdir()
@@ -278,7 +280,7 @@ def setup_agent(entry: str, task: str) -> Callable[[str, Path, str], None]:
             exclude.write(".deliver/\n/.probe-worktrees/\n")
         brief = shared / BRIEFS / f"brief-{entry.lower()}.md"
         brief.parent.mkdir(parents=True)
-        brief.write_text(f"# Probe brief\n\nWrite the word {word(codeword, 'brief')}, a space and your role word "
+        brief.write_text(f"# Probe brief\n\nWrite the word {words['brief']}, a space and your role word "
                          f"to the file {task.format(work=work, worktree=work / WORKTREE)}. Change nothing else.\n")
     return setup
 
@@ -290,88 +292,115 @@ def agent_prompt(entry: str) -> Callable[[str], str]:
 
 
 def written_by(path: Path, run: Finished) -> str:
-    """Who wrote the file: "agent" with the brief's word and the role's word, "other" with the brief's word alone."""
-    words = path.read_text(errors="replace").split() if path.is_file() else []
-    if word(run.codeword, "brief") not in words:
-        return ""
-    return "agent" if word(run.codeword, "role") in words else "other"
+    """What the file proves: missing, no brief word, the reviewer, no role word, or the reader."""
+    if not path.is_file():
+        return "missing"
+    words, expected = path.read_text(errors="replace").split(), WORDS.get(run.codeword, {})
+    if expected.get("brief") not in words:
+        return "no brief word"
+    if expected[REVIEWER] in words:
+        return "reviewer"
+    return "reader" if expected[READER] in words else "no role word"
+
+
+def judge_file(path: Path, run: Finished, name: str, seen: str) -> tuple[str, str]:
+    who = written_by(path, run)
+    if who == "reader":
+        return "seen", seen
+    return "failed", {"missing": f"no {name}",
+                      "no brief word": f"the {name} lacks the brief's word",
+                      "reviewer": f"the {name} holds the reviewer role's word, not the reader's",
+                      "no role word": f"the {name} lacks the reader role's word"}[who]
 
 
 def judge_x3(harness: str, run: Finished) -> tuple[str, str]:
-    who = written_by(run.work / AGENT_MARKER, run)
-    if who == "agent":
-        return "seen", "an agent of the reader role wrote the marker its brief names"
-    if who:
-        return "failed", "the brief's marker lacks the reader role's word"
-    return "failed", "no marker the brief names"
+    return judge_file(run.work / AGENT_MARKER, run, "marker the brief names",
+                      "an agent of the reader role wrote the marker its brief names")
 
 
 def judge_x4(harness: str, run: Finished) -> tuple[str, str]:
-    who = written_by(run.work / WORKTREE / ".deliver" / DROP, run)
-    if who == "agent":
-        return "seen", "an agent of the reader role wrote into .deliver/ of its worktree"
-    if who:
-        return "failed", "the file in .deliver/ lacks the reader role's word"
-    return "failed", "no file in .deliver/ of the agent's worktree"
+    return judge_file(run.work / WORKTREE / ".deliver" / DROP, run, "file in .deliver/ of the agent's worktree",
+                      "an agent of the reader role wrote into .deliver/ of its worktree")
 
 
 def events_of(out: str) -> list[dict]:
-    """The JSON objects of the output stream; a line holding an array gives each of its objects."""
+    """The JSON objects of the output stream, one per line."""
     events: list[dict] = []
     for line in out.splitlines():
         try:
             got = json.loads(line)
         except ValueError:
             continue
-        events += [item for item in (got if isinstance(got, list) else [got]) if isinstance(item, dict)]
+        if isinstance(got, dict):
+            events.append(got)
     return events
 
 
-def fields(value: object, path: tuple[str, ...] = ()):
-    """Every object inside value, with the keys that lead to it, the outer object first."""
-    if isinstance(value, dict):
-        yield path, value
-        for key, inner in value.items():
-            yield from fields(inner, (*path, str(key)))
-    elif isinstance(value, list):
-        for inner in value:
-            yield from fields(inner, path)
+@dataclass(frozen=True)
+class Place:
+    """A field X5 reads: in events whose key `kind` has the value `value`, at `path`."""
+    kind: str
+    value: str
+    path: tuple[str, ...]
+
+    def label(self) -> str:
+        return f"{self.value} event .{'.'.join(self.path)}"
 
 
-def place(event: dict, path: tuple[str, ...]) -> str:
-    kind = event.get("type") or event.get("event") or "untyped"
-    return f"{kind} event .{'.'.join(path)}" if path else f"{kind} event"
+# Where each harness's output keeps the model and the token counts (#188 prototype, #189), and the
+# names of its input and output counts. "agent" fields count only in an event that names the
+# sub-agent's tool call in parent_tool_use_id; every other field is not tied to the agent.
+OUTPUT_FIELDS = {
+    "claude": {"model": Place("type", "system", ("model",)), "tokens": Place("type", "result", ("usage",)),
+               "agent_model": Place("type", "assistant", ("message", "model")),
+               "agent_tokens": Place("type", "assistant", ("message", "usage")),
+               "counts": ("input_tokens", "output_tokens")},
+    "codex": {"tokens": Place("type", "turn.completed", ("usage",)), "counts": ("input_tokens", "output_tokens")},
+    "cursor": {"model": Place("type", "system", ("model",)), "tokens": Place("type", "result", ("usage",)),
+               "counts": ("inputTokens", "outputTokens")},
+    "antigravity": {"model": Place("event", "init", ("init", "model")),
+                    "tokens": Place("event", "result", ("result", "usage")),
+                    "counts": ("input_tokens", "output_tokens")},
+}
+OUTPUT_FIELDS["cortex"] = OUTPUT_FIELDS["claude"]
 
 
-def models_in(events: list[dict]) -> str:
-    found: dict[str, str] = {}
-    for event in events:
-        for path, value in fields(event):
-            if isinstance(value.get("model"), str) and value["model"]:
-                found.setdefault(value["model"], place(event, (*path, "model")))
-            if isinstance(value.get("modelUsage"), dict):
-                for name in value["modelUsage"]:
-                    found.setdefault(str(name), place(event, (*path, "modelUsage")) + " keys")
-    return ", ".join(f"model {name} at {where}" for name, where in found.items()) or "model absent"
+def model_name(value: object) -> bool:
+    """A model id, such as provider/name-1.5: never a path, which X5 must not print."""
+    return (isinstance(value, str) and value[:1].isalnum() and value.count("/") <= 1 and "/." not in value
+            and all(c.isalnum() or c in "._:@+-/" for c in value))
 
 
-def tokens_in(events: list[dict]) -> str:
-    """The first object holding token counts in the last event that has one; a count that is not a number is blank."""
-    for event in reversed(events):
-        for path, value in fields(event):
-            counts = {key: count for key, count in value.items()
-                      if "token" in str(key).lower() and not isinstance(count, (dict, list))}
-            if counts:
-                shown = " ".join(f"{key}={count if type(count) is int else ''}" for key, count in counts.items())
-                return f"tokens {shown} at {place(event, path)}"
-    return "tokens absent"
+def last_at(events: list[dict], place: Place | None, agent: bool) -> object:
+    """The value at place in the last event of its kind, among the agent's events or the others."""
+    found = None
+    for event in events if place else ():
+        if event.get(place.kind) != place.value or bool(event.get("parent_tool_use_id")) != agent:
+            continue
+        value: object = event
+        for key in place.path:
+            value = value.get(key) if isinstance(value, dict) else None
+        if value is not None:
+            found = value
+    return found
+
+
+def measured(events: list[dict], fields: dict, model_key: str, tokens_key: str, agent: bool) -> str:
+    model = last_at(events, fields.get(model_key), agent)
+    shown = f"model {model} at {fields[model_key].label()}" if model_name(model) else "model absent"
+    usage = last_at(events, fields.get(tokens_key), agent)
+    if not isinstance(usage, dict):
+        return f"{shown}, tokens absent"
+    counts = " ".join(f"{key}={usage[key] if type(usage.get(key)) is int else ''}" for key in fields["counts"])
+    return f"{shown}, tokens {counts} at {fields[tokens_key].label()}"
 
 
 def judge_x5(harness: str, run: Finished) -> tuple[str, str]:
-    if written_by(run.work / AGENT_MARKER, run) != "agent":
+    if written_by(run.work / AGENT_MARKER, run) != "reader":
         return "failed", "no agent of the reader role ran"
-    events = events_of(run.out)
-    return "recorded", f"{models_in(events)}; {tokens_in(events)}"
+    events, fields = events_of(run.out), OUTPUT_FIELDS[harness]
+    return "recorded", (f"agent {measured(events, fields, 'agent_model', 'agent_tokens', True)}; "
+                        f"not tied to the agent {measured(events, fields, 'model', 'tokens', False)}")
 
 
 IN_FOLDER = AGENT_MARKER + " in the folder {work}"

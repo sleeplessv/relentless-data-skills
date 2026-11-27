@@ -161,6 +161,8 @@ class Ready(unittest.TestCase):
         self.assertIn(f"- R1: pass at {head[:7]}\n", body)
         self.assertNotRegex(body, r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         self.assertNotIn("session", body.lower())
+        merged = deliver_kit.load("merge").with_line(body, "merge: squash at abc1234")
+        self.assertEqual(merged, body.replace("merge: pending\n", "merge: squash at abc1234\n"))
         self.assertEqual(self.ready_records("feat/pass"), [{
             "event": "ready", "commit": head, "result": "small edit",
             "small_test": {"lines": 1, "critical_paths": [], "dependents": None}, "door": "two-way", "door_paths": [],

@@ -29,6 +29,8 @@ MARKED = draw.GENERATION_ONE + GENERATION_TWO
 CACHES = (".cache/uv", ".cache/pip", "Library/Caches/pip", ".npm")
 # The only hosts a sandboxed command may reach: package registries. GitHub is not one.
 REGISTRIES = ("pypi.org", "files.pythonhosted.org", "registry.npmjs.org")
+# The sandbox's temporary folder, in both of its spellings on macOS: the one folder a command may put a Unix socket in.
+SOCKETS = (f"/tmp/claude-{os.getuid()}", f"/private/tmp/claude-{os.getuid()}")
 # Variables the session must not inherit: a parent Claude Code session's own, and GitHub credentials.
 KEPT = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN")
 DROPPED = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR")
@@ -91,7 +93,9 @@ with no MCP server, and these settings: the command sandbox on, a start refused
 when the sandbox cannot start, no command run outside it; sandboxed writes only
 to the clone, the temporary folder and the tool caches ~/{", ~/".join(CACHES)};
 no sandboxed read under the home folder but the clone and those caches; network
-only to {", ".join(REGISTRIES)}; the file tools held to the
+only to {", ".join(REGISTRIES)}; local port binding; Unix sockets only in the
+sandbox's temporary folder, /tmp/claude-<uid> and its spelling
+/private/tmp/claude-<uid>, and in no other folder; the file tools held to the
 clone; no WebFetch or WebSearch tool; no claude.ai connector and no hook. It does not inherit the variables a
 parent Claude Code session sets (CLAUDECODE, CLAUDE_CODE_*, and the rest of
 CLAUDE_* but {" and ".join(KEPT)}) or a GitHub token. For git, its environment
@@ -191,7 +195,8 @@ def settings(clone: Path) -> dict:
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
             "filesystem": {"denyRead": [str(home)], "allowRead": [str(clone), *caches], "allowWrite": caches},
-            "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True},
+            "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True, "allowLocalBinding": True,
+                        "allowUnixSockets": list(SOCKETS)},
         },
         # The sandbox binds commands only, not the web tools; a deny holds with prompts switched off.
         "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True,

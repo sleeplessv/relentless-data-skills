@@ -96,18 +96,19 @@ class Finish(unittest.TestCase):
         self.world.add_record("feat/waits", "merge", commit=head, method=None,
                               merge_line="merge: withheld, stop at ready was given at start")
         self.github(head, "OPEN")
-        self.assertEqual(self.finish().stdout.splitlines()[0],
-                         "#416 ready, waits for you (withheld, stop at ready was given at start): PR #12")
+        self.assert_ends(self.finish(), 0, "#416 ready, waits for you (withheld, stop at ready was given at start): "
+                                           "PR #12\nKept feat/waits: PR #12 is open, not merged.\n")
 
     def test_a_draft_pr(self):
         head = self.branch("feat/draft", ready=None)
         self.github(head, "OPEN")
-        self.assertEqual(self.finish().stdout.splitlines()[0], "#416 draft: PR #12")
+        self.assert_ends(self.finish(), 0, "#416 draft: PR #12\nKept feat/draft: PR #12 is open, not merged.\n")
 
     def test_a_draft_that_needs_a_review(self):
         head = self.branch("feat/review", ready="needs review")
         self.github(head, "OPEN")
-        self.assertEqual(self.finish().stdout.splitlines()[0], "#416 draft, needs a review: PR #12")
+        self.assert_ends(self.finish(), 0, "#416 draft, needs a review: PR #12\n"
+                                           "Kept feat/review: PR #12 is open, not merged.\n")
 
     def test_a_pr_closed_unmerged(self):
         head = self.branch("feat/closed")
@@ -123,7 +124,9 @@ class Finish(unittest.TestCase):
     def test_a_run_with_no_ticket_names_its_branch(self):
         head = self.branch("feat/talk", request="Source: conversation\n\nFix the typo.\n")
         self.github(head, "MERGED")
-        self.assertEqual(self.finish().stdout.splitlines()[0], "feat/talk merged: PR #12")
+        self.assert_ends(self.finish(), 0, (
+            "feat/talk merged: PR #12\nSwitched this checkout to main.\n"
+            "Removed the local branch feat/talk, the remote branch origin/feat/talk and the records of feat/talk.\n"))
 
     def test_kept_when_this_run_did_not_create_the_branch(self):
         head = self.branch("feat/theirs", created=False)
@@ -150,8 +153,9 @@ class Finish(unittest.TestCase):
         pushed = self.world.commit(other, "p.txt", "p\n", "fix: pushed from elsewhere")
         self.world.git(other, "push", "-q", "origin", "HEAD:refs/heads/feat/pushed")
         self.github(head, "MERGED")
-        self.assertEqual(self.finish().stdout.splitlines()[2],
-                         f"Kept feat/pushed: the remote tip {pushed[:7]} is not the PR's head {head[:7]}.")
+        self.assert_ends(self.finish(), 0, (
+            "#416 merged: PR #12\nSwitched this checkout to main.\n"
+            f"Kept feat/pushed: the remote tip {pushed[:7]} is not the PR's head {head[:7]}.\n"))
         self.assertEqual(self.tips("feat/pushed"), (head, pushed))
 
     def test_kept_when_the_checkout_has_an_untracked_file(self):

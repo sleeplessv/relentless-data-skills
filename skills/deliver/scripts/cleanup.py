@@ -16,8 +16,8 @@ When one fails, nothing is removed and one `Kept <branch>: <reasons>.` line name
 guard. The default branch is never touched. Nothing passes `--force`: the local branch is deleted
 with `git update-ref -d` against the PR's head commit, so git refuses if the tip has moved, and
 the remote branch with `git push origin --delete`. After a merge, the run's own checkout is
-switched to the default branch first when its tree is clean. Stage 3 starts no author worktree,
-so cleanup removes none.
+switched to the default branch first when its tree is clean; a switch git refuses is kept as a
+failed guard. Stage 3 starts no author worktree, so cleanup removes none.
 
 The helpers `git`, `gh`, `records` and `view` are shared with `merge` and `finish`.
 """

@@ -150,10 +150,12 @@ class Merge(MergeWorld):
                                                  {"name": "lint", "bucket": "pass"}]), once=True)
         self.world.gh_answer(["pr", "checks", "12", "--watch"], exit=8)
         self.answer(head, checks=PASS)
-        result = self.merge()
-        self.assertEqual(result.stdout.splitlines()[:2], [
-            "Waiting for pending checks on PR #12: tests.", f"Merged PR #12 with squash at {head[:7]}."])
-        self.assertEqual(self.calls()[:4], [VIEW, CHECKS, ["pr", "checks", "12", "--watch"], CHECKS])
+        self.assert_ends(self.merge(), 0, (
+            f"Waiting for pending checks on PR #12: tests.\nMerged PR #12 with squash at {head[:7]}.\n"
+            "Switched this checkout to main.\n"
+            "Removed the local branch feat/pending and the remote branch origin/feat/pending.\n"))
+        self.assertEqual(self.calls()[:5], [VIEW, CHECKS, ["pr", "checks", "12", "--watch"], CHECKS,
+                                            ["pr", "merge", "12", "--squash", "--match-head-commit", head]])
 
     def test_no_checks_and_no_ci_records_checks_none_reported(self):
         head = self.branch("feat/no-ci")
@@ -204,8 +206,10 @@ class Merge(MergeWorld):
     def test_merge_not_ready_when_ready_found_it_needs_a_review(self):
         head = self.branch("feat/needs-review", ready="needs review")
         self.answer(head, checks=PASS)
-        self.assertEqual(self.merge().stdout.splitlines()[0],
-                         f"REFUSED merge.not-ready: `ready` has not passed on the PR's head commit {head[:7]}")
+        self.assert_ends(self.merge(), 10, (
+            f"REFUSED merge.not-ready: `ready` has not passed on the PR's head commit {head[:7]}\n"
+            "Next: deliver.py ready\n"))
+        self.assert_untouched("feat/needs-review", head)
 
     def test_merge_not_ready_with_no_ready_record(self):
         head = self.branch("feat/no-ready", ready=None)

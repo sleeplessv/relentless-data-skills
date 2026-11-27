@@ -16,8 +16,8 @@ merge line `merge` recorded for its head commit.
 """
 from __future__ import annotations
 
-import core
 import cleanup
+import core
 import render
 
 STATE = {

@@ -509,6 +509,69 @@ class Start(unittest.TestCase):
         self.assert_nothing_written()
         self.assertEqual((self.work / "README.md").read_text(encoding="utf-8"), "seed\nlocal\n")
 
+    def test_a_gap_question_keeps_stop_at_ready_in_the_command_to_run_again(self):
+        self.issue(7, body="## Acceptance criteria\n\n- [ ]\n")
+        self.assert_ends(self.world.deliver("start", "--stop-at-ready", "7"), 20, "\n".join([
+            "Ticket #7 does not pass the entry check:",
+            f"- {entry_check.NO_TEXT}",
+            f"- {entry_check.NO_CRITERION}",
+            "Will you add what is missing to ticket #7? Then the session runs deliver.py start --stop-at-ready 7 "
+            "again."]) + "\n")
+        self.assert_nothing_written()
+
+    def test_start_no_ticket_keeps_stop_at_ready_in_the_next_command(self):
+        self.world.gh_answer(["issue", "view"], stderr="GraphQL: Could not resolve to an issue with the number of 9.\n",
+                             exit=1)
+        self.assert_ends(self.world.deliver("start", "9", "--stop-at-ready"), 10, (
+            "REFUSED start.no-ticket: gh cannot read ticket #9: GraphQL: Could not resolve to an issue with the "
+            "number of 9.\nNext: check the number and gh auth status, then run deliver.py start 9 --stop-at-ready\n"))
+        self.assert_nothing_written()
+
+    def test_start_not_built_keeps_stop_at_ready_in_the_next_command(self):
+        for args in (["7", "8"], ["spec", "200"], ["backlog"]):
+            with self.subTest(args=args):
+                self.assert_ends(self.world.deliver("start", *args, "--stop-at-ready"), 10, (
+                    f"REFUSED start.not-built: start {' '.join(args)} is a multi-ticket run, and multi-ticket runs "
+                    "come with a later build stage\nNext: deliver.py start <one ticket> --stop-at-ready\n"))
+        self.assert_nothing_written()
+        self.assertEqual(self.calls(), [])
+
+    def test_start_not_a_repo_keeps_stop_at_ready_in_the_next_command(self):
+        outside = self.world.root / "outside"
+        outside.mkdir()
+        self.assert_ends(self.world.deliver("start", "7", "--stop-at-ready", cwd=outside), 10, (
+            f"REFUSED start.not-a-repo: {outside} is not in a git working tree\n"
+            "Next: run deliver.py start --stop-at-ready inside the repo\n"))
+        self.assertEqual(self.calls(), [])
+
+    def test_start_no_request_keeps_stop_at_ready_in_the_next_command(self):
+        self.assert_ends(self.world.deliver("start", "request", "--stop-at-ready"), 10, (
+            "REFUSED start.no-request: .deliver/request.md is missing or empty, and a request is read from "
+            "there only\nNext: write the request word for word into .deliver/request.md, then run "
+            "deliver.py start request --stop-at-ready\n"))
+        self.assert_nothing_written()
+
+    def test_start_fetch_failed_keeps_stop_at_ready_in_the_next_command(self):
+        self.issue(7)
+        self.world.git(self.work, "remote", "set-url", "origin", str(self.world.root / "gone.git"))
+        result = self.world.deliver("start", "7", "--stop-at-ready")
+        self.assertEqual((result.returncode, result.stderr), (10, ""))
+        self.assertRegex(result.stdout, re.compile(
+            r"\AREFUSED start\.fetch-failed: git fetch origin main failed, so no fresh branch was cut: "
+            r"fatal: .*gone\.git.*\nNext: fix the error, then run deliver\.py start 7 --stop-at-ready\n\Z", re.S))
+        self.assert_nothing_written()
+
+    def test_start_cannot_carry_keeps_stop_at_ready_in_the_next_command(self):
+        self.advance_origin("README.md", "seed\nupstream\n")
+        (self.work / "README.md").write_text("seed\nlocal\n", encoding="utf-8")
+        result = self.world.deliver("start", "--stop-at-ready")
+        self.assertEqual((result.returncode, result.stderr), (10, ""))
+        self.assertRegex(result.stdout, re.compile(
+            r"\AREFUSED start\.cannot-carry: git cannot carry the changes in the tree onto a fresh branch from "
+            r"origin/main, so nothing was changed: error: .*README\.md.*\n"
+            r"Next: commit or stash the changes git names, then run deliver\.py start --stop-at-ready\n\Z", re.S))
+        self.assert_nothing_written()
+
 
 class EntryCheck(unittest.TestCase):
     def check(self, body: str, comments: tuple[str, ...] = ()):

@@ -56,20 +56,21 @@ STOP_AT_READY = "--stop-at-ready"
 def main(args: list[str], run: core.Run | None) -> None:
     said = STOP_AT_READY in args
     rest = [a for a in args if a != STOP_AT_READY]
+    flag = f" {STOP_AT_READY}" if said else ""
     if said and rest == ["--resume"]:
         raise core.UsageError(f"{STOP_AT_READY} goes with the start of a new run, not with --resume")
     if run and run.mark and rest != ["--resume"]:
         raise core.Refused("start.run-in-progress", "deliver.py finish, to end it", run=run.mark["run"],
                            mark=run.git_dir / core.MARK)
-    route, ticket = _route(rest)
+    route, ticket = _route(rest, flag)
     if run is None:
-        raise core.Refused("start.not-a-repo", "run deliver.py start inside the repo", cwd=Path.cwd())
+        raise core.Refused("start.not-a-repo", f"run deliver.py start{flag} inside the repo", cwd=Path.cwd())
     if route == "resume":
         return resume(run)
     rerun = " ".join(["deliver.py start", *args])
     requirements: list[str] = []
     if route == "ticket":
-        request, requirements = _ticket(run, ticket)
+        request, requirements = _ticket(run, ticket, rerun)
     elif route == "request":
         text = (run.checkout / REQUEST).read_text(encoding="utf-8") if (run.checkout / REQUEST).is_file() else ""
         if not text.strip():
@@ -141,7 +142,7 @@ def grant_line(stack: dict) -> str:
     return f"Run grant: push this branch, open and update its PR, {merge}{follow_ups}."
 
 
-def _route(args: list[str]) -> tuple[str, int | None]:
+def _route(args: list[str], flag: str) -> tuple[str, int | None]:
     if not args:
         return "tree", None
     if args == ["--resume"]:
@@ -151,22 +152,22 @@ def _route(args: list[str]) -> tuple[str, int | None]:
     if len(args) == 1 and TICKET.fullmatch(args[0]):
         return "ticket", int(args[0])
     if args[0] in ("spec", "backlog") or (len(args) > 1 and all(TICKET.fullmatch(a) for a in args)):
-        raise core.Refused("start.not-built", "deliver.py start <one ticket>", form=" ".join(["start", *args]))
+        raise core.Refused("start.not-built", f"deliver.py start <one ticket>{flag}", form=" ".join(["start", *args]))
     raise core.UsageError(f"start takes one ticket number, request, --resume or nothing, got: {' '.join(args)}")
 
 
-def _ticket(run: core.Run, number: int) -> tuple[str, list[str]]:
+def _ticket(run: core.Run, number: int, rerun: str) -> tuple[str, list[str]]:
     """The ticket's request.md text and requirements, or exit 20 when the entry check finds a gap."""
     proc = _call(run, "gh", "issue", "view", str(number), "--json", "title,body,comments")
     if proc.returncode != 0:
-        raise core.Refused("start.no-ticket", f"check the number and gh auth status, then run deliver.py start {number}",
+        raise core.Refused("start.no-ticket", f"check the number and gh auth status, then run {rerun}",
                            ticket=number, error=proc.stderr.strip())
     issue = json.loads(proc.stdout)
     entry = entry_check.check(issue.get("body") or "", [c.get("body") or "" for c in issue.get("comments") or []])
     if entry.gaps:
         raise core.Question("\n".join([
             f"Ticket #{number} does not pass the entry check:", *(f"- {gap}" for gap in entry.gaps),
-            f"Will you add what is missing to ticket #{number}? Then the session runs deliver.py start {number} again.",
+            f"Will you add what is missing to ticket #{number}? Then the session runs {rerun} again.",
         ]))
     quote = f"\n{entry.quote}\n" if entry.quote else ""
     return f"Source: ticket #{number}\n{quote}", entry.requirements

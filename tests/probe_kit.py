@@ -27,6 +27,8 @@ project level, in the form the guard research note gives for each harness:
 written to a user-level settings file. The hook appends each input it gets to
 logs/hook.jsonl. It refuses `gh pr merge` and `gh pr ready`, refuses
 merge-script.sh when the input marks an agent, and asks on oneway-probe.sh.
+The hook and the judges share one rule for merge-script.sh: a command runs it
+when its name is a command word, so reading the script is not refused.
 merge-script.sh, oneway-probe.sh and control-probe.sh each write a marker file
 in logs/ when they run, so a refused command leaves none.
 
@@ -180,6 +182,7 @@ The kit is never installed. Its tests are tests/test_probe_kit.py.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import os
 import re
@@ -761,7 +764,7 @@ def codex_roles(work: Path) -> list[str]:
 CODEX_RULE = ('prefix_rule(pattern = ["./oneway-probe.sh"], decision = "prompt",\n'
               '    justification = "one-way command, needs the owner\'s answer")\n')
 GUARD = r'''import json, os, sys
-import glob
+import glob, re
 from pathlib import Path
 
 # The stand-in guard hook, seeded from the guard research fixture. Its argument names the
@@ -796,6 +799,13 @@ with open(Path(__file__).resolve().parent.parent / "logs" / "hook.jsonl", "a") a
     log.write(line + "\n")
 if form == "sessionStart":  # Cursor's session start: logged only, no decision
     sys.exit(0)
+shell = cmd
+if form == "pre":  # Antigravity: the shell command of a run_command call
+    args = (data.get("toolCall") or {}).get("args")
+    shell = str(args.get("CommandLine") or "") if isinstance(args, dict) else ""
+
+
+{runs_merge}
 
 
 def out(decision, reason):
@@ -817,7 +827,7 @@ def out(decision, reason):
 
 if "gh pr merge" in cmd or "gh pr ready" in cmd:
     out("deny", "GUARD-A: raw gh pr merge/ready is refused to every agent")
-if "merge-script.sh" in cmd and is_helper:
+if runs_merge(shell) and is_helper:  # the judges' rule: reading the script is allowed, running it is not
     out("deny", "GUARD-B: the merge script is refused to a helper")
 if "oneway-probe" in cmd:
     out("ask", "GUARD-C: one-way command, needs the owner's answer")
@@ -848,7 +858,7 @@ def write_guard(harness: str, work: Path) -> None:
     """The hook, its project-level registration, the stand-in commands, logs/ and an empty folder sub/."""
     for folder in ("hooks", "logs", "sub"):
         (work / folder).mkdir()
-    (work / "hooks" / "guard.py").write_text(GUARD)
+    (work / "hooks" / "guard.py").write_text(GUARD.replace("{runs_merge}", inspect.getsource(runs_merge)))
     for name, body in STANDINS.items():
         (work / name).write_text("#!/bin/sh\n" + body.format(logs=shlex.quote(str(work / "logs"))))
         (work / name).chmod(0o755)
@@ -1643,14 +1653,20 @@ def tool_calls(events: list[dict]) -> list[Call]:
 
 
 def call_results(events: list[dict]) -> dict[str, tuple[str, bool]]:
-    """Each tool_result item by the id of its call: its content as text, and whether it is an error."""
+    """Each tool_result item by the id of its call: its content as text, and whether it is an error.
+
+    Cortex Code gives a failed call's error as plain content with no flag, such as "task tool failed: ..." (#405).
+    """
     found = {}
     for event in events:
         message = event.get("message")
         content = message.get("content") if isinstance(message, dict) else None
         for item in content if isinstance(content, list) else ():
             if isinstance(item, dict) and item.get("type") == "tool_result" and item.get("tool_use_id"):
-                found[str(item["tool_use_id"])] = (json.dumps(item.get("content")), item.get("is_error") is True)
+                given = item.get("content")
+                error = item.get("is_error") is True or (isinstance(given, str)
+                                                         and re.match(r"\w+ tool failed:", given) is not None)
+                found[str(item["tool_use_id"])] = (json.dumps(given), error)
     return found
 
 
@@ -1799,9 +1815,9 @@ def resumed(run: Finished, entry: str, calls: list[Call], target: str, after: in
         if isinstance(content, list):
             content = " ".join(str(item.get("text", "")) for item in content if isinstance(item, dict))
         said = content if isinstance(content, str) else ""
-        for known in (target, calls[again].id):  # the ids the kit knows for that agent, whatever their letters
-            said = said.replace(str(known), "...")
-        reason = " ".join(re.sub(r"\S*[\d/\\]\S*", "...", said).split())[:200]
+        # A word goes when it holds a digit, a slash or an id the kit knows for that agent, quotes and all.
+        known = "".join(f"|{re.escape(str(k))}" for k in (target, calls[again].id) if k)
+        reason = " ".join(re.sub(rf"\S*(?:[\d/\\]{known})\S*", "...", said).split())[:200]
         return "failed", "the resume call failed" + (f": {reason}" if reason else "")
     return called_back(run, entry)
 

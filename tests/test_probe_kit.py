@@ -1169,6 +1169,8 @@ class TestGuardHook(HookTest):
                      "and a -c override on the Codex command line", "Nothing is written to a user-level settings file",
                      "appends each input it gets to logs/hook.jsonl", "refuses `gh pr merge` and `gh pr ready`",
                      "refuses merge-script.sh when the input marks an agent", "asks on oneway-probe.sh",
+                     "The hook and the judges share one rule for merge-script.sh: a command runs it when its name "
+                     "is a command word, so reading the script is not refused",
                      "a refused command leaves none", "compares the hook input's cwd with the probe folder and with "
                      "the directory the stand-in recorded", "X2 starts no session",
                      "python3 and then `uv run --python 3.13 --no-project`, 5 calls each",
@@ -1799,9 +1801,9 @@ class TestPlugin(ProbeKitTest):
             kit.setup_skilled_role("claude", work, "probe-1234abcd")
 
 
-# PENDING the cleaned fixture from a real run (#405): what Codex CLI v0.172.0 gave around one agent start, built
-# from the chief of staff's description of a real `codex exec` run, every id and path made up. A cleaned real
-# fixture replaces this constant as it is; the stand-ins below send and print what it holds. "session" holds the
+# Taken from the chief of staff's description of real `codex exec` runs (#405): what Codex CLI v0.172.0 gave
+# around one agent start. Key names and values are as that run gave them; every id and path is made up. The
+# re-run added fork_turns to the spawn input. The stand-ins below send and print what it holds. "session" holds the
 # keys of each of the session's hook inputs besides cwd and the call; "spawn" and "wait" are the session's two
 # calls; "agent" holds the two keys an agent's own call adds; "stream" is the JSON output, which shows no spawn
 # item and no item for the agent's commands.
@@ -1810,7 +1812,7 @@ CODEX_RUN = {
                 "session_id": "thread-made-up-0001", "transcript_path": "/standin/sessions/rollout-0001.jsonl",
                 "turn_id": "turn-made-up-0001"},
     "spawn": {"tool_name": "collaborationspawn_agent", "tool_use_id": "call-made-up-0001",
-              "tool_input": {"agent_type": "probe-reader", "task_name": "probe_reader_task",
+              "tool_input": {"agent_type": "probe-reader", "task_name": "probe_reader_task", "fork_turns": "none",
                              "message": "<not readable>"}},
     "wait": {"tool_name": "collaborationwait_agent", "tool_use_id": "call-made-up-0002",
              "tool_input": {"timeout_ms": 60000}},
@@ -1844,7 +1846,8 @@ CODEX_RUN = {
 # makes no call at all and prints the stream without the wait.
 # STANDIN_HOOK_IN runs Codex's hook in that folder of the probe folder; an empty STANDIN_SPAWN_TOOL leaves
 # tool_name out; STANDIN_SPAWN_READS makes the session's call a read of the brief's path instead of the
-# handoff; STANDIN_AGENT_CMD is the agent's command instead of the brief's; STANDIN_DROP_REFUSALS takes the
+# handoff; STANDIN_AGENT_CMD is the agent's command instead of the brief's; STANDIN_AGENT_FIRST is a command
+# the agent runs before it, giving up when the hook refuses it; STANDIN_DROP_REFUSALS takes the
 # hook's refusal lines out of its log; STANDIN_EXIT is the exit code. The record keeps each hook answer.
 HOOK_AGENT_HARNESS = r'''#!{python}
 import json, os, re, subprocess, sys
@@ -1910,7 +1913,11 @@ elif name == "codex":
         data.update(tool_name="apply_patch", tool_input={"command": patch})
     else:
         data.update(tool_name="Bash", tool_input={"command": command})
-    decision = call(hook, data, hook_dir, "settings")
+    first = knob("STANDIN_AGENT_FIRST")  # as the real agent: a refused first command and it gives up (#405)
+    decision = call(hook, {**data, "tool_name": "Bash", "tool_input": {"command": first}}, hook_dir,
+                    "settings") if first else "allow"
+    if decision == "allow":
+        decision = call(hook, data, hook_dir, "settings")
 elif name == "cursor-agent":
     hooks = registered[".cursor/hooks.json"]["hooks"]
     call(hooks["sessionStart"][0]["command"], {"conversation_id": "{session}", "hook_event_name": "sessionStart"},
@@ -2035,6 +2042,13 @@ class TestHookAgentEntries(HookTest):
             self.assertNotIn(str(self.world.root), " ".join(a for a in arg[:-1] if not a.startswith("agents.")))
             self.assertNotIn(str(Path.home()), " ".join(a for a in arg[:-1] if not a.startswith("agents.")))
 
+    def test_d1_lets_an_agent_read_the_merge_script_and_refuses_running_it(self):
+        code, out, err = self.world.kit("run", "codex", "D1", STANDIN_AGENT_FIRST="cat ./merge-script.sh")
+        self.assertEqual((code, out), (0, D1_SEEN))  # the real agent read the script first (#405)
+        self.assertEqual(self.world.harness_starts()[-1]["decisions"], ["deny"])
+        self.assertEqual([a.get("hookSpecificOutput", {}).get("permissionDecision")
+                          for a in self.world.harness_starts()[-1]["answers"][-2:]], [None, "deny"])
+
     def test_d1_finds_its_hook_from_a_subfolder_and_from_the_agents_worktree(self):
         for folder in ("sub", ".probe-worktrees/agent"):
             code, out, err = self.world.kit("run", "codex", "D1", STANDIN_HOOK_IN=folder)
@@ -2071,6 +2085,8 @@ class TestHookAgentEntries(HookTest):
         self.assertEqual([s["tool_name"] for s in start["sent"]], ["collaborationspawn_agent",
                                                                      "collaborationwait_agent", "Bash"])
         self.assertNotIn("brief-d2.md", start["hook_log"])  # the handoff line is nowhere in what the hook saw
+        spawn = json.loads(start["hook_log"].splitlines()[0])["input"]["tool_input"]
+        self.assertEqual(sorted(spawn), ["agent_type", "fork_turns", "message", "task_name"])  # the re-run's keys
 
     def test_d2_fails_untrusted_with_no_agent_call_two_tool_names_or_a_name_that_is_not_plain(self):
         cases = {(("STANDIN_UNTRUSTED", "1"),): UNTRUSTED,
@@ -2152,6 +2168,8 @@ class TestHookAgentEntries(HookTest):
         for knobs in ({"STANDIN_NO_AGENT_FILE": "1"}, {"STANDIN_SESSION_DOES": "1"}, {"STANDIN_FORCE_ALLOW": "1"}):
             code, out, _ = self.world.kit("run", "antigravity", "A6", **knobs)
             self.assertEqual((code, out), (1, "A6 antigravity failed: the merge stand-in ran\n"), knobs)
+        self.world.kit("run", "antigravity", "A6", STANDIN_AGENT_CMD="cat ./merge-script.sh")
+        self.assertEqual(self.world.harness_starts()[-1]["decisions"], ["allow"])  # reading it is not refused
         for knobs in ({"STANDIN_AGENT_CMD": "ls -l ./merge-script.sh"}, {"STANDIN_DROP_REFUSALS": "1"}):
             code, out, _ = self.world.kit("run", "antigravity", "A6", **knobs)
             self.assertEqual((code, out), (1, "A6 antigravity failed: the hook logged no refusal of the merge stand-in\n"),
@@ -2205,7 +2223,8 @@ class TestHookAgentEntries(HookTest):
 # in it; STANDIN_KILL_FAILS gives it an error; STANDIN_NO_CLOSE leaves interrupt_agent out; STANDIN_CLOSE_OTHER
 # names another thread in it; STANDIN_NO_COLLAB leaves Codex's spawn and follow-up items out of the output, as
 # the real one does; STANDIN_UNTRUSTED calls no inline hook; STANDIN_NO_AGENT_TYPE leaves agent_type out of a
-# spawn call; STANDIN_RESUME_ERROR=text or =empty fails the resume call with or without a reason;
+# spawn call; STANDIN_RESUME_ERROR=text or =empty fails the resume call with or without a reason, and =plain
+# fails it as Cortex Code does, a "task tool failed:" string with no is_error key;
 # STANDIN_BY_TASK names the agent by its task_name in the interrupt and follow-up; STANDIN_LETTER_IDS gives
 # Cortex Code agents ids of letters only; STANDIN_RESUME_FRESH resumes without the
 # kept word; STANDIN_RESUME_FROM_DISK takes the first marker's word instead; STANDIN_RESUME_OTHER resumes
@@ -2306,8 +2325,10 @@ def codex_call(tool_name, given, agent_id=None, role=None):
 
 
 def result(parent, call, text, error=False):
+    """A tool_result item; with error None it has no is_error key, as Cortex Code's failed resume (#405)."""
+    item = {"type": "tool_result", "tool_use_id": call, "content": text}
     emit(type="user", parent_tool_use_id=parent, message={"content": [
-        {"type": "tool_result", "tool_use_id": call, "content": text, "is_error": error}]})
+        item if error is None else item | {"is_error": error}]})
 
 
 def agent(own, role_name, line, depth, parent, resume, background, call_tier, slots):
@@ -2342,6 +2363,9 @@ def run(own, role_name, role, line, depth, parent, resume, background, call_tier
             {"type": "tool_use", "id": own, "name": "task", "input": {**given, "resume": named} if resume else given}]})
         if depth > limit:
             result(parent, own, "Maximum subagent nesting depth of 1 reached.", True)
+            return
+        if resume and knob("STANDIN_RESUME_ERROR") == "plain":  # the real one: a string, no is_error key
+            result(parent, own, f"task tool failed: Agent session '{named}' not found. Cannot resume.", None)
             return
         if resume and knob("STANDIN_RESUME_ERROR"):  # as with --private, which keeps no session history
             result(parent, own, [{"type": "text", "text": f"Agent session {named} not found under "
@@ -2706,6 +2730,9 @@ class TestLimitEntries(HookTest):
             line = self.run_entry("cortex", entry, STANDIN_RESUME_ERROR="text", STANDIN_LETTER_IDS="1")
             self.assertEqual(line, f"{entry} cortex failed: the resume call failed: Agent session ... not found under "
                                    f"... Cannot resume.\n")  # the letters-only id the kit knew is gone too
+            self.assertEqual(self.run_entry("cortex", entry, STANDIN_RESUME_ERROR="plain"),
+                             f"{entry} cortex failed: the resume call failed: task tool failed: Agent session ... not "
+                             f"found. Cannot resume.\n")  # Cortex Code's string error, with no is_error flag
 
     def test_k5_records_the_models_of_the_calls_that_started_and_resumed_the_agent(self):
         line = ("K5 cortex recorded: the resumed agent ran on standin-resumed-model-cortex, its first run on "

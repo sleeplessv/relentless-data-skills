@@ -22,6 +22,8 @@ SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
 BUCKETS = ("0-50", "51-300", "301-1500")
 REPO = "example-org/alpha"  # what project-labels.json maps label A to; the report must never print it
 TITLE = "Print the total of example-org/alpha"
+OLD = object()  # a copied_tokens for a row written before scripts/scan.py had the column: the row has no such field
+SCANNED = object()  # a figure as the scan gives it: blank beside a blank total_tokens, else the test's usual one
 
 
 def commit(number: int) -> str:
@@ -104,20 +106,30 @@ class World:
                               "review": {"passed": right, "reason": None},
                               "right_first_time": right})
 
-    def scan(self, name: str, tokens: int | None, minutes: float | None, helpers: Sequence[dict] | None = ()) -> None:
-        self.rows.append({"session": name, "input_tokens": None if tokens is None else 1,
-                          "output_tokens": None if tokens is None else 1, "cache_write_tokens": None,
-                          "cache_read_tokens": None, "total_tokens": tokens,
-                          "copied_tokens": None if tokens is None else 0, "active_minutes": minutes,
-                          "auto_compactions": 0, "typed_compactions": 0, "model": "claude-test-model",
-                          "skills": [], "helpers": None if helpers is None else list(helpers)})
+    def scan(self, name: str, tokens: int | float | None, minutes: object = SCANNED, helpers: object = SCANNED,
+             copied: object = 0) -> None:
+        """A row as scan() in scripts/scan.py writes it. With a total, the token columns add up to it and the other
+        figures are given. With a blank total, as for a log that is gone, every figure is blank. A blank minutes or
+        helpers beside a total, a figure beside a blank total, or a copied of OLD (no such field) is a row a test
+        builds on purpose."""
+        blank = tokens is None
+        row = {"session": name, "input_tokens": None if blank else tokens,
+               **dict.fromkeys(("output_tokens", "cache_write_tokens", "cache_read_tokens"), None if blank else 0),
+               "total_tokens": tokens, "copied_tokens": None if blank else copied,
+               "active_minutes": (None if blank else 10.0) if minutes is SCANNED else minutes,
+               "auto_compactions": None if blank else 0, "typed_compactions": None if blank else 0,
+               "model": None if blank else "claude-test-model", "skills": None if blank else [],
+               "helpers": (None if blank else []) if helpers is SCANNED else None if helpers is None else list(helpers)}
+        if copied is OLD:
+            del row["copied_tokens"]
+        self.rows.append(row)
 
-    def run(self, version: str, ticket: dict, right: bool | None, tokens: int | None = 100,
-            minutes: float | None = 10.0, helpers: Sequence[dict] | None = ()) -> None:
+    def run(self, version: str, ticket: dict, right: bool | None, tokens: int | float | None = 100,
+            minutes: object = SCANNED, helpers: object = SCANNED, copied: object = 0) -> None:
         """A version of a ticket replayed where it is not generation one's, judged and scanned."""
         name = ticket["session"] if version == "generation-one" else self.replay(ticket, version)["session"]
         self.judge(ticket, version, right)
-        self.scan(name, tokens, minutes, helpers)
+        self.scan(name, tokens, minutes, helpers, copied)
 
     def baseline(self, first: int, second: int, *sizes: int) -> None:
         """Sets of the sizes given, one set of 30 when none is, with both versions judged on every ticket: generation
@@ -212,7 +224,31 @@ PROBES = [
 ]
 
 
-def no_helpers(spent: int, unjudged: int = 0) -> list[str]:
+Copied = tuple[int | float, int | float, str | None, int]  # copied, total, share as printed or None, blank count
+
+
+def shown(share: str | None) -> str:
+    return "" if share is None else f", {share}"
+
+
+def copied_tokens(copied: int | float, total: int | float, share: str | None, blank: int) -> str:
+    """A version's line on its copied tokens; a share of None is one the report does not print."""
+    return (f"  Copied tokens: {copied} of the {total} total tokens of the tickets with a copied count{shown(share)}. "
+            f"Left out of the copied tokens: {blank} with a blank copied count.")
+
+
+def sign_two_copied(first: Copied, second: Copied) -> str:
+    """Warning sign 2's line on the copied tokens inside each side's sum: each side as (copied, total, share, blank),
+    the share as copied_tokens takes it."""
+    (first_copied, first_total, first_share, first_blank), (second_copied, second_total, second_share, second_blank) = (
+        first, second)
+    return (f"  Copied tokens in these sums: {first_copied} of the {first_total} total tokens of generation-one's "
+            f"tickets with a copied count{shown(first_share)}, and {second_copied} of the {second_total} total tokens "
+            f"of direct's tickets with a copied count{shown(second_share)}. Left out of the copied tokens: "
+            f"{first_blank} of generation-one's tickets and {second_blank} of direct's, with a blank copied count.")
+
+
+def no_helpers(spent: int, copied: str, unjudged: int = 0) -> list[str]:
     """Warning sign 2's lines between its first line and its verdicts, for sessions with no helpers."""
     return [f"  Left out of both sides: {unjudged} without both versions judged, 0 with a blank token count.",
             "  generation-one's helpers by step: re-check 0, closing verification 0, fix 0, review 0, implement 0, "
@@ -220,7 +256,7 @@ def no_helpers(spent: int, unjudged: int = 0) -> list[str]:
             "  The cut, closing verification, fix and re-check: 0 tokens, 0.0% of generation-one's.",
             f"  Not sorted into a step: {spent} tokens, 100.0% of generation-one's: 0 in helpers that name no step, "
             f"{spent} the sessions' own, in no helper.",
-            "  A helper resumed for a fix round counts under the step it started as."]
+            "  A helper resumed for a fix round counts under the step it started as.", copied]
 
 
 # The rule over the sets together, as both the not-decided line and --help state it.
@@ -271,6 +307,7 @@ class TestReport(unittest.TestCase):
             "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
             "record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank.",
+            copied_tokens(0, 21000, "0.0%", 0),
             "",
             "direct",
             "  0-50: 2 judged, 1 of 2 right first time, median total tokens 250, median active minutes 3.125.",
@@ -280,6 +317,7 @@ class TestReport(unittest.TestCase):
             "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
             "record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank.",
+            copied_tokens(0, 2100, "0.0%", 0),
             "",
             "Warning sign 1: generation-one was right first time on 5 of 6 tickets, direct on 2 of 6, a difference "
             "of 3.",
@@ -287,7 +325,7 @@ class TestReport(unittest.TestCase):
             "",
             "Warning sign 2: on 6 of 6 tickets, generation-one spent 21000 tokens and direct 2100, an extra cost of "
             "18900.",
-            *no_helpers(21000),
+            *no_helpers(21000, sign_two_copied((0, 21000, "0.0%", 0), (0, 2100, "0.0%", 0))),
             "Without the spend not sorted, the cut is 0 tokens against half the extra cost, 9450. The sign does not "
             "appear.",
             "With it counted as cut, the cut is 21000 tokens. The sign appears.",
@@ -312,6 +350,7 @@ class TestReport(unittest.TestCase):
             "  Not sorted into a step: 30120 tokens, 44.1% of generation-one's: 120 in helpers that name no step, "
             "30000 the sessions' own, in no helper.",
             "  A helper resumed for a fix round counts under the step it started as.",
+            sign_two_copied((0, 68310, "0.0%", 0), (0, 30000, "0.0%", 0)),
             "Without the spend not sorted, the cut is 2130 tokens against half the extra cost, 19155. The sign does "
             "not appear.",
             "With it counted as cut, the cut is 32250 tokens. The sign appears.",
@@ -465,6 +504,7 @@ class TestReport(unittest.TestCase):
             "  Not sorted into a step: 27000 tokens, 90.0% of generation-one's: 0 in helpers that name no step, 27000 "
             "the sessions' own, in no helper.",
             "  A helper resumed for a fix round counts under the step it started as.",
+            sign_two_copied((0, 30000, "0.0%", 0), (0, 24000, "0.0%", 0)),
             "Without the spend not sorted, the cut is 2700 tokens against half the extra cost, 3000. The sign does not "
             "appear.",
             "With it counted as cut, the cut is 29700 tokens. The sign appears.",
@@ -477,8 +517,9 @@ class TestReport(unittest.TestCase):
                 lines = self.two([helper("Re-check", None, 400)], 1000, direct)
                 self.assertEqual(lines[0], f"Warning sign 2: on 30 of 30 tickets, generation-one spent 30000 tokens "
                                            f"and direct {30 * direct}, an extra cost of {extra}.")
-                self.assertEqual(lines[-1], "No verdict: generation-one cost no more than direct, so there is no "
-                                            "extra cost to cut.")
+                self.assertEqual(lines[-2:], [
+                    sign_two_copied((0, 30000, "0.0%", 0), (0, 30 * direct, "0.0%", 0)),
+                    "No verdict: generation-one cost no more than direct, so there is no extra cost to cut."])
 
     def test_a_ticket_left_out_of_the_token_figures_is_left_out_of_both_sides(self) -> None:
         cut = [helper("Closing verification", None, 100)]
@@ -496,10 +537,107 @@ class TestReport(unittest.TestCase):
             "  Not sorted into a step: 25300 tokens, 90.4% of generation-one's: 0 in helpers that name no step, 25300 "
             "the sessions' own, in no helper.",
             "  A helper resumed for a fix round counts under the step it started as.",
+            sign_two_copied((0, 28000, "0.0%", 0), (0, 22400, "0.0%", 0)),
             "Without the spend not sorted, the cut is 2700 tokens against half the extra cost, 2800. The sign does not "
             "appear.",
             "With it counted as cut, the cut is 28000 tokens. The sign appears.",
             "The two verdicts differ: the spend not sorted decides the sign."])
+
+    def test_sign_two_gives_the_copied_tokens_inside_each_side(self) -> None:
+        for at, ticket in enumerate(self.world.draw()):
+            # By draw position: at 0, generation one's row is from before the column. At 1 and 3, direct's copied
+            # count is null. At 2, generation one's blank total leaves the ticket out of both sides of sign 2, and
+            # direct's 70 copied with it, which direct's own block still counts.
+            self.world.run("generation-one", ticket, True, tokens=None if at == 2 else 1000,
+                           copied=OLD if at == 0 else 100)
+            self.world.run("direct", ticket, True, tokens=800, copied=None if at in (1, 3) else 70 if at == 2 else 40)
+        lines = self.lines()
+        self.assertEqual([line for line in lines if line.startswith("  Copied tokens: ")], [
+            copied_tokens(2800, 28000, "10.0%", 1),  # generation-one: 28 tickets say, of the 29 with a total
+            copied_tokens(1150, 22400, "5.1%", 2)])  # direct: 27 times 40 and the 70, of the 28 of 30 that say
+        self.assertEqual(section(lines, 2), [
+            "Warning sign 2: on 29 of 30 tickets, generation-one spent 29000 tokens and direct 23200, an extra cost of "
+            "5800.",
+            "  Left out of both sides: 0 without both versions judged, 1 with a blank token count.",
+            *no_helpers(29000, sign_two_copied((2800, 28000, "10.0%", 1), (1080, 21600, "5.0%", 2)))[1:],
+            "Without the spend not sorted, the cut is 0 tokens against half the extra cost, 2900. The sign does not "
+            "appear.",
+            "With it counted as cut, the cut is 29000 tokens. The sign appears.",
+            "The two verdicts differ: the spend not sorted decides the sign."])
+
+    def test_sign_two_prints_no_share_of_no_tokens(self) -> None:
+        # Generation one: at draw position 0 a row of 0 tokens, 0 copied; every other row from before the column.
+        # Direct: every row from before the column.
+        for at, ticket in enumerate(self.world.draw()):
+            self.world.run("generation-one", ticket, True, tokens=0 if at == 0 else 1000, copied=0 if at == 0 else OLD)
+            self.world.run("direct", ticket, True, tokens=800, copied=OLD)
+        self.assertEqual(section(self.lines(), 2)[6],
+                         sign_two_copied((0, 0, None, 29), (0, 0, None, 30)))
+
+    def test_sign_two_prints_a_share_for_one_side_without_the_other(self) -> None:
+        # One side's rows are all from before the column, so it has no share; the other's say 40 copied of 800.
+        for old_side in ("generation-one", "direct"):
+            with self.subTest(old_side=old_side):
+                self.setUp()
+                for ticket in self.world.draw():
+                    for version in ("generation-one", "direct"):
+                        self.world.run(version, ticket, True, tokens=800, copied=OLD if version == old_side else 40)
+                said, old = (1200, 24000, "5.0%", 0), (0, 0, None, 30)
+                self.assertEqual(section(self.lines(), 2)[6], sign_two_copied(
+                    *((old, said) if old_side == "generation-one" else (said, old))))
+
+    def verdict_lines(self, copied: int, cut: int, direct_copied: int) -> tuple[list[str], list[str]]:
+        """Warning sign 2's lines from its copied line on, with the column and without it, on 30 tickets where
+        generation one spends 100 tokens with `cut` in a closing verification and direct spends 50."""
+        for ticket in self.world.draw():
+            self.world.run("generation-one", ticket, True, tokens=100, copied=copied,
+                           helpers=[helper("Closing verification", None, cut)])
+            self.world.run("direct", ticket, True, tokens=50, copied=direct_copied)
+        with_column = section(self.lines(), 2)[6:]
+        for row in self.world.rows:
+            row.pop("copied_tokens")
+        return with_column, section(self.lines(), 2)[6:]
+
+    def test_copied_tokens_change_no_verdict_of_sign_two(self) -> None:
+        # Each fixture sits where taking the copied tokens out of a figure the verdict is built from would change a
+        # verdict line: out of the extra cost or generation one's sum (the first), or out of the cut or direct's
+        # sum (the second).
+        for (copied, cut, direct_copied), verdicts in [
+            ((60, 20, 0), [
+                "Without the spend not sorted, the cut is 600 tokens against half the extra cost, 750. The sign does "
+                "not appear.",
+                "With it counted as cut, the cut is 3000 tokens. The sign appears.",
+                "The two verdicts differ: the spend not sorted decides the sign."]),
+            ((10, 30, 10), [
+                "Without the spend not sorted, the cut is 900 tokens against half the extra cost, 750. The sign "
+                "appears.",
+                "With it counted as cut, the cut is 3000 tokens. The sign appears."]),
+        ]:
+            with self.subTest(copied=copied, cut=cut, direct_copied=direct_copied):
+                self.setUp()
+                with_column, without = self.verdict_lines(copied, cut, direct_copied)
+                self.assertEqual(with_column, [sign_two_copied((30 * copied, 3000, f"{copied / 100:.1%}", 0),
+                                                               (30 * direct_copied, 1500, f"{direct_copied / 50:.1%}",
+                                                                0)), *verdicts])
+                self.assertEqual(without, [sign_two_copied((0, 0, None, 30), (0, 0, None, 30)), *verdicts])
+
+    def test_the_column_changes_no_other_line_and_no_verdict(self) -> None:
+        # Copied tokens on both sides, a row without the column, and helpers of every step.
+        for at, ticket in enumerate(self.world.draw()):
+            self.world.run("generation-one", ticket, at % 2 == 0, tokens=2277 + at, minutes=1.5 + at,
+                           helpers=EVERY_STEP, copied=OLD if at == 3 else 300 + at)
+            self.world.run("direct", ticket, at % 3 == 0, tokens=1000 + at, minutes=0.5 + at, copied=40.5 * (at % 4))
+        with_column = self.world.report(text=False)
+        for row in self.world.rows:
+            row.pop("copied_tokens", None)
+        without = self.world.report(text=False)
+        self.assertEqual((with_column.returncode, with_column.stderr, without.returncode, without.stderr),
+                         (0, b"", 0, b""))
+        blank = copied_tokens(0, 0, None, 30)
+        self.assertEqual([line for line in without.stdout.decode().split("\n") if line.startswith("  Copied tokens")],
+                         [blank, blank, sign_two_copied((0, 0, None, 30), (0, 0, None, 30))])
+        self.assertEqual(*([line for line in result.stdout.split(b"\n") if not line.startswith(b"  Copied tokens")]
+                           for result in (with_column, without)))
 
     def test_sign_two_gives_no_verdict_when_no_ticket_is_left(self) -> None:
         for ticket in self.world.draw():
@@ -605,6 +743,31 @@ class TestReport(unittest.TestCase):
         self.assertEqual(lines[6], "  All: 2 judged, 1 of 2 right first time, median total tokens 100.5, median "
                                    "active minutes 1.015.")
 
+    def copied_line(self, *rows: tuple[int | float | None, object]) -> str:
+        """generation-one's copied-tokens line, for a set of one ticket per row of (total_tokens, copied_tokens)."""
+        tickets = self.world.draw(per_bucket=(len(rows) + 2) // 3)
+        for ticket, (tokens, copied) in zip(tickets, rows):
+            self.world.run("generation-one", ticket, True, tokens=tokens, copied=copied)
+        lines = self.lines()
+        return lines[lines.index("direct") - 2]
+
+    def test_each_version_gives_the_copied_tokens_of_the_tickets_whose_row_says(self) -> None:
+        self.assertEqual(self.copied_line((1000, 0), (2000, 500), (3000, OLD)), copied_tokens(500, 3000, "16.7%", 1))
+
+    def test_the_copied_tokens_line_for_each_shape_of_rows(self) -> None:
+        for rows, figures in [
+            (((1000, 0), (2000, 0), (3000, 0)), (0, 6000, "0.0%", 0)),  # every row says 0
+            (((1000, 1000),), (1000, 1000, "100.0%", 0)),  # every token copied
+            (((100.5, 0.25), (200, 50.5)), (50.75, 300.5, "16.9%", 0)),  # figures with fractions
+            (((1000, None), (500, 100)), (100, 500, "20.0%", 1)),  # a null beside a total
+            (((1000, OLD), (2000, None)), (0, 0, None, 2)),  # no row says: no share
+            (((0, 0),), (0, 0, None, 0)),  # a total of 0: no share
+            (((None, None),), (0, 0, None, 0)),  # no ticket in the token figures
+        ]:
+            with self.subTest(rows=rows):
+                self.setUp()
+                self.assertEqual(self.copied_line(*rows), copied_tokens(*figures))
+
     def test_projects_appear_as_labels_only(self) -> None:
         for labels in (("A", "AB"), ("C",)):  # A-1 and AB-1 both, replayed as direct
             for at, ticket in enumerate(self.world.draw(labels=labels)):
@@ -627,6 +790,7 @@ class TestReport(unittest.TestCase):
             "  All: 60 judged, 30 of 60 (50%) right first time, median total tokens 114.5, median active minutes "
             "15.5.",
             *tail,
+            copied_tokens(0, 6870, "0.0%", 0),
             "",
             "direct",
             "  0-50: 20 judged, 20 of 20 (100%) right first time, median total tokens 63.5, median active minutes "
@@ -636,6 +800,7 @@ class TestReport(unittest.TestCase):
             "16.",
             "  All: 60 judged, 20 of 60 (33%) right first time, median total tokens 64.5, median active minutes 15.",
             *tail,
+            copied_tokens(0, 3870, "0.0%", 0),
             "",
             "Warning sign 1: generation-one was right first time on 30 of 60 (50%) tickets, direct on 20 of 60 "
             "(33%), a difference of 10.",
@@ -643,7 +808,7 @@ class TestReport(unittest.TestCase):
             "",
             "Warning sign 2: on 60 of 60 tickets, generation-one spent 6870 tokens and direct 3870, an extra cost of "
             "3000.",
-            *no_helpers(6870),
+            *no_helpers(6870, sign_two_copied((0, 6870, "0.0%", 0), (0, 3870, "0.0%", 0))),
             "Without the spend not sorted, the cut is 0 tokens against half the extra cost, 1500. The sign does not "
             "appear.",
             "With it counted as cut, the cut is 6870 tokens. The sign appears.",
@@ -654,13 +819,15 @@ class TestReport(unittest.TestCase):
         for ticket in tickets:
             self.world.run("generation-one", ticket, True)
             self.world.run("direct", ticket, False)
-            self.world.run("fan-out", ticket, ticket is tickets[0], tokens=40, minutes=4.0)
+            self.world.run("fan-out", ticket, ticket is tickets[0], tokens=40, minutes=4.0,
+                           copied=OLD if ticket is tickets[1] else 8)
         lines = self.lines()
         self.assertEqual([line for line in lines if line and not line.startswith(" ")][1:4],
                          ["generation-one", "direct", "fan-out"])
         start = lines.index("fan-out")
         self.assertEqual(lines[start + 4], "  All: 3 judged, 1 of 3 right first time, median total tokens 40, "
                                            "median active minutes 4.")
+        self.assertEqual(lines[start + 7], copied_tokens(16, 80, "20.0%", 1))
 
     def test_on_30_tickets_5_or_more_the_sign_appears(self) -> None:
         self.assertEqual(self.sign(20, 15), [
@@ -752,7 +919,7 @@ class TestReport(unittest.TestCase):
     def test_the_verdict_waits_for_both_versions_on_every_ticket(self) -> None:
         self.world.baseline(20, 10)
         for at, row in enumerate(self.world.rows):  # ticket n: generation one spends 990 + 10n, direct 99 + n
-            row["total_tokens"] = 1000 + 10 * (at // 2) if at % 2 == 0 else 100 + at // 2
+            row["total_tokens"] = row["input_tokens"] = 1000 + 10 * (at // 2) if at % 2 == 0 else 100 + at // 2
         self.world.verdicts = [line for line in self.world.verdicts
                                if (line["version"], line["ticket"]) not in (("direct", 1), ("generation-one", 2))]
         self.world.verdicts[-1]["right_first_time"] = None
@@ -763,7 +930,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(section(lines, 2), [  # tickets 3 to 29
             "Warning sign 2: on 27 of 30 tickets, generation-one spent 31050 tokens and direct 3105, an extra cost of "
             "27945.",
-            *no_helpers(31050, unjudged=3),
+            *no_helpers(31050, sign_two_copied((0, 31050, "0.0%", 0), (0, 3105, "0.0%", 0)), unjudged=3),
             "No verdict: tickets without both generation-one and direct judged: 3 of 30."])
 
     def test_a_second_set_not_yet_judged_holds_back_the_verdict(self) -> None:
@@ -888,6 +1055,19 @@ class TestReport(unittest.TestCase):
              "scan-rows.jsonl:2: total_tokens is not a count of tokens."),
             ("scan-rows.jsonl", field("helpers", [helper(None, None, 60), helper(None, None, 41)]),
              "scan-rows.jsonl:2: its helpers hold more tokens than its total_tokens."),
+            *(("scan-rows.jsonl", field("copied_tokens", value),
+               "scan-rows.jsonl:2: copied_tokens is of the wrong type.") for value in ("5", True, [1], {"a": 1})),
+            *(("scan-rows.jsonl", field("copied_tokens", value),
+               "scan-rows.jsonl:2: copied_tokens is not a count of tokens.")
+              for value in (-1, float("nan"), float("inf"))),
+            ("scan-rows.jsonl", field("copied_tokens", 100.5),  # the row's total_tokens is 100
+             "scan-rows.jsonl:2: copied_tokens is more than its total_tokens or beside a blank one."),
+            ("scan-rows.jsonl", lambda lines: lines.__setitem__(1, json.dumps({**json.loads(lines[1]),
+                                                                            "total_tokens": None, "copied_tokens": 5})),
+             "scan-rows.jsonl:2: copied_tokens is more than its total_tokens or beside a blank one."),
+            ("scan-rows.jsonl", lambda lines: lines.append(json.dumps({**json.loads(lines[0]), "session": session(999),
+                                                                       "copied_tokens": -1})),  # a session in no set
+             "scan-rows.jsonl:61: copied_tokens is not a count of tokens."),
         ]
         for name, change, message in cases:
             with self.subTest(message=message):
@@ -1016,6 +1196,41 @@ class TestReport(unittest.TestCase):
                       "tickets, and a versions.jsonl or verdicts.jsonl that is not UTF-8 are named by\n"
                       "file alone. It never prints a refused label or version name, and prints nothing\n"
                       "on standard output.\n", text + "\n")
+
+    def test_help_states_once_that_every_token_figure_includes_copied_tokens(self) -> None:
+        text = self.world.report("--help").stdout + "\n"
+        rule = ("Every token figure includes the tokens a resumed session copied: the report\n"
+                "takes none out of a figure or a verdict. python3 scripts/scan.py --help says\n"
+                "which lines are copied and what copied_tokens holds. A copied response counts\n"
+                "in total_tokens and, wherever the scan puts it, in a helper's tokens or in the\n"
+                "session's own. Each version's block ends with the copied_tokens of the tickets\n"
+                "in its token figures, summed, out of the total_tokens of those of them with a\n"
+                "copied_tokens, and that share as a percent. Warning sign 2 gives the same for\n"
+                "each side, over the tickets it counts. Where those total_tokens sum to 0, no\n"
+                "share is printed. A copied_tokens that is null, or absent from a row the scan\n"
+                "wrote before it had that column, is blank: its ticket is left out of the copied\n"
+                "tokens and counted.\n")
+        self.assertIn("\n\n" + rule + "\n", text)
+        sentence = " ".join(rule[:rule.index("verdict.") + len("verdict.")].split())  # the rule's first sentence
+        self.assertEqual(" ".join(text.split()).count(sentence), 1)
+        # Every share the report prints is a percent, and each sentence names the right whole.
+        self.assertIn("A share of tokens is not a count of\ntickets, so the report gives every share as a percent at "
+                      "any number of\ntickets. The cut and the tokens not sorted are percents of generation-one's\n"
+                      "tokens. Each copied share is of the total printed beside it.\n", text)
+        self.assertIn("  scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes\n"
+                      "                        and helpers of each row, and description, brief_head\n"
+                      "                        and total_tokens of each helper (scripts/scan.py).\n", text)
+        self.assertIn("A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing\n"
+                      "yet. A folder or file that cannot be read, a line of versions.jsonl or\n"
+                      "verdicts.jsonl that is not a JSON object, a field missing or of the wrong type\n"
+                      "(but not the session of a line of scan-rows.jsonl, above, or a missing\n"
+                      "copied_tokens), a set entry's label the draw would not give or bucket it does\n"
+                      "not use, a version name in versions.jsonl or verdicts.jsonl the judge would\n"
+                      "not take, a total_tokens or copied_tokens that is negative, infinite or not a\n"
+                      "number, helpers that hold more tokens than their row's total_tokens, a\n"
+                      "copied_tokens more than its row's total_tokens or beside a blank one, or a\n"
+                      "second line for one ticket and version, one session or\n"
+                      "one ticket of the sets stops the report.", text)
 
     def test_help_names_every_place_that_holds_the_words_the_sorter_reads(self) -> None:
         self.assertIn(

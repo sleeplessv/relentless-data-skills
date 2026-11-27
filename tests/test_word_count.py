@@ -76,6 +76,12 @@ class TestWordCount(unittest.TestCase):
         self.assertEqual(result.stdout.splitlines(), ["single ticket: 5 words, no limit"])
         self.assertEqual(result.stderr.splitlines(), ["small edit: 11 words, over its limit of 10"])
 
+    def test_relative_path_resolves_from_the_repo_root(self) -> None:
+        words = len((REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8").split())
+        result = self.lint(self.row("small edit", ["AGENTS.md"]))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [f"small edit: {words} words, no limit"])
+
     def test_missing_file_is_an_error_not_a_zero(self) -> None:
         missing = str(self.root / "agents" / "reader.md")
         result = self.lint(self.row("small edit", [self.write("a.md", 3), missing]))

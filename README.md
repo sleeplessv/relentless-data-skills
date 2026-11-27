@@ -211,7 +211,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
    runs from the plugin's copy only.
 3. Install `code-review`, `ponytail-review` and `pr`. They are required, and preflight
    stops when any of them is missing. `deliver.py` looks for each in the `skills/` folder of
-   Claude Code's config folder (`$CLAUDE_CONFIG_DIR`, or `~/.claude` when it is unset), then
+   Claude Code's config folder (`$CLAUDE_CONFIG_DIR`, or `~/.claude` when it is unset or empty), then
    in the checkout's `.claude/skills`, then in the Claude Code plugins installed for the user,
    by the organisation, or for this checkout.
 

@@ -61,6 +61,60 @@ to the agent's tool call; the rest prints as not tied to the agent. A field the
 output lacks prints as absent, and a token count the output leaves empty or out
 prints blank, never as 0.
 
+C1, C3 and R4 change Claude Code's user-level plugins, under ~/.claude/. Each
+writes a stand-in plugin (the stand-in skill, one role file in agents/ and a
+hook in hooks/hooks.json that logs each input) and a local marketplace that
+offers it into the probe's temporary folder, and removes the project's copy of
+the skill. It keeps the bytes of each file it finds in ~/.claude/, its settings
+file and ~/.claude/plugins/ two levels down. It names each change on standard
+error before it makes it, then runs `claude plugin marketplace add` and `claude
+plugin install`. On the way out, also after a failure or an interrupt, it
+uninstalls the plugin, removes the marketplace and deletes what still names it
+under ~/.claude/, and writes each kept file back as it was. The kit's last line
+then says the machine was left as it was, or names what it could not remove or
+restore. C1 reads the user's settings as well as the project's, because the
+installed plugin is a user-level setting. It types the plugin's skill, starts
+one agent of the plugin's role and runs one shell command. It is seen when the
+marker holds the skill's codeword, the role-word file holds the word only the
+role file holds and an event of that agent's call wrote it, and the plugin's
+hook logged the command in its command field. It fails when a tool reads the
+plugin's skill or role file. C2 installs nothing: a project role file names the
+stand-in skill in its skills list, and the codeword is in no other file of the
+folder. It is seen when the marker holds the codeword, an event of the
+probe-skilled agent's call holds it, and no tool names a skill file. C3 starts
+no session. It drops the plugin from the marketplace, runs `claude plugin
+marketplace update`, then `claude plugin uninstall`, and records the exit code
+and whether the plugin stayed. R4 runs Cursor with the typed skill and one
+shell command. It records how many paths of the skill file the output names,
+whether the skill ran, and how many times the plugin's hook logged the command
+in its command field. The line about raw output prints only when the run kept
+a file.
+
+D1, D2 and D6 on Codex, R3 on Cursor and A6 on Antigravity add the hook and
+start one agent as X3 does. The brief names a stand-in command, or the edit tool
+for D6. On Codex the hook's -c override matches every tool and runs
+hooks/guard.py of the probe folder, which it finds with `git rev-parse
+--git-common-dir` from any folder inside the probe folder. Its text is the same
+in every probe folder, so one trust covers every run. Codex runs no hook it has
+not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1,
+D2 and D6 fail with that step and the harness's exit status when their hook
+logged no input. The hook writes a refusal line to logs/hook.jsonl after the
+input of each command it refuses. D1 is seen when an agent's input, marked by
+agent_id, reached the hook for a command that runs merge-script.sh, the hook
+logged its refusal of that command and the merge marker is absent. D2 records
+the tool name of the session's call whose input holds the line that hands the
+brief to the agent. D6 runs only after D1 was seen and D2 recorded in the same
+run, and otherwise prints failed with the reason. The hook refuses the edit tool
+(apply_patch, Edit or Write) when the input's agent_type is the reviewer role.
+D6 is seen when the hook logged that refusal and the file the brief names is
+absent. R3 registers subagentStart in .cursor/hooks.json and records whether the
+hook logged it. An agent counts as started when the hook logged its
+control-probe.sh call under a conversation id other than the session's. On
+Antigravity the hook marks an agent by the file the parent writes in
+.system_generated/subagents/ of its artifact folder, named by the agent's
+conversation id. A6 is seen when the merge marker is absent and the hook logged
+a refusal of a command that runs merge-script.sh.
+
 K1 to K5, D3 to D5, R2, R5 and A2 to A4 probe each harness's own agent limits.
 Each agent's brief asks for a word of its own and its role's word, as X3's does,
 and a brief that has the agent start another names that agent's brief, so no
@@ -278,6 +332,7 @@ class Probe:
     direct: bool = False  # judged without a terminal or a harness session
     setup: Callable[[str, Path, str], None] | None = None  # writes the entry's stand-ins: harness, folder, codeword
     args: tuple[str, ...] = ()  # put before the prompt, which comes last on the Codex line
+    command: list[str] | None = None  # the headless command, when the entry needs another than the harness's
 
 
 UNTYPED = "Record a probe run for the probe kit."
@@ -554,7 +609,7 @@ def run_in_folder(harness: str, entry: str, args: argparse.Namespace, saved: Pat
             probe.setup(harness, root / "work", codeword)
         out, err = root / "out.jsonl", root / "err.txt"
         prompt = probe.prompt(harness).replace("{work}", str(root / "work"))
-        argv = [part.replace("{prompt}", prompt) for part in COMMANDS[harness]]
+        argv = [part.replace("{prompt}", prompt) for part in probe.command or COMMANDS[harness]]
         if harness == "cortex":
             argv += ["-c", args.connection]
         if probe.hook and harness == "codex":
@@ -588,11 +643,14 @@ def run_in_folder(harness: str, entry: str, args: argparse.Namespace, saved: Pat
         if finished.exit_code != 0 and not probe.any_exit:
             return "failed", f"harness exited {finished.exit_code}"
         return probe.judge(harness, finished)
+    except SetupFailed as error:
+        return "failed", str(error)
     finally:
         try:
             if address is not None and not ended:
                 hc("kill", address)  # interrupted while waiting: end the terminal
         finally:
+            undo_user_level()
             shutil.rmtree(root, ignore_errors=True)
 
 
@@ -628,11 +686,19 @@ def run(args: argparse.Namespace) -> int:
     saved = state / "probes" / run_id
     saved.mkdir(mode=0o700, parents=True)
     failed = False
+    verdicts: dict[str, str] = {}
     for entry in entries:
-        verdict, fact = run_probe(args.harness, entry, args, saved)
+        try:
+            verdict, fact = skipped(entry, verdicts) or run_probe(args.harness, entry, args, saved)
+        except Exception as error:  # a traceback would print local paths; the clean-up has run
+            verdict, fact = "failed", f"the probe stopped on {type(error).__name__}"
+        verdicts[entry] = verdict
         failed |= verdict == "failed"
         print(f"{entry} {args.harness} {verdict}: {fact}", flush=True)
-    print(f"probe_kit: raw output kept in probes/{run_id}/ of the machine directory", file=sys.stderr)
+    if any(saved.iterdir()):
+        print(f"probe_kit: raw output kept in probes/{run_id}/ of the machine directory", file=sys.stderr)
+    else:
+        saved.rmdir()  # a run that kept nothing, such as C3 alone, points to no folder
     return 1 if failed else 0
 
 
@@ -651,14 +717,16 @@ def hide(text: str, secret: str | None) -> str:
 
 
 def codex_hook(work: Path) -> list[str]:
-    """The hook inline on Codex, as the research note gives it, with the script's absolute path."""
-    return ["-c", 'hooks.PreToolUse=[{matcher="Bash",hooks=[{type="command",'
+    """The hook inline on Codex, as the research note gives it, matching every tool. Its text is the same in
+    every probe folder, so the owner's one trust of its hash covers each run (#386)."""
+    return ["-c", 'hooks.PreToolUse=[{matcher="",hooks=[{type="command",'
                   f'command="{hook_command("codex", work)}",timeout=20}}]}}]']
 
 
 CODEX_RULE = ('prefix_rule(pattern = ["./oneway-probe.sh"], decision = "prompt",\n'
               '    justification = "one-way command, needs the owner\'s answer")\n')
 GUARD = r'''import json, os, sys
+import glob
 from pathlib import Path
 
 # The stand-in guard hook, seeded from the guard research fixture. Its argument names the
@@ -680,6 +748,11 @@ elif form == "pre":
 elif form == "settings":
     cmd = str((data.get("tool_input") or {}).get("command") or "")
 is_helper = "agent_id" in data
+if form == "pre" and not is_helper:  # Antigravity: the parent writes a file named by the agent's conversation id
+    folder, conversation = str(data.get("artifactDirectoryPath") or ""), str(data.get("conversationId") or "")
+    if folder and conversation and "/" not in conversation:
+        pattern = f"*/.system_generated/subagents/{glob.escape(conversation)}.json"
+        is_helper = any(Path(folder).parent.glob(pattern))
 line = json.dumps({"form": form, "command": cmd, "hook_cwd": os.getcwd(), "input": data})
 secret = os.environ.get("PROBE_KIT_CONNECTION", "")
 if secret:  # the Cortex Code connection never reaches the log
@@ -691,6 +764,12 @@ if form == "sessionStart":  # Cursor's session start: logged only, no decision
 
 
 def out(decision, reason):
+    if decision == "deny":  # a refusal line after the input's line
+        refusal = json.dumps({"form": form, "decision": decision, "reason": reason, "refused": cmd})
+        if secret:
+            refusal = refusal.replace(json.dumps(secret)[1:-1], "<connection>")
+        with open(Path(__file__).resolve().parent.parent / "logs" / "hook.jsonl", "a") as log:
+            log.write(refusal + "\n")
     if form == "beforeShell":
         print(json.dumps({"permission": decision, "user_message": reason, "agent_message": reason}))
     elif form == "pre":  # Antigravity refuses a call whose hook prints no decision
@@ -707,6 +786,8 @@ if "merge-script.sh" in cmd and is_helper:
     out("deny", "GUARD-B: the merge script is refused to a helper")
 if "oneway-probe" in cmd:
     out("ask", "GUARD-C: one-way command, needs the owner's answer")
+if str(data.get("tool_name") or "") in ("apply_patch", "Edit", "Write") and data.get("agent_type") == "probe-reviewer":
+    out("deny", "GUARD-D: the edit tool is refused to a reviewer")
 out("allow", "")
 '''
 # Each stand-in command prints a line and writes a marker file, holding the directory it ran in, to logs/.
@@ -721,6 +802,8 @@ def hook_command(harness: str, work: Path) -> str:
     form = HOOK_FORMS[harness]
     if harness == "claude":
         return f'python3 "$CLAUDE_PROJECT_DIR/hooks/guard.py" {form}'
+    if harness == "codex":  # the same text in every folder; found from any folder inside the probe folder
+        return f"python3 $(git rev-parse --path-format=absolute --git-common-dir)/../hooks/guard.py {form}"
     if harness == "cursor":
         return f"python3 hooks/guard.py {form}"
     return f"python3 {shlex.quote(str(work / 'hooks' / 'guard.py'))} {form}"
@@ -891,6 +974,501 @@ def x7(args: argparse.Namespace) -> int:
     return 0
 
 
+# C1, C2, C3 and R4 (#387): the stand-in plugin, offered by a local marketplace in the probe folder and
+# installed on Claude Code. C1, C3 and R4 are the only entries here that change anything outside the
+# probe folder (spec #381, reading 4): the marketplace registration and the installed plugin, which
+# Claude Code keeps under ~/.claude/. C2 installs nothing.
+PLUGIN = "probe-plugin"
+PLUGIN_ROLE = "probe-plugin-role"
+SKILLED_ROLE = "probe-skilled"
+ROLE_OUT = "probe-role-word.txt"
+R4_RAN = "probe-r4.txt"
+PLUGIN_LOG = "logs/plugin-hook.jsonl"
+HOOK_LOGGER = 'import json, sys\nwith open({log!r}, "a") as log:\n    log.write(json.dumps({{"input": sys.stdin.read()}}) + "\\n")\n'
+# The installed plugin is a user-level setting, which --setting-sources project leaves out.
+PLUGIN_COMMAND = [part if part != "project" else "user,project" for part in COMMANDS["claude"]]
+# The marketplaces made, what could not be removed, and the files that could not be put back.
+USER_LEVEL: dict[str, list[str]] = {"made": [], "left": [], "changed": []}
+# Each marketplace to undo, with the paths near ~/.claude before it and the bytes of each file among them.
+PENDING: list[tuple[str, set[Path], dict[Path, bytes]]] = []
+PLUGIN_FILES = ("SKILL.md", "skills/", f"{PLUGIN_ROLE}.md", "agents/")  # a tool input naming one read the plugin
+
+
+class SetupFailed(Exception):
+    """A stand-in the entry needs could not be made: the entry fails with this fact."""
+
+
+def listed(items: list[str]) -> str:
+    return " and ".join(items) if len(items) < 3 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def times(count: int) -> str:
+    return {0: "not at all", 1: "once", 2: "twice"}.get(count, f"{count} times")
+
+
+def claude_home() -> Path:
+    return Path.home() / ".claude"
+
+
+def near(home: Path) -> list[Path]:
+    """~/.claude, its settings file and ~/.claude/plugins two levels down: where a marketplace and a plugin land."""
+    plugins = home / "plugins"
+    found = [home, home / "settings.json", plugins, *plugins.glob("*"), *plugins.glob("*/*")]
+    return [path for path in dict.fromkeys(found) if path.exists() or path.is_symlink()]
+
+
+def names(path: Path, text: str) -> bool:
+    return text in path.name or (path.suffix == ".json" and path.is_file() and text in path.read_text(errors="replace"))
+
+
+def scrub(value: object, market: str) -> object:
+    """The JSON value without the keys, items and string values that name the marketplace."""
+    if isinstance(value, dict):
+        return {key: scrub(item, market) for key, item in value.items()
+                if market not in key and not (isinstance(item, str) and market in item)}
+    if isinstance(value, list):
+        return [scrub(item, market) for item in value if not (isinstance(item, str) and market in item)]
+    return value
+
+
+def hollow(value: object) -> bool:
+    """Whether every list and object in the JSON value is empty."""
+    if isinstance(value, dict):
+        return all(hollow(item) for item in value.values())
+    return value == [] if isinstance(value, list) else True
+
+
+def plugin_cli(*args: str) -> int:
+    """`claude plugin ...`; its output can hold local paths, so none of it is printed."""
+    return subprocess.run(["claude", "plugin", *args], capture_output=True, text=True, check=False,
+                          stdin=subprocess.DEVNULL, timeout=120).returncode
+
+
+def shown(path: Path) -> str:
+    return "~/" + str(path.relative_to(Path.home()))
+
+
+def undo_user_level() -> None:
+    """Uninstall each pending plugin, remove its marketplace, delete what still names it, put kept files back.
+
+    What could not be removed or put back goes to USER_LEVEL, with ~ for the home folder.
+    """
+    while PENDING:
+        market, before, kept = PENDING.pop()
+        for args in (("uninstall", f"{PLUGIN}@{market}"), ("marketplace", "remove", market)):
+            try:
+                plugin_cli(*args)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        home = claude_home()
+        for path in sorted(near(home), key=lambda p: len(p.parts), reverse=True):  # a folder after what it holds
+            try:
+                if market in path.name:
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                elif path in kept:
+                    continue  # written back below
+                elif path.suffix == ".json" and path.is_file() and path not in before:
+                    data = json.loads(path.read_text())
+                    scrubbed = scrub(data, market)
+                    if hollow(scrubbed):
+                        path.unlink()  # a file the install made, now holding nothing
+                    elif scrubbed != data:
+                        path.write_text(json.dumps(scrubbed, indent=2) + "\n")
+                elif path.is_dir() and path not in before and not any(path.iterdir()):
+                    path.rmdir()
+            except (OSError, ValueError):
+                pass
+        changed = []
+        for path, data in kept.items():
+            try:
+                if not path.is_file() or path.read_bytes() != data:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(data)
+                same = path.read_bytes() == data
+            except OSError:
+                same = False
+            if not same:
+                changed.append(path)
+        USER_LEVEL["changed"] += [shown(p) for p in changed]
+        USER_LEVEL["left"] += [shown(p) for p in near(home) if p not in changed and names(p, market)]
+
+
+def write_plugin(folder: Path, work: Path, codeword: str, role_word: str) -> None:
+    """The stand-in skill, one role file in agents/ and a hook in hooks/hooks.json that logs each input."""
+    for part in (".claude-plugin", f"skills/{SKILL}", "agents", "hooks"):
+        (folder / part).mkdir(parents=True)
+    (folder / ".claude-plugin" / "plugin.json").write_text(json.dumps(
+        {"name": PLUGIN, "version": "1.0.0", "description": "Stand-in plugin for the probe kit."}, indent=2) + "\n")
+    (folder / "skills" / SKILL / "SKILL.md").write_text(SKILL_TEXT.format(name=SKILL, marker=MARKER, codeword=codeword))
+    (folder / "agents" / f"{PLUGIN_ROLE}.md").write_text(role_file("claude", PLUGIN_ROLE, "plugin role", None, role_word))
+    logger = work.parent / "plugin-hook.py"
+    logger.write_text(HOOK_LOGGER.format(log=str(work / PLUGIN_LOG)))
+    (work / PLUGIN_LOG).parent.mkdir(exist_ok=True)
+    hooks = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": f"python3 {shlex.quote(str(logger))}"}]}]}}
+    (folder / "hooks" / "hooks.json").write_text(json.dumps(hooks, indent=2) + "\n")
+
+
+def setup_plugin(entry: str) -> Callable[[str, Path, str], None]:
+    """The plugin and its marketplace beside the folder, registered and installed, each change named first."""
+    def setup(harness: str, work: Path, codeword: str) -> None:
+        if shutil.which("claude") is None:
+            raise SetupFailed("claude is not on PATH")
+        market = f"probe-market-{secrets.token_hex(4)}"  # not the codeword, which only the skill holds
+        WORDS[codeword] = {"role": f"role-{secrets.token_hex(4)}", "market": market}
+        shutil.rmtree(work / SKILL_DIRS[harness] / SKILL)  # the plugin's copy of the skill is the only one
+        source = work.parent / "market"
+        write_plugin(source / PLUGIN, work, codeword, WORDS[codeword]["role"])
+        (source / ".claude-plugin").mkdir()
+        (source / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+            {"name": market, "owner": {"name": "probe kit"},
+             "plugins": [{"name": PLUGIN, "source": f"./{PLUGIN}", "description": "Stand-in plugin."}]}, indent=2) + "\n")
+        before = near(claude_home())
+        try:
+            kept = {path: path.read_bytes() for path in before if path.is_file() and not path.is_symlink()}
+        except OSError as error:
+            raise SetupFailed("a file under ~/.claude/ could not be read, so it could not be put back") from error
+        PENDING.append((market, set(before), kept))
+        USER_LEVEL["made"].append(market)
+        for change, args in ((f"registers the marketplace {market} with", ("marketplace", "add", str(source))),
+                             (f"installs the plugin {PLUGIN}@{market} on", ("install", f"{PLUGIN}@{market}"))):
+            print(f"probe_kit: {entry} {change} Claude Code, under ~/.claude/", file=sys.stderr, flush=True)
+            code = plugin_cli(*args)
+            if code != 0:
+                raise SetupFailed(f"claude plugin {' '.join(args[:-1])} exited {code}")
+    return setup
+
+
+def setup_skilled_role(harness: str, work: Path, codeword: str) -> None:
+    """A project role file that names the stand-in skill in its skills list, and no codeword."""
+    folder = work / DEFINITION_DIRS[harness]
+    folder.mkdir(parents=True)
+    (folder / f"{SKILLED_ROLE}.md").write_text(
+        f"---\nname: {SKILLED_ROLE}\ndescription: Stand-in role for the probe kit. Start it only when asked for "
+        f"{SKILLED_ROLE} by name.\nskills:\n  - {SKILL}\n---\n\nYou are the probe kit's stand-in role. Do what "
+        "your prompt asks, with the skill this file gives you.\n")
+    skill = work / SKILL_DIRS[harness] / SKILL / "SKILL.md"
+    for path in work.rglob("*"):
+        if path.is_file() and path != skill and ".git" not in path.relative_to(work).parts:
+            if codeword in path.read_text(errors="replace"):
+                raise SetupFailed("the codeword is in a file of the folder other than the skill file")
+
+
+def plugin_hook_calls(work: Path, harness: str, command: str) -> int:
+    """The plugin hook's log lines whose input has the command in the harness's command field.
+
+    Claude Code sends tool_input.command; Cursor sends command, as the guard hook reads it.
+    """
+    log = work / PLUGIN_LOG
+    count = 0
+    for line in log.read_text(errors="replace").splitlines() if log.is_file() else []:
+        try:
+            data = json.loads(json.loads(line)["input"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        field = data.get("tool_input") if harness == "claude" else data
+        count += isinstance(field, dict) and str(field.get("command") or "").strip() == command
+    return count
+
+
+def names_any(event: object, needles: tuple[str, ...]) -> bool:
+    """Whether a tool or command event names any of the needles; a message that names one does not count."""
+    if isinstance(event, list):
+        return any(names_any(item, needles) for item in event)
+    if not isinstance(event, dict):
+        return False
+    kind = str(event.get("type", "")).lower()
+    if any(word in kind for word in ("tool", "command", "function_call")) or "tool_call" in event:
+        text = json.dumps(event)
+        return any(needle in text for needle in needles)
+    return any(names_any(value, needles) for value in event.values())
+
+
+def agent_calls(events: list[dict], role: str) -> set[str]:
+    """The ids of the Agent (or Task) tool calls that start the role."""
+    ids = set()
+    for event in events:
+        message = event.get("message") if event.get("type") == "assistant" else None
+        for item in message.get("content") or [] if isinstance(message, dict) else []:
+            if (isinstance(item, dict) and item.get("type") == "tool_use" and item.get("name") in ("Agent", "Task")
+                    and isinstance(item.get("input"), dict) and item["input"].get("subagent_type") == role
+                    and item.get("id")):
+                ids.add(item["id"])
+    return ids
+
+
+def said_by(events: list[dict], calls: set[str], word: str) -> bool:
+    """Whether an assistant event of one of the calls holds the word: the agent's own quote or tool call."""
+    return any(event.get("type") == "assistant" and event.get("parent_tool_use_id") in calls
+               and word in json.dumps(event.get("message")) for event in events)
+
+
+def strings(value: object):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict | list):
+        for item in value.values() if isinstance(value, dict) else value:
+            yield from strings(item)
+
+
+def judge_c1(harness: str, run: Finished) -> tuple[str, str]:
+    events, role, word = events_of(run.out), run.work / ROLE_OUT, WORDS[run.codeword]["role"]
+    if names_any(events, PLUGIN_FILES):
+        return "failed", "a tool read the installed plugin's files, so its words need not have come from loading them"
+    loaded = {"skill": run.marker_holds_codeword(),
+              "role file": role.is_file() and word in role.read_text(errors="replace").split()
+              and said_by(events, agent_calls(events, f"{PLUGIN}:{PLUGIN_ROLE}"), word),
+              "hook": plugin_hook_calls(run.work, harness, "echo probe-c1") > 0}
+    missing = [part for part, seen in loaded.items() if not seen]
+    if missing:
+        return "failed", f"the installed plugin's {listed(missing)} did not load"
+    return "seen", "the installed plugin loaded its skill, role file and hook"
+
+
+def judge_c2(harness: str, run: Finished) -> tuple[str, str]:
+    if not run.marker_holds_codeword():
+        return "failed", "no marker holds the skill's codeword"
+    events = events_of(run.out)
+    if names_any(events, ("SKILL.md", "skills/")):
+        return "failed", "a tool read the skill file, so the codeword need not have come through the role file"
+    calls = agent_calls(events, SKILLED_ROLE)
+    if not calls:
+        return "failed", f"no agent of the role {SKILLED_ROLE} was started"
+    if not said_by(events, calls, run.codeword):
+        return "failed", "no event of the agent's holds the codeword"
+    return "seen", "an agent of the role wrote the codeword only the skill holds"
+
+
+def judge_c3(harness: str, run: Finished) -> tuple[str, str]:
+    """Drop the plugin from the marketplace, update it, then uninstall the plugin and record what stayed."""
+    market = WORDS[run.codeword]["market"]
+    listing = run.work.parent / "market" / ".claude-plugin" / "marketplace.json"
+    offered = json.loads(listing.read_text())
+    listing.write_text(json.dumps({**offered, "plugins": []}, indent=2) + "\n")
+    code = plugin_cli("marketplace", "update", market)
+    if code != 0:
+        return "failed", f"claude plugin marketplace update exited {code}"
+    code = plugin_cli("uninstall", f"{PLUGIN}@{market}")
+    stayed = (claude_home() / "plugins" / "cache" / market / PLUGIN).exists() or any(
+        names(path, f"{PLUGIN}@{market}") for path in near(claude_home()))
+    return "recorded", f"uninstall exited {code} and the plugin {'stayed' if stayed else 'is gone'}"
+
+
+def judge_r4(harness: str, run: Finished) -> tuple[str, str]:
+    if not (run.work / R4_RAN).is_file():
+        return "failed", "the shell command did not run, so the hook count says nothing"
+    shown = {text for text in strings(events_of(run.out)) if text.endswith(f"/{SKILL}/SKILL.md")}
+    return "recorded", (f"skill file in the output {times(len(shown))}, skill "
+                        f"{'ran' if run.marker_holds_codeword() else 'did not run'}, hook fired "
+                        f"{times(plugin_hook_calls(run.work, harness, 'echo probe-r4 > ' + R4_RAN))}")
+
+
+PROBES.update({
+    "C1": Probe(lambda h: (f"/{PLUGIN}:{SKILL} Then start one agent of the role {PLUGIN}:{PLUGIN_ROLE} and give it "
+                           f"this line, word for word, as its whole prompt: Write your role word to the file "
+                           f"{ROLE_OUT} in the folder {{work}}. Then run the shell command `echo probe-c1`."),
+                judge_c1, setup=setup_plugin("C1"), command=PLUGIN_COMMAND),
+    "C2": Probe(lambda h: (f"Start one agent of the role {SKILLED_ROLE} and give it this line, word for word, as its "
+                           "whole prompt: Follow the skill you were given, in the folder {work}. Do not open any "
+                           "skill file yourself, and do nothing else."), judge_c2, setup=setup_skilled_role),
+    "C3": Probe(lambda h: "", judge_c3, setup=setup_plugin("C3"), direct=True),
+    "R4": Probe(lambda h: f"/{SKILL} Then run the shell command `echo probe-r4 > {R4_RAN}`.", judge_r4,
+                setup=setup_plugin("R4")),
+})
+
+
+# D1, D2 and D6 (Codex), R3 (Cursor) and A6 (Antigravity): the guard hook and one agent together (#386).
+# The session starts one agent of a stand-in role as X3 does; its brief names a stand-in command or, for D6,
+# the edit tool. Each judge reads the hook log, D1, D6 and A6 the marker files too, and none the reply.
+TRUST = (f"Trust the stand-in hook once in Codex: in a terminal in the root of this checkout, start "
+         f"{shlex.join(['codex', *codex_hook(Path('.'))])}, type /hooks, trust the hook, then quit.")
+
+
+def no_input(run: Finished) -> str:
+    """D1, D2 and D6's verdict when the hook logged no input: Codex runs no hook it has not trusted."""
+    return (f"the hook logged no input and the harness exited {run.exit_code}. "
+            f"Codex runs no hook it has not trusted. {TRUST}")
+EDIT_TOOLS = ("apply_patch", "Edit", "Write")  # the edit tool's names in Codex's hook input, as in GUARD's rule D
+REVIEW_FILE = "probe-review.txt"
+NEEDS = {"D6": (("D1", "seen"), ("D2", "recorded"))}  # an entry runs only after these verdicts in the same run
+
+
+def skipped(entry: str, verdicts: dict[str, str]) -> tuple[str, str] | None:
+    for before, wanted in NEEDS.get(entry, ()):
+        if verdicts.get(before) != wanted:
+            why = "failed" if before in verdicts else "did not run before it"
+            return "failed", f"skipped, {before} {why} in this run"
+    return None
+
+
+def setup_hook_agent(entry: str, task: str, then: Callable[[Path], None] | None = None) -> Callable[[str, Path, str], None]:
+    """X3's role files and worktree, with a brief that holds the entry's task instead of X3's."""
+    agent = setup_agent(entry, "")
+
+    def setup(harness: str, work: Path, codeword: str) -> None:
+        agent(harness, work, codeword)
+        brief = work / ".git" / BRIEFS / f"brief-{entry.lower()}.md"
+        brief.write_text(f"# Probe brief\n\n{task.format(work=work)} Change nothing else.\n")
+        if then is not None:
+            then(work)
+    return setup
+
+
+def print_trust(work: Path) -> None:
+    print(f"probe_kit: D1 needs a trusted hook. {TRUST}", file=sys.stderr, flush=True)
+
+
+def register_subagent_start(work: Path) -> None:
+    """Cursor's subagentStart hook at project level, in the guard research note's form."""
+    path = work / ".cursor" / "hooks.json"
+    body = json.loads(path.read_text())
+    body["hooks"]["subagentStart"] = [{"command": "python3 hooks/guard.py subagentStart"}]
+    path.write_text(json.dumps(body, indent=2) + "\n")
+
+
+def inputs(log: list[dict]) -> list[dict]:
+    """The hook inputs of the log, without its refusal lines."""
+    return [line["input"] for line in log if isinstance(line.get("input"), dict)]
+
+
+def refused(log: list[dict], rule: str) -> bool:
+    return any(line.get("decision") == "deny" and str(line.get("reason", "")).startswith(rule) for line in log)
+
+
+def runs_merge(command: str) -> bool:
+    """Whether a shell command runs the merge stand-in: its name is a command word, not an argument."""
+    for part in re.split(r"[;&|()\n]+", command):
+        words = part.split()
+        if words[:1] in (["sh"], ["bash"]):
+            words = words[1:]
+        if words and Path(words[0]).name == "merge-script.sh":
+            return True
+    return False
+
+
+def refused_merge(log: list[dict]) -> bool:
+    """A GUARD-B refusal line for a command that runs the merge stand-in."""
+    for line in log:
+        command = str(line.get("refused", ""))
+        if line.get("form") == "pre":  # Antigravity's call arguments, as JSON
+            try:
+                command = str(json.loads(command).get("CommandLine", ""))
+            except (ValueError, AttributeError):
+                command = ""
+        if line.get("decision") == "deny" and str(line.get("reason", "")).startswith("GUARD-B") and runs_merge(command):
+            return True
+    return False
+
+
+MERGE_RAN = "merge-ran.marker"
+
+
+def judge_d1(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if not log:
+        return "failed", no_input(run)
+    if run.exit_code != 0:
+        return "failed", f"harness exited {run.exit_code}"
+    if not any(runs_merge(str((i.get("tool_input") or {}).get("command"))) and "agent_id" in i for i in inputs(log)):
+        return "failed", "no agent's call of the merge stand-in reached the hook"
+    if (run.work / "logs" / MERGE_RAN).is_file():
+        return "failed", "the merge stand-in ran"
+    if not refused_merge(log):
+        return "failed", "the hook logged no refusal of the merge stand-in"
+    return "seen", "the hook saw the agent marker and refused the merge stand-in"
+
+
+def holds(value: object, text: str) -> bool:
+    """Whether a string inside a hook input value is the text, or holds it."""
+    if isinstance(value, str):
+        return text in value
+    if isinstance(value, dict):
+        value = list(value.values())
+    return isinstance(value, list) and any(holds(item, text) for item in value)
+
+
+def judge_d2(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if not log:
+        return "failed", no_input(run)
+    if run.exit_code != 0:
+        return "failed", f"harness exited {run.exit_code}"
+    if not any("agent_id" in i for i in inputs(log)):
+        return "failed", "no agent's call reached the hook"
+    handoff = f"Read {run.work}/.git/{BRIEFS}/brief-d2.md and follow it."  # the line the prompt asks to hand over
+    starts = [i for i in inputs(log) if "agent_id" not in i and holds(i.get("tool_input"), handoff)]
+    if not starts:
+        return "failed", "no call of the session's that hands the brief's line to an agent reached the hook"
+    names = sorted({i.get("tool_name") for i in starts}, key=str)
+    if not all(isinstance(name, str) and name for name in names):
+        return "failed", "the hook input of the agent-starting call holds no tool name"
+    if len(names) > 1:
+        return "failed", f"{len(names)} tools of the session's named the brief"
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", names[0]):
+        return "failed", "the agent-starting tool's name is not a plain name"
+    return "recorded", f"the agent-starting tool reaches the hook as {names[0]}"
+
+
+def judge_d6(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if not log:
+        return "failed", no_input(run)
+    if run.exit_code != 0:
+        return "failed", f"harness exited {run.exit_code}"
+    edits = [i for i in inputs(log) if "agent_id" in i and i.get("tool_name") in EDIT_TOOLS]
+    if not edits:
+        return "failed", "no agent's edit call reached the hook"
+    if not any(i.get("agent_type") == REVIEWER for i in edits):
+        return "failed", "the hook input of the agent's edit call does not name the reviewer role"
+    if (run.work / REVIEW_FILE).exists():
+        return "failed", "the reviewer's edit went through"
+    if not refused(log, "GUARD-D"):
+        return "failed", "the hook logged no refusal of the edit tool"
+    return "seen", "the hook refused the edit tool to a reviewer"
+
+
+def judge_r3(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if any(line.get("form") == "subagentStart" for line in log):
+        return "recorded", "subagentStart fired"
+    session = {str(line["input"].get("conversation_id")) for line in log
+               if line.get("form") == "sessionStart" and isinstance(line.get("input"), dict)}
+    if not session:
+        return "failed", "the hook logged no session start"
+    if not any(line.get("form") == "beforeShell" and "control-probe.sh r3" in str(line.get("command"))
+               and str((line.get("input") or {}).get("conversation_id")) not in session for line in log):
+        return "failed", "no agent's call of the control stand-in reached the hook"
+    return "recorded", "subagentStart did not fire, though an agent ran"
+
+
+def judge_a6(harness: str, run: Finished) -> tuple[str, str]:
+    if (run.work / "logs" / MERGE_RAN).is_file():
+        return "failed", "the merge stand-in ran"
+    if not refused_merge(hook_log(run.work)):
+        return "failed", "the hook logged no refusal of the merge stand-in"
+    return "seen", "the hook refused the merge stand-in to an agent"
+
+
+RUN_MERGE = "Run the command `./merge-script.sh` in the folder {work}."
+PROBES.update({
+    "D1": Probe(agent_prompt("D1"), judge_d1, any_exit=True, hook=True, setup=setup_hook_agent("D1", RUN_MERGE, print_trust)),
+    "D2": Probe(agent_prompt("D2"), judge_d2, any_exit=True, hook=True,
+                setup=setup_hook_agent("D2", "Run the command `./control-probe.sh d2` in the folder {work}.")),
+    "D6": Probe(lambda h: agent_prompt("D6")(h).replace(READER, REVIEWER), judge_d6, any_exit=True, hook=True,
+                setup=setup_hook_agent("D6", f"Create the file {{work}}/{REVIEW_FILE} holding the word review with "
+                                             "your file-editing tool, not with a shell command.")),
+    "R3": Probe(agent_prompt("R3"), judge_r3, hook=True,
+                setup=setup_hook_agent("R3", "Run the command `./control-probe.sh r3` in the folder {work}.",
+                                       register_subagent_start)),
+    "A6": Probe(agent_prompt("A6"), judge_a6, hook=True, setup=setup_hook_agent("A6", RUN_MERGE)),
+})
+
+
 # K1 to K5, D3 to D5, R2, R5 and A2 to A4: each harness's own agent limits (#385). Every brief asks for a
 # word of its own and the role's word, as X3's does. A brief that has its agent start another holds that
 # agent's one line, so no nested path is in the prompt. The rule each judge follows is in the run's
@@ -961,20 +1539,20 @@ def setup_limit(entry: str, briefs: dict[str, str], roles: tuple[str, ...] = (RE
     return setup
 
 
-def holds(path: Path, run: Finished, *uses: str) -> bool:
+def file_holds(path: Path, run: Finished, *uses: str) -> bool:
     """Whether the file holds the word the kit drew for each use: a brief's key or a role."""
     words, drawn = path.read_text(errors="replace").split() if path.is_file() else [], WORDS.get(run.codeword, {})
     return all(drawn.get(use) in words for use in uses)
 
 
 def marker(run: Finished, entry: str, key: str, *uses: str) -> bool:
-    return holds(run.work / marker_of(entry, key), run, key, *uses)
+    return file_holds(run.work / marker_of(entry, key), run, key, *uses)
 
 
 def tools_listed(run: Finished, entry: str, key: str) -> tuple[str, ...] | None:
     """The agent tools the agent of that key listed beside its brief's word; None when it listed nothing."""
     path = run.work / marker_of(entry, f"{key}-tools")
-    if not holds(path, run, key):
+    if not file_holds(path, run, key):
         return None
     words = path.read_text(errors="replace").split()
     return tuple(tool for tool in AGENT_TOOLS if tool in words)
@@ -989,7 +1567,7 @@ class Call:
     input: dict
 
 
-def agent_calls(events: list[dict]) -> list[Call]:
+def tool_calls(events: list[dict]) -> list[Call]:
     """The stream's tool calls in order; one with no id or no input is left out."""
     calls = []
     for event in events:
@@ -1049,7 +1627,7 @@ def model_under(events: list[dict], call: Call) -> str | None:
 
 def judge_k1(harness: str, run: Finished) -> tuple[str, str]:
     events = events_of(run.out)
-    calls, results = agent_calls(events), call_results(events)
+    calls, results = tool_calls(events), call_results(events)
     facts = []
     for outer, leaf, label in (("fg", "fgleaf", "foreground"), ("bg", "bgleaf", "background")):
         if not marker(run, "K1", outer, AUTHOR):
@@ -1102,7 +1680,7 @@ def two_leaves(entry: str, background: bool) -> Callable[[str, Finished], tuple[
             return "failed", (f"an agent of the leaf role, two layers down, has {', '.join(kept)}, so the limit is "
                               f"deeper than 2")
         events = events_of(run.out)
-        calls, results = agent_calls(events), call_results(events)
+        calls, results = tool_calls(events), call_results(events)
         author = started(calls, entry, "author")
         if author is None or author.parent is not None or author.input.get("run_in_background") is not background:
             return "failed", f"the output does not show the session starting the author in the {mode}"
@@ -1163,7 +1741,7 @@ def judge_k4(harness: str, run: Finished) -> tuple[str, str]:
     if (run.work / "probe-k4-slept.txt").is_file():
         return "failed", "the agent was not killed: its sleep finished"
     events = events_of(run.out)
-    calls, results = agent_calls(events), call_results(events)
+    calls, results = tool_calls(events), call_results(events)
     target = agent_id(results, started(calls, "K4", "first"))
     if target is None:
         return "failed", "the output shows no agentId for the agent"
@@ -1183,7 +1761,7 @@ def judge_k5(harness: str, run: Finished) -> tuple[str, str]:
     if not marker(run, "K5", "first", READER):
         return "failed", "no agent of the reader role ran"
     events = events_of(run.out)
-    calls, results = agent_calls(events), call_results(events)
+    calls, results = tool_calls(events), call_results(events)
     first = started(calls, "K5", "first")
     target = agent_id(results, first)
     if target is None:
@@ -1258,7 +1836,7 @@ def judge_d4(harness: str, run: Finished) -> tuple[str, str]:
 def judge_d5(harness: str, run: Finished) -> tuple[str, str]:
     if not marker(run, "D5", "inside", READER):
         return "failed", "no agent of the reader role ran"
-    if holds(run.work.parent / "outside" / marker_of("D5", "outside"), run, "outside", READER):
+    if file_holds(run.work.parent / "outside" / marker_of("D5", "outside"), run, "outside", READER):
         return "seen", "the agent wrote in its worktree outside the session's writable directories"
     return "failed", "the agent ran, but its file in the worktree outside the writable directories is missing"
 
@@ -1286,7 +1864,7 @@ def judge_r5(harness: str, run: Finished) -> tuple[str, str]:
     path = run.work / marker_of("R5", "user")
     if not path.is_file():
         return "failed", "no marker the brief names"
-    if not holds(path, run, "user", USER_ROLE):
+    if not file_holds(path, run, "user", USER_ROLE):
         return "failed", "the marker the brief names lacks the brief's word or the user-level role's word"
     return "seen", "an agent of the role defined only in ~/.cursor/agents/ wrote the marker its brief names"
 
@@ -1578,6 +2156,13 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:  # each probe's finally has run; a traceback would print local paths
         print("probe_kit: interrupted", file=sys.stderr)
         return 130
+    finally:
+        if USER_LEVEL["made"]:  # the last line, after every other
+            left, changed = USER_LEVEL["left"], USER_LEVEL["changed"]
+            undone = ([f"remove {listed(left)}"] if left else []) + (
+                [f"restore {listed(changed)} to what it held before"] if changed else [])
+            print("probe_kit: the machine was left as it was" if not undone else
+                  f"probe_kit: could not {' and '.join(undone)}; {'fix' if changed else 'remove'} by hand", file=sys.stderr)
 
 
 if __name__ == "__main__":

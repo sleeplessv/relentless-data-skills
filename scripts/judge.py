@@ -17,7 +17,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True  # importing the siblings would otherwise write scripts/__pycache__/ into the checkout
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import draw  # noqa: E402  (a sibling script, not an installed package)
-import scan  # noqa: E402
+sys.path.insert(1, str(Path(__file__).resolve().parent.parent / "skills" / "deliver" / "scripts"))
+import scan  # noqa: E402  (deliver.py's scan, found from this repo's skills/deliver/scripts/)
 
 GENERATION_ONE = "generation-one"
 EXIT_NO_VERDICT = 3

@@ -10,7 +10,8 @@
 - `bin/gh`, a stand-in first on PATH. It appends each call as one JSON line to
   `gh-calls.jsonl`, with the text of a `--body-file` argument under `body`, and answers from `gh-answers.json` with the first saved answer, in the order
   saved, whose arguments are the call's leading arguments (or all of them). So save the longer
-  answer first: `["pr"]` saved before `["pr", "view"]` answers `gh pr view` too. With no answer
+  answer first: `["pr"]` saved before `["pr", "view"]` answers `gh pr view` too. An answer saved
+  with `once=True` is used once and then dropped, so a later call gets the next one. With no answer
   it prints `stand-in gh: no answer for <args>` and exits 1.
 
 `world.deliver(*args)` runs deliver.py as a session would, with only the world's environment, so
@@ -64,6 +65,9 @@ with (world / "gh-calls.jsonl").open("a") as calls:
 answers = json.loads((world / "gh-answers.json").read_text())
 for answer in answers:
     if args[:len(answer["args"])] == answer["args"]:
+        if answer.get("once"):
+            answers.remove(answer)
+            (world / "gh-answers.json").write_text(json.dumps(answers))
         sys.stdout.write(answer["stdout"])
         sys.stderr.write(answer["stderr"])
         sys.exit(answer["exit"])
@@ -229,14 +233,32 @@ class World:
     def state_lines(self, name: str) -> list[dict]:
         return read_lines(self.state / name)
 
-    def gh_answer(self, args: list[str], stdout: str = "", stderr: str = "", exit: int = 0) -> None:
+    def gh_answer(self, args: list[str], stdout: str = "", stderr: str = "", exit: int = 0,
+                  once: bool = False) -> None:
         path = self.root / "gh-answers.json"
         answers = json.loads(path.read_text(encoding="utf-8"))
-        answers.append({"args": args, "stdout": stdout, "stderr": stderr, "exit": exit})
+        answers.append({"args": args, "stdout": stdout, "stderr": stderr, "exit": exit, "once": once})
         path.write_text(json.dumps(answers), encoding="utf-8")
 
     def gh_calls(self) -> list[dict]:
         return read_lines(self.root / "gh-calls.jsonl")
+
+    def gh_reset(self) -> None:
+        """Drop every saved answer and every recorded call."""
+        (self.root / "gh-answers.json").write_text("[]", encoding="utf-8")
+        (self.root / "gh-calls.jsonl").unlink(missing_ok=True)
+
+    def add_record(self, branch: str, event: str, **fields: object) -> None:
+        """Append one event to a branch's records in the layout spec #407 fixes, without the program."""
+        common = Path(self.git(self.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        load("core").append_record(common, branch, event, **fields)
+
+    def save_text(self, branch: str, kind: str, text: str) -> None:
+        """Write a saved text, such as `request.md`, into a branch's records."""
+        common = Path(self.git(self.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        folder = load("core").records_dir(common, branch)
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / f"{kind}.md").write_text(text, encoding="utf-8")
 
 
 def read_lines(path: Path) -> list[dict]:

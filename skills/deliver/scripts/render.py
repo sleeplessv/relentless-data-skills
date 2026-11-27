@@ -47,6 +47,9 @@ MARKER = "<!-- deliver: rendered from the saved records by deliver.py; a hand ed
 NO_DOOR = "the plan has no door line, so it counts as one-way"
 ODD_DOOR = "the plan's door line says neither two-way nor one-way, so it counts as one-way"
 PENDING_BLAST = "pending. `deliver.py ready` runs the small test."
+# The measurement block's opening and closing lines; `merge` finds the block by them.
+MEASUREMENT_OPEN = ("<details><summary>Measurement</summary>", "", "```text")
+MEASUREMENT_CLOSE = ("```", "", "</details>")
 
 
 class Unreadable(Exception):
@@ -195,7 +198,7 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
         out += ["", "Assumptions", ""] + assumptions
     out += ["", "## Findings", "", "No review: small edit."]
     if block:
-        out += ["", "<details><summary>Measurement</summary>", "", "```text"] + block + ["```", "", "</details>"]
+        out += ["", *MEASUREMENT_OPEN, *block, *MEASUREMENT_CLOSE]
     return "\n".join(out) + "\n"
 
 

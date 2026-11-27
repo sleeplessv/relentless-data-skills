@@ -339,7 +339,8 @@ class TestHelpAndList(ProbeKitTest):
             "X6": "X6  cortex, codex, cursor, antigravity  Detection with CLAUDECODE set",
             "X8": "X8  cortex, codex, cursor, antigravity  A typed skill name that is not installed",
             "X9": "X9  codex, cursor, antigravity  Who resolves a typed command for a skill closed to model invocation",
-            "C1": "C1  claude  A plugin from a marketplace loads its skill, agents/ and hooks/hooks.json (not built)",
+            "C1": "C1  claude  A plugin from a marketplace loads its skill, agents/ and hooks/hooks.json",
+            "R4": "R4  cursor  Loading Claude Code plugins",
             "K6": "K6  cortex  The command line loads an installed skill from its description",
             "D3": "D3  codex  Two agent starts in one model step (not built)",
             "R1": "R1  cursor  The IDE chat (not probed, closed by reading 6) (not built)",
@@ -347,7 +348,7 @@ class TestHelpAndList(ProbeKitTest):
         }
         for entry, line in expected.items():
             self.assertEqual(lines[ids.index(entry)], line)
-        self.assertEqual(sum("(not built)" not in line for line in lines), 12)
+        self.assertEqual(sum("(not built)" not in line for line in lines), 16)
 
 
 class TestRuns(ProbeKitTest):
@@ -693,7 +694,11 @@ class TestAgentEntries(ProbeKitTest):
                                           # This world's stand-in reads only an agent prompt and has no uv
                                           # (see TestGuardHook).
                                           "X1 claude failed: harness exited 1\n"
-                                          "X2 claude failed: uv is not on PATH\n"))
+                                          "X2 claude failed: uv is not on PATH\n"
+                                          # It runs no `claude plugin` command (see TestPlugin).
+                                          "C1 claude failed: claude plugin marketplace add exited 1\n"
+                                          "C2 claude failed: harness exited 1\n"
+                                          "C3 claude failed: claude plugin marketplace add exited 1\n"))
         self.assertEqual(self.world.harness_starts()[0]["args"][2:],
                          ["--output-format", "stream-json", "--verbose", "--setting-sources", "project",
                           "--no-session-persistence", "--permission-mode", "acceptEdits",
@@ -1050,8 +1055,13 @@ class TestGuardHook(HookTest):
                               r"X4 claude failed: harness exited 1\n"
                               r"X5 claude failed: harness exited 1\n"
                               r"X1 claude recorded: hook input cwd is the session's directory\n"
-                              r"X2 claude recorded: uv run adds -?\d+ ms a call \(median of 5: \d+ ms, \d+ ms without\)\n$")
+                              r"X2 claude recorded: uv run adds -?\d+ ms a call \(median of 5: \d+ ms, \d+ ms without\)\n"
+                              # It runs no `claude plugin` command (see TestPlugin).
+                              r"C1 claude failed: claude plugin marketplace add exited 1\n"
+                              r"C2 claude failed: harness exited 1\n"
+                              r"C3 claude failed: claude plugin marketplace add exited 1\n$")
         self.assert_private(out, err)
+        self.assert_home_empty()
 
     def test_a5_is_seen_when_the_inner_agy_call_lists_the_probe_hook(self):
         code, out, err = self.world.kit("run", "antigravity", "A5")
@@ -1158,6 +1168,422 @@ class TestX7(HookTest):
         (self.world.bin / "hc").unlink()
         self.assertEqual(self.world.kit("x7", "cursor"), (2, "", "probe_kit: hc is not on PATH\n"))
         self.assertEqual((self.world.hc_calls(), self.world.harness_starts()), ([], []))
+
+
+# C1, C2, C3 and R4 (#387). A stand-in `claude` that keeps `claude plugin`'s state under HOME the way the
+# real one is taken to: known_marketplaces.json, a copy of each marketplace, a cache of each installed
+# plugin, installed_plugins.json, and enabledPlugins in ~/.claude/settings.json. As a session it loads an
+# installed plugin only when --setting-sources names user: it runs the typed plugin skill, starts the
+# plugin's role, sends the shell command to the plugin's hook and runs it. For a project role whose file
+# lists skills, the agent gets the skill's text and writes the marker. Knobs: STANDIN_PLUGIN_FAIL makes
+# those `claude plugin` actions exit 1, comma-separated; STANDIN_OFF leaves those parts unloaded (skill,
+# role, hook, skills); STANDIN_SESSION_READS has the session read the skill file and write the marker;
+# STANDIN_SESSION_WRITES has the session write it with no read shown; STANDIN_UNINSTALL_NEEDS_ENTRY makes
+# uninstall refuse a plugin its marketplace no longer offers; STANDIN_BREAK_SOURCE deletes the probe's
+# marketplace file on install; STANDIN_LOCK leaves the plugin cache folder read-only; STANDIN_SLEEP waits
+# before the session acts.
+PLUGIN_CLAUDE = r'''#!{python}
+import json, os, re, shutil, subprocess, sys, time
+from pathlib import Path
+args, knob = sys.argv[1:], os.environ.get
+home = Path.home() / ".claude"
+plugins = home / "plugins"
+known, installed, settings = plugins / "known_marketplaces.json", plugins / "installed_plugins.json", home / "settings.json"
+with open(knob("STANDIN_CLAUDE_CALLS"), "a") as calls:
+    calls.write(json.dumps(args) + "\n")
+
+
+def load(path, default):
+    return json.loads(path.read_text()) if path.exists() else default
+
+
+def save(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2))
+
+
+def word_of(text):
+    return re.search(r"Write the word (\S+)", text).group(1)
+
+
+if args[0] == "plugin":
+    action, target = " ".join(args[1:3] if args[1] == "marketplace" else args[1:2]), args[-1]
+    if action in (knob("STANDIN_PLUGIN_FAIL") or "").split(","):
+        print("stand-in refusal under " + str(home), file=sys.stderr)
+        sys.exit(1)
+    if action == "marketplace add":
+        name = json.loads((Path(target) / ".claude-plugin" / "marketplace.json").read_text())["name"]
+        save(known, {**load(known, {}), name: {"source": {"source": "directory", "path": target}}})
+        shutil.copytree(target, plugins / "marketplaces" / name)
+    elif action == "marketplace update":
+        shutil.rmtree(plugins / "marketplaces" / target)
+        shutil.copytree(load(known, {})[target]["source"]["path"], plugins / "marketplaces" / target)
+    elif action == "marketplace remove":
+        save(known, {key: value for key, value in load(known, {}).items() if key != target})
+        shutil.rmtree(plugins / "marketplaces" / target, ignore_errors=True)
+    elif action == "install":
+        plugin, market = target.split("@")
+        offered = plugins / "marketplaces" / market
+        source = next(p["source"] for p in json.loads((offered / ".claude-plugin" / "marketplace.json").read_text())[
+            "plugins"] if p["name"] == plugin)
+        path = plugins / "cache" / market / plugin / "1.0.0"
+        shutil.copytree(offered / source, path)
+        if knob("STANDIN_LOCK"):
+            (plugins / "cache").chmod(0o555)
+        if knob("STANDIN_BREAK_SOURCE"):
+            (Path(load(known, {})[market]["source"]["path"]) / ".claude-plugin" / "marketplace.json").unlink()
+        data = load(installed, {"version": 2, "plugins": {}})
+        data["plugins"][target] = [{"scope": "user", "installPath": str(path), "version": "1.0.0"}]
+        save(installed, data)
+        prefs = load(settings, {})
+        prefs.setdefault("enabledPlugins", {})[target] = True
+        save(settings, prefs)
+    elif action == "uninstall":
+        plugin, market = target.split("@")
+        offered = plugins / "marketplaces" / market / ".claude-plugin" / "marketplace.json"
+        listed = offered.exists() and plugin in [p["name"] for p in json.loads(offered.read_text())["plugins"]]
+        data = load(installed, {"version": 2, "plugins": {}})
+        if target not in data["plugins"] or (knob("STANDIN_UNINSTALL_NEEDS_ENTRY") and not listed):
+            sys.exit(1)
+        del data["plugins"][target]
+        save(installed, data)
+        prefs = load(settings, {})
+        prefs.get("enabledPlugins", {}).pop(target, None)
+        save(settings, prefs)
+        shutil.rmtree(plugins / "cache" / market / plugin)
+        (plugins / "cache" / market).rmdir()
+    sys.exit(0)
+prompt, cwd, off = args[args.index("-p") + 1], Path.cwd(), (knob("STANDIN_OFF") or "").split(",")
+sources = args[args.index("--setting-sources") + 1].split(",")
+enabled = load(settings, {}).get("enabledPlugins", {}) if "user" in sources else {}
+roots = [Path(e[0]["installPath"]) for key, e in load(installed, {"plugins": {}})["plugins"].items() if enabled.get(key)]
+with open(knob("STANDIN_STARTS"), "a") as starts:
+    starts.write(json.dumps({
+        "name": "claude", "args": args, "prompt": prompt,
+        "project_skills": sorted(str(p.relative_to(cwd)) for p in cwd.glob(".claude/skills/*/SKILL.md")),
+        "definitions": {str(p.relative_to(cwd)): p.read_text() for p in sorted(cwd.glob(".claude/agents/*"))},
+        "plugins": [sorted(str(p.relative_to(root)) for p in root.rglob("*") if p.is_file()) for root in roots],
+        "plugin_texts": [{str(p.relative_to(root)): p.read_text() for p in root.rglob("*") if p.is_file()}
+                         for root in roots]}) + "\n")
+time.sleep(float(knob("STANDIN_SLEEP", "0")))
+
+
+def emit(**event):
+    print(json.dumps(event), flush=True)
+
+
+emit(type="system", subtype="init", session_id="{session}", cwd=str(cwd))
+typed = re.match(r"/(\S+):(\S+) ", prompt)
+role = re.search(r"of the role (\S+):(\S+) and", prompt)
+for root in roots:
+    name = json.loads((root / ".claude-plugin" / "plugin.json").read_text())["name"]
+    if typed and typed.group(1) == name and "skill" not in off:
+        (cwd / "probe-marker.txt").write_text(word_of((root / "skills" / typed.group(2) / "SKILL.md").read_text()))
+    if role and role.group(1) == name and "role" not in off:
+        task = re.search(r"Write your role word to the file (\S+) in the folder (.+)\. Then run", prompt)
+        word = re.search(r"Your role word is (\S+)\.", (root / "agents" / (role.group(2) + ".md")).read_text())
+        (Path(task.group(2)) / task.group(1)).write_text(word.group(1) + "\n")
+command = re.search(r"shell command `([^`]+)`", prompt)
+if command:
+    for root in [] if "hook" in off else roots:
+        for group in json.loads((root / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]:
+            for hook in group["hooks"]:
+                subprocess.run(hook["command"], shell=True, check=True, text=True, input=json.dumps(
+                    {"hook_event_name": "PreToolUse", "tool_name": "Bash",
+                     "tool_input": {"command": command.group(1)}, "cwd": str(cwd)}))
+    subprocess.run(command.group(1), shell=True, check=True)
+skilled = re.search(r"of the role ([\w-]+) and give it", prompt)
+if skilled:
+    head = (cwd / ".claude" / "agents" / (skilled.group(1) + ".md")).read_text().split("---\n")[1]
+    skill = cwd / ".claude" / "skills" / "probe-standin" / "SKILL.md"
+    emit(type="assistant", parent_tool_use_id=None, message={"content": [
+        {"type": "tool_use", "id": "toolu_1", "name": "Agent", "input": {"subagent_type": skilled.group(1)}}]})
+    writer = "toolu_1"
+    if knob("STANDIN_SESSION_READS"):
+        emit(type="assistant", parent_tool_use_id=None, message={"content": [
+            {"type": "tool_use", "id": "toolu_2", "name": "Read", "input": {"file_path": str(skill)}}]})
+        writer = None
+    if knob("STANDIN_SESSION_WRITES"):
+        writer = None
+    if writer is None or (re.search(r"^skills:\n  - probe-standin$", head, re.M) and "skills" not in off):
+        word = word_of(skill.read_text())
+        (cwd / "probe-marker.txt").write_text(word + "\n")
+        emit(type="assistant", parent_tool_use_id=writer, message={"content": [
+            {"type": "tool_use", "id": "toolu_3", "name": "Write",
+             "input": {"file_path": str(cwd / "probe-marker.txt"), "content": word}}]})
+emit(type="result", session_id="{session}", result="done")
+'''
+
+# R4: a stand-in `cursor-agent` that loads each plugin of Claude Code's installed list STANDIN_CURSOR_LOADS
+# times (default 1): from the cache, then from the marketplace copy. Its init event names each loaded skill
+# file; a typed /probe-standin runs the first; each loaded hook gets the shell command, which then runs
+# unless STANDIN_NO_SHELL is set.
+PLUGIN_CURSOR = r'''#!{python}
+import json, os, re, subprocess, sys
+from pathlib import Path
+args, cwd = sys.argv[1:], Path.cwd()
+prompt = args[-1]
+plugins = Path.home() / ".claude" / "plugins"
+listed = plugins / "installed_plugins.json"
+copies = []
+for key, entries in (json.loads(listed.read_text())["plugins"] if listed.exists() else {}).items():
+    plugin, market = key.split("@")
+    copies += [Path(entries[0]["installPath"]), plugins / "marketplaces" / market / plugin]
+copies = copies[:int(os.environ.get("STANDIN_CURSOR_LOADS", "1"))]
+with open(os.environ["STANDIN_STARTS"], "a") as starts:
+    starts.write(json.dumps({"name": "cursor-agent", "args": args, "prompt": prompt,
+                             "project_skills": sorted(str(p.relative_to(cwd)) for p in cwd.glob(".cursor/skills/*/*"))}) + "\n")
+skills = [str(copy / "skills" / "probe-standin" / "SKILL.md") for copy in copies]
+print(json.dumps({"type": "system", "subtype": "init", "session_id": "{session}", "skills": skills}), flush=True)
+if prompt.startswith("/probe-standin") and skills:
+    word = re.search(r"Write the word (\S+)", Path(skills[0]).read_text()).group(1)
+    (cwd / "probe-marker.txt").write_text(word + "\n")
+command = re.search(r"shell command `([^`]+)`", prompt).group(1)
+for copy in copies:
+    for group in json.loads((copy / "hooks" / "hooks.json").read_text())["hooks"]["PreToolUse"]:
+        for hook in group["hooks"]:
+            subprocess.run(hook["command"], shell=True, check=True, text=True,
+                           input=json.dumps({"command": command, "cwd": str(cwd)}))
+if not os.environ.get("STANDIN_NO_SHELL"):
+    subprocess.run(command, shell=True, check=True)
+print(json.dumps({"type": "result", "session_id": "{session}", "result": "done"}))
+'''
+
+
+class PluginWorld(World):
+    """The world with the plugin stand-ins as `claude` and `cursor-agent`, and python3 first on PATH."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.claude_calls = self.root / "claude.jsonl"
+        for name, text in (("claude", PLUGIN_CLAUDE), ("cursor-agent", PLUGIN_CURSOR)):
+            (self.bin / name).unlink(missing_ok=True)
+            (self.bin / name).write_text(text.replace("{python}", sys.executable).replace("{session}", SESSION))
+            (self.bin / name).chmod(0o755)
+        (self.bin / "python3").symlink_to(sys.executable)
+
+    def env(self, **knobs: str) -> dict[str, str]:
+        return {"STANDIN_CLAUDE_CALLS": str(self.claude_calls), **knobs}
+
+    def kit(self, *args: str, **knobs: str) -> tuple[int, str, str]:
+        return super().kit(*args, **self.env(**knobs))
+
+    def plugin_calls(self) -> list[list[str]]:
+        lines = self.claude_calls.read_text().splitlines() if self.claude_calls.exists() else []
+        return [json.loads(line)[:3] for line in lines if json.loads(line)[0] == "plugin"]
+
+
+MARKET = r"probe-market-[0-9a-f]{8}"
+LEFT_AS_IT_WAS = "probe_kit: the machine was left as it was"
+
+
+def user_level_lines(entry: str) -> str:
+    """What the kit prints on standard error before it changes Claude Code's plugins."""
+    return (rf"probe_kit: {entry} registers the marketplace ({MARKET}) with Claude Code, under ~/\.claude/\n"
+            rf"probe_kit: {entry} installs the plugin probe-plugin@\1 on Claude Code, under ~/\.claude/\n")
+
+
+RAW = r"probe_kit: raw output kept in probes/\d{8}T\d{6}Z-\d+/ of the machine directory\n"
+
+
+class TestPlugin(ProbeKitTest):
+    def setUp(self) -> None:
+        self.world = PluginWorld()
+        self.addCleanup(shutil.rmtree, self.world.root, ignore_errors=True)
+
+    def assert_home_empty(self) -> None:
+        self.assertEqual(sorted(self.world.home.rglob("*")), [])
+
+    def assert_changes_undone(self, entry: str, err: str) -> str:
+        """The two changes named first, the last line, an empty HOME and the folder gone; the marketplace's name."""
+        found = re.fullmatch(user_level_lines(entry) + RAW + LEFT_AS_IT_WAS + "\n", err)
+        self.assertIsNotNone(found, err)
+        self.assert_home_empty()
+        self.assertEqual(list(self.world.tmp.iterdir()), [])
+        self.assert_private(err)
+        return found.group(1)
+
+    def test_help_states_the_user_level_changes_and_how_c1_c2_c3_and_r4_are_judged(self):
+        code, out, err = self.world.kit("--help")
+        self.assertEqual((code, err), (0, ""))
+        text = " ".join(out.split())
+        for fact in ("C1, C3 and R4 change Claude Code's user-level plugins, under ~/.claude/",
+                     "It names each change on standard error before it makes it",
+                     "also after a failure or an interrupt, it uninstalls the plugin, removes the marketplace and "
+                     "deletes what still names it under ~/.claude/",
+                     "The kit's last line then says the machine was left as it was, or names what it could not remove",
+                     "C1 reads the user's settings as well as the project's",
+                     "C2 installs nothing: a project role file names the stand-in skill in its skills list",
+                     "C3 starts no session", "records the exit code and whether the plugin stayed",
+                     "R4 runs Cursor with the typed skill and one shell command"):
+            self.assertIn(fact, text)
+
+    def test_c1_is_seen_when_the_installed_plugin_loads_its_skill_role_file_and_hook(self):
+        code, out, err = self.world.kit("run", "claude", "C1")
+        self.assertEqual((code, out), (0, "C1 claude seen: the installed plugin loaded its skill, role file and hook\n"))
+        market = self.assert_changes_undone("C1", err)
+        source = json.loads(self.world.claude_calls.read_text().splitlines()[0])[3]
+        self.assertEqual(self.world.plugin_calls(), [
+            ["plugin", "marketplace", "add"], ["plugin", "install", f"probe-plugin@{market}"],
+            ["plugin", "uninstall", f"probe-plugin@{market}"], ["plugin", "marketplace", "remove"]])
+        self.assertEqual(Path(source).name, "market")
+        start = self.world.harness_starts()[0]
+        self.assertEqual(start["args"][2:], ["--output-format", "stream-json", "--verbose", "--setting-sources",
+                                             "user,project", "--no-session-persistence", "--permission-mode",
+                                             "acceptEdits", "--allowedTools", "Agent,Read,Write,Edit,Bash,Glob,Grep"])
+        self.assertEqual(start["plugins"], [[".claude-plugin/plugin.json", "agents/probe-plugin-role.md",
+                                             "hooks/hooks.json", "skills/probe-standin/SKILL.md"]])
+        self.assertEqual(start["project_skills"], [])  # the plugin's copy of the skill is the only one
+        texts = start["plugin_texts"][0]
+        codeword = re.search(r"Write the word (\S+)", texts["skills/probe-standin/SKILL.md"]).group(1)
+        role_word = re.search(r"Your role word is (\S+)\.", texts["agents/probe-plugin-role.md"]).group(1)
+        self.assertIn("disable-model-invocation: true", texts["skills/probe-standin/SKILL.md"])
+        for word in (codeword, role_word, market):
+            self.assertNotIn(word, start["prompt"])
+        self.assertTrue(start["prompt"].startswith("/probe-plugin:probe-standin Then start one agent of the role "
+                                                   "probe-plugin:probe-plugin-role "))
+        self.assertNotIn(codeword, texts["agents/probe-plugin-role.md"] + texts["hooks/hooks.json"] + market)
+
+    def test_c1_fails_naming_each_part_of_the_plugin_that_did_not_load_and_still_undoes_its_changes(self):
+        cases = {"role": "role file", "hook": "hook", "skill,hook": "skill and hook",
+                 "skill,role,hook": "skill, role file and hook"}
+        for parts, missing in cases.items():
+            code, out, err = self.world.kit("run", "claude", "C1", STANDIN_OFF=parts)
+            self.assertEqual((code, out), (1, f"C1 claude failed: the installed plugin's {missing} did not load\n"))
+            self.assert_changes_undone("C1", err)
+
+    def test_a_failed_install_or_registration_fails_c1_before_any_session_and_is_undone(self):
+        for action, made in (("install", 2), ("marketplace add", 1)):
+            code, out, err = self.world.kit("run", "claude", "C1", STANDIN_PLUGIN_FAIL=action)
+            self.assertEqual((code, out), (1, f"C1 claude failed: claude plugin {action} exited 1\n"))
+            named = user_level_lines("C1") if made == 2 else user_level_lines("C1").split(r"\n")[0] + r"\n"
+            self.assertRegex(err, "^" + named + RAW + LEFT_AS_IT_WAS + "\n$")
+            self.assert_home_empty()
+            self.assertEqual((self.world.hc_calls(), self.world.harness_starts()), ([], []))
+            self.assertEqual(self.world.plugin_calls()[-2:], [["plugin", "uninstall", self.world.plugin_calls()[-2][2]],
+                                                              ["plugin", "marketplace", "remove"]])
+
+    def test_an_interrupt_during_c1_ends_the_terminal_and_undoes_the_changes(self):
+        import signal
+        env = {"PATH": f"{self.world.bin}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(self.world.home),
+               "DELIVER_STATE_DIR": str(self.world.state), "TMPDIR": str(self.world.tmp),
+               "STANDIN_HC_DIR": str(self.world.hc_dir), "STANDIN_STARTS": str(self.world.starts),
+               "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_SYSTEM": os.devnull, "LANG": "C.UTF-8",
+               **self.world.env(STANDIN_SLEEP="30")}
+        kit = subprocess.Popen([sys.executable, str(KIT), "run", "claude", "C1", "--poll", "0.05"], env=env,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(kit.kill)
+        deadline = time.monotonic() + 20
+        while not self.world.harness_starts() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertTrue((self.world.home / ".claude" / "settings.json").is_file())
+        kit.send_signal(signal.SIGINT)
+        out, err = kit.communicate(timeout=30)
+        self.assertEqual((kit.returncode, out), (130, ""))
+        self.assertRegex(err, "^" + user_level_lines("C1") + LEFT_AS_IT_WAS + "\n$")
+        self.assert_home_empty()
+        self.assertEqual(self.world.hc_calls()[-1][:1], ["kill"])
+        self.assertEqual(list(self.world.tmp.iterdir()), [])
+
+    def test_the_last_line_names_what_could_not_be_removed(self):
+        cache = self.world.home / ".claude" / "plugins" / "cache"
+        self.addCleanup(lambda: cache.exists() and cache.chmod(0o755))
+        code, out, err = self.world.kit("run", "claude", "C1", STANDIN_LOCK="1")
+        self.assertEqual((code, out), (0, "C1 claude seen: the installed plugin loaded its skill, role file and hook\n"))
+        self.assertRegex(err, "^" + user_level_lines("C1") + RAW + r"probe_kit: could not remove "
+                         r"~/\.claude/plugins/cache/\1; remove by hand\n$")
+        self.assertEqual(sorted(str(p.relative_to(self.world.home)) for p in self.world.home.rglob("*")),
+                         [".claude", ".claude/plugins", ".claude/plugins/cache",
+                          ".claude/plugins/cache/" + re.search(MARKET, err).group(0)])
+        self.assert_private(out, err)
+
+    def test_c2_is_seen_when_an_agent_of_the_role_writes_the_codeword_its_file_loaded_and_installs_nothing(self):
+        code, out, err = self.world.kit("run", "claude", "C2")
+        self.assertEqual((code, out), (0, "C2 claude seen: an agent of the role wrote the codeword only the skill holds\n"))
+        self.assertRegex(err, "^" + RAW + "$")
+        self.assertEqual(self.world.plugin_calls(), [])
+        self.assert_home_empty()
+        start = self.world.harness_starts()[0]
+        self.assertEqual(start["args"][4:6], ["--verbose", "--setting-sources"])
+        self.assertEqual(start["args"][6], "project")
+        self.assertEqual(start["project_skills"], [".claude/skills/probe-standin/SKILL.md"])
+        role = start["definitions"][".claude/agents/probe-skilled.md"]
+        self.assertIn("\nskills:\n  - probe-standin\n", role)
+        codeword = re.search(r"probe-[0-9a-f]{8}", self.world.saved()["C2-claude.jsonl"]).group(0)
+        for text in (role, start["prompt"]):
+            self.assertNotIn(codeword, text)
+        self.assertEqual(start["prompt"], "Start one agent of the role probe-skilled and give it this line, word for "
+                         "word, as its whole prompt: Follow the skill you were given, in the folder "
+                         + start["prompt"].split("in the folder ")[1])
+
+    def test_c2_fails_unless_the_agent_got_the_codeword_without_a_read_of_the_skill_file(self):
+        cases = {"STANDIN_OFF": ("skills", "no marker holds the skill's codeword"),
+                 "STANDIN_SESSION_READS": ("1", "a tool read the skill file, so the codeword need not have come "
+                                                "through the role file"),
+                 "STANDIN_SESSION_WRITES": ("1", "no event of the agent's holds the codeword")}
+        for name, (value, fact) in cases.items():
+            code, out, err = self.world.kit("run", "claude", "C2", **{name: value})
+            self.assertEqual((code, out), (1, f"C2 claude failed: {fact}\n"))
+            self.assert_private(out, err)
+
+    def test_c3_records_what_uninstall_does_once_the_marketplace_no_longer_offers_the_plugin(self):
+        for knobs, fact in (({}, "uninstall exited 0 and the plugin is gone"),
+                            ({"STANDIN_UNINSTALL_NEEDS_ENTRY": "1"}, "uninstall exited 1 and the plugin stayed")):
+            self.world.claude_calls.unlink(missing_ok=True)
+            code, out, err = self.world.kit("run", "claude", "C3", **knobs)
+            self.assertEqual((code, out), (0, f"C3 claude recorded: {fact}\n"))
+            market = self.assert_changes_undone("C3", err)
+            self.assertEqual(self.world.plugin_calls(), [
+                ["plugin", "marketplace", "add"], ["plugin", "install", f"probe-plugin@{market}"],
+                ["plugin", "marketplace", "update"], ["plugin", "uninstall", f"probe-plugin@{market}"],
+                ["plugin", "uninstall", f"probe-plugin@{market}"], ["plugin", "marketplace", "remove"]])
+            self.assertEqual((self.world.hc_calls(), self.world.harness_starts()), ([], []))
+
+    def test_c3_fails_when_the_marketplace_update_fails_or_the_probe_raises_and_still_undoes_its_changes(self):
+        for knobs, fact in (({"STANDIN_PLUGIN_FAIL": "marketplace update"},
+                             "claude plugin marketplace update exited 1"),
+                            ({"STANDIN_BREAK_SOURCE": "1"}, "the probe stopped on FileNotFoundError")):
+            code, out, err = self.world.kit("run", "claude", "C3", **knobs)
+            self.assertEqual((code, out), (1, f"C3 claude failed: {fact}\n"))
+            self.assert_changes_undone("C3", err)
+
+    def test_r4_records_how_often_cursor_shows_the_installed_plugin_s_skill_and_fires_its_hook(self):
+        for loads, fact in (("1", "skill file in the output once, skill ran, hook fired once"),
+                            ("2", "skill file in the output twice, skill ran, hook fired twice"),
+                            ("0", "skill file in the output not at all, skill did not run, hook fired not at all")):
+            code, out, err = self.world.kit("run", "cursor", "R4", STANDIN_CURSOR_LOADS=loads)
+            self.assertEqual((code, out), (0, f"R4 cursor recorded: {fact}\n"))
+            self.assert_changes_undone("R4", err)
+        start = self.world.harness_starts()[0]
+        self.assertEqual(start["prompt"], "/probe-standin Then run the shell command `echo probe-r4 > probe-r4.txt`.")
+        self.assertEqual(start["project_skills"], [])  # only the plugin's copy could show
+        self.assertEqual(start["args"][:5], ["-p", "--output-format", "stream-json", "--force", start["prompt"]])
+
+    def test_r4_fails_when_the_command_did_not_run_or_claude_is_missing(self):
+        code, out, err = self.world.kit("run", "cursor", "R4", STANDIN_NO_SHELL="1")
+        self.assertEqual((code, out), (1, "R4 cursor failed: the shell command did not run, so the hook count "
+                                          "says nothing\n"))
+        self.assert_changes_undone("R4", err)
+        (self.world.bin / "claude").unlink()
+        code, out, err = self.world.kit("run", "cursor", "R4")
+        self.assertEqual((code, out), (1, "R4 cursor failed: claude is not on PATH\n"))
+        self.assertRegex(err, "^" + RAW + "$")  # nothing was changed, so no line about the machine
+        self.assert_home_empty()
+
+    def test_all_on_cursor_and_claude_runs_the_plugin_entries_with_their_own_lines(self):
+        code, out, err = self.world.kit("run", "cursor", "all")
+        self.assertEqual(code, 1)
+        self.assertEqual(out.splitlines()[-1], "R4 cursor recorded: skill file in the output once, skill ran, "
+                                               "hook fired once")
+        self.assertEqual(err.splitlines()[-1], LEFT_AS_IT_WAS)
+        code, out, err = self.world.kit("run", "claude", "all")
+        self.assertEqual(out.splitlines()[-3:], [
+            "C1 claude seen: the installed plugin loaded its skill, role file and hook",
+            "C2 claude seen: an agent of the role wrote the codeword only the skill holds",
+            "C3 claude recorded: uninstall exited 0 and the plugin is gone"])
+        self.assertEqual(err.splitlines()[-1], LEFT_AS_IT_WAS)
+        self.assert_home_empty()
+        self.assert_private(out, err)
 
 
 if __name__ == "__main__":

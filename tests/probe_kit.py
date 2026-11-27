@@ -61,6 +61,29 @@ to the agent's tool call; the rest prints as not tied to the agent. A field the
 output lacks prints as absent, and a token count the output leaves empty or out
 prints blank, never as 0.
 
+C1, C3 and R4 change Claude Code's user-level plugins, under ~/.claude/. Each
+writes a stand-in plugin (the stand-in skill, one role file in agents/ and a
+hook in hooks/hooks.json that logs each input) and a local marketplace that
+offers it into the probe's temporary folder, and removes the project's copy of
+the skill. It names each change on standard error before it makes it, then runs
+`claude plugin marketplace add` and `claude plugin install`. On the way out,
+also after a failure or an interrupt, it uninstalls the plugin, removes the
+marketplace and deletes what still names it under ~/.claude/. The kit's last
+line then says the machine was left as it was, or names what it could not
+remove. C1 reads the user's settings as well as the project's, because the
+installed plugin is a user-level setting. It types the plugin's skill, starts
+one agent of the plugin's role and runs one shell command. It is seen when the
+marker holds the skill's codeword, the role-word file holds the word only the
+role file holds, and the plugin's hook logged the command. C2 installs nothing:
+a project role file names the stand-in skill in its skills list. It is seen
+when the marker holds the codeword, an event of the agent's holds it, and no
+tool read the skill file. C3 starts no session. It drops the plugin from the
+marketplace, runs `claude plugin marketplace update`, then `claude plugin
+uninstall`, and records the exit code and whether the plugin stayed. R4 runs
+Cursor with the typed skill and one shell command. It records how many paths
+of the skill file the output names, whether the skill ran, and how many times
+the plugin's hook logged the command.
+
 Cortex Code needs --connection, the Snowflake connection its runs spend. The kit
 passes it on the harness's command line only: it is not in the terminal name, it
 is replaced by <connection> before any output reaches a file, the hook writes
@@ -244,6 +267,7 @@ class Probe:
     hook: bool = False  # the folder gets the stand-in guard hook, its registration and the stand-in commands
     direct: bool = False  # judged without a terminal or a harness session
     setup: Callable[[str, Path, str], None] | None = None  # writes the entry's stand-ins: harness, folder, codeword
+    command: list[str] | None = None  # the headless command, when the entry needs another than the harness's
 
 
 UNTYPED = "Record a probe run for the probe kit."
@@ -507,11 +531,9 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
     root = make_folder(harness, codeword)
     if probe.hook:
         write_guard(harness, root / "work")
-    if probe.setup is not None:
-        probe.setup(harness, root / "work", codeword)
     out, err = root / "out.jsonl", root / "err.txt"
     prompt = probe.prompt(harness).replace("{work}", str(root / "work"))
-    argv = [part.replace("{prompt}", prompt) for part in COMMANDS[harness]]
+    argv = [part.replace("{prompt}", prompt) for part in probe.command or COMMANDS[harness]]
     if harness == "cortex":
         argv += ["-c", args.connection]
     if probe.hook and harness == "codex":
@@ -523,6 +545,8 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
     name = f"probe-{harness}-{entry.lower()}-{os.getpid()}"
     address, ended = None, False
     try:
+        if probe.setup is not None:
+            probe.setup(harness, root / "work", codeword)
         if probe.direct:
             return probe.judge(harness, Finished(root / "work", "", None, codeword))
         started = hc("run", "--bg", "--no-notify", "--name", name, "--cwd", str(root / "work"), "bash", "-c", line)
@@ -545,9 +569,12 @@ def run_probe(harness: str, entry: str, args: argparse.Namespace, saved: Path) -
         if finished.exit_code != 0 and not probe.any_exit:
             return "failed", f"harness exited {finished.exit_code}"
         return probe.judge(harness, finished)
+    except SetupFailed as error:
+        return "failed", str(error)
     finally:
         if address is not None and not ended:
             hc("kill", address)  # interrupted while waiting: end the terminal
+        USER_LEVEL["left"] += undo_user_level()
         shutil.rmtree(root, ignore_errors=True)
 
 
@@ -584,7 +611,10 @@ def run(args: argparse.Namespace) -> int:
     saved.mkdir(mode=0o700, parents=True)
     failed = False
     for entry in entries:
-        verdict, fact = run_probe(args.harness, entry, args, saved)
+        try:
+            verdict, fact = run_probe(args.harness, entry, args, saved)
+        except Exception as error:  # a traceback would print local paths; the clean-up has run
+            verdict, fact = "failed", f"the probe stopped on {type(error).__name__}"
         failed |= verdict == "failed"
         print(f"{entry} {args.harness} {verdict}: {fact}", flush=True)
     print(f"probe_kit: raw output kept in probes/{run_id}/ of the machine directory", file=sys.stderr)
@@ -846,6 +876,232 @@ def x7(args: argparse.Namespace) -> int:
     return 0
 
 
+# C1, C2, C3 and R4 (#387): the stand-in plugin, offered by a local marketplace in the probe folder and
+# installed on Claude Code. C1, C3 and R4 are the only entries here that change anything outside the
+# probe folder (spec #381, reading 4): the marketplace registration and the installed plugin, which
+# Claude Code keeps under ~/.claude/. C2 installs nothing.
+PLUGIN = "probe-plugin"
+PLUGIN_ROLE = "probe-plugin-role"
+SKILLED_ROLE = "probe-skilled"
+ROLE_OUT = "probe-role-word.txt"
+R4_RAN = "probe-r4.txt"
+PLUGIN_LOG = "logs/plugin-hook.jsonl"
+HOOK_LOGGER = 'import json, sys\nwith open({log!r}, "a") as log:\n    log.write(json.dumps({{"input": sys.stdin.read()}}) + "\\n")\n'
+# The installed plugin is a user-level setting, which --setting-sources project leaves out.
+PLUGIN_COMMAND = [part if part != "project" else "user,project" for part in COMMANDS["claude"]]
+USER_LEVEL: dict[str, list[str]] = {"made": [], "left": []}  # the marketplaces made, what could not be removed
+PENDING: list[tuple[str, set[Path]]] = []  # each marketplace to undo, with what ~/.claude held before it
+
+
+class SetupFailed(Exception):
+    """A stand-in the entry needs could not be made: the entry fails with this fact."""
+
+
+def listed(items: list[str]) -> str:
+    return " and ".join(items) if len(items) < 3 else ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def times(count: int) -> str:
+    return {0: "not at all", 1: "once", 2: "twice"}.get(count, f"{count} times")
+
+
+def claude_home() -> Path:
+    return Path.home() / ".claude"
+
+
+def near(home: Path) -> list[Path]:
+    """~/.claude, its settings file and ~/.claude/plugins two levels down: where a marketplace and a plugin land."""
+    plugins = home / "plugins"
+    found = [home, home / "settings.json", plugins, *plugins.glob("*"), *plugins.glob("*/*")]
+    return [path for path in dict.fromkeys(found) if path.exists() or path.is_symlink()]
+
+
+def names(path: Path, text: str) -> bool:
+    return text in path.name or (path.suffix == ".json" and path.is_file() and text in path.read_text(errors="replace"))
+
+
+def scrub(value: object, market: str) -> object:
+    """The JSON value without the keys, items and string values that name the marketplace."""
+    if isinstance(value, dict):
+        return {key: scrub(item, market) for key, item in value.items()
+                if market not in key and not (isinstance(item, str) and market in item)}
+    if isinstance(value, list):
+        return [scrub(item, market) for item in value if not (isinstance(item, str) and market in item)]
+    return value
+
+
+def hollow(value: object) -> bool:
+    """Whether every list and object in the JSON value is empty."""
+    if isinstance(value, dict):
+        return all(hollow(item) for item in value.values())
+    return value == [] if isinstance(value, list) else True
+
+
+def plugin_cli(*args: str) -> int:
+    """`claude plugin ...`; its output can hold local paths, so none of it is printed."""
+    return subprocess.run(["claude", "plugin", *args], capture_output=True, text=True, check=False,
+                          stdin=subprocess.DEVNULL, timeout=120).returncode
+
+
+def undo_user_level() -> list[str]:
+    """Uninstall each pending plugin, remove its marketplace, delete what still names it; what could not go, with ~."""
+    left = []
+    while PENDING:
+        market, before = PENDING.pop()
+        for args in (("uninstall", f"{PLUGIN}@{market}"), ("marketplace", "remove", market)):
+            try:
+                plugin_cli(*args)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        home = claude_home()
+        for path in sorted(near(home), key=lambda p: len(p.parts), reverse=True):  # a folder after what it holds
+            try:
+                if market in path.name:
+                    if path.is_dir() and not path.is_symlink():
+                        shutil.rmtree(path)
+                    else:
+                        path.unlink()
+                elif path.suffix == ".json" and path.is_file():
+                    data = json.loads(path.read_text())
+                    kept = scrub(data, market)
+                    if path not in before and hollow(kept):
+                        path.unlink()  # a file the install made, now holding nothing
+                    elif kept != data:
+                        path.write_text(json.dumps(kept, indent=2) + "\n")
+                elif path.is_dir() and path not in before and not any(path.iterdir()):
+                    path.rmdir()
+            except (OSError, ValueError):
+                pass
+        left += ["~/" + str(p.relative_to(Path.home())) for p in near(home) if names(p, market)]
+    return left
+
+
+def write_plugin(folder: Path, work: Path, codeword: str, role_word: str) -> None:
+    """The stand-in skill, one role file in agents/ and a hook in hooks/hooks.json that logs each input."""
+    for part in (".claude-plugin", f"skills/{SKILL}", "agents", "hooks"):
+        (folder / part).mkdir(parents=True)
+    (folder / ".claude-plugin" / "plugin.json").write_text(json.dumps(
+        {"name": PLUGIN, "version": "1.0.0", "description": "Stand-in plugin for the probe kit."}, indent=2) + "\n")
+    (folder / "skills" / SKILL / "SKILL.md").write_text(SKILL_TEXT.format(name=SKILL, marker=MARKER, codeword=codeword))
+    (folder / "agents" / f"{PLUGIN_ROLE}.md").write_text(role_file("claude", PLUGIN_ROLE, "plugin role", None, role_word))
+    logger = work.parent / "plugin-hook.py"
+    logger.write_text(HOOK_LOGGER.format(log=str(work / PLUGIN_LOG)))
+    (work / PLUGIN_LOG).parent.mkdir(exist_ok=True)
+    hooks = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        {"type": "command", "command": f"python3 {shlex.quote(str(logger))}"}]}]}}
+    (folder / "hooks" / "hooks.json").write_text(json.dumps(hooks, indent=2) + "\n")
+
+
+def setup_plugin(entry: str) -> Callable[[str, Path, str], None]:
+    """The plugin and its marketplace beside the folder, registered and installed, each change named first."""
+    def setup(harness: str, work: Path, codeword: str) -> None:
+        if shutil.which("claude") is None:
+            raise SetupFailed("claude is not on PATH")
+        market = f"probe-market-{secrets.token_hex(4)}"  # not the codeword, which only the skill holds
+        WORDS[codeword] = {"role": f"role-{secrets.token_hex(4)}", "market": market}
+        shutil.rmtree(work / SKILL_DIRS[harness] / SKILL)  # the plugin's copy of the skill is the only one
+        source = work.parent / "market"
+        write_plugin(source / PLUGIN, work, codeword, WORDS[codeword]["role"])
+        (source / ".claude-plugin").mkdir()
+        (source / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+            {"name": market, "owner": {"name": "probe kit"},
+             "plugins": [{"name": PLUGIN, "source": f"./{PLUGIN}", "description": "Stand-in plugin."}]}, indent=2) + "\n")
+        PENDING.append((market, set(near(claude_home()))))
+        USER_LEVEL["made"].append(market)
+        for change, args in ((f"registers the marketplace {market} with", ("marketplace", "add", str(source))),
+                             (f"installs the plugin {PLUGIN}@{market} on", ("install", f"{PLUGIN}@{market}"))):
+            print(f"probe_kit: {entry} {change} Claude Code, under ~/.claude/", file=sys.stderr, flush=True)
+            code = plugin_cli(*args)
+            if code != 0:
+                raise SetupFailed(f"claude plugin {' '.join(args[:-1])} exited {code}")
+    return setup
+
+
+def setup_skilled_role(harness: str, work: Path, codeword: str) -> None:
+    """A project role file that names the stand-in skill in its skills list, and no codeword."""
+    folder = work / DEFINITION_DIRS[harness]
+    folder.mkdir(parents=True)
+    (folder / f"{SKILLED_ROLE}.md").write_text(
+        f"---\nname: {SKILLED_ROLE}\ndescription: Stand-in role for the probe kit. Start it only when asked for "
+        f"{SKILLED_ROLE} by name.\nskills:\n  - {SKILL}\n---\n\nYou are the probe kit's stand-in role. Do what "
+        "your prompt asks, with the skill this file gives you.\n")
+
+
+def plugin_hook_calls(work: Path, command: str) -> int:
+    """The plugin hook's log lines whose input names the command."""
+    log = work / PLUGIN_LOG
+    lines = log.read_text(errors="replace").splitlines() if log.is_file() else []
+    return sum(command in line for line in lines)
+
+
+def strings(value: object):
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict | list):
+        for item in value.values() if isinstance(value, dict) else value:
+            yield from strings(item)
+
+
+def judge_c1(harness: str, run: Finished) -> tuple[str, str]:
+    role = run.work / ROLE_OUT
+    loaded = {"skill": run.marker_holds_codeword(),
+              "role file": role.is_file() and WORDS[run.codeword]["role"] in role.read_text(errors="replace").split(),
+              "hook": plugin_hook_calls(run.work, "echo probe-c1") > 0}
+    missing = [part for part, seen in loaded.items() if not seen]
+    if missing:
+        return "failed", f"the installed plugin's {listed(missing)} did not load"
+    return "seen", "the installed plugin loaded its skill, role file and hook"
+
+
+def judge_c2(harness: str, run: Finished) -> tuple[str, str]:
+    if not run.marker_holds_codeword():
+        return "failed", "no marker holds the skill's codeword"
+    events = events_of(run.out)
+    if reads_skill_file(events):
+        return "failed", "a tool read the skill file, so the codeword need not have come through the role file"
+    if not any(event.get("parent_tool_use_id") and run.codeword in json.dumps(event) for event in events):
+        return "failed", "no event of the agent's holds the codeword"
+    return "seen", "an agent of the role wrote the codeword only the skill holds"
+
+
+def judge_c3(harness: str, run: Finished) -> tuple[str, str]:
+    """Drop the plugin from the marketplace, update it, then uninstall the plugin and record what stayed."""
+    market = WORDS[run.codeword]["market"]
+    listing = run.work.parent / "market" / ".claude-plugin" / "marketplace.json"
+    offered = json.loads(listing.read_text())
+    listing.write_text(json.dumps({**offered, "plugins": []}, indent=2) + "\n")
+    code = plugin_cli("marketplace", "update", market)
+    if code != 0:
+        return "failed", f"claude plugin marketplace update exited {code}"
+    code = plugin_cli("uninstall", f"{PLUGIN}@{market}")
+    stayed = (claude_home() / "plugins" / "cache" / market / PLUGIN).exists() or any(
+        names(path, f"{PLUGIN}@{market}") for path in near(claude_home()))
+    return "recorded", f"uninstall exited {code} and the plugin {'stayed' if stayed else 'is gone'}"
+
+
+def judge_r4(harness: str, run: Finished) -> tuple[str, str]:
+    if not (run.work / R4_RAN).is_file():
+        return "failed", "the shell command did not run, so the hook count says nothing"
+    shown = {text for text in strings(events_of(run.out)) if text.endswith(f"/{SKILL}/SKILL.md")}
+    return "recorded", (f"skill file in the output {times(len(shown))}, skill "
+                        f"{'ran' if run.marker_holds_codeword() else 'did not run'}, hook fired "
+                        f"{times(plugin_hook_calls(run.work, 'echo probe-r4'))}")
+
+
+PROBES.update({
+    "C1": Probe(lambda h: (f"/{PLUGIN}:{SKILL} Then start one agent of the role {PLUGIN}:{PLUGIN_ROLE} and give it "
+                           f"this line, word for word, as its whole prompt: Write your role word to the file "
+                           f"{ROLE_OUT} in the folder {{work}}. Then run the shell command `echo probe-c1`."),
+                judge_c1, setup=setup_plugin("C1"), command=PLUGIN_COMMAND),
+    "C2": Probe(lambda h: (f"Start one agent of the role {SKILLED_ROLE} and give it this line, word for word, as its "
+                           "whole prompt: Follow the skill you were given, in the folder {work}. Do not open any "
+                           "skill file yourself, and do nothing else."), judge_c2, setup=setup_skilled_role),
+    "C3": Probe(lambda h: "", judge_c3, setup=setup_plugin("C3"), direct=True),
+    "R4": Probe(lambda h: f"/{SKILL} Then run the shell command `echo probe-r4 > {R4_RAN}`.", judge_r4,
+                setup=setup_plugin("R4")),
+})
+
+
 def show_list() -> int:
     for entry, (harnesses, what) in ENTRIES.items():
         built = "" if entry in PROBES or entry == "X7" else " (not built)"
@@ -877,6 +1133,13 @@ def main(argv: list[str] | None = None) -> int:
     except KitError as error:
         print(f"probe_kit: {error}", file=sys.stderr)
         return 2
+    except KeyboardInterrupt:  # the probe's clean-up has run
+        return 130
+    finally:
+        if USER_LEVEL["made"]:  # the last line, after every other
+            left = USER_LEVEL["left"]
+            print(f"probe_kit: could not remove {listed(left)}; remove by hand" if left
+                  else "probe_kit: the machine was left as it was", file=sys.stderr)
 
 
 if __name__ == "__main__":

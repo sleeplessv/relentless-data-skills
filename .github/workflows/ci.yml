@@ -40,9 +40,23 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PUSH_BASE: ${{ github.event.before }}
+          PR_BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
+          # A PR into the default branch compares with its base tip (HEAD^1).
+          # A PR into another branch, such as an integration branch, compares
+          # with the merge base of the merge result and the default branch, as
+          # scripts/check.sh does: a skill that is new there keeps its launch
+          # version until the branch merges.
           case "$EVENT_NAME" in
-            pull_request) baseline=$(git rev-parse HEAD^1) ;;
+            pull_request)
+              if [ "$PR_BASE_REF" = "$DEFAULT_BRANCH" ]; then
+                baseline=$(git rev-parse HEAD^1)
+              else
+                git rev-parse -q --verify "origin/$DEFAULT_BRANCH" >/dev/null ||
+                  git fetch --no-tags origin "$DEFAULT_BRANCH:refs/remotes/origin/$DEFAULT_BRANCH"
+                baseline=$(git merge-base HEAD "origin/$DEFAULT_BRANCH")
+              fi ;;
             push) baseline="$PUSH_BASE" ;;
             *) baseline="$GITHUB_SHA" ;;
           esac

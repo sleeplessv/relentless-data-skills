@@ -13,6 +13,7 @@ the [compatible pair described below](#implementation-workflow-updates).
 | [`astra-review`](skills/astra-review/) | Get a ponytail review of a change from Astra, the Codex CLI on an Astra model, in a Herdr tab, then fix the findings that hold up. |
 | [`candidate-to-spec`](skills/candidate-to-spec/) | Turn deepening candidates from an architecture review into approved specs and ready-for-agent tickets. |
 | [`dbt-runner`](skills/dbt-runner/) | Run dbt commands and diagnose failures with project setup checks and captured output. |
+| [`deliver`](skills/deliver/) | Take a change from request to pull request through one tested program, with preflight, guards and saved evidence. |
 | [`dlt-bootstrap`](skills/dlt-bootstrap/) | Set up dlt projects with the dltHub AI Harness and Relentless Data conventions. |
 | [`dossier`](skills/dossier/) | Write dossiers: single-file HTML documents that explain a system, process, finding or decision through numbered figures and tables, in one locked house style. |
 | [`fabric-lineage-dag`](skills/fabric-lineage-dag/) | Build interactive lineage graphs and coverage reports from Microsoft Fabric workspaces exported to Git. |
@@ -214,8 +215,20 @@ A run without `--fast` waits its turn behind any other such run of this clone
 and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) explains.
 
 - `python3 -m unittest discover -s tests -v` runs the repository's Python tests.
-- `python3 scripts/lint_skill.py` checks skill frontmatter, invocation triggers,
-  description lengths, line budgets, and YAML-safe values.
+- `python3 scripts/lint_skill.py` checks each skill under `skills/` for:
+  - a SKILL.md that opens with a closed `---` YAML frontmatter block, non-empty
+    `name` and `description` keys, and no key outside `ALLOWED_KEYS`;
+  - YAML-safe frontmatter values;
+  - a "Use when" trigger clause in the description, which a skill with
+    `disable-model-invocation: true` must not have;
+  - a description of at most 1024 characters and a SKILL.md of at most 150 lines;
+  - no `$` followed by a digit or `ARGUMENTS` in SKILL.md, with or without a backslash
+    (item 19 of
+    [the skill authoring checklist](docs/research/skill-authoring-best-practices.md#c-invocation-control)
+    gives the reason);
+  - no outward side-effect command, such as `git push` or `gh pr merge`, in any text
+    file in a model-invocable skill's folder, unless the skill is listed in
+    `SIDE_EFFECT_ALLOWLIST`.
 - `python3 scripts/word_count.py` counts the words of each row of
   `docs/path-map.toml` and fails when a row is over its limit, lists a missing
   file, or lists a script.
@@ -225,7 +238,9 @@ and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) e
   and README skills table match each skill's `plugin.json`.
 - `python3 scripts/skill_versions.py --check --base origin/main` checks skill
   versions against the fetched `main` branch. CI compares the proposed merge
-  with its base branch, or a push with its previous commit. Scheduled and manual
+  with its base branch, or a push with its previous commit. A PR into a branch
+  other than `main`, such as an integration branch, is compared with its merge
+  base with `main`, as `scripts/check.sh` does. Scheduled and manual
   runs validate current metadata without requiring a historical bump.
 
 After editing a skill's `plugin.json`, run

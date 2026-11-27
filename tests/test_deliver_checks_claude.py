@@ -42,7 +42,7 @@ PLUGIN = deliver_kit.REPO_ROOT / "skills" / "deliver"
 SNOWMAN = deliver_kit.REPO_ROOT / "skills" / "snowman"
 DELIVER_KEY = "deliver@relentless-data-skills"
 RERUN = "then run deliver.py preflight"
-EFFORT = ("CLAUDE_CODE_EFFORT_LEVEL is unset, so the session runs at Claude Code's default effort")
+EFFORT = "CLAUDE_CODE_EFFORT_LEVEL is unset"
 
 
 def recorded(name: str, **places: Path) -> str:
@@ -139,14 +139,14 @@ class Checks(unittest.TestCase):
 
     # Hooks switched off.
 
-    def test_hooks_off_in_project_settings(self):
+    def test_hooks_off_in_project_settings_not_yet_seen(self):
         path = self.home.settings("project", disableAllHooks=True)
         self.assertEqual(self.refused(claude.check_hooks_on(self.ctx)), [
             f"REFUSED preflight.hooks-off: Claude Code's hooks are switched off: {path} sets disableAllHooks",
             f'Next: set "disableAllHooks": false in {path}, {RERUN}',
         ])
 
-    def test_hooks_off_in_local_settings(self):
+    def test_hooks_off_in_local_settings_not_yet_seen(self):
         path = self.home.settings("local", disableAllHooks=True)
         self.assertEqual(claude.check_hooks_on(self.ctx).fields["path"], str(path))
 
@@ -154,11 +154,11 @@ class Checks(unittest.TestCase):
         self.home.settings(str(self.managed), disableAllHooks=True)
         self.assertEqual(claude.check_hooks_on(self.ctx).fields["path"], str(self.managed))
 
-    def test_hooks_off_value_that_is_not_false_stops(self):
+    def test_hooks_off_value_that_is_not_false_stops_not_yet_seen(self):
         self.home.settings("user", disableAllHooks="true")
         self.assertEqual(claude.check_hooks_on(self.ctx).code, "preflight.hooks-off")
 
-    def test_hooks_on_when_false_or_absent_in_every_file(self):
+    def test_hooks_on_when_false_or_absent_in_every_file_not_yet_seen(self):
         self.assertIsNone(claude.check_hooks_on(self.ctx))
         for scope in ("user", "project", "local", str(self.managed)):
             self.home.settings(scope, disableAllHooks=False)
@@ -190,7 +190,7 @@ class Checks(unittest.TestCase):
         write(self.home.claude / "settings.json", recorded("user-settings.json", home=self.home.home))
         self.assertIsNone(claude.check_shell_hooks(self.ctx))
 
-    def test_snowman_guard_from_its_plugin_passes(self):
+    def test_snowman_guard_from_its_plugin_passes_not_yet_seen(self):
         self.home.plugin("snowman", (SNOWMAN / "hooks" / "hooks.json").read_text())
         self.assertIsNone(claude.check_shell_hooks(self.ctx))
 
@@ -237,6 +237,59 @@ class Checks(unittest.TestCase):
         self.home.plugin("audit", hook("${CLAUDE_PLUGIN_ROOT}/audit.sh"), enabled=None)
         self.home.plugin("other", hook("${CLAUDE_PLUGIN_ROOT}/other.sh"), enabled=False)
         self.assertIsNone(claude.check_shell_hooks(self.ctx))
+
+    def test_plugin_hooks_its_manifest_names_not_yet_seen(self):
+        root = self.home.plugin("audit", {}).parent.parent
+        audit = write(root / "config" / "audit.json", json.dumps(hook("/opt/tools/audit.sh")))
+        manifest = root / ".claude-plugin" / "plugin.json"
+        for given, path in (("./config/audit.json", audit), (["./config/audit.json"], audit),
+                            (hook("/opt/tools/audit.sh")["hooks"], manifest), (hook("/opt/tools/audit.sh"), manifest)):
+            with self.subTest(given=given):
+                write(manifest, json.dumps({"name": "audit", "hooks": given}))
+                self.assertEqual(self.refused(claude.check_shell_hooks(self.ctx))[0],
+                                 "REFUSED preflight.unknown-hook: a hook deliver does not know runs on shell commands: "
+                                 f"{path} registers /opt/tools/audit.sh")
+
+    def test_plugin_hook_source_that_cannot_be_read_stops_not_yet_seen(self):
+        root = self.home.plugin("audit", {}).parent.parent
+        manifest = root / ".claude-plugin" / "plugin.json"
+        for given, path, error in (("./config/gone.json", root / "config" / "gone.json",
+                                    "the plugin's manifest names it, and it does not exist"),
+                                   (7, manifest, "hooks is not a path, an object or a list of them")):
+            with self.subTest(given=given):
+                write(manifest, json.dumps({"name": "audit", "hooks": given}))
+                self.assertEqual(self.refused(claude.check_shell_hooks(self.ctx))[0],
+                                 f"REFUSED preflight.claude-unreadable: Claude Code's file {path} cannot be read: {error}")
+
+    def test_plugin_turned_off_in_a_more_specific_file_passes(self):
+        self.home.plugin("audit", hook("${CLAUDE_PLUGIN_ROOT}/audit.sh"))
+        for scope in ("project", "local", str(self.managed)):
+            with self.subTest(scope=scope):
+                path = self.home.settings(scope, enabledPlugins={"audit@market": False})
+                self.assertIsNone(claude.check_shell_hooks(self.ctx))
+                path.unlink()
+        self.home.settings("project", enabledPlugins={"audit@market": False})
+        self.home.settings("local", enabledPlugins={"audit@market": True})
+        self.assertEqual(claude.check_shell_hooks(self.ctx).code, "preflight.unknown-hook")
+
+    def test_enabled_plugins_value_that_is_not_true_or_false_stops(self):
+        path = self.home.settings("user", enabledPlugins={"audit@market": "true"})
+        self.assertEqual(self.refused(claude.check_shell_hooks(self.ctx))[0],
+                         f"REFUSED preflight.claude-unreadable: Claude Code's file {path} cannot be read: "
+                         "enabledPlugins is not an object of true and false")
+
+    def test_project_install_applies_only_in_its_project_not_yet_seen(self):
+        self.home.plugin("audit", hook("${CLAUDE_PLUGIN_ROOT}/audit.sh"))
+        installed = self.home.claude / "plugins" / "installed_plugins.json"
+        record = json.loads(installed.read_text())
+        for scope, project, code in (("project", self.root / "other", None), ("local", self.root / "other", None),
+                                     ("project", self.checkout, "preflight.unknown-hook"),
+                                     ("local", self.root, "preflight.unknown-hook"),
+                                     ("team", self.checkout, "preflight.claude-unreadable")):
+            with self.subTest(scope=scope, project=project):
+                record["plugins"]["audit@market"][0].update(scope=scope, projectPath=str(project))
+                write(installed, json.dumps(record))
+                self.assertEqual(getattr(claude.check_shell_hooks(self.ctx), "code", None), code)
 
     def test_known_script_with_anything_more_stops(self):
         snow = f"{self.home.home}/.agents/skills/snowman/hooks/snow_guard.py"
@@ -347,10 +400,10 @@ class Checks(unittest.TestCase):
             f"Next: start the run from an interactive Claude Code session in {self.checkout}",
         ])
 
-    def test_unattended_session_stops_not_yet_seen(self):
-        self.env({**json.loads(recorded("interactive-env.json")), "CLAUDE_CODE_SESSION_ATTENDED": "0"})
+    def test_scheduled_session_stops_not_yet_seen(self):
+        self.env({**json.loads(recorded("interactive-env.json")), "CLAUDE_CODE_HOST_SCHEDULED_RUN": "1"})
         self.assertEqual(claude.check_background(self.ctx).fields,
-                         {"var": "CLAUDE_CODE_SESSION_ATTENDED", "value": "0"})
+                         {"var": "CLAUDE_CODE_HOST_SCHEDULED_RUN", "value": "1"})
 
     def test_interactive_session_passes(self):
         self.env(json.loads(recorded("interactive-env.json")))
@@ -368,6 +421,25 @@ class Checks(unittest.TestCase):
     def test_project_role_named_in_its_front_matter_stops(self):
         path = write(self.checkout / ".claude" / "agents" / "reader.md", "---\ndescription: x\nname: 'deliver-reader'\n---\n")
         self.assertEqual(claude.check_roles(self.ctx).fields, {"path": str(path), "role": "deliver-reader"})
+
+    def test_role_link_to_nothing_passes(self):
+        folder = self.home.claude / "agents"
+        folder.mkdir(parents=True)
+        (folder / "helper.md").symlink_to(self.root / "gone.md")
+        self.assertIsNone(claude.check_roles(self.ctx))
+
+    def test_role_folder_or_file_that_cannot_be_read_stops(self):
+        folder = self.checkout / ".claude" / "agents"
+        role = write(folder / "team" / "helper.md", "---\nname: helper\n---\n")
+        for path, error in ((role, "Permission denied"), (role.parent, "Permission denied")):
+            with self.subTest(path=path):
+                path.chmod(0)
+                self.addCleanup(path.chmod, 0o700)
+                self.assertEqual(self.refused(claude.check_roles(self.ctx)), [
+                    f"REFUSED preflight.claude-unreadable: Claude Code's file {path} cannot be read: {error}",
+                    f"Next: fix {path}, {RERUN}",
+                ])
+                path.chmod(0o700)
 
     def test_other_roles_pass(self):
         write(self.home.claude / "agents" / "reviewer.md", "---\nname: reviewer\n---\nname: deliver-reader\n")
@@ -406,6 +478,8 @@ class Checks(unittest.TestCase):
         self.assertEqual(claude.check_effort(self.ctx), preflight.Warn(EFFORT))
         self.env({"CLAUDE_CODE_EFFORT_LEVEL": "high"})
         self.assertIsNone(claude.check_effort(self.ctx))
+        self.env({"CLAUDE_CODE_EFFORT_LEVEL": ""})
+        self.assertIsNone(claude.check_effort(self.ctx))
 
     def test_agents_at_once_passes_for_one_reader(self):
         self.assertIsNone(claude.check_agents_at_once(self.ctx))
@@ -442,7 +516,13 @@ class Preflight(unittest.TestCase):
                          (0, f"warning: {EFFORT}\nPreflight passed.\n", ""))
         self.assertNotIn("adapter", result.stdout)
 
-    def test_preflight_hooks_off(self):
+    def test_print_mode_session_passes_every_check_not_yet_seen(self):
+        self.home.trust(False)
+        session = {**self.session, "CLAUDE_CODE_ENTRYPOINT": "sdk-cli", "CLAUDE_CODE_SESSION_ATTENDED": "0"}
+        result = self.world.deliver("preflight", **session)
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (0, "Preflight passed.\n", ""))
+
+    def test_preflight_hooks_off_not_yet_seen(self):
         path = self.home.settings("user", disableAllHooks=True)
         result = self.world.deliver("preflight", **self.session)
         self.assertEqual((result.returncode, result.stdout, result.stderr), (10, (

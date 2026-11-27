@@ -11,14 +11,16 @@ What the checks read:
   in the checkout), local (`.claude/settings.local.json`) and managed (`MANAGED_SETTINGS` for
   this platform). A missing file has no settings. A file that is not a JSON object stops.
 - Claude Code's folder: `$CLAUDE_CONFIG_DIR` as the environment gives it, else `~/.claude`.
-- Enabled plugins: every `enabledPlugins` key set to true in any settings file. Each one's
-  hooks are `hooks/hooks.json` under every `installPath` that `plugins/installed_plugins.json`
-  lists for it. A plugin that is enabled but not installed has no hooks.
+- Enabled plugins: an `enabledPlugins` key whose value in the most specific settings file that
+  sets it (managed over local over project over user) is true. Each one's hooks are in every
+  install of it that `plugins/installed_plugins.json` lists for this checkout: `hooks/hooks.json`,
+  and the hooks its manifest names, as files or inline. A plugin that is enabled but not
+  installed has no hooks.
 - Known hooks: `known_hooks` in `lists.toml`, through `settings.read_lists`. See `is_known`.
 
-Every signal read from the session's environment or Claude Code's files is a named constant
-below, with a comment that says whether it was seen on a real session. The tests' fixtures in
-`tests/deliver_claude_inputs/` record the seen ones.
+The environment variables, file names and setting keys the checks read are named below. Each
+comment says whether the signal was seen on a real session and describes the layout read
+inside its file. The tests' fixtures in `tests/deliver_claude_inputs/` record the seen ones.
 """
 from __future__ import annotations
 
@@ -44,10 +46,19 @@ MANAGED_SETTINGS = {
     "darwin": Path("/Library/Application Support/ClaudeCode/managed-settings.json"),
     "linux": Path("/etc/claude-code/managed-settings.json"),
 }
-# Seen: settings keys and the hook layout of user settings and of a plugin's hooks/hooks.json.
+# Not yet seen: the key was in no settings file read.
 HOOKS_OFF_KEY = "disableAllHooks"
+# Seen: `hooks.PreToolUse` in user settings and in a plugin's hooks/hooks.json, a list of
+# {"matcher", "hooks": [{"type": "command", "command"}]}; `enabledPlugins` in user settings, keyed
+# `<plugin>@<marketplace>`, values true.
 ENABLED_PLUGINS_KEY = "enabledPlugins"
+# Seen: {"plugins": {"<plugin>@<marketplace>": [{"scope": "user", "installPath"}]}}. Not yet seen:
+# an install of another scope, read here as applying only where its `projectPath` is the checkout.
 INSTALLED_PLUGINS = Path("plugins") / "installed_plugins.json"
+INSTALL_SCOPES = ("user", "managed")
+PROJECT_SCOPES = ("project", "local")
+# Not yet seen: a manifest's `hooks`, read as a path, a list of paths, or inline hooks.
+MANIFESTS = (Path(".claude-plugin") / "plugin.json", Path("plugin.json"))
 # Seen: the shell tool's name in the hook inputs of tests/deliver_guard_inputs/.
 SHELL_TOOL = "Bash"
 PLUGIN_ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}"
@@ -58,17 +69,19 @@ INTERPRETERS = ("python3", "python")
 # folder), and whether a trusted parent folder covers a child (read here as not: exact folder only).
 TRUST_FILE = ".claude.json"
 TRUST_KEY = "hasTrustDialogAccepted"
-# Seen: CLAUDE_CODE_ENTRYPOINT=cli in an interactive session. Not yet seen: the print-mode value.
+# Seen: CLAUDE_CODE_ENTRYPOINT=cli in an interactive session. Not yet seen: the print-mode value,
+# read from the review of the installed package as sdk-cli.
 ENTRYPOINT_VAR = "CLAUDE_CODE_ENTRYPOINT"
 PRINT_ENTRYPOINT = "sdk-cli"
-# Not yet seen: any variable of a remote or scheduled session.
-REMOTE_VAR = "CLAUDE_CODE_REMOTE"
-# Seen: CLAUDE_CODE_SESSION_ATTENDED=1 in an interactive session. Not yet seen: another value.
-ATTENDED_VAR = "CLAUDE_CODE_SESSION_ATTENDED"
-ATTENDED = "1"
-# Seen unset in a real session, beside CLAUDE_EFFORT=medium, which does not count.
+# Not yet seen: any variable of a remote or scheduled session. A remote session is read as
+# CLAUDE_CODE_REMOTE set, a scheduled one as CLAUDE_CODE_HOST_SCHEDULED_RUN set (the review read
+# that marker in the installed package). CLAUDE_CODE_SESSION_ATTENDED is not read: the review read
+# it as 0 in an owner-started print-mode session.
+BACKGROUND_VARS = ("CLAUDE_CODE_REMOTE", "CLAUDE_CODE_HOST_SCHEDULED_RUN")
+# Seen unset in a real session, beside CLAUDE_EFFORT=medium, which does not count. Set to any
+# value, the empty string included, it gives no line.
 EFFORT_VAR = "CLAUDE_CODE_EFFORT_LEVEL"
-EFFORT_WARNING = f"{EFFORT_VAR} is unset, so the session runs at Claude Code's default effort"
+EFFORT_WARNING = f"{EFFORT_VAR} is unset"
 
 
 class Unreadable(Exception):
@@ -120,8 +133,8 @@ def read_settings(checkout: Path) -> list[tuple[Path, dict]]:
 
 def check_background(ctx):
     """Stop in a remote or scheduled session, which nobody can stop (rule 38)."""
-    for var, value in ((REMOTE_VAR, os.environ.get(REMOTE_VAR)), (ATTENDED_VAR, os.environ.get(ATTENDED_VAR))):
-        if value and not (var == ATTENDED_VAR and value == ATTENDED):
+    for var in BACKGROUND_VARS:
+        if value := os.environ.get(var):
             return _result(ctx).Stop("preflight.background", f"start the run from an interactive Claude Code session in {ctx.run.checkout}",
                                      {"var": var, "value": value})
     return None
@@ -164,7 +177,7 @@ def check_shell_hooks(ctx):
     """Stop on a shell-tool PreToolUse hook not on the known hooks list (rule 38)."""
     try:
         files = read_settings(ctx.run.checkout)
-        sources = [(path, None, None, data) for path, data in files] + _plugin_hooks(files)
+        sources = [(path, None, None, data) for path, data in files] + _plugin_hooks(files, ctx.run.checkout)
         for path, plugin, key, data in sources:
             for command in _shell_commands(path, data):
                 if not is_known(command, plugin):
@@ -176,14 +189,16 @@ def check_shell_hooks(ctx):
     return None
 
 
-def _plugin_hooks(files: list[tuple[Path, dict]]) -> list[tuple[Path, str, str, dict]]:
-    """(hooks file, plugin name, plugin key, its JSON) for each enabled plugin's installs."""
-    enabled = set()
+def _plugin_hooks(files: list[tuple[Path, dict]], checkout: Path) -> list[tuple[Path, str, str, dict]]:
+    """(file, plugin name, plugin key, hooks JSON) for each hook source of each enabled plugin's
+    installs that apply to this checkout. `files` run from least to most specific."""
+    state = {}
     for path, data in files:
         plugins = data.get(ENABLED_PLUGINS_KEY, {})
-        if not isinstance(plugins, dict):
-            raise Unreadable(path, f"{ENABLED_PLUGINS_KEY} is not an object")
-        enabled |= {key for key, on in plugins.items() if on is True}
+        if not isinstance(plugins, dict) or not all(isinstance(on, bool) for on in plugins.values()):
+            raise Unreadable(path, f"{ENABLED_PLUGINS_KEY} is not an object of true and false")
+        state.update(plugins)
+    enabled = sorted(key for key, on in state.items() if on)
     if not enabled:
         return []
     path = config_dir() / INSTALLED_PLUGINS
@@ -191,14 +206,51 @@ def _plugin_hooks(files: list[tuple[Path, dict]]) -> list[tuple[Path, str, str, 
     if not isinstance(installed, dict):
         raise Unreadable(path, "plugins is not an object")
     out = []
-    for key in sorted(enabled):
+    for key in enabled:
         installs = installed.get(key, [])
         if not isinstance(installs, list) or not all(isinstance(i, dict) and isinstance(i.get("installPath"), str) for i in installs):
             raise Unreadable(path, f"{key} is not a list of installs with an installPath")
         for install in installs:
-            hooks = Path(install["installPath"]) / "hooks" / "hooks.json"
-            if (data := read_object(hooks)) is not None:
-                out.append((hooks, key.partition("@")[0], key, data))
+            if _applies(install, checkout, path, key):
+                root = Path(install["installPath"])
+                out += [(source, key.partition("@")[0], key, data) for source, data in _hook_sources(root)]
+    return out
+
+
+def _applies(install: dict, checkout: Path, path: Path, key: str) -> bool:
+    """Whether an install applies to the checkout. A project install applies in its folder and
+    below; a scope this does not know cannot be told, so it stops."""
+    scope = install.get("scope")
+    if scope in INSTALL_SCOPES:
+        return True
+    project = install.get("projectPath")
+    if scope not in PROJECT_SCOPES or not isinstance(project, str):
+        raise Unreadable(path, f"an install of {key} has a scope this check does not know: {scope}")
+    return checkout == Path(project) or Path(project) in checkout.parents
+
+
+def _hook_sources(root: Path) -> list[tuple[Path, dict]]:
+    """An install's hooks: `hooks/hooks.json` if it exists, and each `hooks` its manifest names.
+
+    A manifest's `hooks` is a path from the install's root, inline hooks, or a list of either.
+    A path it names that cannot be read stops.
+    """
+    out = []
+    if (data := read_object(root / "hooks" / "hooks.json")) is not None:
+        out.append((root / "hooks" / "hooks.json", data))
+    for manifest in (root / name for name in MANIFESTS):
+        given = (read_object(manifest) or {}).get("hooks")
+        for item in given if isinstance(given, list) else [] if given is None else [given]:
+            if isinstance(item, str):
+                file = root / item
+                data = read_object(file)
+                if data is None:
+                    raise Unreadable(file, "the plugin's manifest names it, and it does not exist")
+                out.append((file, data))
+            elif isinstance(item, dict):
+                out.append((manifest, item if "hooks" in item else {"hooks": item}))
+            else:
+                raise Unreadable(manifest, "hooks is not a path, an object or a list of them")
     return out
 
 
@@ -292,21 +344,41 @@ def check_reader(ctx):
 def check_roles(ctx):
     """Stop when a user or project role file has the name of one of deliver's roles (#231 rule 42)."""
     roles = {path.stem for path in (PLUGIN_ROOT / "agents").glob("*.md")}
-    for folder in (config_dir() / "agents", ctx.run.checkout / ".claude" / "agents"):
-        for path in sorted(folder.rglob("*.md")):
-            name = path.stem if path.stem in roles else _role_name(path)
-            if name in roles:
-                return _result(ctx).Stop(
-                    "preflight.role-clash",
-                    f"rename the role in {path}, in its file name and its name: line, or remove the file, then run {RERUN}",
-                    {"path": str(path), "role": name},
-                )
+    try:
+        for folder in (config_dir() / "agents", ctx.run.checkout / ".claude" / "agents"):
+            for path in _role_files(folder):
+                name = path.stem if path.stem in roles else _role_name(path)
+                if name in roles:
+                    return _result(ctx).Stop(
+                        "preflight.role-clash",
+                        f"rename the role in {path}, in its file name and its name: line, or remove the file, then run {RERUN}",
+                        {"path": str(path), "role": name},
+                    )
+    except Unreadable as e:
+        return _unreadable(ctx, e)
     return None
 
 
+def _role_files(folder: Path) -> list[Path]:
+    """The `.md` files under a role folder; a folder in it that cannot be listed stops."""
+    if not os.path.lexists(folder):
+        return []
+
+    def fail(error: OSError):
+        raise Unreadable(Path(error.filename or folder), error.strerror or str(error))
+
+    return sorted(Path(top) / name for top, _, names in os.walk(folder, onerror=fail) for name in names if name.endswith(".md"))
+
+
 def _role_name(path: Path) -> str | None:
-    """The `name:` of a role file's front matter."""
-    lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    """The `name:` of a role file's front matter. A link to nothing is no role: Claude Code has
+    no file to load. A file that cannot be read stops."""
+    if path.is_symlink() and not path.exists():
+        return None
+    try:
+        lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError as e:
+        raise Unreadable(path, e.strerror or str(e)) from None
     if not lines or lines[0].strip() != "---":
         return None
     for line in lines[1:]:
@@ -335,4 +407,4 @@ def check_agents_at_once(ctx):
 
 def check_effort(ctx):
     """Warn when CLAUDE_CODE_EFFORT_LEVEL is unset (#178 check table)."""
-    return None if os.environ.get(EFFORT_VAR) else _result(ctx).Warn(EFFORT_WARNING)
+    return None if EFFORT_VAR in os.environ else _result(ctx).Warn(EFFORT_WARNING)

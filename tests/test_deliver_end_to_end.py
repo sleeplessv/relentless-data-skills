@@ -2,7 +2,9 @@
 
 Each test runs `deliver.py` at its command line, and the guard on a hook input recorded from
 Claude Code, in a throwaway world of tests/deliver_kit.py: a clone, its bare remote and the
-stand-in gh. Nothing touches the network or the real machine directory.
+stand-in gh. The world's plugin copy has the stand-in scan of tests/test_deliver_ready.py, and
+its gh merges a PR by moving the bare remote's `main` to the PR's head. Nothing touches the
+network or the real machine directory.
 
     python3 -m unittest tests.test_deliver_end_to_end
 """
@@ -16,6 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deliver_kit  # noqa: E402
+from test_deliver_merge import PASS, answer, wrapped  # noqa: E402
+from test_deliver_ready import SCAN_STUB  # noqa: E402
 
 CHECK = "python3 -m unittest"
 TICKET = "7"
@@ -33,6 +37,7 @@ door: two-way — one function and its test; nothing deploys on merge
 """
 SUMMARY = "```diff\n calc.py\n+  double(n)\n```\n"
 URL = "https://github.com/owner/repo/pull/12"
+READY_VIEW = ["pr", "view", "12", "--json", "headRefOid", "--jq", ".headRefOid"]
 REPO_VIEW = ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
 GRANT = ("Run grant: push this branch, open and update its PR, mark it ready and merge it through the scripts, "
          "file follow-up tickets.")
@@ -55,12 +60,13 @@ class EndToEnd(unittest.TestCase):
         self.world.gh_answer(["pr", "list"], "[]")
         self.world.gh_answer(["pr", "create"], URL + "\n")
         self.world.install_upstream()
+        (self.world.root / "plugin" / "scripts" / "scan.py").write_text(SCAN_STUB, encoding="utf-8")
         self.tmp = self.world.root / "tmp"
         self.tmp.mkdir()
 
-    def deliver(self, *args: str) -> str:
+    def deliver(self, *args: str, **env: str) -> str:
         """Run one deliver.py command as the session would; it must exit 0. Returns its output."""
-        result = self.world.deliver(*args, TMPDIR=str(self.tmp))
+        result = self.world.deliver(*args, TMPDIR=str(self.tmp), **env)
         self.assertEqual((result.returncode, result.stderr), (0, ""), f"deliver.py {' '.join(args)}: {result.stdout}")
         return result.stdout
 
@@ -100,20 +106,26 @@ class EndToEnd(unittest.TestCase):
         self.world.git(self.work, "commit", "-q", "-m", "feat: add double")
         return self.head()
 
-    def through_pr(self) -> None:
-        """Steps 6 to 8 up to `pr`: the check on the last commit, the summary, and the draft PR."""
+    def through_pr(self, commit: str) -> None:
+        """Steps 6 to 8 up to `pr`: the check on the last commit, the summary, and the draft PR at that commit."""
         self.deliver("check", "--", *CHECK.split())
         self.drop("summary", SUMMARY)
         self.assertEqual(self.deliver("pr"), f"Opened draft PR #12: {URL}\n")
+        self.world.gh_answer(READY_VIEW, commit + "\n")
+        self.world.gh_answer(["pr", "edit"])
+        self.world.gh_answer(["pr", "ready"])
 
-    def test_a_small_edit_runs_from_start_to_pr(self):
+    def gh_args(self) -> list[list[str]]:
+        return [call["args"] for call in self.world.gh_calls()]
+
+    def test_a_small_edit_runs_from_start_to_finish(self):
         branch = self.begin()
         commit = self.edit({
             "calc.py": "def add(a, b):\n    return a + b\n\n\ndef double(n):\n    return 2 * n\n",
             "test_calc.py": (self.work / "test_calc.py").read_text(encoding="utf-8")
             + "\n    def test_double(self):\n        self.assertEqual(calc.double(4), 8)\n",
         })
-        self.through_pr()
+        self.through_pr(commit)
 
         records = self.world.records(branch)
         check = records[4]
@@ -130,8 +142,51 @@ class EndToEnd(unittest.TestCase):
         self.assertTrue(create[0]["body"].startswith("## Summary\n"))
         self.assertIn("double returns twice its argument", create[0]["body"])
         self.assertIn("Closes #7", create[0]["body"])
+        self.assertEqual(self.world.git(self.work, "status", "--porcelain"), "")
+
+        self.assertEqual(self.deliver("ready").splitlines(), [
+            "small edit: a two-way door, 7 lines and a low blast radius.", f"Marked PR #12 ready: {URL}"])
+        self.assertIn(["pr", "ready", "12"], self.gh_args())
+        [described] = [call["body"] for call in self.world.gh_calls() if call["args"][:2] == ["pr", "edit"]]
+        self.assertIn("merge: pending\n", described)
+        self.assertEqual(self.events(branch)[7:], [("ready", "small edit")])
+        self.assertEqual((self.world.records(branch)[7]["commit"], (self.world.root / "scan-starts.txt").read_text()),
+                         (commit, "start\n"))
+
+        self.world.gh_reset()
+        answer(self.world, commit, checks=PASS, body=described)
+        github_merges = wrapped(self.world, "gh", (
+            "if args[:2] == ['pr', 'merge']:\n"
+            f"    import subprocess; subprocess.run(['git', '--git-dir', {str(self.world.origin)!r}, "
+            f"'update-ref', 'refs/heads/main', {commit!r}], check=True)"))
+        self.assertEqual(self.deliver("merge", PATH=github_merges), (
+            f"Merged PR #12 with squash at {commit[:7]}.\nSwitched this checkout to main.\n"
+            f"Removed the remote branch origin/{branch} and the local branch {branch}.\n"))
+        self.assertIn(["pr", "merge", "12", "--squash", "--match-head-commit", commit], self.gh_args())
+        [merged] = [call["body"] for call in self.world.gh_calls() if call["args"][:2] == ["pr", "edit"]]
+        self.assertEqual(merged, described.replace("merge: pending\n", "merge: by the session, squash\n"))
+        self.assertEqual(self.events(branch)[8:], [("merge", None)])
+        self.assertEqual(self.world.git(self.world.origin, "rev-parse", "refs/heads/main"), commit)
+
+        self.assertEqual(self.deliver("finish"), f"#7 merged: PR #12\nRemoved the records of {branch}.\n")
+        self.assertEqual(self.world.records(branch), [])
+        self.assertFalse((self.work / ".git" / "deliver-mark.json").exists())
         self.assertEqual(list(self.tmp.iterdir()), [])
         self.assertEqual(self.world.git(self.work, "status", "--porcelain"), "")
+
+    def test_ready_refuses_a_change_that_needs_a_review(self):
+        branch = self.begin()
+        added = "".join(  # 13 functions of 4 lines: 52, over the small test's 50
+            f"\n\ndef times_{n}(x):\n    return {n} * x\n" for n in range(2, 15))
+        commit = self.edit({"calc.py": "def add(a, b):\n    return a + b\n" + added})
+        self.through_pr(commit)
+
+        result = self.world.deliver("ready", TMPDIR=str(self.tmp))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (10, (
+            "REFUSED ready.needs-review: this change needs a review: 52 lines, over the limit of 50\n"), ""))
+        self.assertEqual(self.events(branch)[-1], ("ready", "needs review"))
+        self.assertEqual([a[:2] for a in self.gh_args() if a[:2] in (["pr", "edit"], ["pr", "ready"])], [])  # still draft
+        self.assertFalse((self.world.root / "scan-starts.txt").exists())
 
 
 if __name__ == "__main__":

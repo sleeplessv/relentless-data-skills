@@ -132,6 +132,87 @@ print(json.dumps({"type": "result", "session_id": "''' + SESSION + r'''", "resul
 sys.exit(int(os.environ.get("STANDIN_EXIT", "0")))
 '''
 
+# X3 to X5: a stand-in harness, installed as all five harness commands, that starts an agent the way the
+# real ones do. It loads a role only from its own harness's definition folder, in that harness's format;
+# the agent reads the brief the one-line prompt names and writes the brief's word and its role's word
+# where the brief says. It prints the model and tokens in its harness's output format. Knobs:
+# STANDIN_AGENT_OFF starts no agent; STANDIN_SESSION_DOES has the session read the brief itself, so the
+# file lacks the role's word; STANDIN_NO_MODEL and STANDIN_NO_TOKENS leave that field out;
+# STANDIN_NULL_TOKEN leaves the output token count empty.
+AGENT_HARNESS = r'''#!{python}
+import json, os, re, subprocess, sys, tomllib
+from pathlib import Path
+name, args = Path(sys.argv[0]).name, sys.argv[1:]
+prompt = args[args.index("-p") + 1] if name in ("claude", "cortex", "agy") else args[-1]
+cwd = Path.cwd()
+folder = {"claude": ".claude/agents", "cortex": ".cortex/agents", "codex": ".codex/agents",
+          "cursor-agent": ".cursor/agents", "agy": ".agents/agents"}[name]
+role_name = re.search(r"of the role (\S+)", prompt).group(1)
+line = re.search(r"whole prompt: (Read (\S+) and follow it\.)", prompt)
+brief = Path(line.group(2))
+common = subprocess.run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                        capture_output=True, text=True).stdout.strip()
+worktrees = subprocess.run(["git", "worktree", "list", "--porcelain"], capture_output=True, text=True).stdout
+
+
+def role_word():
+    for path in sorted((cwd / folder).glob("*.toml" if name == "codex" else "*.md")):
+        text = path.read_text()
+        if name == "codex":
+            role = tomllib.loads(text)
+            found, body = role["name"], role["developer_instructions"]
+        else:
+            head, body = text.split("---\n", 2)[1:]
+            found = re.search(r"^name: (\S+)$", head, re.M).group(1)
+        if found == role_name:
+            return re.search(r"Your role word is (\S+)\.", body).group(1)
+    return None
+
+
+def follow(own_word):
+    task = re.search(r"Write the word (\S+), a space and your role word to the file (\S+) in "
+                     r"(?:your worktree, )?the folder (\S+)\. Change nothing else", brief.read_text())
+    words = [w for w in (task.group(1), own_word) if w]
+    (Path(task.group(3)) / task.group(2)).write_text(" ".join(words) + "\n")
+
+
+word = None if os.environ.get("STANDIN_AGENT_OFF") else role_word()
+with open(os.environ["STANDIN_STARTS"], "a") as starts:
+    starts.write(json.dumps({
+        "name": name, "args": args, "prompt": prompt, "line": line.group(1),
+        "definitions": {str(p.relative_to(cwd)): p.read_text() for p in sorted(cwd.glob(".*/agents/*"))},
+        "brief": brief.read_text(), "brief_in_common_dir": brief.is_relative_to(common),
+        "worktrees": worktrees.replace(str(cwd), "<work>"), "role_word": word}) + "\n")
+if os.environ.get("STANDIN_SESSION_DOES"):
+    follow(None)
+elif word:
+    follow(word)
+model = None if os.environ.get("STANDIN_NO_MODEL") else "standin-model-" + name
+usage = {"input_tokens": 12, "output_tokens": None if os.environ.get("STANDIN_NULL_TOKEN") else 340}
+if os.environ.get("STANDIN_NO_TOKENS"):
+    usage = {}
+if name == "cursor-agent":
+    usage = {key.replace("_tokens", "Tokens"): count for key, count in usage.items()}
+init = {"type": "system", "subtype": "init", "session_id": "{session}", "cwd": str(cwd)}
+if model:
+    init["model"] = model
+if name == "claude":  # one JSON object: the result, its models as the keys of modelUsage
+    print(json.dumps({"type": "result", "session_id": "{session}", "result": "done", "usage": usage,
+                      "modelUsage": {model: {"inputTokens": 12}} if model else {}}))
+elif name == "codex":  # the exec output names no model
+    print(json.dumps({"type": "thread.started", "thread_id": "{session}"}))
+    print(json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "done"}}))
+    print(json.dumps({"type": "turn.completed", "usage": usage}))
+elif name == "agy":
+    print(json.dumps({"event": "init", "init": {"model": model} if model else {}}))
+    print(json.dumps({"event": "result", "result": {"response": "done", "usage": usage}}))
+else:  # cortex and cursor-agent: a stream with an init event and a result event
+    print(json.dumps(init))
+    print(json.dumps({"type": "result", "session_id": "{session}", "result": "done", "usage": usage}))
+'''
+COMMAND_NAMES = {"claude": "claude", "cortex": "cortex", "codex": "codex", "cursor": "cursor-agent",
+                 "antigravity": "agy"}
+
 
 class World:
     """A temporary folder holding the stand-ins, HOME, the machine directory and the records."""
@@ -236,7 +317,7 @@ class TestHelpAndList(ProbeKitTest):
         }
         for entry, line in expected.items():
             self.assertEqual(lines[ids.index(entry)], line)
-        self.assertEqual(sum("(not built)" not in line for line in lines), 5)
+        self.assertEqual(sum("(not built)" not in line for line in lines), 8)
 
 
 class TestRuns(ProbeKitTest):
@@ -297,9 +378,13 @@ class TestRuns(ProbeKitTest):
 
     def test_all_runs_every_built_entry_of_the_harness(self):
         code, out, err = self.world.kit("run", "codex", "all")
-        self.assertEqual((code, out), (0, "X6 codex seen: CODEX_THREAD_ID set beside CLAUDECODE\n"
+        self.assertEqual((code, out), (1, "X6 codex seen: CODEX_THREAD_ID set beside CLAUDECODE\n"
                                           "X8 codex recorded: harness exited 0, its output is kept\n"
-                                          "X9 codex recorded: the stream does not show who resolved it\n"))
+                                          "X9 codex recorded: the stream does not show who resolved it\n"
+                                          # this stand-in starts no agent; TestAgentEntries has one that does
+                                          "X3 codex failed: no marker the brief names\n"
+                                          "X4 codex failed: no file in .deliver/ of the agent's worktree\n"
+                                          "X5 codex failed: no agent of the reader role ran\n"))
         self.assert_private(out, err)
 
     def test_cortex_types_dollar_names_and_keeps_the_connection_out_of_every_file_and_line(self):
@@ -369,6 +454,151 @@ class TestRuns(ProbeKitTest):
         self.assertEqual([c[0] for c in self.world.hc_calls()][-2:], ["get", "rm"])
 
 
+class TestAgentEntries(ProbeKitTest):
+    """X3, X4 and X5 against the stand-in that starts an agent, installed as all five harness commands."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        script = self.world.bin / "standin-agent-harness"
+        script.write_text(AGENT_HARNESS.replace("{python}", sys.executable).replace("{session}", SESSION))
+        script.chmod(0o755)
+        for command in COMMAND_NAMES.values():
+            (self.world.bin / command).unlink(missing_ok=True)
+            (self.world.bin / command).symlink_to(script)
+
+    def run_entry(self, harness: str, entry: str, **knobs: str) -> tuple[int, str, str]:
+        extra = ("--connection", "probe_conn_q7") if harness == "cortex" else ()
+        return self.world.kit("run", harness, entry, *extra, **knobs)
+
+    def test_help_states_how_the_agent_entries_are_judged(self):
+        code, out, err = self.world.kit("--help")
+        self.assertEqual((code, err), (0, ""))
+        text = " ".join(out.split())
+        for fact in ("a harness (claude, cortex, codex, cursor or antigravity)",
+                     "a stand-in reader role and a stand-in reviewer role into the harness's project definition folder",
+                     "saves the entry's brief in the shared git directory", "`Read <path> and follow it.`",
+                     "neither word is in the prompt", "in .deliver/ of the agent's worktree",
+                     "A field the output lacks prints as absent",
+                     "a token count the output leaves empty prints blank, never as 0"):
+            self.assertIn(fact, text)
+
+    def test_x3_is_seen_on_every_harness_with_the_role_files_in_its_own_definition_folder(self):
+        for harness in COMMAND_NAMES:
+            code, out, err = self.run_entry(harness, "X3")
+            self.assertEqual((code, out), (0, f"X3 {harness} seen: an agent of the reader role wrote the marker "
+                                              f"its brief names\n"))
+            self.assert_private(out, err)
+        starts = self.world.harness_starts()
+        self.assertEqual([s["name"] for s in starts], list(COMMAND_NAMES.values()))
+        files = {
+            "claude": [".claude/agents/probe-reader.md", ".claude/agents/probe-reviewer.md"],
+            "cortex": [".cortex/agents/probe-reader.md", ".cortex/agents/probe-reviewer.md"],
+            "codex": [".codex/agents/probe-reader.toml", ".codex/agents/probe-reviewer.toml"],
+            "cursor-agent": [".cursor/agents/probe-reader.md", ".cursor/agents/probe-reviewer.md"],
+            "agy": [".agents/agents/probe-reader.md", ".agents/agents/probe-reviewer.md"],
+        }
+        tools = {"claude": ("Read, Grep, Glob, Bash, Write, Edit", "Read, Grep, Glob, Bash"),
+                 "cortex": ("[read, grep, glob, bash, write, edit]", "[read, grep, glob, bash]"),
+                 "agy": ("[view_file, run_command, write_file, edit_file]", "[view_file, run_command]")}
+        for start in starts:
+            name = start["name"]
+            self.assertEqual(sorted(start["definitions"]), files[name])
+            for path, kind, limit in ((files[name][0], "reader", 0), (files[name][1], "reviewer", 1)):
+                text = start["definitions"][path]
+                description = f"Stand-in {kind} for the probe kit. Start it only when asked for probe-{kind} by name."
+                body = (f"You are the probe kit's stand-in {kind}. Your role word is {start['role_word']}. When a "
+                        f"brief asks for your role word, give this one. Do only what your prompt and its brief ask.")
+                if name == "codex":
+                    expected = (f'name = "probe-{kind}"\ndescription = "{description}"\n'
+                                f'developer_instructions = """\n{body}\n"""\n')
+                else:
+                    limits = f"tools: {tools[name][limit]}\n" if name in tools else ""
+                    expected = f"---\nname: probe-{kind}\ndescription: {description}\n{limits}---\n\n{body}\n"
+                self.assertEqual(text, expected, path)
+            self.assertRegex(start["role_word"], r"^role-[0-9a-f]{8}$")
+
+    def test_the_prompt_is_the_one_line_and_holds_neither_word_and_the_brief_sits_in_the_shared_git_directory(self):
+        code, out, _ = self.run_entry("codex", "X3")
+        self.assertEqual(code, 0, out)
+        (start,) = self.world.harness_starts()
+        line = start["line"]
+        self.assertRegex(line, r"^Read /\S+/work/\.git/deliver/branches/probe-agent/brief-x3\.md and follow it\.$")
+        self.assertEqual(start["prompt"], f"Start one agent of the role probe-reader and give it this line, word "
+                                          f"for word, as its whole prompt: {line} Do not open that file yourself, "
+                                          f"and do nothing else.")
+        self.assertTrue(start["brief_in_common_dir"])
+        brief_word = re.fullmatch(r"# Probe brief\n\nWrite the word (brief-[0-9a-f]{8}), a space and your role word "
+                                  r"to the file probe-brief-marker\.txt in the folder /\S+/work\. Change nothing "
+                                  r"else\.\n", start["brief"]).group(1)
+        for word in (brief_word, start["role_word"], "probe-brief-marker.txt"):
+            self.assertNotIn(word, start["prompt"])
+        self.assertNotIn(start["role_word"], start["brief"])
+        self.assertIn("worktree <work>/.probe-worktrees/agent\nHEAD 0000000000000000000000000000000000000000\n"
+                      "branch refs/heads/probe-agent\n", start["worktrees"])
+
+    def test_x3_fails_without_an_agent_and_when_the_session_writes_the_marker_itself(self):
+        code, out, _ = self.run_entry("claude", "X3", STANDIN_AGENT_OFF="1")
+        self.assertEqual((code, out), (1, "X3 claude failed: no marker the brief names\n"))
+        code, out, _ = self.run_entry("cursor", "X3", STANDIN_SESSION_DOES="1")
+        self.assertEqual((code, out), (1, "X3 cursor failed: the brief's marker lacks the reader role's word\n"))
+
+    def test_x4_is_seen_when_the_agent_writes_into_deliver_of_its_worktree_and_failed_otherwise(self):
+        code, out, err = self.run_entry("antigravity", "X4")
+        self.assertEqual((code, out), (0, "X4 antigravity seen: an agent of the reader role wrote into .deliver/ "
+                                          "of its worktree\n"))
+        self.assert_private(out, err)
+        self.assertRegex(self.world.harness_starts()[0]["brief"],
+                         r"to the file \.deliver/probe-drop\.txt in your worktree, the folder "
+                         r"/\S+/work/\.probe-worktrees/agent\. Change nothing else\.\n$")
+        code, out, _ = self.run_entry("codex", "X4", STANDIN_AGENT_OFF="1")
+        self.assertEqual((code, out), (1, "X4 codex failed: no file in .deliver/ of the agent's worktree\n"))
+        code, out, _ = self.run_entry("cortex", "X4", STANDIN_SESSION_DOES="1")
+        self.assertEqual((code, out), (1, "X4 cortex failed: the file in .deliver/ lacks the reader role's word\n"))
+
+    def test_x5_records_where_each_harness_shows_the_model_and_the_tokens(self):
+        expected = {
+            "claude": "model standin-model-claude at result event .modelUsage keys; "
+                      "tokens input_tokens=12 output_tokens=340 at result event .usage",
+            "cortex": "model standin-model-cortex at system event .model; "
+                      "tokens input_tokens=12 output_tokens=340 at result event .usage",
+            "codex": "model absent; tokens input_tokens=12 output_tokens=340 at turn.completed event .usage",
+            "cursor": "model standin-model-cursor-agent at system event .model; "
+                      "tokens inputTokens=12 outputTokens=340 at result event .usage",
+            "antigravity": "model standin-model-agy at init event .init.model; "
+                           "tokens input_tokens=12 output_tokens=340 at result event .result.usage",
+        }
+        for harness, fact in expected.items():
+            code, out, err = self.run_entry(harness, "X5")
+            self.assertEqual((code, out), (0, f"X5 {harness} recorded: {fact}\n"))
+            self.assert_private(out, err)
+
+    def test_x5_prints_a_missing_token_count_blank_never_0_and_an_absent_field_as_absent(self):
+        code, out, _ = self.run_entry("codex", "X5", STANDIN_NULL_TOKEN="1")
+        self.assertEqual((code, out), (0, "X5 codex recorded: model absent; "
+                                          "tokens input_tokens=12 output_tokens= at turn.completed event .usage\n"))
+        code, out, _ = self.run_entry("cursor", "X5", STANDIN_NULL_TOKEN="1")
+        self.assertEqual((code, out), (0, "X5 cursor recorded: model standin-model-cursor-agent at system event "
+                                          ".model; tokens inputTokens=12 outputTokens= at result event .usage\n"))
+        code, out, _ = self.run_entry("antigravity", "X5", STANDIN_NO_TOKENS="1", STANDIN_NO_MODEL="1")
+        self.assertEqual((code, out), (0, "X5 antigravity recorded: model absent; tokens absent\n"))
+        code, out, _ = self.run_entry("claude", "X5", STANDIN_AGENT_OFF="1")
+        self.assertEqual((code, out), (1, "X5 claude failed: no agent of the reader role ran\n"))
+
+    def test_all_on_claude_runs_the_three_agent_entries_with_its_allowed_tools_named(self):
+        code, out, _ = self.world.kit("run", "claude", "all")
+        self.assertEqual((code, out), (0, "X3 claude seen: an agent of the reader role wrote the marker its brief "
+                                          "names\n"
+                                          "X4 claude seen: an agent of the reader role wrote into .deliver/ of its "
+                                          "worktree\n"
+                                          "X5 claude recorded: model standin-model-claude at result event "
+                                          ".modelUsage keys; tokens input_tokens=12 output_tokens=340 at result "
+                                          "event .usage\n"))
+        self.assertEqual(self.world.harness_starts()[0]["args"][2:],
+                         ["--output-format", "json", "--permission-mode", "acceptEdits",
+                          "--allowedTools", "Agent,Read,Write,Edit,Bash,Glob,Grep"])
+        self.assert_probe_folder_gone()
+
+
 class TestRefusals(ProbeKitTest):
     def test_a_missing_harness_command_or_hc_exits_2_before_any_terminal(self):
         (self.world.bin / "agy").unlink()
@@ -383,7 +613,7 @@ class TestRefusals(ProbeKitTest):
             ("codex", "D3"): "probe_kit: D3 is not built yet\n",
             ("codex", "K6"): "probe_kit: K6 does not run on codex\n",
             ("codex", "Z1"): "probe_kit: unknown entry 'Z1'; `list` shows every entry\n",
-            ("claude", "all"): "probe_kit: no entry is built for claude yet\n",
+            ("claude", "X6"): "probe_kit: X6 does not run on claude\n",
             ("vim", "X6"): "probe_kit: unknown harness 'vim'; harnesses: claude, cortex, codex, cursor, antigravity\n",
         }
         for argv, message in cases.items():

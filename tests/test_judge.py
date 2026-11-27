@@ -640,6 +640,11 @@ class TestJudge(unittest.TestCase):
                      "each with its text on its marker line", "stops the judge with an error that names the line"):
             self.assertNotIn(gone, help_text)
 
+    def test_the_help_advises_how_many_judgements_to_run_at_once(self) -> None:
+        help_text = " ".join(self.world.judge("--help").stdout.split())
+        self.assertIn(" The project's own checks can time out when several judgements run at once. Run at most two at "
+                      "a time, and judge the heaviest project alone. ", help_text)
+
     def test_an_interrupt_after_the_line_is_written_keeps_the_files_it_names(self) -> None:
         version = ("A-7", "direct", "--commit", self.world.replay, "--from", str(self.world.replay_clone))
         self.world.judge(*version)

@@ -88,6 +88,8 @@ Test 1: in a clean checkout of the version's commit the judge runs the repo's
 setup command, where it has one, and then its check command, each with sh,
 both read from repos.json as the draw reads them. It passes when the check
 exits 0. A step that runs for more than {draw.CHECK_TIMEOUT // 60} minutes is stopped and fails.
+The project's own checks can time out when several judgements run at once.
+Run at most two at a time, and judge the heaviest project alone.
 
 Test 2: one requirements review, headless on Claude Code, on Opus at medium
 effort. The reviewer is given the ticket's title and body, its requirements

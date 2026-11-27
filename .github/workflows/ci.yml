@@ -20,9 +20,9 @@ concurrency:
 # Actions are pinned to a commit SHA, with the release tag beside it;
 # .github/dependabot.yml keeps the pins current.
 #
-# Every job here is light (stdlib Python, one npm install), so each runs on
-# ubuntu-slim: a 1-vCPU container runner that starts faster and bills less
-# than ubuntu-latest. Slim jobs are capped at 15 minutes.
+# Every job but `tests` is light (stdlib Python, one npm install), so each
+# runs on ubuntu-slim: a 1-vCPU container runner that starts faster and bills
+# less than ubuntu-latest. Slim jobs are capped at 15 minutes.
 
 jobs:
   skill-version-check:
@@ -50,8 +50,10 @@ jobs:
           python scripts/sync_registry.py --check
 
   tests:
-    runs-on: ubuntu-slim
-    timeout-minutes: 10
+    # The suite outgrew the slim runner: 8 to 9 minutes of its 10, with more
+    # tests on the way. ubuntu-latest has more cores and no 15-minute cap.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       matrix:
         # 3.13 = the repo floor (CODING_STANDARDS.md PY1). The tests are

@@ -82,10 +82,19 @@ def run_checks(ctx: Context, checks: list[Check]) -> tuple[Stop | None, list[str
     return None, warnings
 
 
-def run(run: core.Run, checks: list[Check] | None = None) -> None:
-    """Run preflight for the marked run, save its record, and print or refuse."""
+def run(run: core.Run, checks: list[Check] | None = None, *, probe: bool = True) -> None:
+    """Run preflight for the marked run, save its record, and print or refuse.
+
+    `start` passes `probe=False`, before the session has run the guard probe: the probe check is
+    skipped, and a pass prints only its warnings and is not saved, so it never counts as passing.
+    """
     ctx = Context(run)
-    stop, warnings = run_checks(ctx, CHECKS if checks is None else checks)
+    checks = [c for c in (CHECKS if checks is None else checks) if probe or c is not check_guard.check_guard_probe]
+    stop, warnings = run_checks(ctx, checks)
+    if not (stop or probe):
+        for line in warnings:
+            print(f"warning: {line}")
+        return
     run_id = run.mark["run"]
     run.record(
         "preflight", run=run_id, result="stop" if stop else "pass", stops=[stop.code] if stop else [],

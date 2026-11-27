@@ -1,4 +1,4 @@
-"""Exercise model-router's shell blocks and the invariants its files share."""
+"""Exercise router's shell blocks and the invariants its files share."""
 from __future__ import annotations
 
 import json
@@ -12,7 +12,7 @@ import tempfile
 import unittest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SKILL_DIR = REPO_ROOT / "skills" / "model-router"
+SKILL_DIR = REPO_ROOT / "skills" / "router"
 SKILL_MD = SKILL_DIR / "SKILL.md"
 README_MD = SKILL_DIR / "README.md"
 CATALOG_MD = SKILL_DIR / "references" / "catalog.md"

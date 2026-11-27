@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -40,7 +41,8 @@ class TestSkillVersions(unittest.TestCase):
 
     def git(self, *args: str) -> str:
         return subprocess.run(
-            ["git", *args], cwd=self.root, text=True, capture_output=True, check=True
+            ["git", *args], cwd=self.root, text=True, capture_output=True, check=True,
+            env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
         ).stdout
 
     def commit(self, message: str) -> None:

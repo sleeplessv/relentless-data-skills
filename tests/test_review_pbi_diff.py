@@ -13,6 +13,7 @@ check reads the markers references/artifact.md defines, another interface.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -44,6 +45,7 @@ class TestDefaultRange(unittest.TestCase):
             ["git", "-c", "commit.gpgsign=false", "-c", "user.name=Tester",
              "-c", "user.email=test@example.invalid", *args],
             cwd=self.repo, capture_output=True, text=True, check=True,
+            env={**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
         ).stdout.strip()
 
     def extract(self, *args):

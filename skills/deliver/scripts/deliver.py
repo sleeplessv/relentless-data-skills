@@ -10,7 +10,10 @@ Endings and refusal codes are in `core.py`. Every subcommand but those in `NO_MA
 refuses where the checkout has no run mark, before its module loads. A name in `SUBCOMMANDS`
 whose module does not exist yet exits 2 with the usage text. To build a subcommand, add its
 module; to add a subcommand, also add its name to `SUBCOMMANDS`, and a `<name>.no-mark` code
-to `core.REFUSALS` with its test unless it is in `NO_MARK_NEEDED`.
+to `core.REFUSALS` with its test unless it is in `NO_MARK_NEEDED`. start, deps, scan and report
+never need a mark. `finish` is in `NO_MARK_NEEDED` too but keeps its code: it needs no mark only to
+resume a run whose earlier `finish` left its PR waiting, and refuses `finish.no-mark` itself
+otherwise.
 """
 from __future__ import annotations
 
@@ -26,12 +29,13 @@ import core  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
 SUBCOMMANDS = ("start", "preflight", "check", "save", "pr", "ready", "merge", "finish", "deps", "scan", "report")
-NO_MARK_NEEDED = frozenset({"start", "deps", "scan", "report"})
+NO_MARK_NEEDED = frozenset({"start", "finish", "deps", "scan", "report"})
 USAGE = f"""\
 usage: deliver.py <subcommand> [arguments]
 
 Subcommands: {", ".join(SUBCOMMANDS)}.
-Every subcommand but start, deps, scan and report needs a run mark.
+start, deps, scan and report never need a run mark. finish needs none only to resume a run whose
+earlier finish left its PR waiting. Every other subcommand needs one.
 Exit codes: 0 done, 10 refused, 20 a question for the owner, any other a crash."""
 
 

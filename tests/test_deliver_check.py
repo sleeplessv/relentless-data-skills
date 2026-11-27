@@ -2,7 +2,7 @@
 
 Every test runs deliver.py at its command line in a throwaway world from tests/deliver_kit.py, except
 the matcher's measure, which also calls `check.selected_nothing` directly. The slot tests order
-their children with named pipes the commands write and read, and never sleep or poll.
+their children with named pipes the commands write and read; that ordering neither sleeps nor polls.
 
     python3 -m unittest tests.test_deliver_check
 """
@@ -35,6 +35,7 @@ SELECTED_NOTHING = [
     "[warning] [NoNodesSelected (dbt1601)]: Nothing to do. Try checking your model configs and model specification args",
     "\x1b[33m=== \x1b[33mno tests ran\x1b[0m\x1b[33m in 0.00s\x1b[0m\x1b[33m ===\x1b[0m",
     "\x1b[0m12:00:01  \x1b[33mNothing to do.\x1b[0m Try checking your model configs",
+    "=== no tests ran in 0.01s ===\r",
 ]
 SELECTED_SOMETHING = [
     "Ran 10 tests in 0.010s",
@@ -51,6 +52,7 @@ SELECTED_SOMETHING = [
     "assert out == 'Nothing to do.'",
     "{'msg': 'Nothing to do.'}",
     "12:00:01  Done. PASS=3 WARN=0 ERROR=0 SKIP=0 TOTAL=3",
+    "Cache:\n  Nothing to do.",
 ]
 
 
@@ -127,6 +129,24 @@ class Saved(unittest.TestCase):
         (self.world.work / ".deliver" / "plan.md").write_text("draft\n", encoding="utf-8")
         self.check("true")
         self.assertEqual(self.world.records()[0]["commit"], self.head)
+
+    def test_git_status_failing_ties_the_check_to_no_commit(self):
+        (self.world.work / ".git" / "index").write_bytes(b"not an index")
+        result = self.check("true")
+        self.assertEqual(result.stdout, "Saved check checks/1.txt: exit 0, tied to no commit.\n")
+        self.assertIsNone(self.world.records()[0]["commit"])
+
+    def test_a_sign_is_read_within_one_line(self):
+        for output, nothing in (("=== no tests ran in 0.01s ===\r\n", True), ("Cache:\n  Nothing to do.\n", False)):
+            with self.subTest(output):
+                result = self.check(shlex.join(["printf", "%s", output]))
+                note = "; it selected nothing, so it is not a pass" if nothing else ""
+                n = len(self.world.records())
+                self.assertEqual(result.stdout, output.replace("\r\n", "\n")
+                                 + f"Saved check checks/{n}.txt: exit 0, at {self.head[:7]}{note}.\n")
+                self.assertEqual(self.world.records()[-1]["selected_nothing"], nothing)
+                common = self.world.work / ".git" / "deliver" / "branches" / "main"
+                self.assertEqual((common / f"checks/{n}.txt").read_bytes(), output.encode())
 
     def test_each_sign_of_selected_nothing_is_saved_as_not_a_pass(self):
         for line in ("Ran 0 tests in 0.000s", "no tests ran in 0.01s",

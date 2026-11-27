@@ -1,15 +1,15 @@
 """`deliver.py check -- <command>`: run a check in the slot and save it (#256 rules 27 to 29).
 
-One argument after `--` is run as a shell command line and saved as written; several are joined
-with `shlex.join` first, so both spellings of one command save the same text for `ready` to match.
+One argument after `--` is run as a shell command line and saved as written. Several are joined
+with `shlex.join` into one command line, and that joined text is what is saved and run.
 The command runs in the checkout's top folder, wherever `deliver.py` is called from.
 
 The check waits for a slot, runs the command, and saves its stdout and stderr together to
 `checks/<n>.txt` in the branch's records, then appends a `check` record: `command`, `exit`,
 `output` (that file, relative to the records folder), `commit`, `selected_nothing` and
-`slot_wait_s`. `commit` is null when a tracked file was changed before or after the command, or
-`HEAD` moved while it ran. `check` never refuses inside a run: a failing command is saved and
-ends in exit 0.
+`slot_wait_s`. `commit` is null when a tracked file was changed before or after the command, when
+`git status` fails, or when `HEAD` after the command is not `HEAD` before it. `check` never refuses
+inside a run: a failing command is saved and ends in exit 0.
 
 The slot is a lock file in the machine directory held with `fcntl.flock`, which the system frees
 when the holder dies; the command's process does not inherit it. There is one slot, or
@@ -31,18 +31,18 @@ import settings
 from save import tied_commit
 
 WAITING = "Waiting for a check slot."
-# The three signs of a command that selected nothing (#256 rule 29), each matched on one line.
+# The three signs of a command that selected nothing (#256 rule 29), each matched within one line.
 SELECTED_NOTHING = re.compile(
-    r"^Ran 0 tests in "                                  # unittest
-    r"|^[= ]*no tests ran in [\d.]+s[= ]*$"               # pytest
-    r"|^(?:\d\d:\d\d:\d\d\s+|.*?:\s+)?Nothing to do\.",   # dbt
-    re.M,
+    r"Ran 0 tests in "                                  # unittest
+    r"|[= ]*no tests ran in [\d.]+s[= ]*$"               # pytest
+    r"|(?:\d\d:\d\d:\d\d\s+|.*?:\s+)?Nothing to do\.",   # dbt
 )
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def selected_nothing(output: str) -> bool:
-    return bool(SELECTED_NOTHING.search(ANSI.sub("", output)))
+    """True when one line of the output, split at any line break, is a sign."""
+    return any(SELECTED_NOTHING.match(line) for line in ANSI.sub("", output).splitlines())
 
 
 def slot_count(run: core.Run) -> int:

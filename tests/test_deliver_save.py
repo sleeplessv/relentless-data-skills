@@ -79,6 +79,12 @@ class Save(Base):
         self.assert_ends(self.world.deliver("save", "summary"), 0, "Saved summary.md tied to no commit.\n")
         self.assert_record(self.world.records()[0], kind="summary", file="summary.md", commit=None)
 
+    def test_git_status_failing_ties_the_save_to_no_commit(self):
+        (self.world.work / ".git" / "index").write_bytes(b"not an index")
+        self.drop("summary", "Saved with a broken index.\n")
+        self.assert_ends(self.world.deliver("save", "summary"), 0, "Saved summary.md tied to no commit.\n")
+        self.assert_record(self.world.records()[0], kind="summary", file="summary.md", commit=None)
+
     def test_a_later_save_replaces_the_file_and_adds_a_record(self):
         self.drop("summary", "first\n")
         self.world.deliver("save", "summary")
@@ -188,6 +194,21 @@ class SavePlan(Base):
     def test_a_heading_named_door_is_not_a_door_line(self):
         result = self.save_plan(TABLE + "\n## Door\n\ndoor: two-way — the reason\n")
         self.assert_ends(result, 0, f"Saved plan.md at {self.head[:7]}.\ndoor: two-way (the reason)\n")
+
+    def test_a_door_line_in_a_fenced_block_is_not_the_door(self):
+        for fence in ("```", "~~~text", "````"):
+            with self.subTest(fence):
+                close = fence.rstrip("text")
+                result = self.save_plan(f"{TABLE}\nAn earlier plan said:\n\n{fence}\ndoor: two-way — easy to undo\n{close}\n")
+                self.assert_ends(result, 0, f"Saved plan.md at {self.head[:7]}.\ndoor: one-way (the plan has no door line)\n")
+                read = deliver_kit.load("plan").read(self.run_())
+                self.assertEqual((read.door, read.door_reason), ("one-way", "the plan has no door line"))
+
+    def test_a_table_in_a_fenced_block_is_not_the_table(self):
+        example = "~~~\n| # | Requirement | Proof |\n|---|---|---|\n| R1 | an example | — |\n~~~\n"
+        self.assert_ends(self.save_plan(f"{TABLE}\n{example}\ndoor: two-way — the reason\n"), 0,
+                         f"Saved plan.md at {self.head[:7]}.\ndoor: two-way (the reason)\n")
+        self.assertEqual([r.number for r in deliver_kit.load("plan").read(self.run_()).requirements], ["R1", "R2"])
 
     def test_read_returns_the_saved_requirements_proofs_and_door(self):
         plan = deliver_kit.load("plan")

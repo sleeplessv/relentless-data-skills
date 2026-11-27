@@ -10,11 +10,13 @@ for word. Only two parts of it are read, and only in this form:
 - At most one door line: `door: two-way` or `door: one-way`, a separator (` — `, ` – `, ` - `,
   `: `, `; ` or `, `) and a one-line reason. With no door line the door is one-way.
 
-Anything else (a heading, the assumptions, notes) is kept and not read. Text that looks like
-either part but does not fit raises `PlanError` rather than being guessed at.
+Anything else (a heading, the assumptions, notes) is kept and not read, and neither part is
+looked for inside a fenced code block (``` or ~~~). Text that looks like either part but does
+not fit raises `PlanError` rather than being guessed at.
 
 `read(run)` reads the saved plan of the run's branch. `ready` (#423), the small test (#422) and the
-PR description (#415) call it for the requirements, their proofs and the door.
+PR description (#415) are to call it for the requirements, their proofs and the door; for now
+only the tests do.
 """
 from __future__ import annotations
 
@@ -30,6 +32,7 @@ DOOR = re.compile(r"door: (two-way|one-way)(?: [—–-] |[:;,] )(\S.*)")
 LOOKS_LIKE_DOOR = re.compile(r"^\W*door\s*[:=-]", re.I)
 NO_PROOF = re.compile(r"[-–—]*")
 NO_DOOR_LINE = "the plan has no door line"
+FENCE = re.compile(r" {0,3}(`{3,}|~{3,})")
 
 
 class PlanError(Exception):
@@ -57,9 +60,27 @@ def cells(line: str) -> list[str]:
     return [c.strip().replace("\\|", "|") for c in CELL_SPLIT.split(inner[1:])]
 
 
+def fenced(lines: list[str]) -> set[int]:
+    """The numbers of the lines in fenced code blocks, fences included; an open fence runs to the end."""
+    inside, fence = set(), None
+    for i, line in enumerate(lines):
+        found = FENCE.match(line)
+        if fence is None:
+            if found:
+                fence = found[1]
+                inside.add(i)
+            continue
+        inside.add(i)
+        if found and found[1][0] == fence[0] and len(found[1]) >= len(fence) and not line[found.end():].strip():
+            fence = None
+    return inside
+
+
 def parse(text: str) -> Plan:
     lines = text.splitlines()
-    heads = [i for i, line in enumerate(lines) if line.lstrip().startswith("|") and cells(line) == HEADER]
+    skip = fenced(lines)
+    heads = [i for i, line in enumerate(lines)
+             if i not in skip and line.lstrip().startswith("|") and cells(line) == HEADER]
     if len(heads) != 1:
         raise PlanError(f"the plan needs one table headed | {' | '.join(HEADER)} |, and it has {len(heads)}")
     first = heads[0] + 1
@@ -80,7 +101,7 @@ def parse(text: str) -> Plan:
         requirements.append(Requirement(want, row[1], "" if NO_PROOF.fullmatch(row[2]) else row[2]))
     if not requirements:
         raise PlanError("the table has no requirement")
-    doors = [(i, line) for i, line in enumerate(lines) if LOOKS_LIKE_DOOR.match(line)]
+    doors = [(i, line) for i, line in enumerate(lines) if i not in skip and LOOKS_LIKE_DOOR.match(line)]
     if not doors:
         return Plan(requirements, "one-way", NO_DOOR_LINE)
     if len(doors) > 1:

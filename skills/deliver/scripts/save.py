@@ -2,7 +2,8 @@
 
 The kinds are request, requirements, plan and summary. `save <kind>` moves `.deliver/<kind>.md`
 to `<kind>.md` in the branch's records, replacing an earlier one, and appends a `save` record:
-`kind`, `file` and `commit`. `commit` is null when a tracked file is changed (#256 rule 28).
+`kind`, `file` and `commit`. `commit` is null when a tracked file is changed or `git status`
+fails (#256 rule 28).
 `save plan` first reads the plan with `plan.parse`: it refuses a requirement with no proof or a
 plan it cannot read, and prints the door, which is one-way when the plan has no door line.
 """
@@ -23,8 +24,9 @@ def git(run: core.Run, *args: str) -> subprocess.CompletedProcess:
 
 
 def tied_commit(run: core.Run) -> str | None:
-    """`HEAD`, or None when a tracked file is changed or there is no commit yet."""
-    if git(run, "status", "--porcelain", "--untracked-files=no").stdout:
+    """`HEAD`, or None when a tracked file is changed, `git status` fails or there is no commit yet."""
+    status = git(run, "status", "--porcelain", "--untracked-files=no")
+    if status.returncode != 0 or status.stdout:
         return None
     head = git(run, "rev-parse", "--verify", "-q", "HEAD")
     return head.stdout.strip() if head.returncode == 0 else None

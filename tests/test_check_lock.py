@@ -100,7 +100,8 @@ JOINED_ROWS = ("lock ownership",)
 
 # The standard output of a full run in which every stand-in check passed.
 EVERY_CHECK = [
-    line for name in ("skill lint", "registry check", "skill versions (base main)", "role files", "unit tests", "claude plugin validate")
+    line for name in (
+        "skill lint", "registry check", "skill versions (base main)", "role files", "unit tests", "claude plugin validate")
     for line in (f"==> {name}", f"PASS: {name}")
 ] + ["All checks passed."]
 

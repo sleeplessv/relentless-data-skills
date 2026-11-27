@@ -1607,7 +1607,8 @@ class TestLimitEntries(HookTest):
                          "standin-pro-model, as the one whose file names no tier did\n")
         definitions = self.world.harness_starts()[-1]["definitions"]
         self.assertIn("\nmodel: flash\n---\n", definitions[".agents/agents/probe-reader.md"])
-        self.assertNotIn("model:", definitions[".agents/agents/probe-reviewer.md"])
+        self.assertNotIn("model:", definitions[".agents/agents/probe-author.md"])
+        self.assertNotIn("tools:", definitions[".agents/agents/probe-author.md"])
         self.assertEqual(self.run_entry("antigravity", "A3", STANDIN_TIER_WINS="file"),
                          "A3 antigravity recorded: the file's tier won: the agent whose file names flash ran on "
                          "standin-flash-model, the one whose file names no tier on standin-pro-model\n")

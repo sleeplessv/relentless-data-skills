@@ -880,7 +880,8 @@ WRITE = "Write the word {word}, a space and your role word to the file {marker} 
 RECALL = ("Write the word {word}, a space, the word your first brief gave you, a space and your role word to "
           "the file {marker} in the folder {work}.")
 FORGET = " Then delete this brief file."
-CONTROL = "Run the shell command `./control-probe.sh {control}` in the folder {work}, with your role word as a second argument."
+CONTROL = ("Run the shell command `./control-probe.sh {control}` in the folder {work}, with your role word as a "
+           "second argument.")
 TOGETHER = " Then run this shell command in the folder {work}: `{together}`"
 DEPTH_VAR = "CORTEX_CODE_EXPERIMENTAL_FEATURES"
 # Codex writes only in the session's folder: the temporary folders, which hold the probe folder, are left out.
@@ -1122,7 +1123,7 @@ def judge_a2(harness: str, run: Finished) -> tuple[str, str]:
 
 def judge_a3(harness: str, run: Finished) -> tuple[str, str]:
     models = {}
-    for key, role in (("tiered", READER), ("plain", REVIEWER)):
+    for key, role in (("tiered", READER), ("plain", AUTHOR)):
         if not marker(run, "A3", key, role):
             return "failed", f"no agent of the {role.removeprefix('probe-')} role ran"
         lines = agent_hook_lines(run, role)
@@ -1222,7 +1223,7 @@ def spawn_prompt(entry: str) -> Callable[[str], str]:
 
 def invoke_prompt(role: str, keys: tuple[str, ...], model: str = "") -> Callable[[str], str]:
     """Antigravity: one invoke_subagent call per key, each agent of the role given with its key."""
-    roles = (role,) if len(keys) == 1 else (READER, REVIEWER)
+    roles = (role,) if len(keys) == 1 else (READER, AUTHOR)
     calls = " ".join(f"Start one agent of the role {r} with invoke_subagent{model} and give it this line, word for "
                      f"word, as its whole prompt: {line_of('A3' if model else 'A2', key)}" for r, key in zip(roles, keys))
     return lambda h: f"{calls} Do not open those files yourself, and do nothing else."
@@ -1273,7 +1274,7 @@ PROBES.update({
     "A3": Probe(invoke_prompt(READER, ("tiered", "plain"), ", with Model pro,"), judge_a3, hook=True,
                 setup=setup_limit("A3", {"tiered": CONTROL + " Then " + WRITE[0].lower() + WRITE[1:],
                                          "plain": CONTROL + " Then " + WRITE[0].lower() + WRITE[1:]},
-                                  roles=(READER, REVIEWER), tier="flash")),
+                                  roles=(READER, AUTHOR), tier="flash")),
     "A4": Probe(cap_prompt("invoke_subagent", "turn"), judge_cap("A4"),
                 setup=setup_limit("A4", {f"agent{n}": WRITE + TOGETHER for n in range(1, CAP + 1)}, count=CAP)),
 })

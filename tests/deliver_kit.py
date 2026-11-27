@@ -21,6 +21,10 @@ directory. A test that needs another stand-in puts it in `world.bin`.
 Claude Code (`deliver_guard_inputs/`) with its `cwd` set to the clone and its command replaced.
 `world.probe()` runs the guard probe that way, so a marked run's preflight finds its refusal.
 
+Claude Code as preflight reads it passes: `CLAUDE_CODE_EFFORT_LEVEL` is set, and `world.trust(folder)`
+marks a folder trusted in `home/.claude.json`, which the world does for the clone and each worktree.
+`tests/test_deliver_checks_claude.py` builds the other Claude Code files under `home/`.
+
 `world.install_upstream()` installs a stand-in of each upstream skill in the home's Claude Code
 skills folder, and from then on `world.deliver` runs a copy of the plugin whose upstream contract
 holds the stand-ins' folder hashes, so preflight finds every skill unchanged.
@@ -113,6 +117,7 @@ class World:
             "LANG": "C",
             "DELIVER_STATE_DIR": str(self.state),
             "DELIVER_KIT_WORLD": str(self.root),
+            "CLAUDE_CODE_EFFORT_LEVEL": "high",
         }
         gh = self.bin / "gh"
         gh.write_text(f"#!{sys.executable} -I\n{GH}", encoding="utf-8")
@@ -124,6 +129,7 @@ class World:
         self.git(self.root, "clone", "-q", str(self.origin), str(self.work))
         self.commit(self.work, "README.md", "seed\n", "chore: seed")
         self.git(self.work, "push", "-q", "origin", "HEAD:refs/heads/main")
+        self.trust(self.work)
         self.script = DELIVER
 
     def env(self, **changes: str | None) -> dict[str, str]:
@@ -153,7 +159,15 @@ class World:
     def worktree(self, name: str, branch: str) -> Path:
         path = self.root / name
         self.git(self.work, "worktree", "add", "-q", "-b", branch, str(path))
+        self.trust(path)
         return path
+
+    def trust(self, folder: Path, trusted: bool = True) -> None:
+        """Record in Claude Code's trust record, home/.claude.json, whether the folder is trusted."""
+        path = self.home / ".claude.json"
+        record = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"projects": {}}
+        record["projects"][str(folder)] = {"hasTrustDialogAccepted": trusted}
+        path.write_text(json.dumps(record), encoding="utf-8")
 
     def deliver(self, *args: str, cwd: Path | None = None, **env: str | None) -> subprocess.CompletedProcess:
         return subprocess.run(

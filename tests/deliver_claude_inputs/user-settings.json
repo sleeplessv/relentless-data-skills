@@ -1,0 +1,18 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"<home>/.agents/skills/snowman/hooks/snow_guard.py\""
+          }
+        ]
+      }
+    ]
+  },
+  "enabledPlugins": {
+    "deliver@relentless-data-skills": true
+  }
+}

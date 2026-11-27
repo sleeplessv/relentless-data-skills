@@ -1,8 +1,8 @@
 """The PR description, rendered from a branch's saved records only (#231 rules 15 to 24; #256 rules 33, 34).
 
 `description(folder, ...)` reads the records folder of one branch and returns the whole
-description. `pr` calls it with no options and so renders a pending blast radius. `ready` (#423)
-is to call it again with the small test's blast radius, the door it settled and the measurement
+description. `pr` calls it with no options and so renders a pending blast radius. `ready` calls it
+again with the small test's blast radius, the door it settled and the measurement
 block. Nobody edits the result by hand.
 
 The record contract this reads, which `start`, `save` and `check` write:
@@ -132,13 +132,21 @@ def evidence_lines(requirements: list[Requirement], records: list[dict]) -> list
             continue
         checks = [r for r in records if r.get("event") == "check" and r.get("command") == command.group(1)]
         last = checks[-1] if checks else None
-        if last and last.get("commit") and last.get("exit") == 0 and not last.get("selected_nothing"):
+        if last and counted(last, command.group(1)):
             lines.append(f"{rid}: pass at {last['commit'][:7]}")
         elif last and last.get("commit") and last.get("exit") != 0:
             lines.append(f"{rid}: fail at {last['commit'][:7]}")
         else:
             lines.append(f"{rid}: pending")
     return lines
+
+
+def counted(record: dict, command: str) -> bool:
+    """Whether a record is a counted pass of `command`: a check of that exact text that exited 0,
+    is tied to a commit and selected something (#256 rules 29, 30). `ready` also wants the commit
+    to be `HEAD`."""
+    return (record.get("event") == "check" and record.get("command") == command and record.get("exit") == 0
+            and bool(record.get("commit")) and not record.get("selected_nothing"))
 
 
 def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tuple[str, str] | None = None,

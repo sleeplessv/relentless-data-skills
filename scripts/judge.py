@@ -47,18 +47,23 @@ EVIDENCE = "\n".join(shown for shown, _ in FORMS)
 PROOF = re.compile("|".join(read for shown, read in FORMS if shown != "none"))
 RULES = """\
 Give one R line for each requirement, in order, and one F line for each
-finding, numbered F1, F2 and on. "breaks" names the requirement that the line
-at <file>:<line> breaks. "fails" shows the finding failing: what to give the
-change or do with it, and what goes wrong then. Write "none" when you can show
-neither. A finding with "breaks" or "fails" names each requirement, R<n>, that
-its line holds after <file>:<line>, and names no other; a finding with "none"
-names no requirement. A finding is proven when its evidence is "breaks" or
-"fails", and each "cannot tell" counts as a proven finding. A requirement that
-is not met needs a proven finding that names it. The review passes when no
-finding is proven, so with every requirement met and nothing wrong the answer
-is the R lines alone."""
+finding, numbered F1, F2 and on. <file> may hold a colon: it ends at the first
+colon that is followed by digits and a colon. Those digits are <line>, a line
+number from 1 with no leading zero. "breaks" names the requirement that the
+line at <file>:<line> breaks. "fails" shows the finding failing: what to give
+the change or do with it, and what goes wrong then. Write "none" when you can
+show neither. A finding names a requirement by its R<n> in <what is wrong> or
+right after "breaks" or "fails". An R<n> later in the evidence, such as a
+label in what to give, names none. A finding with "breaks" or "fails" names
+each requirement it is about, and names no other; a finding with "none" names
+no requirement. A finding is proven when its evidence is "breaks" or "fails",
+and each "cannot tell" counts as a proven finding. A requirement that is not
+met needs a proven finding that names it. The review passes when no finding is
+proven, so with every requirement met and nothing wrong the answer is the R
+lines alone."""
 REQUIREMENT_LINE = re.compile(rf"R([1-9]\d*): ({'|'.join(ANSWERS)})")
-FINDING_LINE = re.compile(r"F([1-9]\d*): ([^\s:][^:]*):([1-9]\d*): (\S.*?) Evidence: (.+)")
+# <file> ends where RULES says, and is never moved later to make the rest of the line fit.
+FINDING_LINE = re.compile(r"F([1-9]\d*): ((?!\s)(?:(?!:[0-9]+:).)+):([1-9][0-9]*): (\S.*?) Evidence: (.+)")
 NAMED = re.compile(r"\bR([1-9]\d*)\b")
 VERSION_NAME = re.compile(r"[a-z0-9][a-z0-9._-]*")
 
@@ -276,10 +281,12 @@ def export(clone: Path, commit: str, folder: Path) -> None:
         else:
             target.write_bytes(content)
             target.chmod(0o755 if mode == b"100755" else 0o644)
-    root = folder.resolve()
     for link, to in links:  # made last, so no file is written through one
-        if (link.parent / to).resolve().is_relative_to(root):
-            link.symlink_to(to)
+        link.symlink_to(to)
+    # Each link is judged with every link in place, so one that leads through another is followed as the kernel would.
+    root = folder.resolve()
+    for link in [link for link, _ in links if not link.resolve().is_relative_to(root)]:
+        link.unlink()
 
 
 def read_answer(text: str, count: int) -> dict | None:
@@ -296,7 +303,7 @@ def read_answer(text: str, count: int) -> dict | None:
             answers[f"R{found.group(1)}"] = found.group(2)
         elif found := FINDING_LINE.fullmatch(line):
             evidence = found.group(5).strip()
-            named = sorted({int(number) for number in NAMED.findall(f"{found.group(4)} {evidence}")})
+            named = sorted({int(number) for number in NAMED.findall(f"{found.group(4)} {evidence.split(':', 1)[0]}")})
             if int(found.group(1)) != len(findings) + 1 or not (
                     evidence == "none" and not named or PROOF.fullmatch(evidence)):
                 return None
@@ -443,13 +450,26 @@ def attempt(state: Path, label: str, number: int, version: str, commit: str | No
             "right_first_time": None if reading is None else failed is None and reading["passed"]}
 
 
-def ledger(state: Path) -> list[dict]:
+def ledger(state: Path, readable: bool = False) -> list[dict]:
+    """The lines of verdicts.jsonl, split and numbered as the report reads them. A line that is not blank and not a
+    JSON object in UTF-8 is an error, or, with `readable`, left out."""
     path = state / "verdicts.jsonl"
-    return [json.loads(text) for text in (path.read_text().splitlines() if path.is_file() else []) if text.strip()]
+    data = path.read_bytes() if path.is_file() else b""
+    lines = []
+    for at, text in enumerate(data.replace(b"\r\n", b"\n").replace(b"\r", b"\n").split(b"\n"), 1):
+        line = scan.json_object(text)
+        if line is not None:
+            lines.append(line)
+        elif not readable and text.decode(errors="replace").strip():  # a byte that is not UTF-8 is not blank
+            raise JudgeError(f"{path} line {at} cannot be read as a JSON object.")
+    return lines
 
 
-def folder_of(state: Path, line: dict) -> Path:
-    return (state / str(line.get("check", {}).get("output", ""))).parent
+def folder_of(state: Path, line: dict) -> Path | None:
+    """The folder of the attempt whose check output the line names, or None when it names none."""
+    check = line.get("check")
+    output = check.get("output") if isinstance(check, dict) else None
+    return (state / output).parent if isinstance(output, str) and output else None
 
 
 def publish(state: Path, record: dict, saved: Path) -> list[Path]:
@@ -463,7 +483,7 @@ def publish(state: Path, record: dict, saved: Path) -> list[Path]:
         scan.write_private(state / "verdicts.jsonl", "".join(json.dumps(line) + "\n" for line in [*(
             line for line in lines if line not in earlier), record]))
     folders = [folder_of(state, line) for line in earlier]
-    return [folder for folder in folders if folder.parent == saved.parent and folder != saved]
+    return [folder for folder in folders if folder is not None and folder.parent == saved.parent and folder != saved]
 
 
 def judge(label: str, number: int, version: str, commit: str | None, source: Path | None) -> int:
@@ -475,6 +495,7 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
         raise JudgeError("CLAUDE_CONFIG_DIR must be unset or an absolute path with no .. part.")
     config = scan.config_dir() if value is None else Path(value)
     state = scan.state_dir()
+    ledger(state)  # a line it cannot read ends the judge here, before a review is paid for
     entry = find_ticket(state, label, number)
     required = entry.get("requirements")
     if not (isinstance(required, list) and required
@@ -492,7 +513,7 @@ def judge(label: str, number: int, version: str, commit: str | None, source: Pat
     except BaseException:
         # Around publish too: an interrupt can land after it has written the line that names this attempt.
         if not any((saved / name).exists() for name in REVIEWED) and all(
-                folder_of(state, line) != saved for line in ledger(state)):
+                folder_of(state, line) != saved for line in ledger(state, readable=True)):
             shutil.rmtree(saved, ignore_errors=True)
         raise
     for folder in replaced:  # only once the new line is written

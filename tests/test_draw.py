@@ -357,6 +357,14 @@ def sized(start: int, count: int, size: int, **fields: object) -> list[Ticket]:
     return [Ticket(number, size, **fields) for number in range(start, start + count)]
 
 
+def writable(root: Path) -> None:
+    """Give the owner write access to each folder under `root`, so that a folder a check made read-only can go."""
+    for folder, names, _ in os.walk(root):
+        for name in names:
+            if not os.path.islink(os.path.join(folder, name)):
+                os.chmod(os.path.join(folder, name), 0o700)
+
+
 def full_pool(per_bucket: int = 12, **fields: object) -> list[Ticket]:
     """`per_bucket` tickets of 20, 100 and 800 changed lines, numbered from 1, 101 and 201."""
     return sized(1, per_bucket, 20, **fields) + sized(101, per_bucket, 100, **fields) + sized(201, per_bucket, 800, **fields)
@@ -411,6 +419,57 @@ def counts(result: subprocess.CompletedProcess[str]) -> tuple[int, int, int]:
     pools = {text.split(":")[0]: int(text.split()[2].rstrip(",")) for text in printed if ": pool " in text}
     skipped = [int(text.split()[1]) for text in printed if text.startswith("Skipped ")]
     return pools["0-50"], pools["51-300"], (skipped or [0])[0]
+
+
+# The shape of the calls behind the PRs the first real draw vetoed: a body written to a file, a cd, and gh pr create
+# after a variable set for it alone.
+BY_TIME = ("cat > \"$F\" <<'EOF'\nBody: gh pr create runs once.\nEOF\ncd \"$D\"\n"
+           "GH_PAGER= gh pr create --title \"t\" --body-file \"$F\"")
+# Whether a call names gh pr create: its three words, plain, start one command after nothing but NAME=value words.
+# The reader answers "does not name" wherever it cannot read the text before the words with certainty.
+NAMES = {
+    BY_TIME: True, "A=1 B=2 gh pr create": True, "git push && gh pr create --fill": True,
+    'A="x $Y" gh pr create': True, "cd x || exit 1\ngh pr create": True, "git push |& tail -1; gh pr create": True,
+    "cat <<-'EOF' >out\n\tbody\n\tEOF\ngh pr create": True, "cat <<EOF 2>&1\nbody\nEOF\ngh pr create": True,
+    'cd "${D}" && gh pr create': True, 'echo "a\\"b" $1 $#; gh pr create': True, "echo a\\ b; gh pr create": True,
+    "make &>log </dev/null; gh pr create": True,
+    # The three words only inside a here-document's body or only inside quotes.
+    "cat <<'EOF'\ngh pr create\nEOF": False, "cat <<EOF\ngh pr create\nEOF": False,
+    "cat <<-EOF\n\tgh pr create\n\tEOF": False, "cat <<\"EOF\"\ngh pr create\nEOF\necho done": False,
+    'echo "gh pr create"': False, "git commit -m 'gh pr create'": False, '"gh" pr create': False,
+    # env is a program, not a NAME=value word; and words that are not gh pr create.
+    "env A=1 gh pr create": False, "gh pr view": False, "xgh pr create": False, "gh pr create-preview": False,
+    # Text the reader cannot be sure of before the words: a here-document with no end, or one whose line holds a
+    # quoted new line; an expansion that runs a command; a here-string; a command with nothing before an operator.
+    "cat <<'EOF'\nbody\ngh pr create": False, "cat <<'EOF' 'x\n'\nEOF\ngh pr create": False,
+    'echo "$(date)"; gh pr create': False, "echo `date`; gh pr create": False, "cat <<< x; gh pr create": False,
+    "&& gh pr create": False, "; gh pr create": False, "true ;; gh pr create": False,
+    "true ;& gh pr create": False, 'echo "${D:-x}"; gh pr create': False,
+    # A line of an unquoted body that ends in a backslash may join the next, so its delimiter line may not end it;
+    # a quoted body, or an unquoted one with no such line, still ends there.
+    "cat <<EOF\nUsage: \\\nEOF\ngh pr create --fill\nEOF\ngh pr view --json url --jq .url": False,
+    "cat <<'EOF'\nUsage: \\\nEOF\ngh pr create --fill": True, "cat <<EOF\nUsage: x\nEOF\ngh pr create --fill": True,
+    # A < or > touching create may make it another word; one after a blank is a redirection.
+    "gh pr create<(printf body) || gh pr view --json url --jq .url": False, "gh pr create>(cat)": False,
+    "gh pr create<1-3> || gh pr view": False, "gh pr create --fill > out.txt": True, "gh pr create 2>&1": True}
+# The rows of FORMS["maybe"] that name gh pr create; the others do not.
+NAMED_MAYBE = {
+    "gh pr create --fill || gh pr view --json url --jq .url", f"gh pr create --fill | cat <<'URL'\n{URL}\nURL",
+    "gh pr create --fill | tail -1 notes.txt", "gh pr create --fill | tail -n5", "gh pr create --fill | tail -1 | cat",
+    "cat body.md | gh pr create --body-file -", AT_THE_LIMIT + "x", "gh pr create --fill 2>&1 > out.txt",
+    "cat>>log.txt; gh pr create", "git log >log.txt; gh pr create", "git push 2>err.txt; gh pr create",
+    'gh pr create --title "costs \\$5"', "gh pr create --body =gh", "'git' push && gh pr create",
+    "cat url.txt; gh pr create --fill | tail -1", "gh pr create --fill | tail -1 && cat url.txt",
+    "cd x && gh pr create --fill 2>&1 | tail -1", "gh pr create --title =SUM --fill 2>&1 | tail -1",
+    "gh pr create --fill | tail -1 && cat url.txt >&2", "gh pr create --fill || cat url.txt",
+    "gh pr create --title ''=SUM 2>&1 | tail -1", f"gh pr create --title \"\"={URL} 2>&1 | tail -1",
+    "git log ''=x; gh pr create", "gh pr create --title 't'=SUM",
+    "git push && gh pr create --fill; cd .", f"false && gh pr create --fill; printf '%s\\n' {URL}",
+    "exit 0; gh pr create", "exec true; gh pr create", "PATH=/absent; gh pr create",
+    f"gh pr create > missing-folder/out; printf '%s\\n' {URL}", f"gh pr create < missing-file; printf '%s\\n' {URL}",
+    "gh pr view --json url || gh pr create --fill", "git push ||\ngh pr create", "git push && gh pr create &",
+    "gh pr create  # open it", "GH=1 gh pr create", "gh pr create; gh pr create",
+    "gh pr create --body \"$(cat <<'EOF'\nEOF)\nEOF\n)\""}
 
 
 class World:
@@ -568,23 +627,26 @@ class World:
         (self.state / "repos.json").write_text(json.dumps(repos))
 
     def draw(self, *args: str, state: Path | None = None, prelude: str = "") -> subprocess.CompletedProcess[str]:
-        """Run the draw; `prelude` is Python run in the same process first, to break something the world cannot."""
+        """Run the draw, with SIGINT as `start` leaves it; `prelude` is Python run in the same process first, to break
+        something the world cannot."""
         program, env = self.command(args, state, prelude)
-        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True)
+        return subprocess.run(program, cwd=self.root / "cwd", env=env, text=True, capture_output=True,
+                              preexec_fn=self.default_sigint)
 
     @staticmethod
     def default_sigint() -> None:
         signal.signal(signal.SIGINT, signal.SIG_DFL)
         signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGINT})
 
-    def start(self, *args: str) -> subprocess.Popen[str]:
-        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited.
+    def start(self, *args: str, caller: Callable[[], None] = default_sigint) -> subprocess.Popen[str]:
+        """Start the draw and return at once, with SIGINT at its default and unblocked whatever the test run inherited,
+        or as `caller` leaves it.
 
         A job a script starts with `&` with job control off has SIGINT ignored, and a caller may block it;
         either way the draw would not stop on the interrupt a test sends it."""
         program, env = self.command(args, None, "")
         return subprocess.Popen(program, cwd=self.root / "cwd", env=env, text=True, stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE, preexec_fn=self.default_sigint)
+                                stderr=subprocess.PIPE, preexec_fn=caller)
 
     def command(self, args: tuple[str, ...], state: Path | None, prelude: str) -> tuple[list[str], dict[str, str]]:
         answers = self.root / "answers"
@@ -635,13 +697,13 @@ class TestOneDraw(unittest.TestCase):
         return {str(path): path.read_bytes() for folder in cls.outside if folder.exists()
                 for path in sorted(folder.rglob("*")) if path.is_file()}
 
-    def test_the_draw_writes_ten_tickets_per_bucket_with_each_entrys_fields(self) -> None:
+    def test_the_draw_writes_five_tickets_per_bucket_with_each_entrys_fields(self) -> None:
         world = self.world
         self.assertEqual(self.result.returncode, 0, self.result.stderr)
         drawn = world.set_file()
         self.assertEqual(drawn["seed"], 7)
         buckets = [entry["bucket"] for entry in drawn["tickets"]]
-        self.assertEqual(buckets, ["0-50"] * 10 + ["51-300"] * 10 + ["301-1500"] * 10)
+        self.assertEqual(buckets, ["0-50"] * 5 + ["51-300"] * 5 + ["301-1500"] * 5)
         for entry in drawn["tickets"]:
             ticket = world.tickets[entry["ticket"]]
             self.assertEqual(entry, {
@@ -652,6 +714,8 @@ class TestOneDraw(unittest.TestCase):
                 "ready_commit": ticket.commit("a"), "model": MODEL,
                 "pr": ticket.pr, "session": ticket.session, "log": f"logs/{ticket.session}.jsonl",
                 "check_output": f"checks/A-{ticket.number}.txt"})
+        self.assertEqual(sorted(f"checks/{path.name}" for path in (world.state / "checks").iterdir()),
+                         sorted(entry["check_output"] for entry in drawn["tickets"]))  # no try after the fifth pass
         self.assertEqual(json.loads((world.state / "project-labels.json").read_text()), {"A": ALPHA})
 
     def test_the_draw_copies_and_scans_each_kept_session_log_with_its_helpers(self) -> None:
@@ -681,8 +745,8 @@ class TestOneDraw(unittest.TestCase):
             "opened it, keeps it out of the pool.",
             "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
             "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 10.",
-            "51-300: pool 12, set aside 0, kept 10.", "301-1500: pool 12, set aside 0, kept 10.",
+            "0-50: pool 12, set aside 0, kept 5.",
+            "51-300: pool 12, set aside 0, kept 5.", "301-1500: pool 12, set aside 0, kept 5.",
             f"Wrote {state / 'replay-set-1.json'}."])
         self.assertEqual(self.result.stderr, "")
         self.assertEqual(oct((state / "replay-set-1.json").stat().st_mode & 0o777), oct(0o600))
@@ -698,8 +762,35 @@ class TestDraw(unittest.TestCase):
         result = self.world([]).draw("--help")
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(result.stdout.splitlines()[:3], [
-            "Draw the replay set: 30 tickets generation one finished, 10 per size bucket.", "",
+            "Draw the replay set: up to 15 tickets generation one finished, up to 5 per size bucket.", "",
             "Usage: python3 scripts/draw.py [--seed N]"])
+
+    def test_help_states_the_up_to_five_rule_the_short_and_empty_bucket_rules_and_no_old_figure(self) -> None:
+        sentences = [
+            "The draw tries the tickets in that order until 5 pass or the bucket's pool is used up, whatever the "
+            "other buckets hold.",
+            "A bucket in which fewer than 5 pass gives all that pass, and a bucket in which none passes means no set "
+            "is written (exit 3).",
+            "Exit 3: a bucket holds no ticket that passes, because its pool is empty or every ticket in it is set "
+            "aside; no set was written, and the count per bucket is printed."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+        self.assertEqual(re.findall(r"\b(?:10|30)\b", help_text), [])
+
+    def test_help_takes_its_figures_from_the_per_bucket_limit(self) -> None:
+        world = self.world([])
+        script = world.source / "draw.py"
+        source = script.read_text()
+        self.assertEqual(source.count("\nPER_BUCKET = 5\n"), 1)
+        script.write_text(source.replace("\nPER_BUCKET = 5\n", "\nPER_BUCKET = 7\n"))
+        help_text = " ".join(world.draw("--help").stdout.split())
+        for sentence in ["Draw the replay set: up to 21 tickets generation one finished, up to 7 per size bucket.",
+                         "until 7 pass or the bucket's pool is used up",
+                         "A bucket in which fewer than 7 pass gives all that pass"]:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
 
     def test_help_gives_the_opening_forms_the_veto_the_limit_and_what_it_takes_for_granted_each_once(self) -> None:
         sentences = [
@@ -740,6 +831,39 @@ class TestDraw(unittest.TestCase):
             with self.subTest(sentence=sentence):
                 self.assertEqual(help_text.count(sentence), 1)
 
+    def test_help_states_each_known_limit_and_the_exit_on_a_signal_each_once(self) -> None:
+        sentences = [
+            "A Bash call and its result are paired only inside one transcript: a call in the session's log whose "
+            "result is in a helper's log gives no evidence.",
+            "A log is split into lines at line feeds only, so a log whose lines end in a bare carriage return is read "
+            "as one line.",
+            "SIGKILL or a crash between the two renames that put a saved log in place can leave the new log without "
+            "its folder, the earlier copy in logs/.old-<session>/ and the rest of the new one in "
+            "logs/.new-<session>/, until that session is saved again.",
+            "Ctrl-C or SIGTERM while a step that ran too long is being stopped can leave the draw waiting until that "
+            "step ends.",
+            "A helper's response whose message id is a number can stand in for a response in the session's log that "
+            "has no id, and supply the session's model.",
+            "When one helper folder of a session cannot be listed, none of that session's helpers is read, the "
+            "readable ones included.",
+            "When the scan row cannot be written after a log was saved, the new copy of the log stays in place, no "
+            "copy of the earlier one is kept, and scan-rows.jsonl.partial can be left.",
+            "The draw takes an answer from gh as it comes: a timeline that is blank or holds an empty event picks the "
+            "head at the PR's creation, a push whose after is not a commit id is saved as the commit, and a byte that "
+            "is not UTF-8 ends the draw before the answer is saved.",
+            "Output of git that is not UTF-8, such as a hook's message, ends the draw with Python's traceback and "
+            "exit 1, and no set written; so does the judge, which runs its check through the draw's git runner.",
+            "Exit 130: Ctrl-C stopped the draw.",
+            "Exit 143: SIGTERM stopped the draw.",
+            "Either stop prints one line that says so, and no set was written.",
+            "Once the set file is in place, a signal leaves the exit at 0 and the last line as the one that names the "
+            "set.",
+            "A SIGINT or SIGTERM the caller ignored stays ignored."]
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        for sentence in sentences:
+            with self.subTest(sentence=sentence):
+                self.assertEqual(help_text.count(sentence), 1)
+
     def test_the_reader_s_docstrings_leave_the_forms_to_the_help(self) -> None:
         # The help names the other commands from OTHERS; neither docstring of the reader lists them again.
         sys.path.insert(0, str(SCRIPTS))
@@ -767,6 +891,76 @@ class TestDraw(unittest.TestCase):
                 self.assertEqual(result.stdout.splitlines()[1], f"Vetoed {count} PRs of the listed repos: a call "
                                                                 f"that may have opened each, or another PR of the "
                                                                 f"session that opened it, keeps it out of the pool.")
+
+    def test_a_call_names_gh_pr_create_only_when_its_three_words_plainly_start_one_command(self) -> None:
+        sys.path.insert(0, str(SCRIPTS))
+        self.addCleanup(sys.path.remove, str(SCRIPTS))
+        draw = importlib.import_module("draw")
+        table = {**NAMES, **{command: command in NAMED_MAYBE for command in FORMS["maybe"]},
+                 **dict.fromkeys(FORMS["opens"], True), **dict.fromkeys(FORMS["neither"], False)}
+        self.assertLessEqual(NAMED_MAYBE, set(FORMS["maybe"]))
+        for command, names in table.items():
+            with self.subTest(command=label(command)):
+                self.assertIs(draw.names_gh_pr_create(command), names)
+
+    def draw_once(self, tickets: list[Ticket], untimed: str = "") -> list[str]:
+        """What a draw with seed 1 prints, as lines; with `untimed`, the first ticket's log lines of that kind have
+        no time. Every bucket but 0-50 is empty."""
+        world = self.world(tickets)
+        if untimed:
+            retime(world.log_path(tickets[0]), None, untimed)
+        result = world.draw("--seed", "1")
+        self.assertEqual((result.returncode, result.stderr), (3, ""))
+        return result.stdout.splitlines()
+
+    @staticmethod
+    def printed(pool: int, vetoed: int, skipped: int = 0) -> list[str]:
+        """What a draw with seed 1 prints when the 0-50 pool holds `pool` tickets that pass and the others none."""
+        return ["Seed 1.", *([f"Skipped {skipped} session logs that could not be read."] if skipped else []),
+                f"Vetoed {vetoed} PRs of the listed repos: a call that may have opened each, or another PR of the "
+                "session that opened it, keeps it out of the pool.",
+                "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read "
+                "with certainty keeps each out of the pool.",
+                f"0-50: pool {pool}, set aside 0, kept {pool}.", "51-300: pool 0, set aside 0, kept 0.",
+                "301-1500: pool 0, set aside 0, kept 0.", "No set written: a bucket holds no ticket that passes."]
+
+    def test_a_call_that_names_gh_pr_create_opens_its_pr_when_github_s_time_falls_inside_it(self) -> None:
+        # GitHub's time is inside the call, outside it, or the result's time is missing; and calls that hold the
+        # three words only inside a here-document's body or inside quotes, with GitHub's time inside.
+        for name, ticket, untimed, printed in (
+                ("inside", Ticket(1, 20, command=BY_TIME), "", self.printed(1, 0)),
+                ("outside", Ticket(1, 20, command=BY_TIME, created="2026-01-04T09:00:00Z"), "", self.printed(0, 0)),
+                ("no time", Ticket(1, 20, command=BY_TIME), "user", self.printed(0, 1, skipped=1)),
+                ("here-document", Ticket(1, 20, command="cat <<'EOF'\ngh pr create\nEOF"), "", self.printed(0, 1)),
+                ("quotes", Ticket(1, 20, command="echo 'gh pr create' \"gh pr create\""), "", self.printed(0, 1))):
+            with self.subTest(case=name):
+                self.assertEqual(self.draw_once([ticket], untimed), printed)
+
+    def test_a_pr_opened_by_time_stays_out_beside_another_opener_or_another_pr_of_its_session(self) -> None:
+        # A second session may have opened the PR, or opened it by time too; the session may have opened a PR in a
+        # repo outside the list, which the draw does not ask GitHub about, so a call that names gh pr create only
+        # may have opened it; or the session opened a second PR of the listed repo by time.
+        maybe = "env A=1 gh pr create"
+        for name, ticket, vetoed_count in (
+                ("a rival that may have", Ticket(1, 20, command=BY_TIME, rival=maybe), 1),
+                ("a rival that did", Ticket(1, 20, command=BY_TIME, rival=BY_TIME), 0),
+                ("an unlisted PR named", Ticket(1, 20, unlisted_pr_command=BY_TIME), 1),
+                ("an unlisted PR it may have", Ticket(1, 20, command=BY_TIME, unlisted_pr_command=maybe), 1),
+                ("a second PR", Ticket(1, 20, command=BY_TIME, prs=2), 0)):
+            with self.subTest(case=name):
+                self.assertEqual(self.draw_once([ticket]), self.printed(0, vetoed_count))
+
+    def test_help_gives_the_second_way_and_what_it_takes_for_granted(self) -> None:
+        help_text = " ".join(self.world([]).draw("--help").stdout.split())
+        second = help_text[help_text.index("by time and not by form"):help_text.index("Any other call")]
+        for terms in (("draw asked GitHub about the PR",), ("result", "not an error", "PR's URL"),
+                      ("GitHub's time", "span"), ("names gh pr create",), ("plain", "unquoted", "in that order"),
+                      ("NAME=value",), ("here-document's body", "quotes"),
+                      ("takes for granted", "no other program opened the PR during that one call")):
+            with self.subTest(terms=terms):
+                for term in terms:
+                    self.assertIn(term, second)
+        self.assertEqual(help_text.count("by time and not by form"), 1)
 
     def test_pool_holds_only_tickets_that_meet_readings_2_and_3_in_listed_repos(self) -> None:
         kept = [
@@ -812,29 +1006,37 @@ class TestDraw(unittest.TestCase):
         # And one whose line holds a message that is not an object, which it counts.
         write_lines(projects / "00000000-0000-4000-d000-000000000003.jsonl", [
             line("00000000-0000-4000-d000-000000000003", "assistant", 4, message=[f"https://github.com/{ALPHA}/pull/599"])])
-        result = world.draw("--seed", "1")
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[1], "Skipped 2 session logs that could not be read.")
-        self.assertEqual(sorted(entry["ticket"] for entry in world.set_file()["tickets"]),
-                         [ticket.number for ticket in kept])
-        self.assertEqual(world.set_file()["set_aside"], [])
-        for entry in world.set_file()["tickets"]:
+        drawn = []
+        for number, pool in ((1, 10), (2, 5)):  # a set holds 5 of each bucket's 10; the second draw takes the rest
+            result = world.draw("--seed", "1")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.splitlines()[1], "Skipped 2 session logs that could not be read.")
+            self.assertEqual([text for text in result.stdout.splitlines() if ": pool " in text], [
+                f"{bucket}: pool {pool}, set aside 0, kept 5." for bucket in ("0-50", "51-300", "301-1500")])
+            self.assertEqual(world.set_file(number)["set_aside"], [])
+            drawn += world.set_file(number)["tickets"]
+        self.assertEqual(sorted(entry["ticket"] for entry in drawn), [ticket.number for ticket in kept])
+        for entry in drawn:
             ticket = world.tickets[entry["ticket"]]
             self.assertEqual((entry["ready_commit"], entry["model"]), (ticket.commit("b" if ticket.draft else "a"), MODEL),
                              ticket.number)
 
-    def test_a_command_makes_its_session_the_opener_only_when_it_surely_ran_gh_pr_create(self) -> None:
+    def test_a_command_makes_its_session_the_opener_by_its_form_or_by_time_when_it_names_gh_pr_create(self) -> None:
         for does, commands in FORMS.items():
             for command in commands:
                 with self.subTest(command=label(command)):
                     # Ticket 1's session runs the command. Ticket 101's opens its PR and a second session runs it.
                     # Ticket 102's opens its PR and later runs it, printing the URL of a PR in an unlisted repo.
+                    # GitHub's time for the listed PRs of tickets 1 and 101 falls inside each call, so a "maybe" call
+                    # that names gh pr create opens them by time; ticket 102's unlisted PR has no GitHub time and
+                    # counts on the form alone.
                     world = self.world([Ticket(1, 20, command=command), Ticket(101, 100, rival=command),
                                         Ticket(102, 100, unlisted_pr_command=command)])
                     result = world.draw()
+                    by_time = command in NAMED_MAYBE
                     self.assertEqual(result.returncode, 3, result.stderr)
-                    self.assertEqual(counts(result), (does == "opens", 2 * (does == "neither"), 0))
-                    self.assertEqual(vetoed(result), 3 * (does == "maybe"))
+                    self.assertEqual(counts(result), (does == "opens" or by_time, 2 * (does == "neither"), 0))
+                    self.assertEqual(vetoed(result), (1 if by_time else 3) * (does == "maybe"))
 
     def shell(self, name: str) -> tuple[str, Path]:
         """A shell --help takes for granted, and a folder holding the stand-ins and the files the forms use. A host
@@ -1021,8 +1223,10 @@ class TestDraw(unittest.TestCase):
         world = self.world(full_pool(criteria=criteria))
         result = world.draw()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual([entry["requirements"] for entry in world.set_file()["tickets"]],
-                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * 30)
+        tickets = world.set_file()["tickets"]
+        self.assertNotEqual(tickets, [])
+        self.assertEqual([entry["requirements"] for entry in tickets],
+                         [["Count rows, blank ones too.", "Print the total.", "Save it."]] * len(tickets))
 
     def test_the_draw_prints_how_many_tickets_it_left_out_for_a_list_it_cannot_read(self) -> None:
         cannot = "## Acceptance\n\n- Print the total.\n> A quote.\n- Count rows."
@@ -1052,10 +1256,27 @@ class TestDraw(unittest.TestCase):
                          "cannot read with certainty keeps each out of the pool.")
         self.assertEqual(counts(result), (1, 0, 0))
 
+    def test_the_refused_count_leaves_out_a_body_with_no_possible_item_under_a_criteria_heading(self) -> None:
+        # Tickets 1 to 3 hold no line that may start an item at or after their first possible criteria heading,
+        # outside a block closed before the line the draw cannot be sure of. Ticket 4 holds one, and is refused.
+        world = self.world([
+            Ticket(1, 20, criteria="- - -\n\n> ## Acceptance\n> Nothing yet."),
+            Ticket(2, 20, criteria="## Notes\n- Run:\n  ~~~sh\n  date\n  ~~~\n\n## Acceptance\nNothing yet."),
+            Ticket(3, 20, criteria="## Acceptance\n\n~~~\n- example\n~~~\n\n> Pending."),
+            Ticket(4, 20, criteria="- - -\n\n> ## Acceptance\n> - Real")])
+        result = world.draw()
+        self.assertEqual(result.returncode, 3, result.stderr)
+        printed = result.stdout.splitlines()
+        self.assertEqual(printed[printed.index(next(line for line in printed if line.startswith("Vetoed "))) + 1],
+                         "Refused 1 tickets of the listed repos: a list under a criteria heading that the draw "
+                         "cannot read with certainty keeps each out of the pool.")
+        self.assertEqual(counts(result), (0, 0, 0))
+
     def test_help_states_the_lists_the_draw_reads_and_the_refused_count(self) -> None:
         sentences = [
             "The draw reads the body as CommonMark's blocks, and a line ends only at a line feed, a carriage return "
             "or both.",
+            "One U+FEFF at the very start of the body is dropped first, as GitHub drops it.",
             "Code, fenced or indented, and HTML blocks hide what they hold.",
             "In the section the draw reads lists of items marked - * + or ASCII digits and . or ), each with its text "
             "on its marker line.",
@@ -1077,8 +1298,7 @@ class TestDraw(unittest.TestCase):
             "at least to the text of the last open item.",
             "Anywhere in the body but inside a fence or an HTML block the draw holds open, which it opens only at a "
             "line indented at most 3 spaces, with no > or marker, that starts a fence or one of CommonMark's HTML "
-            "blocks of kinds 1 to 6, and holds until a later line ends it or its first line does past the text that "
-            "opens it, so is a line that is a \"## \" criteria heading once its indent, the > of any quotes and any "
+            "blocks of kinds 1 to 6, and holds until a later line ends it or its first line does, so is a line that is a \"## \" criteria heading once its indent, the > of any quotes and any "
             "list markers are taken off, when it had a > or a marker, or when it is indented and a line outside such "
             "a block that starts, at most 3 spaces in, with a list marker came before it, as it may stand inside a "
             "quote or an item; and a line indented at most 3 spaces that holds one HTML tag alone and starts none of "
@@ -1099,9 +1319,10 @@ class TestDraw(unittest.TestCase):
             "Its requirements are a list of strings.",
             "After the count of vetoed PRs and before the count per bucket, the draw prints how many tickets of the "
             "listed repos it left out because it refused their body as above.",
-            "A body is never refused when none of its lines is a \"## \" criteria heading once its indent, any > and "
-            "any list markers are taken off, or when none of its lines starts with a list marker once its indent and "
-            "any > are taken off, as it then holds no item.",
+            "A body is never refused when no line that starts with a list marker once its indent and any > are taken "
+            "off comes at or after its first line that is a \"## \" criteria heading once its indent, any > and any "
+            "list markers are taken off, leaving out the lines inside a fence or an HTML block the draw held open "
+            "and that ended before the line it refused, as no item can then stand under a criteria heading.",
             "That count is taken before the rules on a ticket's other PRs and earlier sets, so it is the most tickets "
             "the reader can have cost the pool."]
         help_text = " ".join(self.world([]).draw("--help").stdout.split())
@@ -1280,7 +1501,7 @@ class TestDraw(unittest.TestCase):
             f"## Acceptance\n\n- One.\n- Two.\n\n{notes}": ["One.", "Two."],
             f"{notes}\n## Acceptance\n\n- One.\n": "- ```sh",
             f"## Acceptance\n\n- One.\n\n{notes}\n## Done when\n\n- Two.\n": "- ```sh",
-            f"{notes}\n```\n## Acceptance\n```\n": "- ```sh",  # a criteria heading's line, even in a fence
+            f"{notes}\n```\n## Acceptance\n```\n": [],  # no line that may start an item after the heading's line
         })
 
     def test_a_body_with_no_line_that_may_start_an_item_is_never_refused(self) -> None:
@@ -1314,6 +1535,58 @@ class TestDraw(unittest.TestCase):
             "## Acceptance\n\n- \u2028[ ] Save.\n": ["\u2028[ ] Save."],
             "## Acceptance\n\n- [x] \u2028Save.\t\n": ["\u2028Save."],
             "## Acceptance\u2028\n\n- Not under a criteria heading.\n": [],
+        })
+
+    def test_an_html_block_whose_first_line_ends_it_holds_no_line_after_it(self) -> None:
+        # Of CommonMark's HTML kinds 1 to 5 only a comment and a processing instruction can end on text that
+        # overlaps their opener: <!-->, <!---> and <?>. The block is that one line. The ticket's body, with an item
+        # that opens a fence in the Notes section, is refused at that item; without it the body is read. The last
+        # rows are controls: an opener whose end comes later on its line, a block that ends on a later line, and a
+        # block of kind 6, which a blank line ends.
+        first, after = "## Acceptance\n- First\n## Notes\n", "\n## Done when\n- Save"
+        cases: dict[str, list[str] | str] = {}
+        for opener in ("<!-->", "<!--->", "<?>"):
+            cases[f"{first}{opener}\n- ```sh\n  ls\n  ```{after}"] = "- ```sh"
+            cases[f"{first}{opener}{after}"] = ["First", "Save"]
+        for opener in ("<!-- x -->", "<!A>", "<![CDATA[]]>", "<pre></pre>", "<? x ?>"):
+            cases[f"{first}{opener}{after}"] = ["First", "Save"]
+        cases[f"{first}<!--\n## Done when\n- Hidden\n-->{after}"] = ["First", "Save"]
+        cases[f"{first}<div>\n## Done when\n- Hidden\n{after}"] = ["First", "Save"]
+        self.read_or_refuse(cases)
+
+    def test_a_u_feff_that_starts_the_body_is_dropped_as_github_drops_it(self) -> None:
+        # GitHub's renderer drops one U+FEFF at the very start of the text; any other U+FEFF is text.
+        self.read_or_refuse({
+            "\ufeff- Note\n  ## Acceptance\n  - Fake\n## Done when\n- Real": "  ## Acceptance",
+            "\ufeff## Acceptance\n- Real": ["Real"],
+            "\ufeff```\n## Acceptance\n- Fake\n```\n## Done when\n- Real": ["Real"],
+            "\ufeffNotes\n\n## Acceptance\n- Real": ["Real"],
+            "\ufeff\ufeff## Acceptance\n- Real": [],
+            "## Acceptance\n- Real\ufeff\n- \ufeffSave": ["Real\ufeff", "\ufeffSave"],
+        })
+
+    def test_a_line_that_may_start_an_item_costs_a_list_only_at_or_after_a_possible_criteria_heading(self) -> None:
+        # An item under a criteria heading starts on a line after the heading's, so a refusal costs no list when no
+        # line that may start an item comes at or after the first line that may be a criteria heading. The last
+        # rows have one, and are refused.
+        quoted = "- - -\n\n> ## Acceptance\n> Nothing yet."
+        fenced = "## Notes\n- Run:\n  ~~~sh\n  date\n  ~~~\n\n## Acceptance\nNothing yet."
+        self.read_or_refuse({
+            quoted: [],
+            fenced: [],
+            quoted.replace("> Nothing yet.", "> - Real"): "> ## Acceptance",
+            f"{fenced}\n- Real": "  ~~~sh",
+        })
+
+    def test_a_line_inside_a_block_closed_before_the_refusal_costs_no_list(self) -> None:
+        # The lines of a fence or HTML block the reader opened and closed before the line it refuses are code or
+        # HTML, and start no item. The lines of a block still open at the refusal may start one.
+        fenced = "## Acceptance\n\n~~~\n- example\n~~~\n\n> Pending."
+        self.read_or_refuse({
+            fenced: [],
+            fenced.replace("~~~", "<!--", 1).replace("~~~", "-->"): [],
+            f"{fenced}\n\n- Real": "> Pending.",
+            "## Acceptance\n\n  ~~~\n- maybe\n": "- maybe",
         })
 
     def test_the_model_is_a_name_from_the_session_s_own_responses_or_a_helper_s_copy_of_one(self) -> None:
@@ -1373,51 +1646,124 @@ class TestDraw(unittest.TestCase):
         result = world.draw("--seed", "5")
         self.assertEqual(result.returncode, 0, result.stderr)
         drawn = [entry["ticket"] for entry in world.set_file()["tickets"] if entry["bucket"] == "0-50"]
-        self.assertEqual(drawn[:9], [number for number in first if number != failed])
-        self.assertNotIn(drawn[9], first)
+        self.assertEqual(drawn[:4], [number for number in first if number != failed])
+        self.assertNotIn(drawn[4], first)
+        self.assertEqual((first, failed, drawn), ([1, 6, 4, 9, 11], 9, [1, 6, 4, 11, 3]))  # 3 is next in seed 5's order
         self.assertEqual(world.set_file()["set_aside"], [{"label": "A", "ticket": failed, "bucket": "0-50",
                                                            "reason": "check exited 1",
                                                            "check_output": f"checks/A-{failed}.txt"}])
-        self.assertEqual(result.stdout.splitlines()[3:6], ["0-50: pool 12, set aside 1, kept 10.",
-                                                            "51-300: pool 12, set aside 0, kept 10.",
-                                                            "301-1500: pool 12, set aside 0, kept 10."])
+        self.assertEqual(result.stdout.splitlines()[3:6], ["0-50: pool 12, set aside 1, kept 5.",
+                                                            "51-300: pool 12, set aside 0, kept 5.",
+                                                            "301-1500: pool 12, set aside 0, kept 5."])
         self.assertEqual((world.state / f"checks/A-{failed}.txt").read_text(),
                          f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 1\n")
         self.assertEqual((world.state / f"checks/A-{drawn[0]}.txt").read_text(),
                          f"$ {SETUP}\n\nsetup exit 0\n$ {CHECK}\n\ncheck exit 0\n")
 
-    def test_a_bucket_whose_pool_holds_fewer_than_ten_writes_no_set_and_runs_no_check(self) -> None:
-        world = self.world(sized(1, 12, 20) + sized(101, 9, 100) + sized(201, 12, 800))
+    def test_a_bucket_with_fewer_than_five_tickets_that_pass_gives_all_of_them_to_the_set(self) -> None:
+        # The 301-1500 pool holds four tickets, and the check fails for ticket 202.
+        short = [Ticket(201, 800), Ticket(202, 800, passes=False), Ticket(203, 800), Ticket(204, 800)]
+        world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + short)
         result = world.draw("--seed", "2")
-        self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 0.", "51-300: pool 9, set aside 0, kept 0.",
-            "301-1500: pool 12, set aside 0, kept 0.", "No set written: a bucket cannot reach 10 tickets."])
-        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
-                         ["draw.lock", "project-labels.json", "repos.json"])
-        self.assertNotIn("repo clone", world.gh_log.read_text())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+            "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
+            "301-1500: pool 4, set aside 1, kept 3.", f"Wrote {world.state / 'replay-set-1.json'}."])
+        self.assertEqual(result.stderr, "")
+        drawn = world.set_file()
+        self.assertEqual((drawn["set"], drawn["seed"]), (1, 2))
+        self.assertEqual([entry["bucket"] for entry in drawn["tickets"]], ["0-50"] * 5 + ["51-300"] * 5 + ["301-1500"] * 3)
+        self.assertEqual([entry["ticket"] for entry in drawn["tickets"] if entry["bucket"] == "301-1500"],
+                         [203, 201, 204])  # seed 2's order is 202, 203, 201, 204
+        self.assertEqual(drawn["set_aside"], [{"label": "A", "ticket": 202, "bucket": "301-1500",
+                                               "reason": "check exited 1", "check_output": "checks/A-202.txt"}])
+        self.assertEqual(sorted(path.name for path in (world.state / "logs").iterdir()),
+                         sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
 
-    def test_a_bucket_that_cannot_reach_ten_once_tickets_are_set_aside_writes_no_set(self) -> None:
-        world = self.world(sized(1, 12, 20) + sized(101, 12, 100)
-                           + sized(201, 9, 800) + sized(210, 2, 800, passes=False))
+    def test_a_middle_bucket_that_falls_to_one_pass_gives_it_and_to_none_writes_no_set(self) -> None:
+        # Pools of 2, 6 and 2. Seed 2 tries the middle pool as 103, 102, 106, 105, 104, 101; only 101 can pass.
+        for passes in (True, False):
+            with self.subTest(passes=passes):
+                middle = [Ticket(number, 100, passes=passes and number == 101) for number in range(101, 107)]
+                world = self.world(sized(1, 2, 20) + middle + sized(201, 2, 800))
+                result = world.draw("--seed", "2")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(sorted(path.name for path in (world.state / "checks").iterdir()),
+                                 ["A-1.txt", "A-101.txt", "A-102.txt", "A-103.txt", "A-104.txt", "A-105.txt",
+                                  "A-106.txt", "A-2.txt", "A-201.txt", "A-202.txt"])
+                self.assertFalse((world.state / "draw-work").exists())
+                if passes:
+                    self.assertEqual(result.returncode, 0)
+                    self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+                        "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 5, kept 1.",
+                        "301-1500: pool 2, set aside 0, kept 2.", f"Wrote {world.state / 'replay-set-1.json'}."])
+                    drawn = world.set_file()
+                    self.assertEqual([entry["ticket"] for entry in drawn["tickets"]], [2, 1, 101, 201, 202])
+                    self.assertEqual([(entry["ticket"], entry["reason"]) for entry in drawn["set_aside"]],
+                                     [(number, "check exited 1") for number in (103, 102, 106, 105, 104)])
+                    self.assertEqual(sorted(path.name for path in (world.state / "logs").iterdir()),
+                                     sorted(f"{entry['session']}.jsonl" for entry in drawn["tickets"]))
+                else:
+                    self.assertEqual(result.returncode, 3)
+                    self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+                        "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 6, set aside 6, kept 0.",
+                        "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
+                    self.assertEqual(list(world.state.glob("replay-set-*")), [])
+                    self.assertFalse((world.state / "logs").exists())
+
+    def test_a_bucket_whose_pool_is_empty_writes_no_set_while_the_other_buckets_are_tried(self) -> None:
+        world = self.world(sized(1, 2, 20) + sized(201, 2, 800))
         result = world.draw("--seed", "2")
         self.assertEqual(result.returncode, 3, result.stderr)
-        self.assertEqual(result.stdout.splitlines(), [
-            "Seed 2.",
-            "Vetoed 0 PRs of the listed repos: a call that may have opened each, or another PR of the session that "
-            "opened it, keeps it out of the pool.",
-            "Refused 0 tickets of the listed repos: a list under a criteria heading that the draw cannot read with "
-            "certainty keeps each out of the pool.",
-            "0-50: pool 12, set aside 0, kept 10.", "51-300: pool 12, set aside 0, kept 10.",
-            "301-1500: pool 11, set aside 2, kept 9.", "No set written: a bucket cannot reach 10 tickets."])
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+            "0-50: pool 2, set aside 0, kept 2.", "51-300: pool 0, set aside 0, kept 0.",
+            "301-1500: pool 2, set aside 0, kept 2.", "No set written: a bucket holds no ticket that passes."])
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
+                         ["checks", "draw.lock", "project-labels.json", "repos.json"])
+        self.assertEqual(sorted(path.name for path in (world.state / "checks").iterdir()),
+                         ["A-1.txt", "A-2.txt", "A-201.txt", "A-202.txt"])
+
+    def test_a_bucket_whose_every_ticket_is_set_aside_writes_no_set(self) -> None:
+        world = self.world(sized(1, 12, 20) + sized(101, 12, 100) + sized(201, 2, 800, passes=False))
+        result = world.draw("--seed", "2")
+        self.assertEqual(result.returncode, 3, result.stderr)
+        self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:], ["Seed 2.",
+            "0-50: pool 12, set aside 0, kept 5.", "51-300: pool 12, set aside 0, kept 5.",
+            "301-1500: pool 2, set aside 2, kept 0.", "No set written: a bucket holds no ticket that passes."])
+        self.assertEqual(result.stderr, "")
+        self.assertEqual(sorted(path.name for path in world.state.iterdir()),
+                         ["checks", "draw.lock", "project-labels.json", "repos.json"])
         self.assertEqual(list(world.state.glob("replay-set-*")), [])
         self.assertFalse((world.state / "logs").exists())
         self.assertFalse((world.state / "draw-work").exists())
+
+    def test_a_folder_a_check_left_read_only_does_not_stop_the_next_draw(self) -> None:
+        # Pools 6, 1, 6 leave 1, 0, 1 for the second draw, which writes no set; pools 6, 6, 6 leave one in each.
+        check = CHECK + " && mkdir fixture && touch fixture/input && chmod 555 fixture"
+        for middle, second in ((1, ["0-50: pool 1, set aside 0, kept 1.", "51-300: pool 0, set aside 0, kept 0.",
+                                    "301-1500: pool 1, set aside 0, kept 1.",
+                                    "No set written: a bucket holds no ticket that passes."]),
+                               (6, ["0-50: pool 1, set aside 0, kept 1.", "51-300: pool 1, set aside 0, kept 1.",
+                                    "301-1500: pool 1, set aside 0, kept 1."])):
+            with self.subTest(middle=middle):
+                world = self.world(sized(1, 6, 20) + sized(101, middle, 100) + sized(201, 6, 800),
+                                   repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
+                self.addCleanup(writable, world.root)  # runs before the folder's own removal
+                leftover = world.state / "draw-work" / "A-999" / "fixture"  # as a stopped draw could leave it
+                leftover.mkdir(parents=True)
+                (leftover / "input").touch()
+                leftover.chmod(0o555)
+                first = world.draw("--seed", "2")
+                self.assertEqual((first.returncode, first.stderr), (0, ""))
+                self.assertFalse((world.state / "draw-work").exists())
+                result = world.draw("--seed", "2")
+                self.assertEqual(result.stderr, "")
+                self.assertEqual(result.returncode, 0 if middle == 6 else 3)
+                written = [f"Wrote {world.state / 'replay-set-2.json'}."] if middle == 6 else []
+                self.assertEqual(result.stdout.splitlines()[:1] + result.stdout.splitlines()[3:],
+                                 ["Seed 2.", *second, *written])
+                self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_same_seed_on_the_same_pool_and_check_results_gives_the_same_set(self) -> None:
         world = self.world(full_pool(13) + [Ticket(14, 20, passes=False), Ticket(114, 100, passes=False)])
@@ -1425,12 +1771,12 @@ class TestDraw(unittest.TestCase):
         world.write_repos([{"repo": ALPHA, "check": CHECK, "setup": SETUP}])
         shutil.copytree(world.state, other)
         for state in (world.state, other):
-            self.assertEqual(world.draw("--seed", "11", state=state).returncode, 0)
+            self.assertEqual(world.draw("--seed", "6", state=state).returncode, 0)  # its order tries 14 and 114
         first, again = world.set_file(state=world.state), world.set_file(state=other)
         self.assertNotEqual(first["set_aside"], [])
         self.assertEqual((first["tickets"], first["set_aside"]), (again["tickets"], again["set_aside"]))
 
-    def test_a_second_call_draws_thirty_more_with_no_ticket_kept_or_set_aside_before(self) -> None:
+    def test_a_second_call_draws_fifteen_more_with_no_ticket_kept_or_set_aside_before(self) -> None:
         world = self.world([Ticket(ticket.number, ticket.size, passes=ticket.number % 100 > 3)
                             for ticket in full_pool(26)])
         self.assertEqual(world.draw("--seed", "1").returncode, 0)
@@ -1438,7 +1784,7 @@ class TestDraw(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         first, second = world.set_file(1), world.set_file(2)
         self.assertNotEqual(first["set_aside"], [])
-        self.assertEqual((second["set"], len(second["tickets"])), (2, 30))
+        self.assertEqual((second["set"], len(second["tickets"])), (2, 15))
         earlier = {entry["ticket"] for entry in first["tickets"] + first["set_aside"]}
         self.assertEqual(earlier & {entry["ticket"] for entry in second["tickets"] + second["set_aside"]}, set())
 
@@ -1448,7 +1794,7 @@ class TestDraw(unittest.TestCase):
         world = self.world(full_pool(10) + cannot + [Ticket(16, 20, repo=BETA)],
                            repos=[{"repo": ALPHA, "check": CHECK, "setup": SETUP}, {"repo": BETA, "check": CHECK, "setup": SETUP}])
         (world.remotes / f"{BETA}.fail-once").touch()  # the first clone fails, the next works
-        result = world.draw("--seed", "1")  # its order tries 11 to 17, and 14 before 16
+        result = world.draw("--seed", "49")  # its order tries 11 to 17, and 14 before 16
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn(16, [entry["ticket"] for entry in world.set_file()["tickets"]])
         self.assertEqual(world.gh_log.read_text().count(f"repo clone {BETA} "), 2)
@@ -1469,7 +1815,7 @@ class TestDraw(unittest.TestCase):
                                        "stand-in gh: the clone failed", "clone exit 1"])
         self.assertEqual(outputs[17][1:], [f"stand-in gh: no saved answer for api repos/{ALPHA}/activity?ref=refs/heads/"
                                            "ticket-17&per_page=100", "gh exit 1"])
-        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 17, set aside 6, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 17, set aside 6, kept 5.")
 
     def test_the_seed_gives_the_same_tickets_whatever_the_order_of_the_repo_list(self) -> None:
         alpha = full_pool(6)
@@ -1502,15 +1848,15 @@ class TestDraw(unittest.TestCase):
 
     def test_a_gh_answer_that_fails_or_cannot_be_read_sets_its_ticket_aside_with_what_gh_printed(self) -> None:
         bad = [Ticket(11, 20), Ticket(12, 20), Ticket(13, 20, draft=True)]
-        world = self.world(full_pool(10) + bad)  # seed 2 tries all three before the last good ticket
+        world = self.world(full_pool(10) + bad)  # seed 34 tries all three before the last good ticket
         timeline = f"api repos/{ALPHA}/issues/511/timeline"
         world.answers[timeline + ".fails"] = '{"message": "Server Error"}'
         world.answers[f"api repos/{ALPHA}/activity?ref=refs/heads/ticket-12&per_page=100"] = "["
         world.answers[f"api repos/{ALPHA}/issues/513/timeline"] = json.dumps(
             [{"event": "ready_for_review", "created_at": 17}])
-        result = world.draw("--seed", "2")
+        result = world.draw("--seed", "34")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 13, set aside 3, kept 10.")
+        self.assertEqual(result.stdout.splitlines()[3], "0-50: pool 13, set aside 3, kept 5.")
         aside = {entry["ticket"]: entry for entry in world.set_file()["set_aside"]}
         self.assertEqual({number: entry["reason"] for number, entry in aside.items()}, dict.fromkeys(
             (11, 12, 13), "GitHub's record of the PR's history or of the pushes to its branch could not be read"))
@@ -1533,9 +1879,11 @@ class TestDraw(unittest.TestCase):
         subprocess.run(["sleep", "1.5"])
         self.assertEqual(list(late.iterdir()), [])
 
-    def draw_signalled_in_a_check(self, number: signal.Signals) -> World:
-        """Signal a draw whose check blocks until its private folder is removed, so only the signal ends it, and
-        assert the check is gone once the draw has ended. The folder's removal at cleanup releases a check the
+    def draw_signalled_in_a_check(self, *numbers: signal.Signals,
+                                  caller: Callable[[], None] = World.default_sigint) -> tuple[World, int, str]:
+        """Send each signal in turn to a draw whose check blocks until its private folder is removed, so only a signal
+        ends it, and assert the check is gone once the draw has ended. Return the world, the draw's exit status and its
+        standard error. The folder's removal at cleanup releases a check the
         draw left running. The waits: a poll for the check's pid, `communicate(timeout=60)` for the draw's exit, then a
         poll for the check's exit, each ending after 60 seconds; the cleanup's `communicate` follows the kill."""
         marks = Path(tempfile.mkdtemp())
@@ -1544,17 +1892,18 @@ class TestDraw(unittest.TestCase):
         check = (f"{CHECK} && echo $$ > {folder}/pid.tmp && mv {folder}/pid.tmp {folder}/pid"
                  f" && while test -d {folder}; do sleep 0.05; done")
         world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": check, "setup": SETUP}])
-        draw = world.start("--seed", "1")
+        draw = world.start("--seed", "1", caller=caller)
         self.addCleanup(draw.communicate)  # closes the pipes, after the kill
         self.addCleanup(draw.kill)
         self.wait_for(lambda: (marks / "pid").exists() or draw.poll() is not None)
         self.assertTrue((marks / "pid").exists(), "the draw ended before the check started")
         pid = int((marks / "pid").read_text())
-        draw.send_signal(number)
-        draw.communicate(timeout=60)
+        for number in numbers:
+            draw.send_signal(number)
+        _, stderr = draw.communicate(timeout=60)
         self.assertTrue(self.wait_for(lambda: not self.alive(pid)),
                         f"the check (pid {pid}) is still running after the draw ended")
-        return world
+        return world, draw.returncode, stderr
 
     @staticmethod
     def alive(pid: int) -> bool:
@@ -1574,7 +1923,9 @@ class TestDraw(unittest.TestCase):
         return True
 
     def test_an_interrupt_during_a_check_stops_the_check(self) -> None:
-        self.draw_signalled_in_a_check(signal.SIGINT)
+        _, status, stderr = self.draw_signalled_in_a_check(signal.SIGINT)
+        self.assertNotIn("Traceback", stderr)
+        self.assertEqual((status, stderr), (130, "draw: stopped by SIGINT; no set written.\n"))
 
     def test_a_log_that_cannot_be_saved_ends_the_draw_naming_its_label_and_no_path(self) -> None:
         world = self.world(full_pool(10))
@@ -1719,7 +2070,7 @@ class TestDraw(unittest.TestCase):
     def test_an_interrupt_while_a_timed_out_check_is_stopped_signals_its_group_once(self) -> None:
         world = self.world(full_pool(10))
         record = world.root / "killpg.txt"
-        result = world.draw("--seed", "1", prelude="import os, subprocess\n"
+        result = world.draw("--seed", "1", prelude="import os, signal, subprocess\n"
                             "real_wait = subprocess.Popen.wait\n"
                             "def wait(self, timeout=None):\n"
                             "    if timeout == 3600:  # every step times out at once\n"
@@ -1731,15 +2082,178 @@ class TestDraw(unittest.TestCase):
                             f"    with open({str(record)!r}, 'a') as out:\n"
                             "        out.write(f'{number}\\n')\n"
                             "    real_killpg(group, number)\n"
-                            "    raise KeyboardInterrupt  # as if Ctrl-C came right after the signal\n"
+                            "    os.kill(os.getpid(), signal.SIGINT)  # as if Ctrl-C came right after the signal\n"
                             "os.killpg = killpg")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(record.read_text(), f"{int(signal.SIGKILL)}\n")
         self.assertNotIn("PermissionError", result.stderr)
-        self.assertEqual(result.stderr.splitlines()[-1], "KeyboardInterrupt")
+        self.assertEqual(result.stderr.splitlines()[-1], "draw: stopped by SIGINT; no set written.")
+
+    def test_a_signal_once_the_set_file_is_in_place_leaves_the_draw_ending_with_its_set(self) -> None:
+        world = self.world(full_pool(10))
+        short = self.world(sized(1, 12, 20))  # writes no set: exit 3
+        # Python the draw runs first: it sends the draw the signal {number} right after one of its steps.
+        steps = {"the set file is in place": "import scan\nreal_write = scan.write_private\n"
+                                             "def write(path, text):\n"
+                                             "    real_write(path, text)\n"
+                                             "    if path.name.startswith('replay-set-'):\n"
+                                             "        os.kill(os.getpid(), {number})\n"
+                                             "scan.write_private = write",
+                 "the Wrote line": "import builtins\nreal_print = builtins.print\n"
+                                   "def print_(*args, **options):\n"
+                                   "    real_print(*args, **options)\n"
+                                   "    if str(args[0]).startswith('Wrote '):\n"
+                                   "        os.kill(os.getpid(), {number})\n"
+                                   "builtins.print = print_",
+                 "main returns": "real_exit = sys.exit\n"
+                                 "def exit_(status):\n"
+                                 "    os.kill(os.getpid(), {number})\n"
+                                 "    real_exit(status)\n"
+                                 "sys.exit = exit_"}
+        cases = [(world, signal.SIGTERM, "the set file is in place"), (world, signal.SIGINT, "the Wrote line"),
+                 (world, signal.SIGTERM, "main returns"), (short, signal.SIGINT, "main returns")]
+        for at, (each, number, step) in enumerate(cases):
+            with self.subTest(signal=number.name, after=step, sets=each is world):
+                state = each.root / f"state-{at}"
+                shutil.copytree(each.state, state)
+                prelude = (f"import os, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(each.source)!r})\n"
+                           + steps[step].format(number=int(number)))
+                result = each.draw("--seed", "1", state=state, prelude=prelude)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual(result.stderr, "")
+                if each is world:
+                    self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
+                                     (0, f"Wrote {state / 'replay-set-1.json'}."))
+                    self.assertEqual(len(each.set_file(state=state)["tickets"]), 15)
+                else:
+                    self.assertEqual((result.returncode, result.stdout.splitlines()[-1]),
+                                     (3, "No set written: a bucket holds no ticket that passes."))
+
+    def test_a_signal_while_a_log_is_saved_leaves_no_staging_folder_and_the_earlier_copy_as_it_was(self) -> None:
+        world = self.world(full_pool(10, by_helper=True))
+        fresh = world.root / "fresh"  # a machine directory with no copy of any log
+        shutil.copytree(world.state, fresh)
+        for ticket in world.tickets.values():  # the earlier copy holds a helper the sessions no longer have
+            folder = world.log_path(ticket).with_suffix("") / "subagents"
+            write_lines(folder / "agent-a2.jsonl", read_lines(folder / "agent-a1.jsonl"))
+        (world.state / "scan-rows.lock").mkdir()  # the first draw saves one log and then cannot write its row
+        self.assertEqual(world.draw("--seed", "1").returncode, 1)
+        (world.state / "scan-rows.lock").rmdir()
+        logs = world.state / "logs"
+        session = next(logs.glob("*.jsonl")).stem  # the draw saves this session's log first
+        for ticket in world.tickets.values():
+            (world.log_path(ticket).with_suffix("") / "subagents" / "agent-a2.jsonl").unlink()
+
+        def files(folder: Path) -> dict[str, bytes]:
+            """Every path under the folder, with each file's bytes."""
+            return {str(path.relative_to(folder)): path.read_bytes() if path.is_file() else b""
+                    for path in folder.rglob("*")}
+        earlier = files(logs)
+        self.assertIn(f"{session}/subagents/agent-a2.jsonl", earlier)
+        source = world.config / "projects" / "-work-example"
+        new = {name: data for name, data in files(source).items() if name.startswith(session)}
+        # Python the draw runs first: the draw gets the signal right after it copies a transcript of the session, or
+        # right after it moves the session's new log into logs/.
+        copy = ("import os, shutil\nreal_copy = shutil.copyfile\n"
+                "def copy(source, target, **options):\n"
+                "    real_copy(source, target, **options)\n"
+                "    if '.new-{session}' in str(target):\n"
+                "        os.kill(os.getpid(), {number})\n"
+                "    return target\n"
+                "shutil.copyfile = copy")
+        rename = ("import os\nreal_replace = os.replace\n"
+                  "def replace(source, target):\n"
+                  "    real_replace(source, target)\n"
+                  "    if str(source).endswith('.new-{session}/{session}.jsonl'):\n"
+                  "        os.kill(os.getpid(), {number})\n"
+                  "os.replace = replace")
+        cases = [("an earlier copy", world.state, copy, signal.SIGINT, earlier),
+                 ("no earlier copy", fresh, copy, signal.SIGTERM, {}),
+                 ("an earlier copy", world.state, rename, signal.SIGTERM, new)]  # once begun, the swap runs whole
+        for at, (has, state, prelude, number, after) in enumerate(cases):
+            with self.subTest(session=has, signal=number.name, at="copy" if prelude is copy else "the renames"):
+                copied = world.root / f"state-{at}"
+                shutil.copytree(state, copied)
+                result = world.draw("--seed", "1", state=copied,
+                                    prelude=prelude.format(session=session, number=int(number)))
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual((result.returncode, result.stderr),
+                                 (128 + number, f"draw: stopped by {number.name}; no set written.\n"))
+                self.assertEqual(files(copied / "logs"), after)
+                self.assertEqual(list(copied.glob("replay-set-*")), [])
+
+    def test_a_second_signal_does_not_change_how_the_draw_ends(self) -> None:
+        world = self.world(full_pool(10))
+        # Python the draw runs first: the first signal comes as the draw scans a session's new copy, the second
+        # while the draw cleans up after the first.
+        prelude = ("import os, signal, shutil, scan\nreal_scan, real_rmtree = scan.scan, shutil.rmtree\n"
+                   "both = {signal.SIGINT, signal.SIGTERM}\nstopping = []\n"
+                   "def scan_(session, path):\n"
+                   "    if '.new-' in str(path) and not stopping:\n"
+                   "        stopping.append(True)\n"
+                   "        {first}\n"
+                   "    return real_scan(session, path)\n"
+                   "def rmtree(path, *args, **options):\n"
+                   "    if stopping and os.path.basename(path).startswith('.new-'):\n"
+                   "        {second}\n"
+                   "    return real_rmtree(path, *args, **options)\n"
+                   "scan.scan, shutil.rmtree = scan_, rmtree")
+        together = "signal.pthread_sigmask(signal.SIG_BLOCK, both); os.kill(os.getpid(), signal.SIGTERM); " \
+                   "os.kill(os.getpid(), signal.SIGINT); signal.pthread_sigmask(signal.SIG_UNBLOCK, both)"
+        cases = [(signal.SIGINT, "SIGTERM at once after SIGINT", together, "pass"),
+                 (signal.SIGTERM, "SIGINT during the cleanup", "os.kill(os.getpid(), signal.SIGTERM)",
+                  "os.kill(os.getpid(), signal.SIGINT)")]
+        for at, (first, then, sent, second) in enumerate(cases):
+            with self.subTest(first=first.name, then=then):
+                state = world.root / f"state-{at}"
+                shutil.copytree(world.state, state)
+                prelude_ = (f"import sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(world.source)!r})\n"
+                            + prelude.replace("{first}", sent).replace("{second}", second))
+                result = world.draw("--seed", "1", state=state, prelude=prelude_)
+                self.assertNotIn("Traceback", result.stderr)
+                self.assertEqual((result.returncode, result.stderr),
+                                 (128 + first, f"draw: stopped by {first.name}; no set written.\n"))
+                self.assertEqual(sorted(path.name for path in state.iterdir() if path.name.startswith(("draw-work", "replay-set"))), [])
+                self.assertEqual([path.name for path in (state / "logs").iterdir() if path.name.startswith(".")], [])
+
+    def test_a_caller_that_ignored_or_blocked_sigint_keeps_it_so_and_sigterm_still_stops_the_draw(self) -> None:
+        def ignored() -> None:
+            signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+        def blocked() -> None:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT})
+        for caller in (ignored, blocked):
+            with self.subTest(sigint=caller.__name__):
+                world, status, stderr = self.draw_signalled_in_a_check(signal.SIGINT, signal.SIGTERM, caller=caller)
+                self.assertNotIn("Traceback", stderr)
+                self.assertEqual((status, stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
+                self.assertFalse((world.state / "draw-work").exists())
+
+    def test_a_signal_as_a_checks_cleanup_begins_still_stops_what_the_check_left_running(self) -> None:
+        marks = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, marks)
+        left = marks / "pid"
+        setup = f"{SETUP} && (sleep 300 & echo $! > {shlex.quote(str(left))})"  # still running when the check passes
+        world = self.world(full_pool(10), repos=[{"repo": ALPHA, "check": CHECK, "setup": setup}])
+        # Python the draw runs first: SIGTERM comes as the first check's cleanup holds the signals.
+        prelude = ("import os, signal\nreal_mask = signal.pthread_sigmask\nsent = []\n"
+                   "def mask(how, numbers):\n"
+                   "    if how == signal.SIG_BLOCK and not sent:\n"
+                   "        sent.append(True)\n"
+                   "        os.kill(os.getpid(), signal.SIGTERM)\n"
+                   "    return real_mask(how, numbers)\n"
+                   "signal.pthread_sigmask = mask")
+        result = world.draw("--seed", "1", prelude=prelude)
+        pid = int(left.read_text())
+        self.addCleanup(lambda: self.alive(pid) and os.kill(pid, signal.SIGKILL))
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual((result.returncode, result.stderr), (143, "draw: stopped by SIGTERM; no set written.\n"))
+        self.assertTrue(self.wait_for(lambda: not self.alive(pid)), f"what setup left (pid {pid}) is still running")
+        self.assertFalse((world.state / "draw-work").exists())
 
     def test_a_sigterm_during_a_check_stops_the_check(self) -> None:
-        world = self.draw_signalled_in_a_check(signal.SIGTERM)
+        world = self.draw_signalled_in_a_check(signal.SIGTERM)[0]
         self.assertFalse((world.state / "draw-work").exists())
 
     def test_the_model_takes_one_vote_per_parent_response_however_many_helpers_copy_it(self) -> None:
@@ -1761,7 +2275,10 @@ class TestDraw(unittest.TestCase):
         (world.state / "scan-rows.jsonl").write_text("[]\n")
         result = world.draw("--seed", "1")
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n" * 30)
+        tickets = world.set_file()["tickets"]
+        self.assertNotEqual(tickets, [])
+        self.assertEqual(result.stderr, f"{world.state / 'scan-rows.jsonl'}:1: not a JSON object, kept as it is\n"
+                         * len(tickets))
         self.assertEqual((world.state / "scan-rows.jsonl").read_text().split("\n")[0], "[]")
         self.assertEqual([path.name for path in world.state.glob("replay-set-*")], ["replay-set-1.json"])
 

@@ -225,8 +225,10 @@ def skills(lines: list[dict]) -> list[str]:
 
 
 def helper_logs(log: Path) -> list[Path]:
-    """The helpers' logs. A session without a subagents/ folder has none; a folder on the way to one, or
-    below it, that cannot be searched or listed raises OSError, not leaves one out."""
+    """The helpers' logs. A session without a subagents/ folder has none. A folder on the way to subagents/
+    that cannot be searched raises OSError; one that can be searched need not be listed. subagents/, or a
+    folder below it, that cannot be listed raises, and so does one that cannot be searched and holds a
+    folder; one that can be listed but not searched yields its transcripts' paths, which cannot be read."""
     # A workflow's helpers sit in folders below subagents/, such as subagents/workflows/<run>/.
     folder = log.parent / log.stem / "subagents"
     try:

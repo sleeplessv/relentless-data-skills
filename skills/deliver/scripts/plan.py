@@ -14,9 +14,8 @@ Anything else (a heading, the assumptions, notes) is kept and not read, and neit
 looked for inside a fenced code block (``` or ~~~). Text that looks like either part but does
 not fit raises `PlanError` rather than being guessed at.
 
-`read(run)` reads the saved plan of the run's branch. `ready` (#423), the small test (#422) and the
-PR description (#415) are to call it for the requirements, their proofs and the door; for now
-only the tests do.
+`read(run)` reads the saved plan of the run's branch. `ready` calls it for the requirements, their
+proofs and the door, and passes the door and proofs on to the small test.
 """
 from __future__ import annotations
 

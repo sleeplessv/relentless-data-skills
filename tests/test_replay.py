@@ -1411,5 +1411,333 @@ class ReplayTest(unittest.TestCase):
         self.assertFalse(self.world.starts.exists())
 
 
+PLUGIN = TESTS.parent / "skills" / "deliver"
+# deliver's own cleanup after a merge (skills/deliver/scripts/cleanup.py), run on the clone with the PR merged at the
+# head commit given as its argument; it prints the lines cleanup gives.
+CLEANUP = ("import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); import cleanup, core; "
+           "print(cleanup.clean(core.find_run(Path.cwd()), 'deliver/ticket-7', 'main', "
+           "cleanup.Pr(1, 'MERGED', sys.argv[2]), created=True, remove_records=False).lines)")
+# What the stand-in `claude` does as a deliver session ends, in place of deliver.py: the change goes on a branch that
+# is pushed to the clone's bare remote, opened as a PR on the stand-in gh, marked ready and merged, and deliver's
+# cleanup runs. Setup's file is ignored here, so cleanup finds a clean checkout.
+DELIVER_RUN = ("echo .setup-done >> .git/info/exclude"
+               " && git switch -q -c deliver/ticket-7 && git add replayed.txt && git commit -q -m 'feat: print the total'"
+               " && git push -q -u origin deliver/ticket-7 && printf 'The total.\\n' > .git/pr-body.md"
+               " && gh pr create --draft --base main --head deliver/ticket-7 --title 'feat: print the total'"
+               " --body-file .git/pr-body.md >/dev/null && gh pr ready 1"
+               ' && head=$(git rev-parse HEAD) && gh pr merge 1 {method} --match-head-commit "$head"'
+               f" && python3 -c {shlex.quote(CLEANUP)} {shlex.quote(str(PLUGIN / 'scripts'))} \"$head\""
+               " > .git/cleanup.txt")
+
+
+class DeliverVersionTest(unittest.TestCase):
+    """`--version deliver`: the session's command, settings, environment and prompt, and the version it records."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.world = World(ReplayTest.root_of(temp))
+        self.git = self.world.git
+        self.clone = self.world.state / "replays" / "A-7-deliver"
+        self.store = self.world.state / "replays" / "A-7-deliver.git"
+        self.standin = self.clone / ".git" / "replay-deliver"
+
+    def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        result = self.world.replay("--version", "deliver", *args, **extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def test_the_session_s_command_differs_from_direct_s_only_by_the_plugin_loaded_for_it_and_hooks_on(self) -> None:
+        self.assertEqual(self.world.replay("A", "7").returncode, 0)
+        self.replay("A", "7")
+        direct, deliver = self.world.starts_made()
+        settings = json.loads(direct["args"][direct["args"].index("--settings") + 1])
+        settings["sandbox"]["filesystem"]["allowRead"][0] = str(self.clone)
+        settings["sandbox"]["filesystem"]["allowRead"].append(str(PLUGIN))
+        settings["disableAllHooks"] = False
+        session = deliver["args"][deliver["args"].index("--session-id") + 1]
+        self.assertEqual(deliver["args"], [
+            "-p", "--model", MODEL, "--session-id", session, "--permission-mode", "bypassPermissions",
+            "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+            "--settings", json.dumps(settings), "--plugin-dir", str(PLUGIN)])
+        self.assertEqual(deliver["cwd"], str(self.clone))
+        self.assertTrue(deliver["setup_done"])
+
+    def test_the_prompt_is_the_typed_deliver_command_with_the_ticket_s_number(self) -> None:
+        self.replay("A", "7")
+        [start] = self.world.starts_made()
+        self.assertEqual(start["prompt"], "/deliver:deliver 7")
+
+    def test_the_session_s_environment_differs_from_direct_s_by_the_stand_in_gh_a_scratch_state_and_no_github_name(
+            self) -> None:
+        self.assertEqual(self.world.replay("A", "7").returncode, 0)
+        self.replay("A", "7")
+        direct, deliver = (start["env"] for start in self.world.starts_made())
+        github = {key: value for key, value in direct.items() if key.startswith("GH_") or "GITHUB" in key}
+        self.assertEqual(sorted(github), ["GH_LOG", "GH_REMOTES"])  # the world's own gh, for the clone
+        self.assertEqual(deliver, {**{key: value for key, value in direct.items() if key not in github},
+                                   "PATH": f"{self.standin / 'bin'}{os.pathsep}{direct['PATH']}",
+                                   "DELIVER_STATE_DIR": str(self.standin / "state")})
+        self.assertEqual(direct["DELIVER_STATE_DIR"], str(self.world.state))
+        self.assertEqual([key for key in deliver if key in PARENT], ["CLAUDE_CODE_OAUTH_TOKEN"])
+        self.assertTrue((self.standin / "state").is_dir())
+
+    def test_no_github_credential_variable_reaches_the_deliver_session(self) -> None:
+        names = ("GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_PAT", "GH_HOST", "GH_ENTERPRISE_TOKEN", "github_token",
+                 "MY_GITHUB_KEY")
+        self.replay("A", "7", **{name: "made-up-credential" for name in names})
+        [start] = self.world.starts_made()
+        self.assertEqual([key for key in start["env"] if "github" in key.lower() or key.upper().startswith("GH_")],
+                         [])
+        self.assertNotIn("made-up-credential", json.dumps(start["env"]))
+
+    def test_a_deliver_run_merges_on_the_bare_remote_and_the_merged_tree_is_recorded_as_the_deliver_version(
+            self) -> None:
+        result = self.replay("A", "7", STANDIN_PREPARE=DELIVER_RUN.format(method="--squash"))
+        [version] = self.world.versions()
+        commit = version["commit"]
+        session = self.world.starts_made()[0]["args"][self.world.starts_made()[0]["args"].index("--session-id") + 1]
+        self.assertEqual(version, {
+            "label": "A", "ticket": 7, "version": "deliver", "commit": commit, "repo": "replays/A-7-deliver.git",
+            "base_commit": self.world.base, "clone": "replays/A-7-deliver", "exit_status": 0, "session": session,
+            "skills": [], "not_direct": False})
+        self.assertEqual(result.stdout, f"Recorded A-7 deliver at {commit}: session exit 0.\n")
+        origin = self.clone / ".git" / "replay-origin.git"
+        self.assertEqual(self.git("log", "--format=%s", "main", cwd=origin), "feat: print the total (#1)\nstart")
+        # The merged change, with the file setup made beside it in the working tree.
+        self.assertEqual(self.git("ls-tree", "-r", "main", cwd=origin).splitlines(),
+                         [line for line in self.git("ls-tree", "-r", commit, cwd=self.store).splitlines()
+                          if not line.endswith("\t.setup-done")])
+        self.assertEqual(self.git("rev-parse", "refs/replay/deliver", cwd=self.store), commit)
+        self.assertEqual(self.git("rev-parse", f"{commit}^", cwd=self.store), self.world.base)
+        self.assertEqual(self.git("log", "-1", "--format=%s", commit, cwd=self.store), "deliver replay of A-7")
+        self.assertEqual(self.git("ls-tree", "-r", "--name-only", commit, cwd=self.store).split(),
+                         [".gitignore", ".setup-done", "README.md", "replayed.txt"])
+        calls = [json.loads(line)["args"] for line in (self.standin / "gh-calls.jsonl").read_text().splitlines()]
+        self.assertEqual([call[:2] for call in calls], [["pr", "create"], ["pr", "ready"], ["pr", "merge"]])
+        # The world's own gh, which stands in for the real one, saw only the clone.
+        self.assertEqual(len(self.world.gh_log.read_text().splitlines()), 1)
+        # deliver's cleanup, which pulls nothing, left the clone on main at the merged commit.
+        self.assertEqual((self.clone / ".git" / "cleanup.txt").read_text(), str([
+            "Switched this checkout to main.",
+            "Removed the remote branch origin/deliver/ticket-7 and the local branch deliver/ticket-7."]) + "\n")
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.clone), self.git("rev-parse", "main", cwd=origin))
+
+    def test_a_merge_with_each_method_deliver_sends_is_recorded_as_the_merged_change(self) -> None:
+        for method in ("--squash", "--merge", "--rebase"):
+            with self.subTest(method=method):
+                shutil.rmtree(self.clone, ignore_errors=True)
+                shutil.rmtree(self.store, ignore_errors=True)
+                self.replay("A", "7", STANDIN_PREPARE=DELIVER_RUN.format(method=method))
+                commit = self.world.versions()[-1]["commit"]
+                self.assertEqual(self.git("show", f"{commit}:replayed.txt", cwd=self.store), "the replay's change")
+                origin = self.clone / ".git" / "replay-origin.git"
+                self.assertEqual(self.git("rev-list", "--parents", "-1", "main", cwd=origin).split()[1:],
+                                 [self.world.base])
+
+    def test_the_replay_s_own_records_stay_in_the_machine_directory(self) -> None:
+        self.replay("A", "7")
+        self.assertEqual(len(self.world.versions()), 1)
+        self.assertEqual(len(self.world.rows()), 1)
+        self.assertEqual(sorted(path.name for path in (self.standin / "state").iterdir()), [])
+
+    def test_a_deliver_session_is_marked_not_direct_by_a_marked_skill_other_than_deliver(self) -> None:
+        for skill, marked in (("deliver", False), ("implement-ticket", True), ("squad", True), ("tdd", False)):
+            with self.subTest(skill=skill):
+                shutil.rmtree(self.clone, ignore_errors=True)
+                shutil.rmtree(self.store, ignore_errors=True)
+                self.replay("A", "7", STANDIN_SKILL=skill)
+                [version] = self.world.versions()
+                self.assertEqual((version["skills"], version["not_direct"]), ([skill], marked))
+
+    def test_a_version_other_than_direct_or_deliver_is_bad_usage(self) -> None:
+        for args in (("--version", "squad", "A", "7"), ("--version",), ("--version", "deliver", "A"),
+                     ("A", "7", "--version", "deliver")):
+            with self.subTest(args=args):
+                result = self.world.replay(*args)
+                self.assertEqual(result.returncode, 2)
+                self.assertTrue(result.stderr.startswith("Rerun one ticket of the replay set"), result.stderr)
+        self.assertFalse(self.world.starts.exists())
+
+    def test_the_help_states_the_deliver_version_s_differences(self) -> None:
+        text = " ".join(self.world.replay("--help").stdout.split())
+        sentences = re.split(r"(?<=\.)\s+(?=[A-Z0-9/])", text)
+        for rule in (
+                "Usage: python3 scripts/replay.py LABEL TICKET python3 scripts/replay.py --version deliver LABEL TICKET",
+                "With no --version, the replay is the direct version.",
+                "The deliver version differs from direct in these ways and no other.",
+                "Its session loads the plugin in this tree's skills/deliver/ for that session only, with "
+                "--plugin-dir, may read that folder from the sandbox, and runs with hooks on: deliver's own hook, "
+                "and any hook in the clone's project settings.",
+                "Its prompt is the typed command /deliver:deliver TICKET.",
+                "Its environment also leaves out every variable whose name, in any case, starts with GH_ or holds "
+                "GITHUB.",
+                "The stand-in answers issue view with the ticket's title and body from the replay set, records "
+                "every call in .git/replay-deliver/gh-calls.jsonl, and merges a PR by squashing its branch onto "
+                "the default branch of the clone's bare remote, where the session's pushes go, whichever merge "
+                "method the call names.",
+                "After the merge it moves the clone's own default branch to the new commit when that branch is "
+                "still at the old tip and not checked out.",
+                "The session's DELIVER_STATE_DIR is .git/replay-deliver/state/ in the clone, a scratch folder; "
+                "the replay's own records stay in the machine directory."):
+            with self.subTest(rule=rule[:40]):
+                self.assertIn(rule, text if rule.startswith(("Usage", "With no")) else sentences)
+
+
+class StandInGhTest(unittest.TestCase):
+    """scripts/replay_gh.py on its own: a clone's .git/ holding the stand-in, its gh.json and a bare remote."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.world = World(ReplayTest.root_of(temp))
+        self.work = self.world.root / "clone"
+        self.world.git("clone", "-q", str(self.world.bare), str(self.work), cwd=self.world.root)
+        self.origin = self.work / ".git" / "replay-origin.git"
+        self.world.git("clone", "-q", "--bare", str(self.world.bare), str(self.origin), cwd=self.world.root)
+        self.world.git("remote", "set-url", "origin", str(self.origin), cwd=self.work)
+        self.home = self.work / ".git" / "replay-deliver"
+        (self.home / "bin").mkdir(parents=True)
+        shutil.copyfile(SCRIPTS / "replay_gh.py", self.home / "bin" / "gh")
+        (self.home / "bin" / "gh").chmod(0o755)
+        (self.home / "gh.json").write_text(json.dumps({"repo": "replay/A", "origin": str(self.origin), "ticket": 7,
+                                                       "title": TITLE, "body": BODY}))
+
+    def gh(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([str(self.home / "bin" / "gh"), *args], cwd=self.work, capture_output=True, text=True,
+                              env=self.world.git_env())
+
+    def calls(self) -> list[dict]:
+        return [json.loads(line) for line in (self.home / "gh-calls.jsonl").read_text().splitlines()]
+
+    def test_issue_view_serves_the_ticket_and_no_other(self) -> None:
+        served = self.gh("issue", "view", "7", "--json", "title,body,comments")
+        self.assertEqual((served.returncode, served.stdout, served.stderr),
+                         (0, json.dumps({"title": TITLE, "body": BODY, "comments": []}) + "\n", ""))
+        other = self.gh("issue", "view", "8", "--json", "title,body,comments")
+        self.assertEqual((other.returncode, other.stdout, other.stderr), (
+            1, "", "stand-in gh: no answer for gh issue view 8 --json title,body,comments "
+                   "(not a call the stand-in answers)\n"))
+
+    def test_every_call_is_recorded_answered_or_not(self) -> None:
+        self.gh("auth", "token")
+        self.gh("repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+        self.gh("secret", "list")
+        self.assertEqual(self.calls(), [
+            {"args": ["auth", "token"], "cwd": str(self.work)},
+            {"args": ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+             "cwd": str(self.work)},
+            {"args": ["secret", "list"], "cwd": str(self.work)}])
+
+    def test_preflight_s_calls_are_answered_as_a_repo_the_session_can_push_to(self) -> None:
+        self.assertEqual(self.gh("repo", "view", "--json", "nameWithOwner,defaultBranchRef,viewerPermission,"
+                                 "hasIssuesEnabled").stdout,
+                         json.dumps({"nameWithOwner": "replay/A", "defaultBranchRef": {"name": "main"},
+                                     "viewerPermission": "ADMIN", "hasIssuesEnabled": True}) + "\n")
+        self.assertEqual(self.gh("repo", "view", "--json", "defaultBranchRef", "--jq",
+                                 ".defaultBranchRef.name").stdout, "main\n")
+        self.assertEqual(self.gh("api", "repos/replay/A/rules/branches/main").stdout, "[]\n")
+        self.assertEqual(self.gh("auth", "token").returncode, 0)
+
+    def test_a_squash_merge_leaves_the_change_on_the_bare_remote_s_default_branch(self) -> None:
+        git = self.world.git
+        git("switch", "-q", "-c", "deliver/ticket-7", cwd=self.work)
+        (self.work / "total.py").write_text("print(43)\n")
+        git("add", "total.py", cwd=self.work)
+        git("commit", "-q", "-m", "first", cwd=self.work)
+        (self.work / "total.py").write_text("print(44)\n")
+        git("commit", "-q", "-am", "second", cwd=self.work)
+        git("push", "-q", "origin", "deliver/ticket-7", cwd=self.work)
+        head = git("rev-parse", "HEAD", cwd=self.work)
+        (self.work / "body.md").write_text("The total.\n")
+        made = self.gh("pr", "create", "--draft", "--base", "main", "--head", "deliver/ticket-7", "--title",
+                       "feat: print the total", "--body-file", "body.md")
+        self.assertEqual((made.returncode, made.stdout), (0, "https://github.invalid/replay/A/pull/1\n"))
+        self.assertEqual(self.gh("pr", "list", "--head", "deliver/ticket-7", "--state", "open", "--json",
+                                 "number,url").stdout,
+                         json.dumps([{"number": 1, "url": "https://github.invalid/replay/A/pull/1"}]) + "\n")
+        checks = self.gh("pr", "checks", "1", "--json", "name,bucket")
+        self.assertEqual((checks.returncode, checks.stderr),
+                         (1, "no checks reported on the 'deliver/ticket-7' branch\n"))
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", "0" * 40).returncode, 1)
+        merged = self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head)
+        self.assertEqual((merged.returncode, merged.stderr), (0, ""))
+        self.assertEqual(git("log", "--format=%s", "main", cwd=self.origin),
+                         "feat: print the total (#1)\nthe merged change\nstart")
+        self.assertEqual(git("show", "main:total.py", cwd=self.origin), "print(44)")
+        self.assertEqual(git("rev-parse", "main^", cwd=self.origin), self.world.merged)
+        self.assertEqual(json.loads(self.gh("pr", "view", "1", "--json", "state,headRefOid").stdout),
+                         {"state": "MERGED", "headRefOid": head})
+        self.assertEqual(self.calls()[0]["body"], "The total.\n")
+
+    def open_pr(self) -> str:
+        """Push a branch with one change and open PR 1 for it; its head commit."""
+        git = self.world.git
+        git("switch", "-q", "-c", "topic", cwd=self.work)
+        (self.work / "total.py").write_text("print(43)\n")
+        git("commit", "-q", "-am", "change", cwd=self.work)
+        git("push", "-q", "origin", "topic", cwd=self.work)
+        (self.work / ".git" / "body.md").write_text("b\n")
+        self.gh("pr", "create", "--base", "main", "--head", "topic", "--title", "t", "--body-file", ".git/body.md")
+        return git("rev-parse", "HEAD", cwd=self.work)
+
+    def test_each_merge_method_deliver_sends_squashes_onto_the_bare_remote_s_default_branch(self) -> None:
+        for method in ("--squash", "--merge", "--rebase"):
+            with self.subTest(method=method):
+                self.setUp()
+                head = self.open_pr()
+                merged = self.gh("pr", "merge", "1", method, "--match-head-commit", head)
+                self.assertEqual((merged.returncode, merged.stderr), (0, ""))
+                git = self.world.git
+                self.assertEqual(git("rev-list", "--parents", "-1", "main", cwd=self.origin).split()[1:],
+                                 [self.world.merged])
+                self.assertEqual(git("log", "-1", "--format=%s", "main", cwd=self.origin), "t (#1)")
+                self.assertEqual(git("show", "main:total.py", cwd=self.origin), "print(43)")
+
+    def test_a_merge_without_a_method_is_not_answered(self) -> None:
+        self.open_pr()
+        refused = self.gh("pr", "merge", "1")
+        self.assertEqual((refused.returncode, refused.stderr), (
+            1, "stand-in gh: no answer for gh pr merge 1 (not a call the stand-in answers)\n"))
+
+    def test_a_merge_moves_the_clone_s_default_branch_only_from_the_old_tip_and_not_checked_out(self) -> None:
+        git = self.world.git
+        head = self.open_pr()
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head).returncode, 0)
+        self.assertEqual(git("rev-parse", "main", cwd=self.work), git("rev-parse", "main", cwd=self.origin))
+        self.assertEqual(git("branch", "--show-current", cwd=self.work), "topic")
+        # Checked out: the branch stays where it is, and so does the working tree.
+        self.setUp()
+        head = self.open_pr()
+        git("switch", "-q", "main", cwd=self.work)
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head).returncode, 0)
+        self.assertEqual(git("rev-parse", "main", cwd=self.work), self.world.merged)
+        # Moved on since: the clone's own commit stays.
+        self.setUp()
+        head = self.open_pr()
+        git("branch", "-f", "main", head, cwd=self.work)
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head).returncode, 0)
+        self.assertEqual(git("rev-parse", "main", cwd=self.work), head)
+
+    def test_a_call_whose_body_file_cannot_be_read_is_recorded_and_answered_with_one_line(self) -> None:
+        refused = self.gh("pr", "edit", "1", "--body-file", "missing.md")
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(refused.stderr.count("\n"), 1)
+        self.assertTrue(refused.stderr.startswith(
+            "stand-in gh: no answer for gh pr edit 1 --body-file missing.md (the --body-file cannot be read: "),
+            refused.stderr)
+        self.assertEqual(self.calls(), [{"args": ["pr", "edit", "1", "--body-file", "missing.md"],
+                                         "cwd": str(self.work)}])
+
+    def test_a_field_the_stand_in_lacks_or_another_jq_is_not_answered(self) -> None:
+        for args, why in ((("repo", "view", "--json", "nameWithOwner,visibility"), "no field visibility"),
+                          (("repo", "view", "--json", "defaultBranchRef", "--jq", "length"),
+                           "--jq length is not a path of plain keys")):
+            with self.subTest(args=args):
+                refused = self.gh(*args)
+                self.assertEqual((refused.returncode, refused.stdout, refused.stderr),
+                                 (1, "", f"stand-in gh: no answer for gh {' '.join(args)} ({why})\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

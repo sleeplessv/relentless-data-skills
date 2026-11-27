@@ -50,15 +50,16 @@ class Preflight(unittest.TestCase):
     def setUp(self):
         self.world = deliver_kit.World(self.addCleanup)
         self.world.write_mark(run="run-3")
+        self.world.probe()
         self.world.install_upstream()
 
     def stack(self, text: str) -> None:
         (self.world.work / "docs" / "agents").mkdir(parents=True)
         (self.world.work / "docs" / "agents" / "stack.toml").write_text(text, encoding="utf-8")
 
-    def record(self, result, stops=(), warnings=()):
+    def record(self, result, stops=(), warnings=(), guard_probe="seen", permission_mode="default"):
         return {"event": "preflight", "run": "run-3", "result": result, "stops": list(stops),
-                "warnings": list(warnings), "guard_probe": "missing", "permission_mode": None,
+                "warnings": list(warnings), "guard_probe": guard_probe, "permission_mode": permission_mode,
                 "harness": "claude-code"}
 
     def test_clean_run_prints_one_line_and_saves_a_pass(self):
@@ -86,7 +87,7 @@ class Preflight(unittest.TestCase):
             "Next: fix docs/agents/stack.toml, then run deliver.py preflight\n",
             "",
         ))
-        self.assertEqual(without_at(self.world.records()), [self.record("stop", stops=["preflight.bad-settings"])])
+        self.assertEqual(without_at(self.world.records()), [self.record("stop", stops=["preflight.bad-settings"], guard_probe="missing", permission_mode=None)])
         stops = self.world.state_lines("preflight-stops.jsonl")
         self.assertRegex(stops[0]["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
         self.assertEqual(without_at(stops), [{"run": "run-3", "code": "preflight.bad-settings", "harness": "claude-code"}])

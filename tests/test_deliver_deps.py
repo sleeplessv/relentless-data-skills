@@ -343,6 +343,7 @@ class Preflight(unittest.TestCase):
     def setUp(self):
         self.world = deliver_kit.World(self.addCleanup)
         self.world.write_mark(run="run-4")
+        self.world.probe()
         self.folders = self.world.install_upstream()
 
     def change(self, name: str) -> str:

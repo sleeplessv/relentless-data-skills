@@ -15,3 +15,4 @@ files = [
   "skills/deliver/SKILL.md",
   "skills/deliver/agents/deliver-reader.md",
 ]
+limit = 534

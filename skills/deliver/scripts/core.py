@@ -41,8 +41,12 @@ REFUSALS = {
     "preflight.no-mark": NO_MARK,
     "preflight.bad-settings": "the stack settings cannot be read: {error}",
     "preflight.guards-off": "the guards are off: no refusal of the guard probe is logged for run {run} since its mark was written",
+    "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,
+    "save.missing-file": "there is no {file} to save",
+    "save.bad-plan": "the plan cannot be read: {error}",
+    "save.no-proof": "a requirement has no proof: {requirements}",
     "pr.no-mark": NO_MARK,
     "pr.not-saved": "the author's files are not saved: {files}",
     "pr.unreadable": "the saved {kind}.md cannot be read: {why}",
@@ -66,6 +70,7 @@ REFUSALS = {
     "merge.mergeable-unknown": "GitHub has not worked out yet whether PR #{number} can merge",
     "merge.no-history": "the history of origin/{base} cannot be read: {error}",
     "finish.no-mark": NO_MARK,
+    "deps.missing-skill": "a required upstream skill is not installed: {skills}",
 }
 
 

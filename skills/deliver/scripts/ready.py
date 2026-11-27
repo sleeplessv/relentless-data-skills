@@ -24,6 +24,12 @@ A change that fails it gets a `ready` record with result `needs review` and the 
 change that passes gets, in this order: its description rendered again from the saved records
 with the blast radius, the door and the measurement block (`gh pr edit`), `gh pr ready`, the
 `ready` record with result `small edit`, and one call of `scan.start_background()`.
+
+The measurement block holds the spec's keys in order (#407), each value from the records or a
+fixed value of the small edit: `harness` and `preflight warnings` from the passing preflight,
+`slot wait` summed over the checks written since the run mark's start, `review skills` from
+`deps.review_skill_hashes`, `roles: author`, no findings, follow-ups or fix rounds, no waiver, and
+`merge: pending` until `merge` writes its line. No value holds a session id.
 """
 from __future__ import annotations
 

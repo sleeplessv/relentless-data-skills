@@ -139,7 +139,7 @@ Source: working tree, requirements written from the diff
 
 """ + PLAN_PART)
 
-    def test_ready_gives_the_blast_radius_the_door_and_the_measurement_block(self):
+    def test_a_given_blast_radius_door_and_measurement_block_are_rendered(self):
         text = self.render(
             "Source: conversation\n\nFix the typo.\n", blast=("low", "12 lines; no critical path; no dependents"),
             door=("one-way", "a one-way path changed: .github/workflows/release.yml"),
@@ -192,6 +192,40 @@ door: one-way
             with self.subTest(line=line, records=records):
                 self.assertEqual(render.evidence_lines(rows, records), [line])
 
+    def test_a_row_without_a_trailing_pipe_is_read_as_plan_parse_reads_it(self):
+        plan = render.read_plan("| R1 | a \\| b | `make test`\n")
+        self.assertEqual(plan.requirements, [render.Requirement("R1", "a | b", "`make test`")])
+
+    def test_assumptions_stop_at_the_next_other_line(self):
+        plan = render.read_plan(PLAN + "\n## Notes\n- a note, not an assumption\n")
+        self.assertEqual(plan.assumptions, [
+            "- A1 (R1): the stand-in gh records the body file. Tested by reading gh-calls.jsonl: held."])
+        self.assertEqual(plan.door, "two-way")
+
+    def test_evidence_matches_the_unmasked_command_and_shows_it_masked(self):
+        plan = PLAN.replace("`python3 -m unittest tests.test_deliver_pr`", "`pytest ~/work/repo/tests`")
+        records = [{"event": "check", "command": "pytest ~/work/repo/tests", "exit": 0, "commit": "2222222b",
+                    "selected_nothing": False}]
+        text = self.render("Source: conversation\n\nx\n", plan=plan, records=records)
+        self.assertIn("- R1: pass at 2222222\n", text)
+        self.assertIn("| R1 | `pr` opens a draft PR | `pytest [private path]` |\n", text)
+        self.assertIn("Source: conversation (masked: private paths)\n", text)
+
+    def test_given_reasons_and_values_are_masked(self):
+        text = self.render("Source: conversation\n\nx\n", door=("two-way", "asked @octocat"),
+                           blast=("low", "only /Users/jane/work"), measurement={"path": "~/work/x"})
+        self.assertIn("**Door:** two-way. Asked [mention]\n", text)
+        self.assertIn("**Blast Radius:** low. Only [private path]\n", text)
+        self.assertIn("path: [private path]\n", text)
+        self.assertIn("Source: conversation (masked: @ mentions and private paths)\n", text)
+
+    def test_a_secret_in_a_given_reason_or_value_is_a_question(self):
+        for options in ({"door": ("two-way", "password = hunter2hunter2")},
+                        {"blast": ("low", "ghp_" + "x" * 36)},
+                        {"measurement": {"merge": "token: abcdefgh1234"}}):
+            with self.subTest(options), self.assertRaises(render.core.Question):
+                self.render("Source: conversation\n\nx\n", **options)
+
     def test_a_secret_is_a_question_and_nothing_is_rendered(self):
         token = "ghp_" + "a1" * 18
         with self.assertRaises(render.core.Question) as caught:
@@ -214,7 +248,7 @@ door: one-way
             self.assertEqual(caught.exception.kind, "request")
 
     def test_a_plan_without_a_readable_row_is_unreadable(self):
-        for plan in ("Just prose.\ndoor: two-way\n", "| R1 | only two | cells\n", "| R1 | a | b | c |\n"):
+        for plan in ("Just prose.\ndoor: two-way\n", "| R1 | only two |\n", "| R1 | a | b | c |\n"):
             with self.subTest(plan), self.assertRaises(render.Unreadable) as caught:
                 self.render("Source: conversation\n\nx\n", plan=plan)
             self.assertEqual(caught.exception.kind, "plan")
@@ -233,6 +267,7 @@ class Mask(unittest.TestCase):
             ("(@a_b)", "([mention])"),
             ("ask @Org/team-name now", "ask [mention] now"),
             ("first line\n@octocat at line start", "first line\n[mention] at line start"),
+            ("+@octocat", "+[mention]"),
             ("in code `@octocat`", "in code `[mention]`"),
         ]:
             with self.subTest(text):
@@ -245,6 +280,14 @@ class Mask(unittest.TestCase):
         ]:
             with self.subTest(path):
                 self.assert_masked(f"see {path} here", "see [private path] here", ["private paths"])
+
+    def test_a_path_in_a_file_link_or_after_a_short_option_is_masked(self):
+        for text, masked in [
+            ("[trace](file:///Users/jane/projects/x)", "[trace](file://[private path])"),
+            ("cc -I/home/jane/include x.c", "cc -I[private path] x.c"),
+        ]:
+            with self.subTest(text):
+                self.assert_masked(text, masked, ["private paths"])
 
     def test_paths_in_a_fenced_block_are_masked(self):
         self.assert_masked("```\ncd /Users/jane/x\n```", "```\ncd [private path]\n```", ["private paths"])
@@ -282,12 +325,15 @@ class Mask(unittest.TestCase):
             ("apikey: abcdefgh1234", "a password or token assignment"),
             ("SECRET=abcdefgh1234", "a password or token assignment"),
             ("`token: abcdefgh1234`", "a password or token assignment"),
+            ('password = "four ordinary test words"', "a password or token assignment"),
+            ("secret: 'two words here'", "a password or token assignment"),
         ]:
             with self.subTest(text):
                 self.assertEqual(mask.find_secret(f"line one\n{text}"), (kind, 2))
 
     def test_a_short_or_placeholder_value_is_not_a_secret(self):
-        for text in ["password = x", "token: ${{ secrets.GH_TOKEN }}", "sk-short", "task-" + "a" * 30]:
+        for text in ["password = x", "token: ${{ secrets.GH_TOKEN }}", 'password: "${DB_PASSWORD} here"',
+                     'token = "<your token here>"', "sk-short", "task-" + "a" * 30]:
             with self.subTest(text):
                 self.assertIsNone(mask.find_secret(text))
 

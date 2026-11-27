@@ -1,11 +1,15 @@
 """The mask every PR description passes through (#231 rules 45 to 47).
 
 `mask(text)` replaces each `@` mention with `[mention]` and each private path with
-`[private path]`, and returns the masked text with the kinds it masked. A private path is one
-under a home or per-user folder: `/Users/<name>`, `/home/<name>`, `/root`, `~`, `C:\\Users\\<name>`,
+`[private path]`, and returns the masked text with the kinds it masked. A mention after a diff's
+`+`, a path in a `file://` link, and a path stuck to a short option such as `-I` are masked too. A
+private path is one under a home or per-user folder: `/Users/<name>`, `/home/<name>`, `/root`, `~`, `C:\\Users\\<name>`,
 and macOS's per-user temp folders under `/var/folders` and `/private/var/folders`. Code spans and
 fenced blocks get no exemption. An email address is not a mention, and issue-closing words such as
 `Closes #415` pass unchanged.
+
+A value assigned to a secret name counts from 8 characters; a quoted value is measured whole,
+spaces included. A value that starts with `$`, `{`, `<` or `%` is a template reference, not a secret.
 
 `find_secret(text)` returns the kind and line number of the first text that looks like a secret,
 or None. The caller stops with a question and never prints the text.
@@ -18,10 +22,10 @@ from __future__ import annotations
 
 import re
 
-MENTION = re.compile(r"(?<![\w.+@-])@[A-Za-z0-9_][\w-]*(?:/[\w.-]+)?")
+MENTION = re.compile(r"(?<![\w.@-])@[A-Za-z0-9_][\w-]*(?:/[\w.-]+)?")
 _REST = r"[^\s`'\"()<>\[\]|]*"
 PRIVATE_PATH = re.compile(
-    r"(?<![\w.~/-])(?:/Users|/home|/root|/private/var/folders|/var/folders)(?![\w.-])" + _REST
+    r"(?:(?<![\w.~])|(?<=-[A-Za-z]))(?:/Users|/home|/root|/private/var/folders|/var/folders)(?![\w.-])" + _REST
     + r"|(?<![\w~/-])~[\w.-]*/" + _REST
     + r"|(?i:\b[a-z]:[\\/]+users[\\/])" + _REST
 )
@@ -34,7 +38,8 @@ SECRETS = (
     ("a Slack token", re.compile(r"\bxox[baps]-[A-Za-z0-9-]+")),
     ("an API key", re.compile(r"(?<![A-Za-z0-9])sk-[\w-]{20,}")),
     ("a password or token assignment", re.compile(
-        r"(?i)(?:password|passwd|secret|token|api_?key)[\w-]*[\"']?\s*[:=]\s*[\"']?[^\s\"'${<%][^\s\"']{7,}")),
+        r"(?i)(?:password|passwd|secret|token|api_?key)[\w-]*[\"']?\s*[:=]\s*"
+        r"(?:\"[^\"\s${<%][^\"]{7,}|'[^'\s${<%][^']{7,}|[^\s\"'${<%][^\s\"']{7,})")),
 )
 
 

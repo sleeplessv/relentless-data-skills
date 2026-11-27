@@ -38,10 +38,11 @@ class Pr(unittest.TestCase):
         self.world.gh_answer(["pr", "create"], URL.format(12) + "\n")
         self.world.gh_answer(["pr", "edit"])
 
-    def branch(self, name: str, request: str | None = TICKET_REQUEST, **more: str) -> Path:
+    def branch(self, name: str, request: str | None = TICKET_REQUEST, subject: str | None = None,
+               **more: str) -> Path:
         """A worktree on a new branch with one commit and a run mark, and its records when given."""
         checkout = self.world.worktree(name.replace("/", "-"), name)
-        self.world.commit(checkout, f"{name}.txt", "x\n", f"feat: {name} work")
+        self.world.commit(checkout, f"{name}.txt", "x\n", subject or f"feat: {name} work")
         self.world.write_mark(checkout, branch=name)
         if request is not None:
             write_records(self.common / "deliver" / "branches" / name, request, records=[], **more)
@@ -113,6 +114,39 @@ class Pr(unittest.TestCase):
             "REFUSED pr.not-saved: the author's files are not saved: plan\nNext: deliver.py save plan\n"))
         self.assertEqual(self.calls(), [])
 
+    def test_only_a_saveable_kind_in_the_drop_folder_counts_as_unsaved(self):
+        checkout = self.branch("feat/ds-store")
+        (checkout / ".deliver").mkdir()
+        for name in (".DS_Store", "plan.md~", "notes.md"):
+            (checkout / ".deliver" / name).write_text("x\n", encoding="utf-8")
+        self.assert_ends(self.pr(checkout), 0, f"Opened draft PR #12: {URL.format(12)}\n")
+
+    def test_pr_wrong_branch(self):
+        checkout = self.branch("feat/two", request=None)
+        self.world.write_mark(checkout, branch="feat/one")
+        write_records(self.common / "deliver" / "branches" / "feat/one", TICKET_REQUEST, records=[])
+        self.assert_ends(self.pr(checkout), 10, (
+            "REFUSED pr.wrong-branch: the checked-out branch is feat/two, and the run mark's branch is feat/one\n"
+            "Next: git switch feat/one\n"))
+        self.assertEqual((self.calls(), self.remote_tip("feat/two"), self.remote_tip("feat/one")), ([], "", ""))
+        self.assertEqual(self.world.records("feat/one"), [])
+
+    def test_a_secret_in_the_title_ends_in_exit_20_before_the_push(self):
+        checkout = self.branch("feat/title-secret", subject="fix: use ghp_" + "a" * 36)
+        self.assert_ends(self.pr(checkout), 20, (
+            "The PR title, the branch's first commit subject, looks like it holds a secret (a GitHub token) on "
+            "line 1, so nothing was pushed or sent to gh. Is it a real secret that should be taken out of the "
+            "commit subject before the run goes on?\n"))
+        self.assertEqual(self.calls(), [["repo", "view", "--json", "defaultBranchRef", "--jq",
+                                         ".defaultBranchRef.name"]])
+        self.assertEqual(self.remote_tip("feat/title-secret"), "")
+
+    def test_masks_the_title(self):
+        checkout = self.branch("feat/title-mask", subject="fix: ask @octocat about /Users/jane/work")
+        self.assert_ends(self.pr(checkout), 0, f"Opened draft PR #12: {URL.format(12)}\n")
+        create = self.calls()[2]
+        self.assertEqual(create[create.index("--title") + 1], "fix: ask [mention] about [private path]")
+
     def test_pr_unreadable(self):
         checkout = self.branch("feat/unreadable", plan="Just prose.\n")
         self.assert_ends(self.pr(checkout), 10, (
@@ -137,11 +171,24 @@ class Pr(unittest.TestCase):
         checkout = self.branch("feat/rejected")
         result = self.pr(checkout)
         self.assert_ends(result, 10, (
-            "REFUSED pr.push-rejected: origin rejected the push of feat/rejected, and nothing was forced\n"
+            "REFUSED pr.push-rejected: the push of feat/rejected to origin failed, and nothing was forced\n"
             "Next: git pull --no-rebase origin feat/rejected\n"))
         self.assertIn("[rejected]", result.stderr)
         self.assertEqual(self.remote_tip("feat/rejected"), other)
         self.assertEqual(len(self.calls()), 1)
+
+    def test_pr_push_rejected_without_advising_a_pull_when_origin_cannot_be_reached(self):
+        checkout = self.branch("feat/unreachable")
+        tmp = self.world.root / "tmp"
+        tmp.mkdir(exist_ok=True)
+        result = self.world.deliver("pr", cwd=checkout, TMPDIR=str(tmp), GIT_CONFIG_COUNT="1",
+                                    GIT_CONFIG_KEY_0="remote.origin.pushurl",
+                                    GIT_CONFIG_VALUE_0=str(self.world.root / "no-such-remote.git"))
+        self.assert_ends(result, 10, (
+            "REFUSED pr.push-rejected: the push of feat/unreachable to origin failed, and nothing was forced\n"
+            "Next: fix the error above, then deliver.py pr\n"))
+        self.assertNotIn("[rejected]", result.stderr)
+        self.assertEqual((len(self.calls()), self.remote_tip("feat/unreachable")), (1, ""))
 
     def test_a_secret_ends_in_exit_20_before_any_push_or_gh_call(self):
         checkout = self.branch("feat/secret", request="Source: conversation\n\nUse AKIAABCDEFGHIJ234567 here.\n",

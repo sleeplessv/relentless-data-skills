@@ -49,6 +49,15 @@ REFUSALS = {
     "preflight.no-github": "gh cannot read this repo from GitHub: {error}",
     "preflight.cannot-push": "the gh account cannot push to {repo}: its permission is {permission}",
     "preflight.reach-failed": "the reach command {name}, `{command}`, failed with exit {exit}: {error}",
+    "preflight.background": "this Claude Code session runs where nobody can stop it: {var} is {value}",
+    "preflight.untrusted": "Claude Code does not trust {folder}: {path} records no accepted trust dialog for it",
+    "preflight.hooks-off": "Claude Code's hooks are switched off: {path} sets {key}",
+    "preflight.unknown-hook": "a hook deliver does not know runs on shell commands: {path} registers {command}",
+    "preflight.claude-unreadable": "Claude Code's file {path} cannot be read: {error}",
+    "preflight.no-reader": "the deliver plugin has no reader role file: {path} is missing",
+    "preflight.role-clash": "the role file {path} has the name of deliver's role {role}",
+    "preflight.plugin-twice": "deliver is also in Claude Code's user-level skills folder: {path}",
+    "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,
     "save.missing-file": "there is no {file} to save",
@@ -63,6 +72,7 @@ REFUSALS = {
     "ready.no-mark": NO_MARK,
     "merge.no-mark": NO_MARK,
     "finish.no-mark": NO_MARK,
+    "deps.missing-skill": "a required upstream skill is not installed: {skills}",
 }
 
 

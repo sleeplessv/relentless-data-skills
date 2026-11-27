@@ -59,6 +59,7 @@ class Checks(unittest.TestCase):
         cls.common = Path(cls.world.git(cls.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
         cls.tools = cls.world.root / "tools"
         cls.tools.mkdir()
+        cls.world.install_upstream()
         calls = cls.world.root / "count-calls"
         counter = f'#!/bin/sh\n[ $# -ge 1 ] || exit 64\nprintf "%s\\n" "$*" >> {calls}\necho 3\n'
         for name, text in (("good-gpg", GOOD_GPG), ("bad-gpg", BAD_GPG), ("count", counter)):

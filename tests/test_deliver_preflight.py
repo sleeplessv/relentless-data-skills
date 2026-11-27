@@ -54,6 +54,7 @@ class Preflight(unittest.TestCase):
         self.world.write_mark(run="run-3")
         self.world.probe()
         deliver_kit.github_ok(self.world)
+        self.world.install_upstream()
 
     def stack(self, text: str) -> None:
         (self.world.work / "docs" / "agents").mkdir(parents=True)

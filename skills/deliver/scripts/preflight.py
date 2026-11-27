@@ -24,8 +24,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import check_guard
+import checks_claude
 import checks_env
 import core
+import deps
 import settings
 
 STOP_LOG = "preflight-stops.jsonl"
@@ -69,6 +71,15 @@ def check_settings(ctx: Context) -> Stop | Warn | None:
 
 CHECKS: list[Check] = [
     check_settings,
+    checks_claude.check_background,
+    checks_claude.check_trust,
+    checks_claude.check_hooks_on,
+    checks_claude.check_shell_hooks,
+    checks_claude.check_reader,
+    checks_claude.check_roles,
+    checks_claude.check_plugin_twice,
+    checks_claude.check_agents_at_once,
+    checks_claude.check_effort,
     check_guard.check_guard_probe,
     checks_env.check_python,
     checks_env.check_writable,
@@ -81,6 +92,8 @@ CHECKS: list[Check] = [
     checks_env.check_check_command,
     checks_env.check_reach,
     checks_env.check_dependents,
+    deps.check_required_skills,
+    deps.check_skill_hashes,
 ]
 
 

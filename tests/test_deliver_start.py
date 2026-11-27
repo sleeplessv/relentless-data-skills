@@ -1,8 +1,8 @@
 """deliver.py start: the routes, the entry check, the fresh branch, resume, and each refusal.
 
-The entry check is a pure function, tested on text in this process. Everything else runs
-`deliver.py start` at its command line in a throwaway world of tests/deliver_kit.py, with its
-bare remote and stand-in gh.
+The entry check and the grant line are pure functions, tested in this process. Everything else
+runs `deliver.py start` at its command line in a throwaway world of tests/deliver_kit.py, with
+its bare remote and stand-in gh; one test puts a spy check into preflight's list first.
 
     python3 -m unittest tests.test_deliver_start
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -26,6 +27,15 @@ PROBE = "Next: run gh pr merge --deliver-guard-probe, which the guard refuses, t
 BODY = "## What to build\n\nAdd a --json flag.\n\n## Acceptance criteria\n\n- [ ] it parses\n- [ ] the help names it\n"
 REPO_VIEW = ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
 TREE = "Source: working tree, requirements written from the diff\n"
+SPY = """\
+import sys
+sys.path.insert(0, sys.argv[1])
+import deliver, preflight
+def spy(ctx):
+    print("mark seen by preflight: " + (ctx.run.git_dir / "deliver-mark.json").read_text(encoding="utf-8"))
+preflight.CHECKS.insert(0, spy)
+sys.exit(deliver.main(sys.argv[2:]))
+"""
 
 
 class Start(unittest.TestCase):
@@ -96,7 +106,7 @@ class Start(unittest.TestCase):
         run, branch = self.started(result)
         self.assertEqual(branch, f"deliver/ticket-7-{run}")
         self.assert_ends(result, 0, "\n".join([
-            f"Started run {run} on branch {branch}.", MISSING, "R1: it parses", "R2: the help names it", GRANT, PROBE,
+            f"Started run {run} on branch {branch}.", "R1: it parses", "R2: the help names it", MISSING, PROBE,
         ]) + "\n")
         self.assertEqual(self.branch(), branch)
         self.assertEqual(self.world.git(self.work, "rev-parse", "HEAD"), tip)
@@ -126,7 +136,7 @@ class Start(unittest.TestCase):
         result = self.world.deliver("start")
         run, branch = self.started(result)
         self.assertEqual(branch, f"deliver/tree-{run}")
-        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n{MISSING}\n{GRANT}\n{PROBE}\n")
+        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n{MISSING}\n{PROBE}\n")
         self.assertEqual(self.branch(), branch)
         self.assertEqual(self.world.git(self.work, "status", "--porcelain"), "M README.md\n?? new.txt")
         self.assertEqual((self.folder(branch) / "request.md").read_text(encoding="utf-8"), TREE)
@@ -142,7 +152,7 @@ class Start(unittest.TestCase):
         (drop / "notes.md").write_text("scratch\n", encoding="utf-8")
         result = self.world.deliver("start", "request")
         run, branch = self.started(result)
-        self.assert_ends(result, 0, f"Started run {run} on branch feat/flag.\n{MISSING}\n{GRANT}\n{PROBE}\n")
+        self.assert_ends(result, 0, f"Started run {run} on branch feat/flag.\n{MISSING}\n{PROBE}\n")
         self.assertEqual((self.folder("feat/flag") / "request.md").read_text(encoding="utf-8"),
                          "Source: conversation\n\nAdd a --json flag.\n\n  Keep `--quiet` as it is.\n")
         self.assertFalse((drop / "request.md").exists())
@@ -179,10 +189,12 @@ class Start(unittest.TestCase):
         exclude = self.git_dir / "info" / "exclude"
         exclude.write_text("# local\n*.log", encoding="utf-8")
         self.issue(7)
-        self.world.deliver("start", "7")
-        (self.git_dir / "deliver-mark.json").unlink()
         self.issue(8)
-        self.world.deliver("start", "8")
+        self.world.gh_answer(["pr", "list"], "[]")
+        first = self.world.deliver("start", "7")
+        (self.git_dir / "deliver-mark.json").unlink()
+        second = self.world.deliver("start", "8")
+        self.assertEqual((first.returncode, second.returncode), (0, 0), first.stdout + second.stdout)
         self.assertEqual(exclude.read_text(encoding="utf-8"), "# local\n*.log\n.deliver/\n")
 
     def test_the_grant_line_drops_follow_ups_and_names_a_withheld_merge(self):
@@ -197,24 +209,38 @@ class Start(unittest.TestCase):
                          "Run grant: push this branch, open and update its PR, mark it ready through the scripts, "
                          "no merge: stop at ready.")
 
-    def test_start_reads_the_grant_from_the_stack_settings(self):
+    def test_start_prints_no_grant_and_resume_reads_it_from_the_stack_settings(self):
         (self.work / "docs" / "agents").mkdir(parents=True)
         (self.work / "docs" / "agents" / "stack.toml").write_text("stop_at_ready = true\nfollow_ups = false\n",
                                                                   encoding="utf-8")
         result = self.world.deliver("start")
         run, branch = self.started(result)
-        self.assert_ends(result, 0, "\n".join([
-            f"Started run {run} on branch {branch}.",
+        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n{PROBE}\n")
+        self.world.probe()
+        self.assertEqual(self.world.deliver("start", "--resume").stdout.splitlines()[-2:], [
+            "Preflight passed.",
             "Run grant: push this branch, open and update its PR, mark it ready through the scripts, "
-            "no merge: stop at ready.", PROBE]) + "\n")
+            "no merge: stop at ready."])
 
     def test_the_mark_is_written_before_preflight_runs(self):
+        (self.work / "new.txt").write_text("new\n", encoding="utf-8")
+        result = subprocess.run(
+            [sys.executable, "-c", SPY, str(deliver_kit.SCRIPTS), "start"], cwd=self.work, env=self.world.env(),
+            capture_output=True, text=True)
+        run, branch = self.started(result)
+        mark = (self.git_dir / "deliver-mark.json").read_text(encoding="utf-8")
+        self.assertEqual(json.loads(mark)["run"], run)
+        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n"
+                                    f"mark seen by preflight: {mark}\n{MISSING}\n{PROBE}\n")
+
+    def test_a_preflight_stop_at_start_is_saved_and_logged_after_the_requirements(self):
         (self.work / "docs" / "agents").mkdir(parents=True)
         (self.work / "docs" / "agents" / "stack.toml").write_text("check_slots = 'two'\n", encoding="utf-8")
-        result = self.world.deliver("start")
+        self.issue(7)
+        result = self.world.deliver("start", "7")
         run, branch = self.started(result)
         self.assert_ends(result, 10, "\n".join([
-            f"Started run {run} on branch {branch}.",
+            f"Started run {run} on branch {branch}.", "R1: it parses", "R2: the help names it",
             "REFUSED preflight.bad-settings: the stack settings cannot be read: "
             "docs/agents/stack.toml: check_slots must be int",
             "Next: fix docs/agents/stack.toml, then run deliver.py preflight"]) + "\n")
@@ -227,7 +253,7 @@ class Start(unittest.TestCase):
                          [{"run": run, "code": "preflight.bad-settings", "harness": "claude-code"}])
 
     def test_a_ticket_with_a_gap_ends_in_exit_20_with_one_question(self):
-        self.issue(7, body="## Acceptance criteria\n\nIt should work.\n")
+        self.issue(7, body="## Acceptance criteria\n\n- [ ]\n")
         self.assert_ends(self.world.deliver("start", "7"), 20, "\n".join([
             "Ticket #7 does not pass the entry check:",
             f"- {entry_check.NO_TEXT}",
@@ -240,7 +266,31 @@ class Start(unittest.TestCase):
         self.issue(7, comments=("## Agent Brief\n\n**Acceptance criteria:**\n- from the brief\n",))
         result = self.world.deliver("start", "7")
         run, branch = self.started(result)
-        self.assertEqual(result.stdout.splitlines()[2], "R1: from the brief")
+        self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\nR1: from the brief\n{MISSING}\n{PROBE}\n")
+
+    def test_placeholders_alone_end_in_exit_20_before_anything_is_written(self):
+        cases = {
+            "Build a flag.\n\n## Acceptance\n\n- [ ]\n- [x] <!-- a criterion -->\n1.\n": [entry_check.NO_CRITERION],
+            "<!--\nSay what to build.\n-->\n\n## Acceptance\n- it parses\n": [entry_check.NO_TEXT],
+        }
+        for number, (body, gaps) in enumerate(cases.items(), 7):
+            with self.subTest(body=body):
+                self.issue(number, body=body)
+                self.assert_ends(self.world.deliver("start", str(number)), 20, "\n".join([
+                    f"Ticket #{number} does not pass the entry check:", *(f"- {gap}" for gap in gaps),
+                    f"Will you add what is missing to ticket #{number}? Then the session runs deliver.py start "
+                    f"{number} again."]) + "\n")
+                self.assert_nothing_written()
+
+    def test_every_list_of_every_criteria_section_is_numbered_in_order(self):
+        self.issue(7, body="Add a JSON export.\n\n## Acceptance\n\nThe export command:\n\n- Red\n\nAnother case\n\n"
+                           "  1. Green\n  2. Blue\n     still Blue\n\n### Done when\n- nested\n\n### Edge cases\n"
+                           "- sibling\n\n## Notes\n- out\n")
+        result = self.world.deliver("start", "7")
+        run, branch = self.started(result)
+        self.assert_ends(result, 0, "\n".join([
+            f"Started run {run} on branch {branch}.", "R1: Red", "R2: Green", "R3: Blue still Blue", "R4: nested",
+            "R5: sibling", MISSING, PROBE]) + "\n")
 
     def test_resume_keeps_the_mark_and_prints_where_the_run_stands(self):
         self.issue(7)
@@ -300,6 +350,18 @@ class Start(unittest.TestCase):
                     "come with a later build stage\nNext: deliver.py start <one ticket>\n"))
         self.assert_nothing_written()
         self.assertEqual(self.calls(), [])
+
+    def test_a_mark_wins_over_every_other_start_form(self):
+        self.issue(7)
+        run, branch = self.started(self.world.deliver("start", "7"))
+        calls = self.calls()
+        for args in (["7", "8"], ["spec", "200"], ["backlog"], ["request", "Add a flag."], ["request"], []):
+            with self.subTest(args=args):
+                self.assert_ends(self.world.deliver("start", *args), 10, (
+                    f"REFUSED start.run-in-progress: run {run} is in progress in this checkout "
+                    f"(run mark: {self.git_dir / 'deliver-mark.json'}); deliver.py start --resume resumes it\n"
+                    "Next: deliver.py finish, to end it\n"))
+        self.assertEqual((self.mark()["run"], len(self.world.records(branch)), self.calls()), (run, 1, calls))
 
     def test_start_nothing_to_start(self):
         (self.work / ".deliver").mkdir()
@@ -391,12 +453,24 @@ class EntryCheck(unittest.TestCase):
 
     def test_continuation_lines_and_nested_items_join_their_parent(self):
         entry = self.check("Build it.\n\n## Acceptance criteria\n\n- [ ] parent\n  goes on\n  - child\n\n"
-                           "    more of it\n- next\nnot a criterion\n  - not joined\n")
+                           "    more of it\n- next\nnot a criterion\n  not joined\n")
         self.assertEqual(entry.requirements, ["parent goes on - child more of it", "next"])
 
     def test_lines_in_a_code_fence_are_not_items(self):
         entry = self.check("Build it.\n\n## Acceptance criteria\n- real\n```\n- fenced\n## Done when\n```\n")
         self.assertEqual(entry.requirements, ["real"])
+
+    def test_a_longer_fence_holds_a_shorter_fence_line(self):
+        entry = self.check("Build it.\n\n## Acceptance criteria\n- real\n````\n```\n- sample\n````\n- after\n")
+        self.assertEqual(entry.requirements, ["real", "after"])
+
+    def test_prose_above_a_criteria_list_is_text_saying_what_to_build(self):
+        entry = self.check("## Acceptance\n\nAdd a JSON export command.\n\n- it exports\n")
+        self.assertEqual((entry.requirements, entry.gaps, entry.quote), (["it exports"], [], ""))
+
+    def test_html_comments_are_neither_text_nor_criteria(self):
+        entry = self.check("<!-- Say what to build. -->\n## Acceptance\n- <!-- a criterion -->\n- [ ] <!--\nmore\n-->\n")
+        self.assertEqual(entry.gaps, [entry_check.NO_TEXT, entry_check.NO_CRITERION])
 
     def test_the_newest_agent_brief_replaces_the_bodys_criteria(self):
         old = "## Agent Brief\n\n**Acceptance criteria:**\n- old one\n"

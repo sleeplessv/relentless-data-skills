@@ -10,17 +10,19 @@ Routes, for one author:
   refuses and lists what it accepts.
 - `start 1 2`, `start spec ...` and `start backlog` refuse: multi-ticket runs come later.
 
-In order, `start` then: refuses where a run mark exists; reads the route's input; on the default
+Where a run mark exists, every `start` but `start --resume` refuses, whatever its arguments.
+Otherwise, in order, `start` reads the route's input; on the default
 branch, a detached HEAD or a branch whose PR is merged, fetches `origin <default>` and cuts a
 fresh branch from it (`deliver/ticket-<N>-<run>`, `deliver/request-<run>` or `deliver/tree-<run>`)
 with `git switch`, which carries the tree's changes or refuses with nothing changed; adds `.deliver/` to the shared git directory's `info/exclude`;
 writes the run mark (role `session`); saves the request as the branch's `request.md` with its
-`Source:` line (`render.py` reads it) and a `save` record; and runs preflight without the probe
-check. Once that passes it prints the requirements of a ticket, the run grant line and the probe
-step. The session then runs the probe, which the guard refuses, and `deliver.py preflight`.
+`Source:` line (`render.py` reads it) and a `save` record; prints the requirements of a ticket,
+so a preflight stop leaves them on screen; and runs preflight without the probe check. Once that
+passes it prints the probe step. The session then runs the probe, which the guard refuses, and
+`deliver.py preflight`. `start` prints no run grant: the grant needs the probe check passed.
 
 `start --resume` keeps the mark, prints where the run stands from its records, runs the whole
-preflight, and prints the grant line once it passes.
+preflight, probe check included, and prints the grant line once it passes.
 """
 from __future__ import annotations
 
@@ -44,14 +46,14 @@ TEXTS = ("request", "requirements", "plan", "summary")
 
 
 def main(args: list[str], run: core.Run | None) -> None:
+    if run and run.mark and args != ["--resume"]:
+        raise core.Refused("start.run-in-progress", "deliver.py finish, to end it", run=run.mark["run"],
+                           mark=run.git_dir / core.MARK)
     route, ticket = _route(args)
     if run is None:
         raise core.Refused("start.not-a-repo", "run deliver.py start inside the repo", cwd=Path.cwd())
     if route == "resume":
         return resume(run)
-    if run.mark:
-        raise core.Refused("start.run-in-progress", "deliver.py finish, to end it", run=run.mark["run"],
-                           mark=run.git_dir / core.MARK)
     rerun = " ".join(["deliver.py start", *args])
     requirements: list[str] = []
     if route == "ticket":
@@ -77,10 +79,9 @@ def main(args: list[str], run: core.Run | None) -> None:
         (run.checkout / REQUEST).unlink()
     run.record("save", kind="request", file="request.md", commit=_tied_commit(run))
     print(f"Started run {run_id} on branch {branch}.")
-    preflight.run(run, probe=False)
     for number, requirement in enumerate(requirements, 1):
         print(f"R{number}: {requirement}")
-    print(grant_line(settings.load(run.checkout)[0]))
+    preflight.run(run, probe=False)
     print(f"Next: run {guard.PROBE}, which the guard refuses, then deliver.py preflight")
 
 

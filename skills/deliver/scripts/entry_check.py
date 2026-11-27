@@ -7,14 +7,18 @@ A criterion is a list item (checkbox, bullet or number) under a heading whose te
 `Acceptance criteria`, `Acceptance` or `Done when`, in any case and at any level, or under a
 bold line with that text such as `**Acceptance criteria:**`, the form Agent Briefs use. A
 heading's section ends at the next heading of the same or a higher level; a bold line's ends at
-the next heading or bold line. Several sections are read in the order they appear, and their
-items are numbered R1 on. An indented line, or a nested item, joins the item above it. A line
-inside a code fence is never an item.
+the next heading or bold line; when a criteria section nested in another ends, the outer one
+goes on. Several sections are read in the order they appear, and their items are numbered R1 on.
+An indented line, or a nested item, joins the item above it. A line that is not part of an item
+ends the list, and a list after it starts at its own indent. An item with no text once its
+`[ ]` or `[x]` is dropped is no criterion. HTML comments are not read. A line inside a code
+fence, from an opening run of three or more backticks or tildes to a run of the same character
+at least as long, is never read as an item or a criteria heading.
 
 When a comment holds an `Agent Brief` heading, the newest such comment's criteria replace the
 body's. A ticket has a gap when neither the body nor the brief used has text saying what to
-build (a line outside the criteria sections that is not a heading), and when it has no
-criterion.
+build (a line that is not a heading, a criterion or a comment, such as prose above a criteria
+list), and when it has no criterion.
 """
 from __future__ import annotations
 
@@ -24,8 +28,9 @@ from dataclasses import dataclass
 NAMES = ("acceptance criteria", "acceptance", "done when")
 HEADING = re.compile(r"^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 BOLD = re.compile(r"^ {0,3}\*\*(.+?)\*\*\s*:?\s*$")
-ITEM = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])\s+(?:\[[ xX]\]\s+)?(.*\S)\s*$")
-FENCE = re.compile(r"^\s*(```|~~~)")
+ITEM = re.compile(r"^(\s*)(?:[-*+]|\d+[.)])(?:\s+(?:\[[ xX]\](?!\S))?(.*))?$")
+FENCE = re.compile(r"^\s*(`{3,}|~{3,})(.*)$")
+COMMENT = re.compile(r"<!--.*?-->", re.S)
 BRIEF = "agent brief"
 BOLD_LEVEL = 7  # below every heading, so any heading or bold line ends a bold line's section
 NO_TEXT = "it has no text saying what to build"
@@ -63,38 +68,43 @@ def check(body: str, comments: list[str]) -> Entry:
 def _read(text: str) -> _Read:
     items: list[str] = []
     prose, first = False, None
-    section: int | None = None  # the level of the criteria section the line is in
-    base: int | None = None  # the indent of the section's first item
+    sections: list[int] = []  # the levels of the criteria sections the line is in, outermost first
+    base: int | None = None  # the indent of the current list's first item
     current = False  # whether a line may join the last item
-    fenced = False
+    fence: str | None = None  # the run of backticks or tildes that opened the fence the line is in
+    text = COMMENT.sub(lambda found: "\n" * found.group().count("\n"), text)  # keeps line numbers
     for index, line in enumerate(text.splitlines()):
-        if FENCE.match(line):
-            fenced, current = not fenced, False
+        if found := FENCE.match(line):
+            run, rest = found.groups()
+            if fence is None:
+                fence = run
+            elif run[0] == fence[0] and len(run) >= len(fence) and not rest.strip():
+                fence = None
+            current = False
             continue
-        heading = None if fenced else _heading(line)
+        heading = None if fence else _heading(line)
         if heading:
             level = heading[0]
-            if section is not None and level <= section:
-                section = None
+            while sections and sections[-1] >= level:
+                sections.pop()
             if _name(heading) in NAMES:
-                section, base, current = level, None, False
+                sections.append(level)
                 first = index if first is None else first
+            base, current = None, False
             continue
         if not line.strip():
             continue
-        if section is None:
-            prose = True
-            continue
-        item = None if fenced else ITEM.match(line)
+        item = ITEM.match(line) if sections and not fence else None
         indent = len(line) - len(line.lstrip())
         if item and (base is None or indent <= base):
-            base = indent if base is None else base
-            items.append(item.group(2))
-            current = True
-        elif current and indent > (base or 0):
+            base, current = indent if base is None else base, False
+            if words := (item.group(2) or "").strip():
+                items.append(words)
+                current = True
+        elif current and indent > base:
             items[-1] += " " + line.strip()
         else:
-            current = False
+            prose, base, current = True, None, False
     return _Read(items, prose, first)
 
 

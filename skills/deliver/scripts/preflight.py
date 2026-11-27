@@ -11,11 +11,12 @@ To add a check, write it in its own module beside this one, import it here and p
 `CHECKS` at its place in the order. Give each new stop code its line in `core.REFUSALS` and
 its test.
 
-Every run saves one `preflight` record in the branch's records, and a stop also appends one
-line to `preflight-stops.jsonl` in the machine directory. A run with no stop prints
+Every full run saves one `preflight` record in the branch's records, and a stop also appends one
+line to `preflight-stops.jsonl` in the machine directory. A full run with no stop prints
 `Preflight passed.`, after one `warning: <line>` line per warning; a run with neither a stop nor
-a warning prints only that line. `deliver.py preflight` calls `run`; `start` (#419) is to call it
-too.
+a warning prints only that line. `deliver.py preflight` and `deliver.py start --resume` call `run`
+in full. `deliver.py start` calls it without the probe check: a stop there is saved and logged
+the same way, and a pass prints only its warnings and saves nothing.
 """
 from __future__ import annotations
 

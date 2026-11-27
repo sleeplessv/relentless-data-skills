@@ -23,6 +23,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import core
+import deps
 import settings
 
 STOP_LOG = "preflight-stops.jsonl"
@@ -65,6 +66,8 @@ def check_settings(ctx: Context) -> Stop | Warn | None:
 
 CHECKS: list[Check] = [
     check_settings,
+    deps.check_required_skills,
+    deps.check_skill_hashes,
 ]
 
 

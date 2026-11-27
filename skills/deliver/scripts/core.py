@@ -40,12 +40,14 @@ NO_MARK = "no run mark in this checkout, so no run is in progress here"
 REFUSALS = {
     "preflight.no-mark": NO_MARK,
     "preflight.bad-settings": "the stack settings cannot be read: {error}",
+    "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,
     "pr.no-mark": NO_MARK,
     "ready.no-mark": NO_MARK,
     "merge.no-mark": NO_MARK,
     "finish.no-mark": NO_MARK,
+    "deps.missing-skill": "a required upstream skill is not installed: {skills}",
 }
 
 

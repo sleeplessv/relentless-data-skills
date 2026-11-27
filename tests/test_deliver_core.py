@@ -136,6 +136,7 @@ class MarkAndRecords(unittest.TestCase):
 
     def test_mark_is_read_from_its_own_checkout_only(self):
         tree = self.world.worktree("tree", "feat/one")
+        self.world.install_upstream()
         self.world.write_mark(tree, branch="feat/one")
         self.assertEqual(self.world.deliver("preflight", cwd=tree).returncode, 0)
         self.assertEqual(self.world.deliver("preflight").stdout, NO_MARK.format("preflight"))

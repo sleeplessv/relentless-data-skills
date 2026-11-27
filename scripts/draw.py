@@ -26,7 +26,7 @@ import scan  # noqa: E402  (a sibling script, not an installed package)
 GENERATION_ONE = ("orchestrator-mode", "implement-ticket", "implement-feature", "implement-backlog")
 CRITERIA_HEADINGS = ("Acceptance criteria", "Acceptance", "Done when")
 BUCKETS = {f"{low}-{high}": range(low, high + 1) for low, high in ((0, 50), (51, 300), (301, 1500))}
-PER_BUCKET = 10
+PER_BUCKET = 5
 CHECK_TIMEOUT = 3600  # seconds, for each of setup and check
 CLOCK_SLACK = timedelta(minutes=1)  # between the machine's clock in the log and GitHub's
 EXIT_SHORT = 3
@@ -55,6 +55,18 @@ PIECE = re.compile(rf"""
   | (?P<quoted>'[^']*'|"[^"\\$`]*"|\\[^\n])
 """, re.X | re.A)
 TAIL = re.compile(r"-[0-9]+|-n [0-9]+")  # what a tail that reads gh's pipe may take: a count of lines and no file
+# The pieces the names reader reads before gh pr create: none ends a word, a command or a here-document's body where
+# bash or zsh would not. A call with any other text there names nothing.
+EXPANSION = r"\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\}|[0-9@*#?$!-])"  # one that runs nothing and holds no quote
+NAMES_PIECE = re.compile(rf"""
+    (?P<blank>[ \t]+)
+  | (?P<here><<(?P<strip>-?)[ \t]*(?:'(?P<single>\w+)'|"(?P<double>\w+)"|(?P<bare>\w+))(?=[ \t\n;&|<>]|\Z))
+  | (?P<redirect>[0-9]*(?:>>|>&|<&|<>|>\||>|<(?!<))(?:[0-9]+-?|-)?)
+  | (?P<op>&&|\|\||\|&?|;|&|\n)
+  | (?P<word>(?:[A-Za-z0-9_./,:=@%+-]+|'[^']*'|\\[\s\S]|{EXPANSION}|"(?:[^"\\$`]|\\[\s\S]|{EXPANSION})*")+)
+""", re.X | re.A)
+# What follows a plain gh that names it; a < or > touching create may make it another word, as create<(...) does.
+PR_CREATE = re.compile(r"[ \t]+pr[ \t]+create(?=[ \t\n;&|]|\Z)")
 # CommonMark's HTML blocks of kinds 1 to 6: what starts one and what ends it; a blank line ends kinds 6 and 7.
 BLANK = re.compile(r"\A[ \t]*\Z")
 HTML_BLOCKS = [
@@ -84,14 +96,15 @@ def one_of(items: list[str]) -> str:
 
 
 HELP = f"""\
-Draw the replay set: {PER_BUCKET * len(BUCKETS)} tickets generation one finished, {PER_BUCKET} per size bucket.
+Draw the replay set: up to {PER_BUCKET * len(BUCKETS)} tickets generation one finished, up to {PER_BUCKET} per size bucket.
 
 Usage: python3 scripts/draw.py [--seed N]
 
 The pool is every ticket that meets all of these:
 - One session under $CLAUDE_CONFIG_DIR/projects (default ~/.claude) opened the
   ticket's PR, itself or through a helper: a Bash call in its log runs
-  `gh pr create` for certain, the call's result holds the PR's URL, and the
+  `gh pr create` for certain, or names it and opened the PR by its time as
+  given below, the call's result holds the PR's URL, and the
   time GitHub gives for the PR's opening falls between the call and its
   result, give or take {CLOCK_SLACK.seconds // 60} minute. No other session opened or may have opened
   the PR, and the session opened or may have opened no other PR.
@@ -137,6 +150,24 @@ The pool is every ticket that meets all of these:
   that gh names the GitHub CLI and {one_of(list(OTHERS)).replace(" or ", " and ")} the commands
   of those names, wherever the call runs them; and that the system can
   start a command whose arguments total {LONGEST // 1024} KiB.
+  A call with none of these forms still opened the PR, by time and not by
+  form, when the draw asked GitHub about the PR, the call's result is not an
+  error and holds the PR's URL, GitHub's time falls in the call's span as
+  above, and the call names gh pr create. A call names gh pr create when the
+  three words, plain, unquoted and in that order, start one of its commands
+  after nothing but NAME=value words, with no < or > right after create.
+  Text in a here-document's body or in quotes names nothing. The draw reads
+  the text before the three words only as blanks; new lines; the operators
+  &&, ||, |, |&, ; and &, each after a command; redirections;
+  here-documents whose delimiter is letters, digits and _, plain or in
+  quotes, each body skipped to its delimiter line, and no line of a body
+  under a plain delimiter ending in a backslash; and words made of
+  letters, digits and _ . / , : = @ % + -, of text in single quotes, of a
+  backslash and the character after it, of a $ before a name, a name in
+  braces or one of 0-9 @ * # ? $ ! -, and of text in double quotes that
+  holds no ` and no other $. A call with any other text before the
+  three words does not name them. This second way takes for granted that no
+  other program opened the PR during that one call.
   Any other call whose text holds gh, pr and create, in any order or case,
   with any text beside each, once its quotes, backslashes, $ signs and
   backslash-new lines are taken out, may have opened the PR its result
@@ -167,7 +198,8 @@ The pool is every ticket that meets all of these:
   set aside.
 
 The draw reads the body as CommonMark's blocks, and a line ends only at a line
-feed, a carriage return or both. Code, fenced or indented, and HTML blocks
+feed, a carriage return or both. One U+FEFF at the very start of the body is
+dropped first, as GitHub drops it. Code, fenced or indented, and HTML blocks
 hide what they hold. In the section the draw reads lists of items marked - * +
 or ASCII digits and . or ), each with its text on its marker line. An item's
 text can wrap onto the lines after it, however they are indented, until a
@@ -189,7 +221,7 @@ text of the last open item. Anywhere in the body but inside a fence or an HTML
 block the draw holds open, which it opens only at a line indented at most 3
 spaces, with no > or marker, that starts a fence or one of CommonMark's HTML
 blocks of kinds 1 to 6, and holds until a later line ends it or its first line
-does past the text that opens it, so is a line that is a "## " criteria
+does, so is a line that is a "## " criteria
 heading once its indent, the > of any quotes and any list markers are taken
 off, when it had a > or a marker, or when it is indented and a line outside
 such a block that starts, at most 3 spaces in, with a list marker came before
@@ -212,9 +244,12 @@ A ticket's size is its PR's additions plus deletions. The buckets are
 {one_of(list(BUCKETS)).replace(" or ", " and ")} changed lines. A larger PR is in no bucket.
 Each bucket's pool is sorted by repo and ticket number, then shuffled by
 random.Random seeded with "<seed>:<bucket>". The draw tries the tickets in that
-order until {PER_BUCKET} pass. A try runs the repo's setup command, where it has one,
-and then its check command, each with sh, in a clean checkout of the commit
-before the merged PR: the first parent of the PR's merge commit. A step that
+order until {PER_BUCKET} pass or the bucket's pool is used up, whatever the other
+buckets hold. A bucket in which fewer than {PER_BUCKET} pass gives all that pass, and
+a bucket in which none passes means no set is written (exit {EXIT_SHORT}). A try runs
+the repo's setup command, where it has one, and then its check command, each
+with sh, in a clean checkout of the commit before the merged PR: the first
+parent of the PR's merge commit. A step that
 runs for more than {CHECK_TIMEOUT // 60} minutes is stopped. Setup and check run in one process
 group, made for the try, so what setup starts runs on through the check. When
 the try ends, whether it passes, fails, runs too long, or the draw gets Ctrl-C
@@ -288,16 +323,45 @@ opened it.
 
 After the count of vetoed PRs and before the count per bucket, the draw prints
 how many tickets of the listed repos it left out because it refused their body
-as above. A body is never refused when none of its lines is a "## " criteria
-heading once its indent, any > and any list markers are taken off, or when
-none of its lines starts with a list marker once its indent and any > are
-taken off, as it then holds no item. That count is taken before the rules on a
+as above. A body is never refused when no line that starts with a list marker
+once its indent and any > are taken off comes at or after its first line that
+is a "## " criteria heading once its indent, any > and any list markers are
+taken off, leaving out the lines inside a fence or an HTML block the draw held
+open and that ended before the line it refused, as no item can then stand
+under a criteria heading. That count is taken before the rules on a
 ticket's other PRs and earlier sets, so it is the most tickets the reader can
 have cost the pool.
 
+The draw has these known limits. A Bash call and its result are paired only
+inside one transcript: a call in the session's log whose result is in a
+helper's log gives no evidence. A log is split into lines at line feeds only,
+so a log whose lines end in a bare carriage return is read as one line.
+SIGKILL or a crash between the two renames that put a saved log in place can
+leave the new log without its folder, the earlier copy in logs/.old-<session>/
+and the rest of the new one in logs/.new-<session>/, until that session is
+saved again. Ctrl-C or SIGTERM while a step that ran too long is being stopped
+can leave the draw waiting until that step ends. A helper's response whose
+message id is a number can stand in for a response in the session's log that
+has no id, and supply the session's model. When one helper folder of a session
+cannot be listed, none of that session's helpers is read, the readable ones
+included. When the scan row cannot be written after a log was saved, the new
+copy of the log stays in place, no copy of the earlier one is kept, and
+scan-rows.jsonl.partial can be left. The draw takes an answer from gh as it
+comes: a timeline that is blank or holds an empty event picks the head at the
+PR's creation, a push whose after is not a commit id is saved as the commit,
+and a byte that is not UTF-8 ends the draw before the answer is saved. Output
+of git that is not UTF-8, such as a hook's message, ends the draw with
+Python's traceback and exit 1, and no set written; so does the judge, which
+runs its check through the draw's git runner.
+
 Exit 0: a set was written. Exit 1: an error; no set was written. Exit 2: bad
-usage. Exit {EXIT_SHORT}: a bucket holds fewer than {PER_BUCKET} tickets, or cannot reach {PER_BUCKET} once
-tickets are set aside; no set was written, and the count per bucket is printed."""
+usage. Exit {EXIT_SHORT}: a bucket holds no ticket that passes, because its pool is
+empty or every ticket in it is set aside; no set was written, and the count per
+bucket is printed.
+Exit 130: Ctrl-C stopped the draw. Exit 143: SIGTERM stopped the draw. Either
+stop prints one line that says so, and no set was written. Once the set file is
+in place, a signal leaves the exit at 0 and the last line as the one that names
+the set. A SIGINT or SIGTERM the caller ignored stays ignored."""
 
 
 class DrawError(Exception):
@@ -312,12 +376,43 @@ class Unreadable(ValueError):
         self.number, self.line = number, line
 
 
-class Terminated(BaseException):
-    """SIGTERM, raised where the draw is so that each cleanup runs; no handler for errors catches it."""
+SIGNALS = (signal.SIGINT, signal.SIGTERM)  # what stops the draw, with one line that says so
+
+
+class Stopped(BaseException):
+    """SIGINT or SIGTERM, whose number it holds, raised where the draw is so that each cleanup runs; no handler for
+    errors catches it."""
+
+
+STOPPED_BY: list[int] = []  # the signal that stopped the draw; a later one does nothing, so the cleanups run whole
+
+
+def stopped(number: int, frame: object) -> None:
+    if not STOPPED_BY:
+        STOPPED_BY.append(number)
+        raise Stopped(number)
+
+
+Terminated = Stopped  # the name scripts/replay.py catches
 
 
 def terminated(number: int, frame: object) -> None:
-    raise Terminated
+    """scripts/replay.py's SIGTERM handler: raises at each signal, as it did before the draw had `stopped`."""
+    raise Stopped(number)
+
+
+def held(cleanup: Callable[[], None]) -> None:
+    """Run `cleanup` with SIGINT and SIGTERM held. A signal during it is raised once it is done; so is one that came
+    just before it, which holding the signals raises."""
+    try:
+        mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    except Stopped:  # the signals are held all the same
+        cleanup()
+        raise
+    try:
+        cleanup()
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, mask)
 
 
 class GhFailed(DrawError):
@@ -327,6 +422,20 @@ class GhFailed(DrawError):
     def __init__(self, message: str, output: str) -> None:
         super().__init__(message)
         self.output = output
+
+
+def remove(path: Path) -> None:
+    """Remove a tree a try may have left, first giving its owner write access to each folder in it, as a check
+    can leave a folder read-only; what still cannot be removed stays."""
+    for folder, names, _ in os.walk(path):
+        for name in names:
+            inner = os.path.join(folder, name)
+            if not os.path.islink(inner):
+                try:
+                    os.chmod(inner, os.lstat(inner).st_mode & 0o7777 | 0o700)
+                except OSError:
+                    pass
+    shutil.rmtree(path, ignore_errors=True)
 
 
 def label_name(number: int) -> str:
@@ -469,20 +578,64 @@ def opening_form(command: str) -> bool:
             and all(found["words"][0] in OTHERS for found in commands if found is not opener))
 
 
-Run = tuple[datetime | None, datetime | None, bool]
+def names_gh_pr_create(command: str) -> bool:
+    """Whether a call names `gh pr create` as --help says: the three words, plain, start one command after nothing
+    but NAME=value words, outside quotes and here-document bodies.
+
+    Invariant: True only when every piece of the call before the three words is a NAMES_PIECE, read in order, with
+    each here-document's body skipped to its delimiter line, and no line of an unquoted body ends in a backslash.
+    Any text it cannot read so gives False: a False may be wrong, a True may not."""
+    start, empty, here, at = True, True, [], 0  # start: no word but NAME=value yet; empty: no piece yet
+    while at < len(command):
+        found = NAMES_PIECE.match(command, at)
+        if not found:
+            return False
+        kind, text, at = found.lastgroup, found.group(), found.end()
+        if kind == "word" and start and text == "gh" and PR_CREATE.match(command, at):
+            return True
+        if kind == "op":
+            if empty and text != "\n":  # an operator with no command before it
+                return False
+            start = empty = True
+            if text == "\n":
+                for strip, delimiter, bare in here:
+                    while (end := command.find("\n", at)) >= 0:
+                        line, at = command[at:end], end + 1
+                        if (line.lstrip("\t") if strip else line) == delimiter:
+                            break
+                        if bare and line.endswith("\\"):  # it may join the next line, delimiter and all
+                            return False
+                    else:
+                        return False
+                here = []
+        elif kind != "blank":
+            if here and "\n" in text:  # where its body starts is not plain
+                return False
+            empty = False
+            start = start and kind == "word" and bool(re.match(r"[A-Za-z_]\w*=", text))
+            if kind == "here":
+                here.append((found["strip"], found["single"] or found["double"] or found["bare"], bool(found["bare"])))
+    return False
+
+
+Run = tuple[datetime | None, datetime | None, str]
 
 
 def opened_prs(lines: list[dict]) -> dict[tuple[str, int], list[Run]]:
     """Each PR whose URL the result of a Bash call that runs or may run `gh pr create` prints, as
-    (owner/name in lower case, number), with each such run as (the call's time, the result's time, whether
-    the call runs it for certain). A time is None when its line has none, or one that cannot be read."""
+    (owner/name in lower case, number), with each such run as (the call's time, the result's time, "opens" when
+    the call runs it for certain, "names" when it names it, else "maybe"). A time is None when its line has none,
+    or one that cannot be read."""
     calls = {}
     for line in lines:
         for part in parts(line) if line.get("type") == "assistant" else []:
             if part.get("type") == "tool_use" and part.get("name") == "Bash":
-                kind = runs_gh_pr_create(str((part.get("input") or {}).get("command")))
+                command = str((part.get("input") or {}).get("command"))
+                kind = runs_gh_pr_create(command)
+                if kind == "maybe" and names_gh_pr_create(command):
+                    kind = "names"
                 if kind:
-                    calls[part.get("id")] = (log_time(line.get("timestamp")), kind == "opens")
+                    calls[part.get("id")] = (log_time(line.get("timestamp")), kind)
     found: dict[tuple[str, int], list[Run]] = {}
     for line in lines:
         for part in parts(line) if line.get("type") == "user" else []:
@@ -498,13 +651,14 @@ def opened(runs: list[Run], created: datetime | None) -> tuple[str | None, bool]
     """Whether a session's runs opened a PR: "opened", "maybe" or None; and whether a run could not be timed.
 
     `created` is GitHub's time for the PR's opening, None for a PR the draw does not ask about, whose
-    runs count on their command alone. A run opened the PR when it ran `gh pr create` for certain and
-    GitHub's time falls between its call and its result, give or take CLOCK_SLACK. A run that may
-    have run it, inside that span, and a run whose times are missing or cannot be read, may have."""
+    runs count on their command's form alone. A run opened the PR when it ran `gh pr create` for certain,
+    or named it, and GitHub's time falls between its call and its result, give or take CLOCK_SLACK. A
+    run that may have run it, inside that span, and a run whose times are missing or cannot be read, may
+    have."""
     found, untimed = set(), False
-    for start, end, certain in runs:
+    for start, end, kind in runs:
         if created is None:
-            found.add("opened" if certain else "maybe")
+            found.add("opened" if kind == "opens" else "maybe")
             continue
         try:
             inside = start - CLOCK_SLACK <= created <= end + CLOCK_SLACK
@@ -513,7 +667,7 @@ def opened(runs: list[Run], created: datetime | None) -> tuple[str | None, bool]
             found.add("maybe")
         else:
             if inside:
-                found.add("opened" if certain else "maybe")
+                found.add("opened" if kind in ("opens", "names") else "maybe")
     return next((state for state in ("opened", "maybe") if state in found), None), untimed
 
 
@@ -574,26 +728,25 @@ def requirements(body: str | None) -> list[str]:
     """The text of each item of a list under a "## " heading among the CRITERIA_HEADINGS, in the order written.
     Unreadable names the first line the reader cannot read with certainty. HELP says which lists it reads."""
     # CommonMark ends a line only at \n, \r or both; str.splitlines also ends one at \v, \f, \x85 and others.
-    lines = re.split(r"\r\n|\r|\n", (body or "").expandtabs(4))
+    lines = re.split(r"\r\n|\r|\n", (body or "").removeprefix("\ufeff").expandtabs(4))  # as GitHub reads it
     found: list[str] = []
     columns: list[int] = []  # the text column of each open item of the section, outermost first
     under = paragraph = False  # paragraph: the line before is text that a line of text continues
     after_item = False  # a line that starts with a list marker came before: an item may still be open
     loose = False  # such a line came outside the criteria sections since the last heading at the margin
     fence, html = "", None  # the open code fence; the pattern that ends the open HTML block
-    block_indent = 0  # the indent of the open fence or HTML block's first line
+    block_indent = opener = 0  # the indent and the number of the open fence or HTML block's first line
+    hidden: set[int] = set()  # the lines after the first of each fence or HTML block closed so far
     try:
         for number, text in enumerate(lines, 1):
             if (fence or html) and text.strip(" \t") and len(text) - len(text.lstrip(" ")) < block_indent:
                 # Inside an item the block ends with the item, and at the top level it does not: no telling which.
                 raise Unreadable(number, text)
-            if fence:  # a fence ends at a line of at least as many of its own character
-                if re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text):
-                    fence = ""
-                continue
-            if html:
-                if html.search(text):
-                    html = None
+            if fence or html:  # a fence ends at a line of at least as many of its own character
+                if (re.fullmatch(rf" {{0,3}}{re.escape(fence[0])}{{{len(fence)},}}[ \t]*", text) if fence
+                        else html.search(text)):
+                    fence, html = "", None
+                    hidden.update(range(opener + 1, number + 1))
                 continue
             line = text.lstrip(" ")
             indent = len(text) - len(line)
@@ -628,11 +781,11 @@ def requirements(body: str | None) -> list[str]:
                 continue
             start = indent < 4 and next(((begin, end) for begin, end in HTML_BLOCKS if begin.match(line)), None)
             if indent < 4 and (opening := re.match(r"`{3,}(?!.*`)|~{3,}", line)):
-                fence, block_indent = opening.group(), indent
+                fence, block_indent, opener = opening.group(), indent, number
             elif start:
                 begin, end = start
-                html = None if end is not BLANK and end.search(line, begin.match(line).end()) else end
-                block_indent = indent
+                html = None if end is not BLANK and end.search(line) else end  # the end may overlap the opener: <!-->
+                block_indent, opener = indent, number
             elif indent < 4 and TAG_LINE.fullmatch(line):  # an HTML block, or a paragraph's text: the line above says
                 raise Unreadable(number, text)
             elif indent < 4 and (heading := HEADING.fullmatch(line)):
@@ -650,11 +803,14 @@ def requirements(body: str | None) -> list[str]:
             columns.clear()  # any other block ends the list and the paragraph
             paragraph = False
     except Unreadable as refusal:
+        # An item under a criteria heading starts on a line after the heading's, with a list marker once its indent
+        # and quotes are taken off, and outside the blocks the reader closed, which every line before the refusal
+        # read with certainty. With no such line no refusal can cost a list, and the items read so far are none.
+        first = next((at for at, text in enumerate(lines, 1) if criteria(unmarked(text))), len(lines) + 1)
+        if not any(MARKER.match(unquoted(text)) for at, text in enumerate(lines[first - 1:], first) if at not in hidden):
+            return found
         # Outside every criteria section, a line the reader cannot be sure of costs the list only when a criteria
         # heading may come at or after it; the items read before it stand.
-        # A body with no line that may start an item has no list: no refusal can cost it one.
-        if not any(MARKER.match(unquoted(text)) for text in lines):
-            return found
         if under or any(criteria(unmarked(text)) for text in lines[refusal.number - 1:]):
             raise
     return found
@@ -781,9 +937,11 @@ class Draw:
 
     def sessions(self) -> tuple[list[dict], int]:
         """Each session with a run that runs or may run `gh pr create` and prints a PR's URL, and how many
-        session logs could not be read. Each transcript, the log's and each helper's, is read once, and its
-        runs count whatever happens to another transcript of the session or to finding its helpers. A
-        session with any failure is counted and not eligible, but its readable runs count against others."""
+        session logs could not be read. The draw decides on one read of each transcript, the log's and each
+        helper's, and its runs count whatever happens to another transcript of the session or to finding its
+        helpers. A session that would be eligible is then scanned, which reads its live log and helpers' logs
+        again; a scan that fails makes it not eligible. A session with any failure is counted and not eligible,
+        but its readable runs count against others."""
         sessions, unreadable = [], 0
         for log in sorted((scan.config_dir() / "projects").glob("*/*.jsonl")):
             failed = False
@@ -896,7 +1054,7 @@ class Draw:
         label, repo = candidate["label"], candidate["repo"]["repo"]
         if label not in self.clones:
             target = self.work / label
-            shutil.rmtree(target, ignore_errors=True)  # what an earlier failed clone left would make this one fail
+            remove(target)  # what an earlier failed clone left would make this one fail
             result = subprocess.run(["gh", "repo", "clone", repo, str(target)], text=True, capture_output=True)
             if result.returncode:  # the repo's next ticket tries again
                 return target, (f"$ gh repo clone {repo} {target}\n{result.stdout}{result.stderr}".rstrip("\n")
@@ -940,6 +1098,12 @@ class Draw:
                 process.wait()
             if started:
                 started[0].stdin.close()
+
+        def cleanup() -> None:
+            stop()
+            self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
+            remove(tree)  # what git leaves, such as a folder the check made read-only
+            self.git("-C", str(clone), "worktree", "prune")
         try:
             added = self.git("-C", str(clone), "worktree", "add", "--detach", "--quiet", str(tree), base)
             if added.returncode:
@@ -971,14 +1135,8 @@ class Draw:
                     out.write(f"\n{step} exit {code}\n")
                     if code:
                         return f"{step} exited {code}"
-        finally:  # on success, failure, timeout, interrupt or SIGTERM alike, with both held until it is done
-            held = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
-            try:
-                stop()
-                self.git("-C", str(clone), "worktree", "remove", "--force", str(tree))
-                self.git("-C", str(clone), "worktree", "prune")
-            finally:
-                signal.pthread_sigmask(signal.SIG_SETMASK, held)
+        finally:  # on success, failure, timeout, interrupt or SIGTERM alike
+            held(cleanup)
         return None
 
     def try_ticket(self, candidate: dict) -> str | None:
@@ -1016,7 +1174,9 @@ class Draw:
         Each transcript, the log's and each helper's, is copied as the bytes the draw read when the session
         qualified, checked by their digest; a helper transcript that appeared later is left out. The copy is
         made in logs/.new-<session>; an earlier copy of the session moves to logs/.old-<session> only once
-        the new one is whole and scanned, and is removed once the new one is in place."""
+        the new one is whole and scanned, and is removed once the new one is in place. A signal holds off from that
+        move until the scan row is written; before it, the earlier copy stays as it was and no .new- folder is
+        left."""
         source = candidate["source"]
         logs = self.state / "logs"
         staged, old = logs / f".new-{source.stem}", logs / f".old-{source.stem}"
@@ -1046,26 +1206,34 @@ class Draw:
                 if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
                     raise OSError(f"{target.name} changed after the draw read it")
             row = scan.scan(source.stem, staged / source.name)
-            old.mkdir()
-            for name in names:
-                if (logs / name).exists():
-                    os.replace(logs / name, old / name)
-            for name in names:
-                if (staged / name).exists():
-                    os.replace(staged / name, logs / name)
-            shutil.rmtree(old)
-            shutil.rmtree(staged)
-            scan.write_row(row)
-        except (Exception, SystemExit) as error:  # its message can name the project's folder
-            for name in names if old.exists() else ():  # put back the earlier copy where it was moved
-                if (old / name).exists():
-                    if (logs / name).is_dir():
-                        shutil.rmtree(logs / name)
-                    elif (logs / name).exists():
-                        (logs / name).unlink()
-                    os.replace(old / name, logs / name)
-            shutil.rmtree(old, ignore_errors=True)
-            shutil.rmtree(staged, ignore_errors=True)
+            mask = signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+            try:
+                old.mkdir()
+                for name in names:
+                    if (logs / name).exists():
+                        os.replace(logs / name, old / name)
+                for name in names:
+                    if (staged / name).exists():
+                        os.replace(staged / name, logs / name)
+                shutil.rmtree(old)
+                shutil.rmtree(staged)
+                scan.write_row(row)
+            finally:  # a signal held off is raised here
+                signal.pthread_sigmask(signal.SIG_SETMASK, mask)
+        except (Exception, SystemExit, Stopped) as error:  # its message can name the project's folder
+            def restore() -> None:
+                for name in names if old.exists() else ():  # put back the earlier copy where it was moved
+                    if (old / name).exists():
+                        if (logs / name).is_dir():
+                            shutil.rmtree(logs / name)
+                        elif (logs / name).exists():
+                            (logs / name).unlink()
+                        os.replace(old / name, logs / name)
+                shutil.rmtree(old, ignore_errors=True)
+                shutil.rmtree(staged, ignore_errors=True)
+            held(restore)
+            if isinstance(error, Stopped):
+                raise
             raise DrawError(f"could not save the session log of project {candidate['label']} ticket "
                             f"{candidate['ticket']} ({type(error).__name__}).")
         return str((logs / source.name).relative_to(self.state))
@@ -1081,28 +1249,27 @@ class Draw:
             buckets = self.pool(repos, self.labels(repos))
             kept: list[dict] = []
             aside: list[dict] = []
-            if all(len(found) >= PER_BUCKET for found in buckets.values()):
-                shutil.rmtree(self.work, ignore_errors=True)
-                self.work.mkdir()
-                try:
-                    for name, found in buckets.items():
-                        order = list(found)
-                        random.Random(f"{self.seed}:{name}").shuffle(order)
-                        for candidate in order:
-                            if sum(entry["bucket"] == name for entry in kept) == PER_BUCKET:
-                                break
-                            reason = self.try_ticket(candidate)
-                            if reason:
-                                aside.append({**candidate, "reason": reason})
-                            else:
-                                kept.append(candidate)
-                finally:
-                    shutil.rmtree(self.work, ignore_errors=True)
+            remove(self.work)
+            self.work.mkdir()
+            try:
+                for name, found in buckets.items():
+                    order = list(found)
+                    random.Random(f"{self.seed}:{name}").shuffle(order)
+                    for candidate in order:
+                        if sum(entry["bucket"] == name for entry in kept) == PER_BUCKET:
+                            break
+                        reason = self.try_ticket(candidate)
+                        if reason:
+                            aside.append({**candidate, "reason": reason})
+                        else:
+                            kept.append(candidate)
+            finally:
+                remove(self.work)
             for name, found in buckets.items():
                 print(f"{name}: pool {len(found)}, set aside {sum(entry['bucket'] == name for entry in aside)}, "
                       f"kept {sum(entry['bucket'] == name for entry in kept)}.")
-            if len(kept) < PER_BUCKET * len(BUCKETS):
-                print(f"No set written: a bucket cannot reach {PER_BUCKET} tickets.")
+            if {entry["bucket"] for entry in kept} != set(BUCKETS):
+                print("No set written: a bucket holds no ticket that passes.")
                 return EXIT_SHORT
             for candidate in kept:
                 candidate["log"] = self.save_log(candidate)
@@ -1110,6 +1277,9 @@ class Draw:
                       "ready_commit", "model", "pr", "session", "log", "check_output")
             number = 1 + max(self.sets(), default=0)
             path = self.state / f"replay-set-{number}.json"
+            # From here the draw ends with its set: a signal stays held past its exit, and a signal that came just
+            # before is raised here, with no set written.
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
             scan.write_private(path, json.dumps({
                 "set": number, "seed": self.seed, "drawn_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                 "tickets": [{field: entry[field] for field in fields} for entry in kept],
@@ -1130,12 +1300,18 @@ def main(argv: list[str]) -> int:
     else:
         print(HELP, file=sys.stderr)
         return 2
-    signal.signal(signal.SIGTERM, terminated)
+    for number in SIGNALS:  # a signal the caller ignored stays ignored, as a job started with & expects
+        if signal.getsignal(number) != signal.SIG_IGN:
+            signal.signal(number, stopped)
     try:
-        return Draw(seed).run()
-    except Terminated:
-        print("draw: stopped by SIGTERM; no set written.", file=sys.stderr)
-        return 128 + signal.SIGTERM
+        try:
+            return Draw(seed).run()
+        finally:  # the draw's last line is printed, or is printed below: no signal follows it
+            signal.pthread_sigmask(signal.SIG_BLOCK, SIGNALS)
+    except Stopped as stop:
+        number = signal.Signals(stop.args[0])
+        print(f"draw: stopped by {number.name}; no set written.", file=sys.stderr)
+        return 128 + number
     except DrawError as error:
         print(f"draw: {error}", file=sys.stderr)
         return 1

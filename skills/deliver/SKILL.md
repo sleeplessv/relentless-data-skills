@@ -18,6 +18,8 @@ command, with no pipe, chain, variable or glob.
    - `deliver.py start request` for a request in words, once you have written it to `.deliver/request.md`;
    - `deliver.py start` for the changes already in the tree;
    - `deliver.py start --resume` to resume a run.
+
+   When the owner says `stop at ready`, add `--stop-at-ready` to a new run's `start`.
 2. Run the probe step `start` prints; the guard refuses it, as it should. Then run the command `start`
    names next.
 3. Write each text into `.deliver/`, then run `deliver.py save <kind>` for it:

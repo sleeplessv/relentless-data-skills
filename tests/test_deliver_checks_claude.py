@@ -502,6 +502,7 @@ class Preflight(unittest.TestCase):
         self.world.probe()
         write(self.world.work / "docs" / "agents" / "stack.toml", 'check_command = "make check"\n')
         self.world.install_upstream()
+        deliver_kit.github_ok(self.world)
         self.home = Home(self.world.home, self.world.work)
         self.home.recorded_user_settings()
         self.session = json.loads(recorded("interactive-env.json"))

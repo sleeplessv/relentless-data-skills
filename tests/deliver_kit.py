@@ -265,3 +265,21 @@ def read_lines(path: Path) -> list[dict]:
     if not path.exists():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+# GitHub as preflight's checks read it (#420). `github_ok` saves the answers of a repo the signed-in
+# account can push to, with issues on and no branch rule; save a test's own answer to one of these
+# calls before it, since the first saved prefix answers. `reset_gh` forgets every answer and call,
+# for a class that shares one world.
+def github_ok(world: World, repo: str = "owner/repo", branch: str = "main") -> None:
+    world.gh_answer(["auth", "token"], stdout="stand-in-token\n")
+    world.gh_answer(["repo", "view"], stdout=json.dumps({
+        "nameWithOwner": repo, "defaultBranchRef": {"name": branch}, "viewerPermission": "ADMIN",
+        "hasIssuesEnabled": True,
+    }))
+    world.gh_answer(["api", f"repos/{repo}/rules/branches/{branch}"], stdout="[]")
+
+
+def reset_gh(world: World) -> None:
+    (world.root / "gh-answers.json").write_text("[]", encoding="utf-8")
+    (world.root / "gh-calls.jsonl").unlink(missing_ok=True)

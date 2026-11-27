@@ -13,7 +13,7 @@ the fix, and run `pbi-vm.sh status` again. Read each instance's `bridgeStatus` b
 | `The Bridge CLI is not installed in the VM` | Run `pbi-vm.sh setup`. See [the VM tools](#the-vm-tools). |
 | `bridgeStatus: "not_connected"` or `"error"` | Report the PID and `unavailableReason` or `error`. Check [Desktop Bridge access](#desktop-bridge-access) in the VM. |
 | No running instance, or a connected instance without a `currentFilePath` | [Open the project](#open-the-project). |
-| A connected instance with another project's `currentFilePath` | Ask the user which project they want open, then open it. |
+| A connected instance whose `currentFilePath` is not the `.pbip` you are editing, such as another checkout or worktree of the same project | [Open the project](#open-the-project) yourself. Desktop starts a second instance and leaves the user's instance and its unsaved work alone. Ask the user only when it is unclear which project they want. |
 
 A `sync-model` or `safe-reload --model` answer of `The TOM library is not installed in the VM` has the
 same fix as the Bridge CLI row.
@@ -50,6 +50,16 @@ The VM can read everything in the shared folder. Which folder to share is the us
 <skill-dir>/scripts/pbi-vm.sh open <path/to/project.pbip>
 ```
 
-Opening takes minutes. Then hand over to the user for three things in Desktop: sign in to the data
-sources, refresh, and save (Ctrl+S). Desktop can mark a freshly opened project as unsaved, and that
-first save is what lets the first `safe-reload` run.
+Opening takes minutes, and the call can outlive a 360-second tool timeout while Desktop still finishes
+opening. Run it in the background or with a tool timeout of at least 10 minutes. Done when
+`pbi-vm.sh status` shows an instance with `bridgeStatus: "connected"` and the expected `currentFilePath`;
+the exit of the call does not tell you.
+
+With two instances open, every per-instance command (`shot`, `shots`, `sync-model`, `safe-reload`) needs
+`--pid <pid>` from `status`; without it the script exits 4.
+
+Then hand over to the user for three things in Desktop: sign in to the data sources, refresh, and save
+(Ctrl+S). Desktop can mark a freshly opened project as unsaved, and that first save is what lets the first
+`safe-reload` run. A project opened from disk already carries the current model and report, so "Apply
+external changes" is not needed. Until the refresh, every card shows "--" under the banner "Some of the
+tables have incomplete or no data." with a "Refresh now" button.

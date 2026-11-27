@@ -17,7 +17,7 @@ Its exit code is the result: 0 done, 3 a **refusal**, the rest in `pbi-vm.sh --h
 ```
 
 Ready means the project instance has `bridgeStatus: "connected"` and its `currentFilePath` is the
-`.pbip` you are editing (`\\Mac\Home\` is the Mac home folder). For other results, follow [setup](references/setup.md).
+`.pbip` you are editing (`\\Mac\Home\` is the Mac home folder). For other results, follow [setup](references/setup.md); when no instance has your `.pbip`, open it yourself. With several instances open, add `--pid <pid>` to every per-instance command.
 
 The wrapper keeps its state and screenshots in `.pbi-desktop/` at the repo's top level. Keep that folder
 out of git. From the top level:
@@ -51,7 +51,7 @@ exit 1 the folder joins this clone's local exclude file, which is never committe
    read `git diff`, make again whatever part of your edit is gone, and go back to step 3.
 5. **Look.** `pbi-vm.sh shot <page-id> <run>` prints the path of a PNG: read the image. `<page-id>` is
    the page's folder name under `definition/pages/`, and `<run>` is any label for this round.
-   `pbi-vm.sh shots <run>` takes every page. Done when the screenshot shows the edit.
+   `pbi-vm.sh shots <run>` takes every page. Done when the screenshot shows the edit. Cards that all read "--" under the banner "Some of the tables have incomplete or no data." mean the user's refresh is pending, not a broken edit: ask for it before judging the shot.
 
 A screenshot proves the edit landed. Whether the numbers are right is a separate check against the
 source data.

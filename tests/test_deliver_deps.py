@@ -24,7 +24,12 @@ import deliver_kit  # noqa: E402
 
 deps = deliver_kit.load("deps")
 preflight = deliver_kit.load("preflight")
-STACK = "warning: no docs/agents/stack.toml: every stack setting has its default\n"
+STACK_WARNINGS = [
+    "no docs/agents/stack.toml: every stack setting has its default",
+    "check_command is empty in docs/agents/stack.toml, so ready relies on the check plan's commands: "
+    "set check_command there to the command that runs this repo's checks",
+]
+STACK = "".join(f"warning: {w}\n" for w in STACK_WARNINGS)
 
 
 def recorded(world: deliver_kit.World, name: str) -> str:
@@ -345,6 +350,7 @@ class Preflight(unittest.TestCase):
         self.world.write_mark(run="run-4")
         self.world.probe()
         self.folders = self.world.install_upstream()
+        deliver_kit.github_ok(self.world)
 
     def change(self, name: str) -> str:
         (self.folders[name] / "SKILL.md").write_text("edited\n", encoding="utf-8")
@@ -378,7 +384,7 @@ class Preflight(unittest.TestCase):
         self.assertEqual((result.returncode, result.stdout, result.stderr),
                          (0, f"{STACK}warning: {line}\nPreflight passed.\n", ""))
         self.assertEqual(self.world.records()[0]["warnings"],
-                         ["no docs/agents/stack.toml: every stack setting has its default", line])
+                         [*STACK_WARNINGS, line])
 
     def test_several_changed_skills_share_the_one_warning_line(self):
         lines = [self.change("code-review"), self.change("pr")]

@@ -283,6 +283,7 @@ class GuardProbeCheck(unittest.TestCase):
     def setUp(self):
         self.world = deliver_kit.World(self.addCleanup)
         self.world.write_mark(run="run-9", started="2026-11-27T18:00:00Z")
+        deliver_kit.github_ok(self.world)
         self.world.install_upstream()
 
     def preflight(self) -> tuple[int, str, str, dict]:

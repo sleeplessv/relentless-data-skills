@@ -97,9 +97,9 @@ class Save(Base):
         for args in ((), ("review",), ("plan", "summary")):
             with self.subTest(args):
                 result = self.world.deliver("save", *args)
-                self.assertEqual(result.returncode, 2)
-                self.assertTrue(result.stderr.startswith(
-                    "deliver.py: save takes one kind, one of request, requirements, plan, summary\n\nusage:"))
+                self.assert_ends(result, 2, "", (
+                    "deliver.py: save takes one kind, one of request, requirements, plan, summary\n\n"
+                    f"{deliver_kit.load('deliver').USAGE}\n"))
 
 
 class SavePlan(Base):

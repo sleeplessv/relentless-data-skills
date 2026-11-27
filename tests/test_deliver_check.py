@@ -106,6 +106,11 @@ class Saved(unittest.TestCase):
         self.check(shlex.join(args))
         self.assertEqual(self.world.records()[1]["command"], self.world.records()[0]["command"])
 
+    def test_the_command_runs_in_the_checkouts_top_folder(self):
+        (self.world.work / "sub").mkdir()
+        result = self.world.deliver("check", "--", "pwd", cwd=self.world.work / "sub")
+        self.assertEqual(result.stdout, f"{self.world.work}\nSaved check checks/1.txt: exit 0, at {self.head[:7]}.\n")
+
     def test_a_changed_tracked_file_ties_the_check_to_no_commit(self):
         (self.world.work / "README.md").write_text("changed\n", encoding="utf-8")
         result = self.check("true")
@@ -145,9 +150,9 @@ class Saved(unittest.TestCase):
         for args in ((), ("--",), ("echo", "x")):
             with self.subTest(args):
                 result = self.world.deliver("check", *args)
-                self.assertEqual(result.returncode, 2)
-                self.assertTrue(result.stderr.startswith(
-                    "deliver.py: check takes a command after --: deliver.py check -- <command>\n\nusage:"))
+                self.assertEqual((result.returncode, result.stdout, result.stderr), (2, "", (
+                    "deliver.py: check takes a command after --: deliver.py check -- <command>\n\n"
+                    f"{deliver_kit.load('deliver').USAGE}\n")))
         self.assertEqual(self.world.records(), [])
 
 

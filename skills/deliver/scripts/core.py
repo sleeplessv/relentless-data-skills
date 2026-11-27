@@ -41,6 +41,7 @@ REFUSALS = {
     "preflight.no-mark": NO_MARK,
     "preflight.bad-settings": "the stack settings cannot be read: {error}",
     "preflight.guards-off": "the guards are off: no refusal of the guard probe is logged for run {run} since its mark was written",
+    "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,
     "save.missing-file": "there is no {file} to save",
@@ -55,6 +56,7 @@ REFUSALS = {
     "ready.no-mark": NO_MARK,
     "merge.no-mark": NO_MARK,
     "finish.no-mark": NO_MARK,
+    "deps.missing-skill": "a required upstream skill is not installed: {skills}",
 }
 
 

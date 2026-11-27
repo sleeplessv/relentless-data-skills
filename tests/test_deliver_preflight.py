@@ -51,6 +51,7 @@ class Preflight(unittest.TestCase):
         self.world = deliver_kit.World(self.addCleanup)
         self.world.write_mark(run="run-3")
         self.world.probe()
+        self.world.install_upstream()
 
     def stack(self, text: str) -> None:
         (self.world.work / "docs" / "agents").mkdir(parents=True)

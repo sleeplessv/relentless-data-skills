@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 
 import check_guard
 import core
+import deps
 import settings
 
 STOP_LOG = "preflight-stops.jsonl"
@@ -67,6 +68,8 @@ def check_settings(ctx: Context) -> Stop | Warn | None:
 CHECKS: list[Check] = [
     check_settings,
     check_guard.check_guard_probe,
+    deps.check_required_skills,
+    deps.check_skill_hashes,
 ]
 
 

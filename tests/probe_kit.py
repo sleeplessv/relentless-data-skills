@@ -102,10 +102,11 @@ hooks/guard.py of the probe folder, which it finds with `git rev-parse
 --git-common-dir` from any folder inside the probe folder. Its text is the same
 in every probe folder, so one trust covers every run. Codex runs no hook it has
 not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1 to
-D4 and D6 fail with that step and the harness's exit status when their hook
-logged no input and the output shows a tool call; with no tool call in the
-output, the line says so and names no trust step. The hook writes a refusal line
-to logs/hook.jsonl after the input of each command it refuses. D1 is seen when
+D4 and D6 fail with that step and the harness's exit status whenever their hook
+logged no input. The line names the trust step even when the output shows no
+tool call, since Codex's output shows no agent start and no agent's command.
+The hook writes a refusal line to logs/hook.jsonl after the input of each
+command it refuses. D1 is seen when
 an agent's input, marked by agent_id, reached the hook for a command that runs
 merge-script.sh, the hook logged its refusal of that command and the merge
 marker is absent. D2 records the tool name of the session's call whose input
@@ -136,7 +137,9 @@ whose leaves start in the background, which it reports. K4, K5 and D4 count the
 agent as called back only when its second marker holds a word its first brief
 gave it to remember and write nowhere; that brief deleted itself. K4 needs a
 kill_agent call that names the agent and succeeded, before the resume, and no
-finished sleep. When the resume call failed, K4 and K5 say so, with the
+finished sleep. K4's second brief tells the agent to run no command its first
+brief gave it, so the resumed agent does not run the sleep again. When the
+resume call failed, K4 and K5 say so, with the
 harness's reason, its ids and paths left out. K5 reads the model from the events
 tied to the call that resumed the agent and fails when they name none. D3 and D4
 add the guard hook and read the agents from its log, since Codex's output shows
@@ -1334,15 +1337,9 @@ TRUST = (f"Trust the stand-in hook once in Codex: in a terminal in the root of t
          f"{shlex.join(['codex', *codex_hook(Path('.'))])}, type /hooks, trust the hook, then quit.")
 
 
-TALK = ("agent_message", "reasoning", "error", "todo_list")  # Codex's output items that are not tool calls
-
-
 def no_input(run: Finished) -> str:
-    """The verdict when the hook logged no input: Codex runs no hook it has not trusted, which matters only when
-    the output shows the session made a tool call."""
-    if not any(str(event.get("type")).startswith("item.") and isinstance(event.get("item"), dict)
-               and event["item"].get("type") not in TALK for event in events_of(run.out)):
-        return f"the hook logged no input, the output shows no tool call, and the harness exited {run.exit_code}"
+    """The verdict when the hook logged no input: Codex runs no hook it has not trusted. The line names the trust
+    step whatever the output shows, since Codex's output shows no agent start and no agent's command (#408)."""
     return (f"the hook logged no input and the harness exited {run.exit_code}. "
             f"Codex runs no hook it has not trusted. {TRUST}")
 EDIT_TOOLS = ("apply_patch", "Edit", "Write")  # the edit tool's names in Codex's hook input, as in GUARD's rule D
@@ -2204,7 +2201,7 @@ PROBES.update({
                                          "vfirst": WRITE, "vsecond": WRITE}, roles=(AUTHOR, LEAF), count=2)),
     "K4": Probe(resume_prompt("K4", True), judge_k4, command=RESUMABLE, setup=setup_limit("K4", {
         "first": KEEP + WRITE + FORGET + " Then run the bash command `sleep 300 && touch {work}/probe-k4-slept.txt`.",
-        "second": RECALL})),
+        "second": RECALL + " Do not run any command your first brief gave you, even one that did not finish."})),
     "K5": Probe(resume_prompt("K5", False), judge_k5, command=RESUMABLE,
                 setup=setup_limit("K5", {"first": KEEP + WRITE + FORGET, "second": RECALL})),
     "D3": Probe(lambda h: (f"In one message, make two spawn_agent calls, both with {CODEX_START.format(role=READER)}: "

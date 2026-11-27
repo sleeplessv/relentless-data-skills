@@ -447,9 +447,9 @@ class TestRuns(ProbeKitTest):
                                           # This world's stand-in calls no hook and has no uv (see TestGuardHook).
                                           "X1 codex failed: the hook logged no input for the control stand-in\n"
                                           "X2 codex failed: uv is not on PATH\n"
-                                          # This world's stand-in makes no tool call, so trust is not blamed.
-                                          f"D1 codex failed: {NO_CALL.format(0)}\n"
-                                          f"D2 codex failed: {NO_CALL.format(0)}\n"
+                                          # This world's stand-in calls no hook, so the line names the trust step.
+                                          f"D1 codex failed: {UNTRUSTED}\n"
+                                          f"D2 codex failed: {UNTRUSTED}\n"
                                           "D6 codex failed: skipped, D1 failed in this run\n"
                                           # TestLimitEntries has the stand-in that follows these briefs
                                           "D3 codex failed: 0 of the 2 agents asked for in one message ran\n"
@@ -1983,7 +1983,6 @@ if sys.argv[1:2] == ["run"]:
         seen.write(json.dumps(open(err).read() if os.path.isfile(err) else None) + "\n")
 os.execv("{hc}", ["{hc}", *sys.argv[1:]])
 """
-NO_CALL = "the hook logged no input, the output shows no tool call, and the harness exited {}"
 D1_SEEN = "D1 codex seen: the hook saw the agent marker and refused the merge stand-in\n"
 D2_SEEN = "D2 codex recorded: the agent-starting tool reaches the hook as spawn_agent\n"
 FORBIDDEN = ("ephemeral", "bypass", "trust")  # no Codex argv of these entries holds one of these words
@@ -2062,8 +2061,8 @@ class TestHookAgentEntries(HookTest):
                  (("STANDIN_AGENT_CMD", "ls -l ./merge-script.sh"),): "no agent's call of the merge stand-in reached the hook",
                  (("STANDIN_DROP_REFUSALS", "1"),): "the hook logged no refusal of the merge stand-in",
                  (("STANDIN_EXIT", "1"),): "harness exited 1",
-                 (("STANDIN_NO_CALL", "1"),): NO_CALL.format(0),
-                 (("STANDIN_NO_CALL", "1"), ("STANDIN_EXIT", "1")): NO_CALL.format(1)}
+                 (("STANDIN_NO_CALL", "1"),): UNTRUSTED,
+                 (("STANDIN_NO_CALL", "1"), ("STANDIN_EXIT", "1")): no_input(1)}
         for knobs, fact in cases.items():
             code, out, err = self.world.kit("run", "codex", "D1", **dict(knobs))
             self.assertEqual((code, out), (1, f"D1 codex failed: {fact}\n"), knobs)
@@ -2182,19 +2181,20 @@ class TestHookAgentEntries(HookTest):
         for fact in ("matches every tool", "from any folder inside the probe folder",
                      "the same in every probe folder, so one trust covers every run",
                      "Codex runs no hook it has not trusted", "Before D1 runs, the kit prints the step that trusts the hook",
-                     "D1 to D4 and D6 fail with that step and the harness's exit status when their hook logged no "
-                     "input",
+                     "D1 to D4 and D6 fail with that step and the harness's exit status whenever their hook logged "
+                     "no input.",
                      "writes a refusal line to logs/hook.jsonl",
                      "marked by agent_id, reached the hook for a command that runs merge-script.sh",
                      "D2 records the tool name of the session's call whose input names the reader role as its "
                      "agent_type; it never reads the message",
-                     "when their hook logged no input and the output shows a tool call; with no tool call in the "
-                     "output, the line says so and names no trust step",
+                     "The line names the trust step even when the output shows no tool call, since Codex's output "
+                     "shows no agent start and no agent's command.",
                      "D6 runs only after D1 was seen and D2 recorded in the same run",
                      "refuses the edit tool (apply_patch, Edit or Write) when the input's agent_type is the reviewer role",
                      "R3 registers subagentStart in .cursor/hooks.json", "conversation id other than the session's",
                      ".system_generated/subagents/", "A6 is seen when the merge marker is absent and the hook logged a refusal"):
             self.assertIn(fact, text)
+        self.assertNotIn("names no trust step", text)  # the rule before #408
 
 
 # K1 to K5, D3 to D5, R2, R5 and A2 to A4 (#385). A third stand-in harness, installed as all five harness
@@ -2734,6 +2734,20 @@ class TestLimitEntries(HookTest):
                              f"{entry} cortex failed: the resume call failed: task tool failed: Agent session ... not "
                              f"found. Cannot resume.\n")  # Cortex Code's string error, with no is_error flag
 
+    def test_k4s_second_brief_and_the_help_tell_the_resumed_agent_to_run_no_command_its_first_brief_gave(self):
+        # The resumed agent ran its first brief's sleep again, and the session hit the time limit (#408).
+        kit, work = self.load_kit(), self.world.root / "k4-work"
+        kit.PROBES["K4"].setup("cortex", work, "k4-codeword")
+        brief = (work / ".git" / kit.BRIEFS / "brief-k4-second.md").read_text().splitlines()
+        self.assertEqual(brief[2], f"Write the word {kit.WORDS['k4-codeword']['second']}, a space, the word your "
+                                   f"first brief asked you to remember, a space and your role word to the file "
+                                   f"probe-k4-second.txt in the folder {work}. Do not run any command your first "
+                                   f"brief gave you, even one that did not finish. Change nothing else.")
+        code, out, err = self.world.kit("--help")
+        self.assertEqual((code, err), (0, ""))
+        self.assertIn("K4's second brief tells the agent to run no command its first brief gave it, so the resumed "
+                      "agent does not run the sleep again.", " ".join(out.split()))
+
     def test_k4_and_k5_run_cortex_without_private_and_other_cortex_entries_keep_it(self):
         for entry in ("K4", "K5", "K1"):  # resume reads the saved session, and --private saves none (#405)
             self.run_entry("cortex", entry)
@@ -2794,7 +2808,7 @@ class TestLimitEntries(HookTest):
         self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_COLLAB="1", STANDIN_BY_TASK="1",
                                         STANDIN_CLOSE_OTHER="1"),
                          "D4 codex failed: the interrupt_agent call names another agent\n")
-        # With the spawn items in the output the session made a tool call, so an empty hook log blames trust.
+        # An empty hook log names the trust step whatever the output shows (#408).
         self.assertEqual(self.run_entry("codex", "D4", STANDIN_UNTRUSTED="1"), f"D4 codex failed: {UNTRUSTED}\n")
         self.assert_home_empty()
 
@@ -2813,6 +2827,13 @@ class TestLimitEntries(HookTest):
                          "agents of it, not 2 and 2\n")
         self.assertEqual(self.run_entry("codex", "D3", STANDIN_UNTRUSTED="1"), f"D3 codex failed: {UNTRUSTED}\n")
         self.assert_home_empty()
+
+    def test_d3_prints_the_trust_step_when_the_hook_logged_nothing_and_the_output_shows_no_agent_start(self):
+        # Codex's output shows no agent start, so a session whose only calls start agents shows no tool call (#408).
+        self.assertEqual(self.run_entry("codex", "D3", STANDIN_UNTRUSTED="1", STANDIN_NO_COLLAB="1"),
+                         f"D3 codex failed: {UNTRUSTED}\n")
+        self.assertEqual(self.agents(), [("probe-reader", 1, "brief-d3-one.md", False, True),
+                                         ("probe-reader", 1, "brief-d3-two.md", False, True)])
 
     def test_d5_runs_codex_without_the_temporary_folders_and_sees_the_write_outside(self):
         self.assertEqual(self.run_entry("codex", "D5"), "D5 codex seen: the agent wrote in its worktree outside the "

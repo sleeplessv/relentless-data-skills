@@ -17,8 +17,10 @@ The record contract this reads, which `start`, `save` and `check` write:
   assumptions are the `- ` lines after a line reading `Assumptions`. Its door line is
   `door: two-way` or `door: one-way` followed by a one-line reason. A plan with no door line, or
   with another word after `door:`, is one-way (#256 rule 26). A plan with no requirement row, or a
-  row without exactly three cells, raises `Unreadable`.
-- `records.jsonl`: each `check` event's `command`, `exit`, `commit` and `selected_nothing`.
+  row without exactly three cells, raises `Unreadable`. `Plan` and `Requirement` have the shape of
+  `plan.parse` (#414), so this reader can give way to that one.
+- `records.jsonl`: each `check` event's `command`, as `check` saved it, `exit`, `commit` and
+  `selected_nothing`. A proof's command matches a check whose `command` is the same text.
 
 Every saved text is checked for a secret first; one ends the run with `core.Question`, so nothing
 is rendered. Every saved text is then masked by `mask.py`, and the source line names what was
@@ -28,7 +30,7 @@ from __future__ import annotations
 
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import core
@@ -54,11 +56,20 @@ class Unreadable(Exception):
 
 
 @dataclass
+class Requirement:
+    number: str
+    text: str
+    proof: str
+
+
+@dataclass
 class Plan:
-    rows: list[tuple[str, str, str]]
-    assumptions: list[str]
+    """The shape of `plan.parse` (#414), with the assumption lines this module also renders."""
+
+    requirements: list[Requirement]
     door: str
     door_reason: str
+    assumptions: list[str] = field(default_factory=list)
 
 
 def read_source(request: str) -> tuple[str, int | None, str]:
@@ -72,14 +83,14 @@ def read_source(request: str) -> tuple[str, int | None, str]:
 
 
 def read_plan(text: str) -> Plan:
-    """The requirement rows, the assumption lines and the door of a saved check plan."""
+    """The requirements, the door and the assumption lines of a saved check plan."""
     rows, assumptions, door, in_assumptions = [], [], None, False
     for line in text.splitlines():
         if ROW.match(line):
             cells = [c.strip() for c in re.split(r"(?<!\\)\|", line.strip()[1:-1])]
             if len(cells) != 3 or not line.strip().endswith("|"):
                 raise Unreadable("plan", f"a requirement row does not have three cells: {line.strip()!r}")
-            rows.append((cells[0], cells[1], cells[2]))
+            rows.append(Requirement(*(c.replace("\\|", "|") for c in cells)))
         elif line.strip().strip("#:").strip().lower() == "assumptions":
             in_assumptions = True
         elif in_assumptions and line.startswith("- "):
@@ -89,10 +100,10 @@ def read_plan(text: str) -> Plan:
             door = (word, door_line.group(2)) if word in ("two-way", "one-way") else ("one-way", ODD_DOOR)
     if not rows:
         raise Unreadable("plan", "it has no requirement row such as | R1 | <requirement> | <proof> |")
-    return Plan(rows, assumptions, *(door or ("one-way", NO_DOOR)))
+    return Plan(rows, *(door or ("one-way", NO_DOOR)), assumptions)
 
 
-def evidence_lines(rows: list[tuple[str, str, str]], records: list[dict]) -> list[str]:
+def evidence_lines(requirements: list[Requirement], records: list[dict]) -> list[str]:
     """One Evidence line per requirement, from the newest check of its proof's command.
 
     A counted pass is a check that exited 0, is tied to a commit and selected something; it gives
@@ -100,12 +111,12 @@ def evidence_lines(rows: list[tuple[str, str, str]], records: list[dict]) -> lis
     with no such check is pending; a proof that is not a command gives `no check run`.
     """
     lines = []
-    for rid, _, proof in rows:
-        command = COMMAND.match(proof)
+    for requirement in requirements:
+        rid, command = requirement.number, COMMAND.match(requirement.proof)
         if not command:
             lines.append(f"{rid}: no check run")
             continue
-        checks = [r for r in records if r.get("event") == "check" and _command(r) == command.group(1)]
+        checks = [r for r in records if r.get("event") == "check" and r.get("command") == command.group(1)]
         last = checks[-1] if checks else None
         if last and last.get("commit") and last.get("exit") == 0 and not last.get("selected_nothing"):
             lines.append(f"{rid}: pass at {last['commit'][:7]}")
@@ -143,7 +154,7 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
     masked = f" (masked: {' and '.join(masked_kinds)})" if masked_kinds else ""
 
     out = ["## Summary", "", texts["summary"].strip(), "", "## Evidence", ""]
-    out += [f"- {line}" for line in evidence_lines(plan.rows, records)]
+    out += [f"- {line}" for line in evidence_lines(plan.requirements, records)]
     out += ["", "## Merge Danger", "", f"**Door:** {door_line}", "",
             f"**Blast Radius:** {blast_line}", ""]
     if ticket:
@@ -152,7 +163,7 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
     if quote:
         out += [""] + [f"> {line}".rstrip() for line in quote.splitlines()]
     out += ["", "## Requirements and check plan", "", "| # | Requirement | Proof |", "|---|---|---|"]
-    out += [f"| {rid} | {requirement} | {proof} |" for rid, requirement, proof in plan.rows]
+    out += [f"| {r.number} | {_cell(r.text)} | {_cell(r.proof)} |" for r in plan.requirements]
     if plan.assumptions:
         out += ["", "Assumptions", ""] + plan.assumptions
     out += ["", "## Findings", "", "No review: small edit."]
@@ -167,9 +178,8 @@ def _sentence(word: str, reason: str) -> str:
     return f"{word}. {reason[:1].upper()}{reason[1:]}" if reason else f"{word}."
 
 
-def _command(record: dict) -> str:
-    command = record.get("command")
-    return " ".join(command) if isinstance(command, list) else str(command)
+def _cell(text: str) -> str:
+    return text.replace("|", "\\|")
 
 
 def _records(folder: Path) -> list[dict]:

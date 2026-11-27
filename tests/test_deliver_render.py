@@ -178,13 +178,13 @@ door: one-way
                       text)
 
     def test_evidence_counts_only_a_pass_tied_to_a_commit_that_selected_something(self):
-        rows = [("R1", "x", "`make test`")]
+        rows = [render.Requirement("R1", "x", "`make test`")]
         cases = [
             ([], "R1: pending"),
             ([{"event": "check", "command": "make test", "exit": 0, "commit": None}], "R1: pending"),
             ([{"event": "check", "command": "make test", "exit": 0, "commit": "abcdef12", "selected_nothing": True}],
              "R1: pending"),
-            ([{"event": "check", "command": ["make", "test"], "exit": 0, "commit": "abcdef12"}], "R1: pass at abcdef1"),
+            ([{"event": "check", "command": "make test", "exit": 0, "commit": "abcdef12"}], "R1: pass at abcdef1"),
             ([{"event": "check", "command": "make test", "exit": 2, "commit": "abcdef12"}], "R1: fail at abcdef1"),
             ([{"event": "check", "command": "make lint", "exit": 0, "commit": "abcdef12"}], "R1: pending"),
         ]

@@ -11,11 +11,12 @@ To add a check, write it in its own module beside this one, import it here and p
 `CHECKS` at its place in the order. Give each new stop code its line in `core.REFUSALS` and
 its test.
 
-Every run saves one `preflight` record in the branch's records, and a stop also appends one
-line to `preflight-stops.jsonl` in the machine directory. A run with no stop prints
+Every full run saves one `preflight` record in the branch's records, and a stop also appends one
+line to `preflight-stops.jsonl` in the machine directory. A full run with no stop prints
 `Preflight passed.`, after one `warning: <line>` line per warning; a run with neither a stop nor
-a warning prints only that line. `deliver.py preflight` calls `run`; `start` (#419) is to call it
-too.
+a warning prints only that line. `deliver.py preflight` and `deliver.py start --resume` call `run`
+in full. `deliver.py start` calls it without the probe check: a stop there is saved and logged
+the same way, and a pass prints only its warnings and saves nothing.
 """
 from __future__ import annotations
 
@@ -23,6 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import check_guard
+import checks_claude
 import core
 import deps
 import settings
@@ -67,6 +69,15 @@ def check_settings(ctx: Context) -> Stop | Warn | None:
 
 CHECKS: list[Check] = [
     check_settings,
+    checks_claude.check_background,
+    checks_claude.check_trust,
+    checks_claude.check_hooks_on,
+    checks_claude.check_shell_hooks,
+    checks_claude.check_reader,
+    checks_claude.check_roles,
+    checks_claude.check_plugin_twice,
+    checks_claude.check_agents_at_once,
+    checks_claude.check_effort,
     check_guard.check_guard_probe,
     deps.check_required_skills,
     deps.check_skill_hashes,
@@ -85,10 +96,19 @@ def run_checks(ctx: Context, checks: list[Check]) -> tuple[Stop | None, list[str
     return None, warnings
 
 
-def run(run: core.Run, checks: list[Check] | None = None) -> None:
-    """Run preflight for the marked run, save its record, and print or refuse."""
+def run(run: core.Run, checks: list[Check] | None = None, *, probe: bool = True) -> None:
+    """Run preflight for the marked run, save its record, and print or refuse.
+
+    `start` passes `probe=False`, before the session has run the guard probe: the probe check is
+    skipped, and a pass prints only its warnings and is not saved, so it never counts as passing.
+    """
     ctx = Context(run)
-    stop, warnings = run_checks(ctx, CHECKS if checks is None else checks)
+    checks = [c for c in (CHECKS if checks is None else checks) if probe or c is not check_guard.check_guard_probe]
+    stop, warnings = run_checks(ctx, checks)
+    if not (stop or probe):
+        for line in warnings:
+            print(f"warning: {line}")
+        return
     run_id = run.mark["run"]
     run.record(
         "preflight", run=run_id, result="stop" if stop else "pass", stops=[stop.code] if stop else [],

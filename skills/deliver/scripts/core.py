@@ -38,9 +38,30 @@ NO_MARK = "no run mark in this checkout, so no run is in progress here"
 
 # Every refusal code of the program, with its reason. A reason may hold str.format fields.
 REFUSALS = {
+    "start.not-a-repo": "{cwd} is not in a git working tree",
+    "start.run-in-progress": "run {run} is in progress in this checkout (run mark: {mark}); "
+                             "deliver.py start --resume resumes it",
+    "start.no-run": "no run mark in this checkout, so there is no run to resume",
+    "start.not-built": "{form} is a multi-ticket run, and multi-ticket runs come with a later build stage",
+    "start.nothing-to-start": "the tree has no changes and no ticket or request was named. start accepts: "
+                              "start <ticket>; start request, after the request is written word for word "
+                              "into .deliver/request.md; start with changes in the tree; start --resume",
+    "start.no-request": "{file} is missing or empty, and a request is read from there only",
+    "start.no-ticket": "gh cannot read ticket #{ticket}: {error}",
+    "start.fetch-failed": "git fetch origin {branch} failed, so no fresh branch was cut: {error}",
+    "start.cannot-carry": "git cannot carry the changes in the tree onto a fresh branch from origin/{branch}, "
+                          "so nothing was changed: {error}",
     "preflight.no-mark": NO_MARK,
     "preflight.bad-settings": "the stack settings cannot be read: {error}",
     "preflight.guards-off": "the guards are off: no refusal of the guard probe is logged for run {run} since its mark was written",
+    "preflight.background": "this Claude Code session runs where nobody can stop it: {var} is {value}",
+    "preflight.untrusted": "Claude Code does not trust {folder}: {path} records no accepted trust dialog for it",
+    "preflight.hooks-off": "Claude Code's hooks are switched off: {path} sets {key}",
+    "preflight.unknown-hook": "a hook deliver does not know runs on shell commands: {path} registers {command}",
+    "preflight.claude-unreadable": "Claude Code's file {path} cannot be read: {error}",
+    "preflight.no-reader": "the deliver plugin has no reader role file: {path} is missing",
+    "preflight.role-clash": "the role file {path} has the name of deliver's role {role}",
+    "preflight.plugin-twice": "deliver is also in Claude Code's user-level skills folder: {path}",
     "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,

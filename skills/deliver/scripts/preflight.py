@@ -12,8 +12,10 @@ To add a check, write it in its own module beside this one, import it here and p
 its test.
 
 Every run saves one `preflight` record in the branch's records, and a stop also appends one
-line to `preflight-stops.jsonl` in the machine directory. A clean run prints one line.
-`start` runs preflight through `run`; `deliver.py preflight` runs it alone.
+line to `preflight-stops.jsonl` in the machine directory. A run with no stop prints
+`Preflight passed.`, after one `warning: <line>` line per warning; a run with neither a stop nor
+a warning prints only that line. `deliver.py preflight` calls `run`; `start` (#419) is to call it
+too.
 """
 from __future__ import annotations
 

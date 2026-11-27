@@ -7,8 +7,8 @@ raises `Question` for exit 20, which prints the question for the owner. Anything
 
 Refusal codes are `<subcommand>.<reason>`, lower case with hyphens, and every one is in
 `REFUSALS`. To add one, add its line here, raise `Refused("<code>", ...)`, and add a test named
-`test_<code>` with dots and hyphens as underscores (for `ready.no-preflight`,
-`test_ready_no_preflight`) in a `tests/test_deliver_*.py` file. The meta-test in
+`test_<code>`, or starting `test_<code>_`, with dots and hyphens as underscores (for
+`ready.no-preflight`, `test_ready_no_preflight`) in a `tests/test_deliver_*.py` file. The meta-test in
 `tests/test_deliver_core.py` fails while a code has no such test.
 
 Layout (spec #407, "Records and the run mark"):

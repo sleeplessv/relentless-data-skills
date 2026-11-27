@@ -8,9 +8,10 @@
 - `origin.git`, a bare repo standing in for the remote, whose `main` holds one commit;
 - `work/`, a clone of it on `main`;
 - `bin/gh`, a stand-in first on PATH. It appends each call as one JSON line to
-  `gh-calls.jsonl` and answers from `gh-answers.json`: the first saved answer whose arguments
-  equal the call's, or else are its leading arguments. With no answer it prints
-  `stand-in gh: no answer for <args>` and exits 1.
+  `gh-calls.jsonl` and answers from `gh-answers.json` with the first saved answer, in the order
+  saved, whose arguments are the call's leading arguments (or all of them). So save the longer
+  answer first: `["pr"]` saved before `["pr", "view"]` answers `gh pr view` too. With no answer
+  it prints `stand-in gh: no answer for <args>` and exits 1.
 
 `world.deliver(*args)` runs deliver.py as a session would, with only the world's environment, so
 no test reads a real session's variables, touches the network or writes to the real machine

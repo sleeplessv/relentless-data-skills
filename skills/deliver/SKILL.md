@@ -18,8 +18,8 @@ command, with no pipe, chain, variable or glob.
    - `deliver.py start request` for a request in words, once you have written it to `.deliver/request.md`;
    - `deliver.py start` for the changes already in the tree;
    - `deliver.py start --resume` to resume a run.
-2. Run the probe step `start` prints. The guard refuses it; `deliver.py preflight`, run next, looks for
-   that refusal.
+2. Run the probe step `start` prints; the guard refuses it, as it should. Then run the command `start`
+   names next.
 3. Write each text into `.deliver/`, then run `deliver.py save <kind>` for it:
    - `requirements.md`, when there is no ticket;
    - `plan.md`: a `| # | Requirement | Proof |` table with one row per requirement (`R1`, `R2`, ...)

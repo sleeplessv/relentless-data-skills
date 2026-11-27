@@ -26,10 +26,10 @@ saved texts, the check output its `check` records name and, last, `records.jsonl
 folders go. A file the records do not name, such as another branch's below this one
 (`topic/child` under `topic`), stays. Stage 3 starts no author worktree, so cleanup removes none.
 
-A run's records are the branch's records from that run's own `start` record up to the next run's
-(`run_records`). `deliver.py start` writes no `start` record yet: then a run's records are those
-written at or after its mark's `started` time. A run with neither has no records, so another
-run's never decide for it.
+A run's records are the branch's records from that run's own `start` record, which `deliver.py
+start` appends, up to the next run's (`run_records`). A run begun before `start` wrote that record
+falls back: in a log with no `start` record, its records are those written at or after its mark's
+`started` time. A run with neither has no records, so another run's never decide for it.
 
 The helpers `git`, `gh`, `records`, `run_records`, `later_run`, `latest` and `view` are shared
 with `merge` and `finish`.
@@ -219,9 +219,9 @@ def later_run(recs: list[dict], run_id: str | None, started: str | None = None) 
 def created(recs: list[dict], branch: str, run_id: str | None) -> bool:
     """Whether the run created the branch.
 
-    Its `start` record says so with `"branch_created": true`. With no `start` record, the branch
-    is the run's when it carries the name `deliver.py start` gives a branch it cuts,
-    `deliver/<route>-<run>`.
+    Its `start` record says so with `"branch_created": true`. A run begun before `start` wrote
+    that record has none: then the branch is the run's when it carries the name `deliver.py start`
+    gives a branch it cuts, `deliver/<route>-<run>`.
     """
     start = latest(recs, "start")
     if start is not None:
@@ -233,7 +233,7 @@ def _start_of(recs: list[dict], run_id: str | None, started: str | None) -> int 
     if any(r["event"] == "start" for r in recs):
         starts = [i for i, r in enumerate(recs) if r["event"] == "start" and r.get("run") == run_id]
         return starts[-1] if starts else None
-    if started:  # a log with no start record at all, as deliver.py start writes it
+    if started:  # a log with no start record at all: a run begun before start wrote one
         return next((i for i, r in enumerate(recs) if str(r.get("at", "")) >= started), None)
     return None
 

@@ -123,8 +123,9 @@ class Start(unittest.TestCase):
                          {"run": run, "branch": branch, "role": "session"})
         self.assertEqual((self.folder(branch) / "request.md").read_text(encoding="utf-8"),
                          "Source: ticket #7\n\n## What to build\n\nAdd a --json flag.\n")
-        self.assertEqual(self.without_at(self.world.records(branch)),
-                         [{"event": "save", "kind": "request", "file": "request.md", "commit": tip}])
+        self.assertEqual(self.without_at(self.world.records(branch)), [
+            {"event": "start", "run": run, "branch_created": True, "stop_at_ready": False},
+            {"event": "save", "kind": "request", "file": "request.md", "commit": tip}])
         self.assertEqual(self.excluded(), [".deliver/"])
         self.assertEqual(self.calls(), [["issue", "view", "7", "--json", "title,body,comments"], REPO_VIEW, *PREFLIGHT_GH])
         self.assertEqual(self.world.state_lines("preflight-stops.jsonl"), [])
@@ -135,7 +136,7 @@ class Start(unittest.TestCase):
         self.assertIn('"permissionDecision": "deny"', self.world.probe().stdout)
         self.assert_ends(self.world.deliver("preflight"), 0, f"{MISSING}\nPreflight passed.\n")
         self.assertEqual([(r["event"], r.get("result")) for r in self.world.records(branch)],
-                         [("save", None), ("preflight", "pass")])
+                         [("start", None), ("save", None), ("preflight", "pass")])
 
     def test_the_fresh_branch_carries_uncommitted_and_untracked_changes(self):
         (self.work / "README.md").write_text("seed\nedited\n", encoding="utf-8")
@@ -147,8 +148,9 @@ class Start(unittest.TestCase):
         self.assertEqual(self.branch(), branch)
         self.assertEqual(self.world.git(self.work, "status", "--porcelain"), "M README.md\n?? new.txt")
         self.assertEqual((self.folder(branch) / "request.md").read_text(encoding="utf-8"), TREE)
-        self.assertEqual(self.without_at(self.world.records(branch)),
-                         [{"event": "save", "kind": "request", "file": "request.md", "commit": None}])
+        self.assertEqual(self.without_at(self.world.records(branch)), [
+            {"event": "start", "run": run, "branch_created": True, "stop_at_ready": False},
+            {"event": "save", "kind": "request", "file": "request.md", "commit": None}])
 
     def test_a_request_is_read_from_the_drop_folder_and_moved_into_the_records(self):
         self.world.git(self.work, "switch", "-q", "-c", "feat/flag")
@@ -165,8 +167,9 @@ class Start(unittest.TestCase):
         self.assertFalse((drop / "request.md").exists())
         self.assertEqual(self.world.git(self.work, "status", "--porcelain", "--untracked-files=all"), "")
         head = self.world.git(self.work, "rev-parse", "HEAD")
-        self.assertEqual(self.without_at(self.world.records("feat/flag")),
-                         [{"event": "save", "kind": "request", "file": "request.md", "commit": head}])
+        self.assertEqual(self.without_at(self.world.records("feat/flag")), [
+            {"event": "start", "run": run, "branch_created": False, "stop_at_ready": False},
+            {"event": "save", "kind": "request", "file": "request.md", "commit": head}])
         self.assertEqual(self.calls(), [REPO_VIEW, ["pr", "list", "--head", "feat/flag", "--state", "merged",
                                                     "--json", "number"], *PREFLIGHT_GH])
 
@@ -223,6 +226,8 @@ class Start(unittest.TestCase):
         result = self.world.deliver("start")
         run, branch = self.started(result)
         self.assert_ends(result, 0, f"Started run {run} on branch {branch}.\n{EMPTY_CHECK}\n{PROBE}\n")
+        self.assertEqual(self.without_at(self.world.records(branch)[:1]),
+                         [{"event": "start", "run": run, "branch_created": True, "stop_at_ready": True}])
         self.world.probe()
         self.assertEqual(self.world.deliver("start", "--resume").stdout.splitlines()[-2:], [
             "Preflight passed.",
@@ -241,23 +246,96 @@ class Start(unittest.TestCase):
                                     f"mark seen by preflight: {mark}\n{MISSING}\n{PROBE}\n")
 
     def test_a_preflight_stop_at_start_is_saved_and_logged_after_the_requirements(self):
-        (self.work / "docs" / "agents").mkdir(parents=True)
-        (self.work / "docs" / "agents" / "stack.toml").write_text("check_slots = 'two'\n", encoding="utf-8")
+        self.world.trust(self.work, False)
         self.issue(7)
         result = self.world.deliver("start", "7")
         run, branch = self.started(result)
         self.assert_ends(result, 10, "\n".join([
-            f"Started run {run} on branch {branch}.", "R1: it parses", "R2: the help names it",
-            "REFUSED preflight.bad-settings: the stack settings cannot be read: "
-            "docs/agents/stack.toml: check_slots must be int",
-            "Next: fix docs/agents/stack.toml, then run deliver.py preflight"]) + "\n")
+            f"Started run {run} on branch {branch}.", "R1: it parses", "R2: the help names it", NO_STACK,
+            f"REFUSED preflight.untrusted: Claude Code does not trust {self.work}: "
+            f"{self.world.home / '.claude.json'} records no accepted trust dialog for it",
+            f"Next: start Claude Code in {self.work}, accept its trust dialog, then run deliver.py preflight"]) + "\n")
         self.assertEqual(self.mark()["run"], run)
         self.assertEqual(self.without_at(self.world.records(branch)), [
+            {"event": "start", "run": run, "branch_created": True, "stop_at_ready": False},
             {"event": "save", "kind": "request", "file": "request.md", "commit": self.world.git(self.work, "rev-parse", "HEAD")},
-            {"event": "preflight", "run": run, "result": "stop", "stops": ["preflight.bad-settings"], "warnings": [],
+            {"event": "preflight", "run": run, "result": "stop", "stops": ["preflight.untrusted"], "warnings": [NO_STACK.removeprefix("warning: ")],
              "guard_probe": "missing", "permission_mode": None, "harness": "claude-code"}])
         self.assertEqual(self.without_at(self.world.state_lines("preflight-stops.jsonl")),
-                         [{"run": run, "code": "preflight.bad-settings", "harness": "claude-code"}])
+                         [{"run": run, "code": "preflight.untrusted", "harness": "claude-code"}])
+
+    def test_unreadable_settings_refuse_start_before_anything_is_written(self):
+        (self.work / "docs" / "agents").mkdir(parents=True)
+        (self.work / "docs" / "agents" / "stack.toml").write_text("check_slots = 'two'\n", encoding="utf-8")
+        self.issue(7)
+        for args in (["7"], ["7", "--stop-at-ready"]):
+            with self.subTest(args=args):
+                self.assert_ends(self.world.deliver("start", *args), 10, (
+                    "REFUSED preflight.bad-settings: the stack settings cannot be read: "
+                    "docs/agents/stack.toml: check_slots must be int\n"
+                    f"Next: fix docs/agents/stack.toml, then run deliver.py start {' '.join(args)}\n"))
+                self.assert_nothing_written()
+        self.assertEqual(self.world.state_lines("preflight-stops.jsonl"), [])
+
+    def test_stop_at_ready_given_at_start_is_recorded_and_resume_names_it_in_the_grant(self):
+        self.issue(7)
+        result = self.world.deliver("start", "7", "--stop-at-ready")
+        run, branch = self.started(result)
+        self.assert_ends(result, 0, "\n".join([
+            f"Started run {run} on branch {branch}.", "R1: it parses", "R2: the help names it", MISSING, PROBE]) + "\n")
+        self.assertEqual(self.without_at(self.world.records(branch)), [
+            {"event": "start", "run": run, "branch_created": True, "stop_at_ready": True},
+            {"event": "save", "kind": "request", "file": "request.md", "commit": self.world.git(self.work, "rev-parse", "HEAD")}])
+        self.world.probe()
+        self.assert_ends(self.world.deliver("start", "--resume"), 0, "\n".join([
+            f"Resuming run {run} on branch {branch}, started {self.mark()['started']}.",
+            "Saved: request.", "Checks: none.", MISSING, "Preflight passed.",
+            "Run grant: push this branch, open and update its PR, mark it ready through the scripts, "
+            "no merge: stop at ready, file follow-up tickets."]) + "\n")
+
+    def test_the_flag_goes_with_the_request_and_the_tree_routes(self):
+        self.world.git(self.work, "switch", "-q", "-c", "feat/flag")
+        self.merged("feat/flag", [])
+        (self.work / ".deliver").mkdir()
+        (self.work / ".deliver" / "request.md").write_text("Add a --json flag.\n", encoding="utf-8")
+        run, branch = self.started(self.world.deliver("start", "--stop-at-ready", "request"))
+        self.assertEqual(self.without_at(self.world.records(branch)[:1]),
+                         [{"event": "start", "run": run, "branch_created": False, "stop_at_ready": True}])
+        (self.git_dir / "deliver-mark.json").unlink()
+        self.world.git(self.work, "switch", "-q", "main")
+        (self.work / "new.txt").write_text("new\n", encoding="utf-8")
+        run, branch = self.started(self.world.deliver("start", "--stop-at-ready"))
+        self.assertEqual(branch, f"deliver/tree-{run}")
+        self.assertEqual(self.without_at(self.world.records(branch)[:1]),
+                         [{"event": "start", "run": run, "branch_created": True, "stop_at_ready": True}])
+
+    def test_resume_appends_no_start_record(self):
+        self.issue(7)
+        run, branch = self.started(self.world.deliver("start", "7"))
+        self.world.probe()
+        before = self.world.records(branch)
+        self.assertEqual(self.world.deliver("start", "--resume").returncode, 0)
+        after = self.world.records(branch)
+        self.assertEqual(after[:-1], before)
+        self.assertEqual(self.without_at(after[-1:]), [
+            {"event": "preflight", "run": run, "result": "pass", "stops": [], "warnings": MISSING.replace("warning: ", "").split("\n"),
+             "guard_probe": "seen", "permission_mode": "default", "harness": "claude-code"}])
+
+    def test_stop_at_ready_with_resume_is_a_usage_error(self):
+        result = self.world.deliver("start", "--resume", "--stop-at-ready")
+        usage = deliver_kit.load("deliver").USAGE
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (2, "", (
+            "deliver.py: --stop-at-ready goes with the start of a new run, not with --resume"
+            f"\n\n{usage}\n")))
+        self.assert_nothing_written()
+
+    def test_resume_of_a_run_with_no_start_record_reads_the_stack_settings_alone(self):
+        # A run begun before start wrote a start record; another run's record says stop at ready.
+        self.world.write_mark(run="old-run", branch="main", started="2000-01-01T00:00:00Z")
+        self.world.add_record("main", "start", run="other-run", branch_created=False, stop_at_ready=True)
+        self.world.probe()
+        result = self.world.deliver("start", "--resume")
+        self.assertEqual((result.returncode, result.stdout.splitlines()[-2:]), (0, ["Preflight passed.", GRANT]))
 
     def test_a_ticket_with_a_gap_ends_in_exit_20_with_one_question(self):
         self.issue(7, body="## Acceptance criteria\n\n- [ ]\n")
@@ -341,7 +419,7 @@ class Start(unittest.TestCase):
             f"(run mark: {self.git_dir / 'deliver-mark.json'}); deliver.py start --resume resumes it\n"
             "Next: deliver.py finish, to end it\n"))
         self.assertEqual((self.git_dir / "deliver-mark.json").read_text(encoding="utf-8"), mark)
-        self.assertEqual(len(self.world.records(branch)), 1)
+        self.assertEqual(len(self.world.records(branch)), 2)
 
     def test_start_no_run(self):
         self.assert_ends(self.world.deliver("start", "--resume"), 10, (
@@ -362,13 +440,14 @@ class Start(unittest.TestCase):
         self.issue(7)
         run, branch = self.started(self.world.deliver("start", "7"))
         calls = self.calls()
-        for args in (["7", "8"], ["spec", "200"], ["backlog"], ["request", "Add a flag."], ["request"], []):
+        for args in (["7", "8"], ["spec", "200"], ["backlog"], ["request", "Add a flag."], ["request"], [],
+                     ["--stop-at-ready"], ["7", "--stop-at-ready"]):
             with self.subTest(args=args):
                 self.assert_ends(self.world.deliver("start", *args), 10, (
                     f"REFUSED start.run-in-progress: run {run} is in progress in this checkout "
                     f"(run mark: {self.git_dir / 'deliver-mark.json'}); deliver.py start --resume resumes it\n"
                     "Next: deliver.py finish, to end it\n"))
-        self.assertEqual((self.mark()["run"], len(self.world.records(branch)), self.calls()), (run, 1, calls))
+        self.assertEqual((self.mark()["run"], len(self.world.records(branch)), self.calls()), (run, 2, calls))
 
     def test_start_nothing_to_start(self):
         (self.work / ".deliver").mkdir()
@@ -429,6 +508,69 @@ class Start(unittest.TestCase):
             r"Next: commit or stash the changes git names, then run deliver\.py start\n\Z", re.S))
         self.assert_nothing_written()
         self.assertEqual((self.work / "README.md").read_text(encoding="utf-8"), "seed\nlocal\n")
+
+    def test_a_gap_question_keeps_stop_at_ready_in_the_command_to_run_again(self):
+        self.issue(7, body="## Acceptance criteria\n\n- [ ]\n")
+        self.assert_ends(self.world.deliver("start", "--stop-at-ready", "7"), 20, "\n".join([
+            "Ticket #7 does not pass the entry check:",
+            f"- {entry_check.NO_TEXT}",
+            f"- {entry_check.NO_CRITERION}",
+            "Will you add what is missing to ticket #7? Then the session runs deliver.py start --stop-at-ready 7 "
+            "again."]) + "\n")
+        self.assert_nothing_written()
+
+    def test_start_no_ticket_keeps_stop_at_ready_in_the_next_command(self):
+        self.world.gh_answer(["issue", "view"], stderr="GraphQL: Could not resolve to an issue with the number of 9.\n",
+                             exit=1)
+        self.assert_ends(self.world.deliver("start", "9", "--stop-at-ready"), 10, (
+            "REFUSED start.no-ticket: gh cannot read ticket #9: GraphQL: Could not resolve to an issue with the "
+            "number of 9.\nNext: check the number and gh auth status, then run deliver.py start 9 --stop-at-ready\n"))
+        self.assert_nothing_written()
+
+    def test_start_not_built_keeps_stop_at_ready_in_the_next_command(self):
+        for args in (["7", "8"], ["spec", "200"], ["backlog"]):
+            with self.subTest(args=args):
+                self.assert_ends(self.world.deliver("start", *args, "--stop-at-ready"), 10, (
+                    f"REFUSED start.not-built: start {' '.join(args)} is a multi-ticket run, and multi-ticket runs "
+                    "come with a later build stage\nNext: deliver.py start <one ticket> --stop-at-ready\n"))
+        self.assert_nothing_written()
+        self.assertEqual(self.calls(), [])
+
+    def test_start_not_a_repo_keeps_stop_at_ready_in_the_next_command(self):
+        outside = self.world.root / "outside"
+        outside.mkdir()
+        self.assert_ends(self.world.deliver("start", "7", "--stop-at-ready", cwd=outside), 10, (
+            f"REFUSED start.not-a-repo: {outside} is not in a git working tree\n"
+            "Next: run deliver.py start --stop-at-ready inside the repo\n"))
+        self.assertEqual(self.calls(), [])
+
+    def test_start_no_request_keeps_stop_at_ready_in_the_next_command(self):
+        self.assert_ends(self.world.deliver("start", "request", "--stop-at-ready"), 10, (
+            "REFUSED start.no-request: .deliver/request.md is missing or empty, and a request is read from "
+            "there only\nNext: write the request word for word into .deliver/request.md, then run "
+            "deliver.py start request --stop-at-ready\n"))
+        self.assert_nothing_written()
+
+    def test_start_fetch_failed_keeps_stop_at_ready_in_the_next_command(self):
+        self.issue(7)
+        self.world.git(self.work, "remote", "set-url", "origin", str(self.world.root / "gone.git"))
+        result = self.world.deliver("start", "7", "--stop-at-ready")
+        self.assertEqual((result.returncode, result.stderr), (10, ""))
+        self.assertRegex(result.stdout, re.compile(
+            r"\AREFUSED start\.fetch-failed: git fetch origin main failed, so no fresh branch was cut: "
+            r"fatal: .*gone\.git.*\nNext: fix the error, then run deliver\.py start 7 --stop-at-ready\n\Z", re.S))
+        self.assert_nothing_written()
+
+    def test_start_cannot_carry_keeps_stop_at_ready_in_the_next_command(self):
+        self.advance_origin("README.md", "seed\nupstream\n")
+        (self.work / "README.md").write_text("seed\nlocal\n", encoding="utf-8")
+        result = self.world.deliver("start", "--stop-at-ready")
+        self.assertEqual((result.returncode, result.stderr), (10, ""))
+        self.assertRegex(result.stdout, re.compile(
+            r"\AREFUSED start\.cannot-carry: git cannot carry the changes in the tree onto a fresh branch from "
+            r"origin/main, so nothing was changed: error: .*README\.md.*\n"
+            r"Next: commit or stash the changes git names, then run deliver\.py start --stop-at-ready\n\Z", re.S))
+        self.assert_nothing_written()
 
 
 class EntryCheck(unittest.TestCase):

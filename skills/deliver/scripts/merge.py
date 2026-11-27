@@ -11,7 +11,7 @@ after the CI wait. In order, it:
    record's door is not `two-way` it refuses `merge.one-way`, whatever the small test found;
    otherwise it refuses `merge.not-ready` unless the record's result is `small edit`;
 4. refuses `merge.withheld` when the stack setting `stop_at_ready` is set, when the run's `start`
-   record carries `"stop_at_ready": true` (the owner said `stop at ready` at start), or when
+   record carries `"stop_at_ready": true` (`--stop-at-ready` or the setting when `start` ran), or when
    GitHub's review decision needs an approval or shows changes requested (no admin bypass is
    ever tried). `merge.one-way` and `merge.withheld` first write the merge line and the `merge`
    record;

@@ -4,30 +4,38 @@
 # (docs/agents/stack.toml) and never removes from them.
 #
 # Command patterns are Python regular expressions searched in the command text. Each one
-# starts with the same prefix, which steps over whole quoted strings, so text inside quotes
-# (a commit message, a PR title) never matches; a command with an unclosed quote does not
-# match past it. Path patterns are globs matched against a path relative to the repo root:
+# starts with the same prefix. Where the text's quoting is plain (every quote closed, and no
+# heredoc, `#` comment or $'...' string), the prefix steps over whole quoted strings, so text
+# inside quotes (a commit message, a PR title) never matches. Otherwise the pattern is searched
+# in the raw text, quotes included, so a doubt about quoting matches rather than lets a
+# command through. Path patterns are globs matched against a path relative to the repo root:
 # `*` stays inside one folder, `**/` matches any number of folders (none included), and a
 # leading dot is matched like any other character.
 
 # Commands that wait for the owner inside a run: #178 rule 21, amended by #213 X7.
 one_way_commands = [
   # A force push.
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\bgit\b(?:[^;&|\n\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\spush\b(?:[^;&|\n\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\s["\x27]?(?:--force\S*|-[A-Za-z]*f[A-Za-z]*(?=\s|$)|\+\S+)',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgit\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\spush\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?(?:--force\S*|-[A-Za-z]*f[A-Za-z]*(?=\s|$)|\+\S+)',
   # Deleting a remote branch or tag, or a mirror or pruning push, which can do both.
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\bgit\b(?:[^;&|\n\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\spush\b(?:[^;&|\n\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\s["\x27]?(?:--delete\b|--mirror\b|--prune\b|-d(?=\s|$)|:\S+)',
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\bgh\s+api\b(?=(?:[^;&|\n\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\s["\x27]?(?:-X\s*|--method[=\s]\s*)["\x27]?DELETE\b)(?=(?:[^;&|\n\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\s["\x27]?[^\s\x27"]*\bgit/refs/)',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgit\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\spush\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?(?:--delete\b|--mirror\b|--prune\b|-d(?=\s|$)|:\S+)',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgh\s+api\b(?=(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?(?:-X\s*|--method[=\s]\s*)["\x27]?DELETE\b)(?=(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?[^\s\x27"]*\bgit/refs/)',
   # Creating a release.
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\bgh\s+release\s+create\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgh\s+release\s+create\b',
   # Publishing a package.
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\b(?:npm|pnpm|yarn|bun|uv|poetry|hatch|flit|cargo)\s+publish\b',
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\btwine\s+upload\b',
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\bgem\s+push\b',
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?\bdocker\s+push\b',
-  # Any command aimed at a target named production: a target option or a *TARGET, *STAGE or
-  # *ENVIRONMENT variable set to prod or production, or the --prod deploy flag.
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?(?<![^\s;&|(])(?:(?:--(?:target|env|environment|stage|profile|context|connection|namespace)|-[tcn])(?:=|\s+)|[A-Z_]*(?:TARGET|STAGE|ENVIRONMENT)=)["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
-  '\A(?:[^\x27"\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*?(?<![^\s;&|(])--prod(?=$|[\s;&|)])',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\b(?:npm|pnpm|yarn|bun|uv|poetry|hatch|flit|cargo)\s+publish\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\btwine\s+upload\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgem\s+push\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bdocker\s+push\b',
+  # Any command aimed at a target named production (prod or production, any case, quoted or not):
+  # a target option set to it,
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])(?:--(?:target|env|environment|stage|profile|context|connection|namespace|stack|project|remote|inventory)|-[tcnsP])(?:=|\s+)["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
+  # a variable set to it whose name is or ends in TARGET, STAGE, ENVIRONMENT, ENV (but not NODE_ENV),
+  # PROFILE, PROJECT or STACK,
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])(?i:[a-z_]*(?:target|stage|environment|(?<!node_)env|profile|project|stack))=["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
+  # it as the argument after push, select, project, use-context, ansible's -i or a word holding deploy,
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])(?:push|select|project|use-context|\S*deploy\S*|ansible\S*(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s-i)(?:\s+-\S+)*\s+["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
+  # or the --prod deploy flag.
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])--prod(?=$|[\s;&|)])',
 ]
 
 # Paths whose change makes the door one-way at `ready`: #256 rule 51.

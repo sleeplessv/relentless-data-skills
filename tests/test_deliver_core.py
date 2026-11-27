@@ -239,35 +239,54 @@ class Lists(unittest.TestCase):
         self.assertEqual([c for c in two_way if hit(c)], [])
 
     @staticmethod
-    def hits(commands: list[str]) -> dict[str, int]:
-        """How many one-way command patterns each command matches."""
+    def hits(commands: list[str]) -> dict[str, bool]:
+        """Whether any one-way command pattern matches each command."""
         patterns = deliver_kit.load("settings").read_lists()["one_way_commands"]
-        return {c: sum(bool(re.search(p, c)) for p in patterns) for c in commands}
+        return {c: any(re.search(p, c) for p in patterns) for c in commands}
 
     def test_a_mirror_or_pruning_push_is_one_way(self):
         commands = ["git push --mirror origin", "git push --prune origin refs/heads/*:refs/heads/*",
                     "git push origin ':main'", 'git push origin "+main"']
-        self.assertEqual(self.hits(commands), dict.fromkeys(commands, 1))
+        self.assertEqual(self.hits(commands), dict.fromkeys(commands, True))
 
     def test_a_command_aimed_at_production_is_one_way(self):
         commands = ["dbt run --target prod", "dbt build --target=production", 'dbt run --target "prod"',
                     "dbt run -t prod", "snow sql -c PROD -q 'select 1'", "kubectl --context production apply -f x.yml",
-                    "DBT_TARGET=prod dbt run", "cd app && vercel deploy --prod"]
-        self.assertEqual(self.hits(commands), dict.fromkeys(commands, 1))
+                    "DBT_TARGET=prod dbt run", "cd app && vercel deploy --prod",
+                    "pulumi up --stack prod", "pulumi up -s prod", "sls deploy -s prod", "firebase deploy --project prod",
+                    "firebase deploy -P prod", "gcloud config set project prod", "AWS_PROFILE=prod aws s3 rm s3://x",
+                    "heroku run rake -a myapp --remote production", "aws --profile prod s3 rm s3://x --recursive"]
+        self.assertEqual(self.hits(commands), dict.fromkeys(commands, True))
+
+    def test_a_production_variable_or_argument_is_one_way(self):
+        commands = ["RAILS_ENV=production rails db:migrate", "ENV=prod ./deploy.sh", "make deploy ENV=prod",
+                    "MIX_ENV=prod mix ecto.migrate", "terraform apply -var env=prod", "terraform workspace select prod",
+                    "ansible-playbook -i production site.yml", "./deploy.sh production", "git push prod main",
+                    "kubectl config use-context prod"]
+        self.assertEqual(self.hits(commands), dict.fromkeys(commands, True))
 
     def test_a_mention_of_production_is_not_one_way(self):
         commands = ["git commit -m 'fix prod bug'", "echo production", "npm install --production",
                     "NODE_ENV=production npm run build", "git -C prod status", "grep -e prod notes.txt",
                     "dbt run --target prod-eu", "cd /srv/prod/app && ls", "cat prod.yml"]
-        self.assertEqual(self.hits(commands), dict.fromkeys(commands, 0))
+        self.assertEqual(self.hits(commands), dict.fromkeys(commands, False))
 
     def test_quoted_text_is_never_one_way(self):
         commands = ['git commit -m "dbt run --target prod"', "git commit -m 'git push --force is banned'",
                     "gh pr create --title \"drop npm publish\" --body 'docker push and gh release create'",
                     "git log --grep 'push --force'", 'git commit -m "a \\"quoted\\" git push --mirror"',
                     "echo 'twine upload' && echo \"gem push\"", "gh issue comment 5 --body 'gh api -X DELETE git/refs/x'",
-                    "echo 'unclosed git push --force"]
-        self.assertEqual(self.hits(commands), dict.fromkeys(commands, 0))
+                    "git commit -m 'line one\nline two' && git push origin x", "echo 'gh release create' "]
+        self.assertEqual(self.hits(commands), dict.fromkeys(commands, False))
+
+    def test_doubtful_quoting_is_read_as_one_way(self):
+        commands = ["git commit -F - <<'EOF'\nDon't break it\nEOF\ngit push --force",
+                    "# don't forget\ngit push --force", "git commit -m $'it\\'s' && git push --force",
+                    "git commit -m 'it\\'s fine' && git push --force", "echo 'unclosed git push --force",
+                    # Apostrophes that pair up, so only the heredoc, comment or $'...' marks the doubt.
+                    "cat <<EOF\nit's\nEOF\ngit push --force; echo it's", "# don't\ngit push --force # won't",
+                    "echo $'a\\'b' && git push --force && echo it's"]
+        self.assertEqual(self.hits(commands), dict.fromkeys(commands, True))
 
     def test_path_lists(self):
         core = deliver_kit.load("core")

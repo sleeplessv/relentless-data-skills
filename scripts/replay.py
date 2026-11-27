@@ -23,7 +23,7 @@ import draw  # noqa: E402  (a sibling script, not an installed package)
 import scan  # noqa: E402
 
 VERSION = "direct"
-GENERATION_TWO = ("deliver", "fan-out")
+GENERATION_TWO = ("deliver", "squad")
 MARKED = draw.GENERATION_ONE + GENERATION_TWO
 # Tool caches a sandboxed command may read and write, under the home folder.
 CACHES = (".cache/uv", ".cache/pip", "Library/Caches/pip", ".npm")

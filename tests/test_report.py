@@ -724,9 +724,9 @@ class TestReport(unittest.TestCase):
     def test_a_version_judged_with_no_replay_record_counts_with_blank_figures(self) -> None:
         tickets = self.world.draw(per_bucket=1)
         for at, ticket in enumerate(tickets):  # judged at a commit the judge was given, with no versions.jsonl line
-            self.world.judge(ticket, "fan-out", at != 1, at=commit(70 + at))
+            self.world.judge(ticket, "squad", at != 1, at=commit(70 + at))
         lines = self.lines()
-        start = lines.index("fan-out")
+        start = lines.index("squad")
         self.assertEqual(lines[start + 4:start + 7], [
             "  All: 3 judged, 2 of 3 right first time, median total tokens none, median active minutes none.",
             "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
@@ -819,12 +819,12 @@ class TestReport(unittest.TestCase):
         for ticket in tickets:
             self.world.run("generation-one", ticket, True)
             self.world.run("direct", ticket, False)
-            self.world.run("fan-out", ticket, ticket is tickets[0], tokens=40, minutes=4.0,
+            self.world.run("squad", ticket, ticket is tickets[0], tokens=40, minutes=4.0,
                            copied=OLD if ticket is tickets[1] else 8)
         lines = self.lines()
         self.assertEqual([line for line in lines if line and not line.startswith(" ")][1:4],
-                         ["generation-one", "direct", "fan-out"])
-        start = lines.index("fan-out")
+                         ["generation-one", "direct", "squad"])
+        start = lines.index("squad")
         self.assertEqual(lines[start + 4], "  All: 3 judged, 1 of 3 right first time, median total tokens 40, "
                                            "median active minutes 4.")
         self.assertEqual(lines[start + 7], copied_tokens(16, 80, "20.0%", 1))

@@ -1,6 +1,6 @@
 """The small test, for `ready` to run on the finished branch (spec #407, "The small test and the door").
 
-Nothing calls it yet: #423 connects it to `ready`. Of the program's modules it imports only `core`.
+`ready` (#423) calls it. Of the program's modules it imports only `core`.
 
 `measure` reads the committed diff of `HEAD` against its merge base with the target branch, the
 stack settings as `settings.load` merges them, and the saved plan's door and proofs. It returns a
@@ -21,7 +21,8 @@ result, never a refusal:
 - The dependents command runs through the shell in the checkout, with every changed path
   appended as a quoted argument. Its first output line is the count. Every further non-blank
   line names a report or exposure the change feeds. `dependents` is None with no command,
-  `{"count", "feeds"}` when it ran, and `{"error"}` when it exited non-zero or printed no count.
+  `{"count", "feeds"}` when it ran, and `{"error"}` when it exited non-zero, printed no count or
+  printed output that is not UTF-8.
   A count over `dependents_limit`, anything it feeds, or an error gives a high blast radius.
 - The door is the plan's (`two-way` or `one-way`; anything else, or None, is one-way), raised to
   one-way by a changed path on `[one_way] paths` and never lowered. `door_paths` names every
@@ -104,11 +105,14 @@ def measure(checkout: Path, base: str, settings: dict, door: str | None, proofs:
 def _dependents(checkout: Path, command: str, changed: list[str]) -> dict | None:
     if not command:
         return None
-    proc = subprocess.run(f"{command} {shlex.join(changed)}", shell=True, cwd=checkout, capture_output=True,
-                          text=True)
+    proc = subprocess.run(f"{command} {shlex.join(changed)}", shell=True, cwd=checkout, capture_output=True)
     if proc.returncode != 0:
         return {"error": f"exit {proc.returncode}"}
-    first, *rest = proc.stdout.splitlines() or [""]
+    try:
+        out = proc.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        return {"error": "its output is not UTF-8"}
+    first, *rest = out.splitlines() or [""]
     if not re.fullmatch(r"[0-9]+", first.strip()):
         return {"error": "it printed no count"}
     return {"count": int(first), "feeds": [line.strip() for line in rest if line.strip()]}

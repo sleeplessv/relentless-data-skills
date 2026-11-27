@@ -16,6 +16,7 @@ import deliver_kit  # noqa: E402
 
 preflight = deliver_kit.load("preflight")
 MISSING = "no docs/agents/stack.toml: every stack setting has its default"
+NO_CHECK = "check_command is empty in docs/agents/stack.toml, so ready relies on the check plan's commands"
 
 
 def without_at(lines: list[dict]) -> list[dict]:
@@ -50,6 +51,7 @@ class Preflight(unittest.TestCase):
     def setUp(self):
         self.world = deliver_kit.World(self.addCleanup)
         self.world.write_mark(run="run-3")
+        deliver_kit.github_ok(self.world)
 
     def stack(self, text: str) -> None:
         (self.world.work / "docs" / "agents").mkdir(parents=True)
@@ -69,11 +71,11 @@ class Preflight(unittest.TestCase):
         self.assertEqual(without_at(records), [self.record("pass")])
         self.assertEqual(self.world.state_lines("preflight-stops.jsonl"), [])
 
-    def test_missing_stack_settings_is_one_warning(self):
+    def test_missing_stack_settings_warns(self):
         result = self.world.deliver("preflight")
         self.assertEqual((result.returncode, result.stdout, result.stderr),
-                         (0, f"warning: {MISSING}\nPreflight passed.\n", ""))
-        self.assertEqual(without_at(self.world.records()), [self.record("pass", warnings=[MISSING])])
+                         (0, f"warning: {MISSING}\nwarning: {NO_CHECK}\nPreflight passed.\n", ""))
+        self.assertEqual(without_at(self.world.records()), [self.record("pass", warnings=[MISSING, NO_CHECK])])
 
     def test_preflight_bad_settings(self):
         self.stack("check_slots = 'two'\n")

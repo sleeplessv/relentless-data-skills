@@ -40,6 +40,13 @@ NO_MARK = "no run mark in this checkout, so no run is in progress here"
 REFUSALS = {
     "preflight.no-mark": NO_MARK,
     "preflight.bad-settings": "the stack settings cannot be read: {error}",
+    "preflight.no-python": "this machine has neither uv nor a python3 of 3.13 or newer",
+    "preflight.cannot-write": "the run cannot write {path}: {error}",
+    "preflight.no-signature": "git signs commits here, and a test signature failed: {error}",
+    "preflight.gh-signed-out": "gh is not signed in to GitHub",
+    "preflight.no-github": "gh cannot read this repo from GitHub: {error}",
+    "preflight.cannot-push": "the gh account cannot push to {repo}: its permission is {permission}",
+    "preflight.reach-failed": "the reach command {name}, `{command}`, failed with exit {exit}: {error}",
     "check.no-mark": NO_MARK,
     "save.no-mark": NO_MARK,
     "pr.no-mark": NO_MARK,

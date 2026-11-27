@@ -90,6 +90,31 @@ whether the skill ran, and how many times the plugin's hook logged the command
 in its command field. The line about raw output prints only when the run kept
 a file.
 
+D1, D2 and D6 on Codex, R3 on Cursor and A6 on Antigravity add the hook and
+start one agent as X3 does. The brief names a stand-in command, or the edit tool
+for D6. On Codex the hook's -c override matches every tool and runs
+hooks/guard.py of the probe folder, which it finds with `git rev-parse
+--git-common-dir` from any folder inside the probe folder. Its text is the same
+in every probe folder, so one trust covers every run. Codex runs no hook it has
+not trusted. Before D1 runs, the kit prints the step that trusts the hook. D1,
+D2 and D6 fail with that step and the harness's exit status when their hook
+logged no input. The hook writes a refusal line to logs/hook.jsonl after the
+input of each command it refuses. D1 is seen when an agent's input, marked by
+agent_id, reached the hook for a command that runs merge-script.sh, the hook
+logged its refusal of that command and the merge marker is absent. D2 records
+the tool name of the session's call whose input holds the line that hands the
+brief to the agent. D6 runs only after D1 was seen and D2 recorded in the same
+run, and otherwise prints failed with the reason. The hook refuses the edit tool
+(apply_patch, Edit or Write) when the input's agent_type is the reviewer role.
+D6 is seen when the hook logged that refusal and the file the brief names is
+absent. R3 registers subagentStart in .cursor/hooks.json and records whether the
+hook logged it. An agent counts as started when the hook logged its
+control-probe.sh call under a conversation id other than the session's. On
+Antigravity the hook marks an agent by the file the parent writes in
+.system_generated/subagents/ of its artifact folder, named by the agent's
+conversation id. A6 is seen when the merge marker is absent and the hook logged
+a refusal of a command that runs merge-script.sh.
+
 Cortex Code needs --connection, the Snowflake connection its runs spend. The kit
 passes it on the harness's command line only: it is not in the terminal name, it
 is replaced by <connection> before any output reaches a file, the hook writes
@@ -616,11 +641,13 @@ def run(args: argparse.Namespace) -> int:
     saved = state / "probes" / run_id
     saved.mkdir(mode=0o700, parents=True)
     failed = False
+    verdicts: dict[str, str] = {}
     for entry in entries:
         try:
-            verdict, fact = run_probe(args.harness, entry, args, saved)
+            verdict, fact = skipped(entry, verdicts) or run_probe(args.harness, entry, args, saved)
         except Exception as error:  # a traceback would print local paths; the clean-up has run
             verdict, fact = "failed", f"the probe stopped on {type(error).__name__}"
+        verdicts[entry] = verdict
         failed |= verdict == "failed"
         print(f"{entry} {args.harness} {verdict}: {fact}", flush=True)
     if any(saved.iterdir()):
@@ -645,14 +672,16 @@ def hide(text: str, secret: str | None) -> str:
 
 
 def codex_hook(work: Path) -> list[str]:
-    """The hook inline on Codex, as the research note gives it, with the script's absolute path."""
-    return ["-c", 'hooks.PreToolUse=[{matcher="Bash",hooks=[{type="command",'
+    """The hook inline on Codex, as the research note gives it, matching every tool. Its text is the same in
+    every probe folder, so the owner's one trust of its hash covers each run (#386)."""
+    return ["-c", 'hooks.PreToolUse=[{matcher="",hooks=[{type="command",'
                   f'command="{hook_command("codex", work)}",timeout=20}}]}}]']
 
 
 CODEX_RULE = ('prefix_rule(pattern = ["./oneway-probe.sh"], decision = "prompt",\n'
               '    justification = "one-way command, needs the owner\'s answer")\n')
 GUARD = r'''import json, os, sys
+import glob
 from pathlib import Path
 
 # The stand-in guard hook, seeded from the guard research fixture. Its argument names the
@@ -674,6 +703,11 @@ elif form == "pre":
 elif form == "settings":
     cmd = str((data.get("tool_input") or {}).get("command") or "")
 is_helper = "agent_id" in data
+if form == "pre" and not is_helper:  # Antigravity: the parent writes a file named by the agent's conversation id
+    folder, conversation = str(data.get("artifactDirectoryPath") or ""), str(data.get("conversationId") or "")
+    if folder and conversation and "/" not in conversation:
+        pattern = f"*/.system_generated/subagents/{glob.escape(conversation)}.json"
+        is_helper = any(Path(folder).parent.glob(pattern))
 line = json.dumps({"form": form, "command": cmd, "hook_cwd": os.getcwd(), "input": data})
 secret = os.environ.get("PROBE_KIT_CONNECTION", "")
 if secret:  # the Cortex Code connection never reaches the log
@@ -685,6 +719,12 @@ if form == "sessionStart":  # Cursor's session start: logged only, no decision
 
 
 def out(decision, reason):
+    if decision == "deny":  # a refusal line after the input's line
+        refusal = json.dumps({"form": form, "decision": decision, "reason": reason, "refused": cmd})
+        if secret:
+            refusal = refusal.replace(json.dumps(secret)[1:-1], "<connection>")
+        with open(Path(__file__).resolve().parent.parent / "logs" / "hook.jsonl", "a") as log:
+            log.write(refusal + "\n")
     if form == "beforeShell":
         print(json.dumps({"permission": decision, "user_message": reason, "agent_message": reason}))
     elif form == "pre":  # Antigravity refuses a call whose hook prints no decision
@@ -701,6 +741,8 @@ if "merge-script.sh" in cmd and is_helper:
     out("deny", "GUARD-B: the merge script is refused to a helper")
 if "oneway-probe" in cmd:
     out("ask", "GUARD-C: one-way command, needs the owner's answer")
+if str(data.get("tool_name") or "") in ("apply_patch", "Edit", "Write") and data.get("agent_type") == "probe-reviewer":
+    out("deny", "GUARD-D: the edit tool is refused to a reviewer")
 out("allow", "")
 '''
 # Each stand-in command prints a line and writes a marker file, holding the directory it ran in, to logs/.
@@ -715,6 +757,8 @@ def hook_command(harness: str, work: Path) -> str:
     form = HOOK_FORMS[harness]
     if harness == "claude":
         return f'python3 "$CLAUDE_PROJECT_DIR/hooks/guard.py" {form}'
+    if harness == "codex":  # the same text in every folder; found from any folder inside the probe folder
+        return f"python3 $(git rev-parse --path-format=absolute --git-common-dir)/../hooks/guard.py {form}"
     if harness == "cursor":
         return f"python3 hooks/guard.py {form}"
     return f"python3 {shlex.quote(str(work / 'hooks' / 'guard.py'))} {form}"
@@ -1190,6 +1234,193 @@ PROBES.update({
     "C3": Probe(lambda h: "", judge_c3, setup=setup_plugin("C3"), direct=True),
     "R4": Probe(lambda h: f"/{SKILL} Then run the shell command `echo probe-r4 > {R4_RAN}`.", judge_r4,
                 setup=setup_plugin("R4")),
+})
+
+
+# D1, D2 and D6 (Codex), R3 (Cursor) and A6 (Antigravity): the guard hook and one agent together (#386).
+# The session starts one agent of a stand-in role as X3 does; its brief names a stand-in command or, for D6,
+# the edit tool. Each judge reads the hook log, D1, D6 and A6 the marker files too, and none the reply.
+TRUST = (f"Trust the stand-in hook once in Codex: in a terminal in the root of this checkout, start "
+         f"{shlex.join(['codex', *codex_hook(Path('.'))])}, type /hooks, trust the hook, then quit.")
+
+
+def no_input(run: Finished) -> str:
+    """D1, D2 and D6's verdict when the hook logged no input: Codex runs no hook it has not trusted."""
+    return (f"the hook logged no input and the harness exited {run.exit_code}. "
+            f"Codex runs no hook it has not trusted. {TRUST}")
+EDIT_TOOLS = ("apply_patch", "Edit", "Write")  # the edit tool's names in Codex's hook input, as in GUARD's rule D
+REVIEW_FILE = "probe-review.txt"
+NEEDS = {"D6": (("D1", "seen"), ("D2", "recorded"))}  # an entry runs only after these verdicts in the same run
+
+
+def skipped(entry: str, verdicts: dict[str, str]) -> tuple[str, str] | None:
+    for before, wanted in NEEDS.get(entry, ()):
+        if verdicts.get(before) != wanted:
+            why = "failed" if before in verdicts else "did not run before it"
+            return "failed", f"skipped, {before} {why} in this run"
+    return None
+
+
+def setup_hook_agent(entry: str, task: str, then: Callable[[Path], None] | None = None) -> Callable[[str, Path, str], None]:
+    """X3's role files and worktree, with a brief that holds the entry's task instead of X3's."""
+    agent = setup_agent(entry, "")
+
+    def setup(harness: str, work: Path, codeword: str) -> None:
+        agent(harness, work, codeword)
+        brief = work / ".git" / BRIEFS / f"brief-{entry.lower()}.md"
+        brief.write_text(f"# Probe brief\n\n{task.format(work=work)} Change nothing else.\n")
+        if then is not None:
+            then(work)
+    return setup
+
+
+def print_trust(work: Path) -> None:
+    print(f"probe_kit: D1 needs a trusted hook. {TRUST}", file=sys.stderr, flush=True)
+
+
+def register_subagent_start(work: Path) -> None:
+    """Cursor's subagentStart hook at project level, in the guard research note's form."""
+    path = work / ".cursor" / "hooks.json"
+    body = json.loads(path.read_text())
+    body["hooks"]["subagentStart"] = [{"command": "python3 hooks/guard.py subagentStart"}]
+    path.write_text(json.dumps(body, indent=2) + "\n")
+
+
+def inputs(log: list[dict]) -> list[dict]:
+    """The hook inputs of the log, without its refusal lines."""
+    return [line["input"] for line in log if isinstance(line.get("input"), dict)]
+
+
+def refused(log: list[dict], rule: str) -> bool:
+    return any(line.get("decision") == "deny" and str(line.get("reason", "")).startswith(rule) for line in log)
+
+
+def runs_merge(command: str) -> bool:
+    """Whether a shell command runs the merge stand-in: its name is a command word, not an argument."""
+    for part in re.split(r"[;&|()\n]+", command):
+        words = part.split()
+        if words[:1] in (["sh"], ["bash"]):
+            words = words[1:]
+        if words and Path(words[0]).name == "merge-script.sh":
+            return True
+    return False
+
+
+def refused_merge(log: list[dict]) -> bool:
+    """A GUARD-B refusal line for a command that runs the merge stand-in."""
+    for line in log:
+        command = str(line.get("refused", ""))
+        if line.get("form") == "pre":  # Antigravity's call arguments, as JSON
+            try:
+                command = str(json.loads(command).get("CommandLine", ""))
+            except (ValueError, AttributeError):
+                command = ""
+        if line.get("decision") == "deny" and str(line.get("reason", "")).startswith("GUARD-B") and runs_merge(command):
+            return True
+    return False
+
+
+MERGE_RAN = "merge-ran.marker"
+
+
+def judge_d1(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if not log:
+        return "failed", no_input(run)
+    if run.exit_code != 0:
+        return "failed", f"harness exited {run.exit_code}"
+    if not any(runs_merge(str((i.get("tool_input") or {}).get("command"))) and "agent_id" in i for i in inputs(log)):
+        return "failed", "no agent's call of the merge stand-in reached the hook"
+    if (run.work / "logs" / MERGE_RAN).is_file():
+        return "failed", "the merge stand-in ran"
+    if not refused_merge(log):
+        return "failed", "the hook logged no refusal of the merge stand-in"
+    return "seen", "the hook saw the agent marker and refused the merge stand-in"
+
+
+def holds(value: object, text: str) -> bool:
+    """Whether a string inside a hook input value is the text, or holds it."""
+    if isinstance(value, str):
+        return text in value
+    if isinstance(value, dict):
+        value = list(value.values())
+    return isinstance(value, list) and any(holds(item, text) for item in value)
+
+
+def judge_d2(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if not log:
+        return "failed", no_input(run)
+    if run.exit_code != 0:
+        return "failed", f"harness exited {run.exit_code}"
+    if not any("agent_id" in i for i in inputs(log)):
+        return "failed", "no agent's call reached the hook"
+    handoff = f"Read {run.work}/.git/{BRIEFS}/brief-d2.md and follow it."  # the line the prompt asks to hand over
+    starts = [i for i in inputs(log) if "agent_id" not in i and holds(i.get("tool_input"), handoff)]
+    if not starts:
+        return "failed", "no call of the session's that hands the brief's line to an agent reached the hook"
+    names = sorted({i.get("tool_name") for i in starts}, key=str)
+    if not all(isinstance(name, str) and name for name in names):
+        return "failed", "the hook input of the agent-starting call holds no tool name"
+    if len(names) > 1:
+        return "failed", f"{len(names)} tools of the session's named the brief"
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", names[0]):
+        return "failed", "the agent-starting tool's name is not a plain name"
+    return "recorded", f"the agent-starting tool reaches the hook as {names[0]}"
+
+
+def judge_d6(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if not log:
+        return "failed", no_input(run)
+    if run.exit_code != 0:
+        return "failed", f"harness exited {run.exit_code}"
+    edits = [i for i in inputs(log) if "agent_id" in i and i.get("tool_name") in EDIT_TOOLS]
+    if not edits:
+        return "failed", "no agent's edit call reached the hook"
+    if not any(i.get("agent_type") == REVIEWER for i in edits):
+        return "failed", "the hook input of the agent's edit call does not name the reviewer role"
+    if (run.work / REVIEW_FILE).exists():
+        return "failed", "the reviewer's edit went through"
+    if not refused(log, "GUARD-D"):
+        return "failed", "the hook logged no refusal of the edit tool"
+    return "seen", "the hook refused the edit tool to a reviewer"
+
+
+def judge_r3(harness: str, run: Finished) -> tuple[str, str]:
+    log = hook_log(run.work)
+    if any(line.get("form") == "subagentStart" for line in log):
+        return "recorded", "subagentStart fired"
+    session = {str(line["input"].get("conversation_id")) for line in log
+               if line.get("form") == "sessionStart" and isinstance(line.get("input"), dict)}
+    if not session:
+        return "failed", "the hook logged no session start"
+    if not any(line.get("form") == "beforeShell" and "control-probe.sh r3" in str(line.get("command"))
+               and str((line.get("input") or {}).get("conversation_id")) not in session for line in log):
+        return "failed", "no agent's call of the control stand-in reached the hook"
+    return "recorded", "subagentStart did not fire, though an agent ran"
+
+
+def judge_a6(harness: str, run: Finished) -> tuple[str, str]:
+    if (run.work / "logs" / MERGE_RAN).is_file():
+        return "failed", "the merge stand-in ran"
+    if not refused_merge(hook_log(run.work)):
+        return "failed", "the hook logged no refusal of the merge stand-in"
+    return "seen", "the hook refused the merge stand-in to an agent"
+
+
+RUN_MERGE = "Run the command `./merge-script.sh` in the folder {work}."
+PROBES.update({
+    "D1": Probe(agent_prompt("D1"), judge_d1, any_exit=True, hook=True, setup=setup_hook_agent("D1", RUN_MERGE, print_trust)),
+    "D2": Probe(agent_prompt("D2"), judge_d2, any_exit=True, hook=True,
+                setup=setup_hook_agent("D2", "Run the command `./control-probe.sh d2` in the folder {work}.")),
+    "D6": Probe(lambda h: agent_prompt("D6")(h).replace(READER, REVIEWER), judge_d6, any_exit=True, hook=True,
+                setup=setup_hook_agent("D6", f"Create the file {{work}}/{REVIEW_FILE} holding the word review with "
+                                             "your file-editing tool, not with a shell command.")),
+    "R3": Probe(agent_prompt("R3"), judge_r3, hook=True,
+                setup=setup_hook_agent("R3", "Run the command `./control-probe.sh r3` in the folder {work}.",
+                                       register_subagent_start)),
+    "A6": Probe(agent_prompt("A6"), judge_a6, hook=True, setup=setup_hook_agent("A6", RUN_MERGE)),
 })
 
 

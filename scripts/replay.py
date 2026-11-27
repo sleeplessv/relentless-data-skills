@@ -72,8 +72,8 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    that a repo's own config names with include.path is still read. They carry
    no GIT_* variable from the caller. The version's repo records the tree. A
    private repo, made beside it for this step, lists a copy of the clone's
-   index and reads objects from the clone's .git/objects, but not from the
-   folders that its alternates file names. Neither repo reads
+   index and reads objects from the clone's .git/objects and from the folders
+   its alternates file names that exist. Neither repo reads
    the clone's config, so nothing the session left in the clone's .git/ runs.
    Git's default
    attribute and ignore files still apply: $XDG_CONFIG_HOME/git/attributes and git/ignore (by default under
@@ -277,16 +277,12 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
                 with contextlib.suppress(OSError):  # any other may be unreadable or a link to anywhere; git fails
                     if stat.S_ISREG(shared.lstat().st_mode):  # below when the named one is missing
                         shutil.copyfile(shared, meta / shared.name)
-            # A sparse index names trees, which are in the clone's objects. They are read through a folder of links
-            # to what the clone's objects folder holds, less its info/ folder: an entry of the clone's own alternates
-            # file that names no folder would be reported on standard error. The folder has a name of the replay's
-            # own, so the alternates file holds no path of the caller's.
-            mirror = meta / "clone-objects"
-            mirror.mkdir()
-            for entry in os.scandir(index.parent / "objects"):
-                if entry.name != "info":
-                    (mirror / entry.name).symlink_to(entry.path)
-            (meta / "objects" / "info" / "alternates").write_text("../clone-objects\n")
+            # A sparse index names trees, which are in the clone's objects or in a folder its alternates file names.
+            # They are read through links with names of the replay's own, so the private alternates file holds no
+            # path of the caller's, and it lists only the folders that exist: git reports an entry that names no
+            # folder on standard error.
+            (meta / "objects" / "info" / "alternates").write_text(
+                "".join(f"../{name}\n" for name in borrowed(index.parent / "objects", meta)))
             listing = ["git", "-c", "advice.sparseIndexExpanded=false", "-C", str(clone), "ls-files", "-z"]
             listed = subprocess.run(listing, stdin=subprocess.DEVNULL, capture_output=True,
                                     env=trusted(meta, clone, "index"))
@@ -302,6 +298,26 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
     return [os.fsencode(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
             and not any((clone / Path(*path.parts[:end])).is_symlink() for end in range(1, len(path.parts)))
             and ((clone / path).is_symlink() or (clone / path).is_file())]
+
+
+def borrowed(objects: Path, meta: Path) -> list[str]:
+    """Link into `meta` the clone's objects folder, less its info/ folder, and each folder its alternates file names
+    that exists; the links' names. The objects folder is linked by the names git reads in it, not by listing it,
+    which needs no read permission and finds the info/ folder as git does on a file system that ignores case."""
+    mirror = meta / "clone-objects"
+    mirror.mkdir()
+    for name in ("pack", *(f"{number:02x}" for number in range(256))):
+        (mirror / name).symlink_to(objects / name)
+    names = ["clone-objects"]
+    try:
+        lines = (objects / "info" / "alternates").read_bytes().split(b"\n")
+    except FileNotFoundError:
+        lines = []
+    for line in lines:  # git's format: one folder a line, relative to the objects folder; # starts a comment
+        if line and not line.startswith((b"#", b'"')) and (objects / os.fsdecode(line)).is_dir():
+            names.append(f"alternate-{len(names)}")
+            (meta / names[-1]).symlink_to(objects / os.fsdecode(line))
+    return names
 
 
 def snapshot(store: Path, clone: Path, base: str) -> str:

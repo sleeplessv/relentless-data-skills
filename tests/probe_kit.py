@@ -2186,6 +2186,8 @@ def a3_prompt(harness: str) -> str:
 
 
 A3_BRIEF = CONTROL + " Then " + WRITE[0].lower() + WRITE[1:]
+# Resume reads the saved session, and --private saves none, so K4 and K5 run without it (#405).
+RESUMABLE = [part for part in COMMANDS["cortex"] if part != "--private"]
 PROBES.update({
     "K1": Probe(lambda h: (f"Call the task tool once with {start(AUTHOR, 'false', 'K1', 'fg')} Then call the task "
                            f"tool once with {start(AUTHOR, 'true', 'K1', 'bg')} Then call agent_output with wait "
@@ -2200,11 +2202,11 @@ PROBES.update({
                 setup=setup_limit("K3", {"author": author_brief("first", "second", "false"), "first": LEAF_BRIEF,
                                          "second": LEAF_BRIEF, "variant": author_brief("vfirst", "vsecond", "true"),
                                          "vfirst": WRITE, "vsecond": WRITE}, roles=(AUTHOR, LEAF), count=2)),
-    "K4": Probe(resume_prompt("K4", True), judge_k4, setup=setup_limit("K4", {
+    "K4": Probe(resume_prompt("K4", True), judge_k4, command=RESUMABLE, setup=setup_limit("K4", {
         "first": KEEP + WRITE + FORGET + " Then run the bash command `sleep 300 && touch {work}/probe-k4-slept.txt`.",
         "second": RECALL})),
-    "K5": Probe(resume_prompt("K5", False), judge_k5, setup=setup_limit("K5", {"first": KEEP + WRITE + FORGET,
-                                                                               "second": RECALL})),
+    "K5": Probe(resume_prompt("K5", False), judge_k5, command=RESUMABLE,
+                setup=setup_limit("K5", {"first": KEEP + WRITE + FORGET, "second": RECALL})),
     "D3": Probe(lambda h: (f"In one message, make two spawn_agent calls, both with {CODEX_START.format(role=READER)}: "
                            f"the first with the message: {line_of('D3', 'one')} and the second with the "
                            f"message: {line_of('D3', 'two')} Then call wait_agent for both and end only when both "

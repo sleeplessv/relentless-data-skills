@@ -2734,6 +2734,12 @@ class TestLimitEntries(HookTest):
                              f"{entry} cortex failed: the resume call failed: task tool failed: Agent session ... not "
                              f"found. Cannot resume.\n")  # Cortex Code's string error, with no is_error flag
 
+    def test_k4_and_k5_run_cortex_without_private_and_other_cortex_entries_keep_it(self):
+        for entry in ("K4", "K5", "K1"):  # resume reads the saved session, and --private saves none (#405)
+            self.run_entry("cortex", entry)
+            self.assertEqual("--private" in self.world.harness_starts()[-1]["args"], entry == "K1", entry)
+            self.assertIn("--bypass", self.world.harness_starts()[-1]["args"], entry)
+
     def test_k5_records_the_models_of_the_calls_that_started_and_resumed_the_agent(self):
         line = ("K5 cortex recorded: the resumed agent ran on standin-resumed-model-cortex, its first run on "
                 "standin-agent-model-cortex, at assistant event .message.model\n")

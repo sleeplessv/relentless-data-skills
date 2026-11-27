@@ -139,6 +139,7 @@ class MarkAndRecords(unittest.TestCase):
         self.world.install_upstream()
         self.world.write_mark(tree, branch="feat/one")
         self.world.probe(cwd=tree)
+        deliver_kit.github_ok(self.world)
         self.assertEqual(self.world.deliver("preflight", cwd=tree).returncode, 0)
         self.assertEqual(self.world.deliver("preflight").stdout, NO_MARK.format("preflight"))
 

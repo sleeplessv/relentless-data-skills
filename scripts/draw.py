@@ -65,7 +65,8 @@ NAMES_PIECE = re.compile(rf"""
   | (?P<op>&&|\|\||\|&?|;|&|\n)
   | (?P<word>(?:[A-Za-z0-9_./,:=@%+-]+|'[^']*'|\\[\s\S]|{EXPANSION}|"(?:[^"\\$`]|\\[\s\S]|{EXPANSION})*")+)
 """, re.X | re.A)
-PR_CREATE = re.compile(r"[ \t]+pr[ \t]+create(?=[ \t\n;&|<>]|\Z)")  # what follows a plain gh that names it
+# What follows a plain gh that names it; a < or > touching create may make it another word, as create<(...) does.
+PR_CREATE = re.compile(r"[ \t]+pr[ \t]+create(?=[ \t\n;&|]|\Z)")
 # CommonMark's HTML blocks of kinds 1 to 6: what starts one and what ends it; a blank line ends kinds 6 and 7.
 BLANK = re.compile(r"\A[ \t]*\Z")
 HTML_BLOCKS = [
@@ -102,7 +103,8 @@ Usage: python3 scripts/draw.py [--seed N]
 The pool is every ticket that meets all of these:
 - One session under $CLAUDE_CONFIG_DIR/projects (default ~/.claude) opened the
   ticket's PR, itself or through a helper: a Bash call in its log runs
-  `gh pr create` for certain, the call's result holds the PR's URL, and the
+  `gh pr create` for certain, or names it and opened the PR by its time as
+  given below, the call's result holds the PR's URL, and the
   time GitHub gives for the PR's opening falls between the call and its
   result, give or take {CLOCK_SLACK.seconds // 60} minute. No other session opened or may have opened
   the PR, and the session opened or may have opened no other PR.
@@ -153,15 +155,17 @@ The pool is every ticket that meets all of these:
   error and holds the PR's URL, GitHub's time falls in the call's span as
   above, and the call names gh pr create. A call names gh pr create when the
   three words, plain, unquoted and in that order, start one of its commands
-  after nothing but NAME=value words. Text in a here-document's body or in
-  quotes names nothing. The draw reads the text before the three words only
-  as blanks; new lines; the operators &&, ||, |, |&, ; and &, each after a
-  command; redirections; here-documents whose delimiter is letters, digits
-  and _, plain or in quotes, each body skipped to its delimiter line; and
-  words made of letters, digits and _ . / , : = @ % + -, of text in single
-  quotes, of a backslash and the character after it, of a $ before a name,
-  a name in braces or one of 0-9 @ * # ? $ ! -, and of text in double quotes
-  that holds no ` and no other $. A call with any other text before the
+  after nothing but NAME=value words, with no < or > right after create.
+  Text in a here-document's body or in quotes names nothing. The draw reads
+  the text before the three words only as blanks; new lines; the operators
+  &&, ||, |, |&, ; and &, each after a command; redirections;
+  here-documents whose delimiter is letters, digits and _, plain or in
+  quotes, each body skipped to its delimiter line, and no line of a body
+  under a plain delimiter ending in a backslash; and words made of
+  letters, digits and _ . / , : = @ % + -, of text in single quotes, of a
+  backslash and the character after it, of a $ before a name, a name in
+  braces or one of 0-9 @ * # ? $ ! -, and of text in double quotes that
+  holds no ` and no other $. A call with any other text before the
   three words does not name them. This second way takes for granted that no
   other program opened the PR during that one call.
   Any other call whose text holds gh, pr and create, in any order or case,
@@ -579,8 +583,8 @@ def names_gh_pr_create(command: str) -> bool:
     but NAME=value words, outside quotes and here-document bodies.
 
     Invariant: True only when every piece of the call before the three words is a NAMES_PIECE, read in order, with
-    each here-document's body skipped to its delimiter line. Any text it cannot read so gives False: a False may be
-    wrong, a True may not."""
+    each here-document's body skipped to its delimiter line, and no line of an unquoted body ends in a backslash.
+    Any text it cannot read so gives False: a False may be wrong, a True may not."""
     start, empty, here, at = True, True, [], 0  # start: no word but NAME=value yet; empty: no piece yet
     while at < len(command):
         found = NAMES_PIECE.match(command, at)
@@ -594,11 +598,13 @@ def names_gh_pr_create(command: str) -> bool:
                 return False
             start = empty = True
             if text == "\n":
-                for strip, delimiter in here:
+                for strip, delimiter, bare in here:
                     while (end := command.find("\n", at)) >= 0:
                         line, at = command[at:end], end + 1
                         if (line.lstrip("\t") if strip else line) == delimiter:
                             break
+                        if bare and line.endswith("\\"):  # it may join the next line, delimiter and all
+                            return False
                     else:
                         return False
                 here = []
@@ -608,7 +614,7 @@ def names_gh_pr_create(command: str) -> bool:
             empty = False
             start = start and kind == "word" and bool(re.match(r"[A-Za-z_]\w*=", text))
             if kind == "here":
-                here.append((found["strip"], found["single"] or found["double"] or found["bare"]))
+                here.append((found["strip"], found["single"] or found["double"] or found["bare"], bool(found["bare"])))
     return False
 
 

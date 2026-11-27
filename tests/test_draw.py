@@ -413,7 +413,14 @@ NAMES = {
     "cat <<'EOF'\nbody\ngh pr create": False, "cat <<'EOF' 'x\n'\nEOF\ngh pr create": False,
     'echo "$(date)"; gh pr create': False, "echo `date`; gh pr create": False, "cat <<< x; gh pr create": False,
     "&& gh pr create": False, "; gh pr create": False, "true ;; gh pr create": False,
-    "true ;& gh pr create": False, 'echo "${D:-x}"; gh pr create': False}
+    "true ;& gh pr create": False, 'echo "${D:-x}"; gh pr create': False,
+    # A line of an unquoted body that ends in a backslash may join the next, so its delimiter line may not end it;
+    # a quoted body, or an unquoted one with no such line, still ends there.
+    "cat <<EOF\nUsage: \\\nEOF\ngh pr create --fill\nEOF\ngh pr view --json url --jq .url": False,
+    "cat <<'EOF'\nUsage: \\\nEOF\ngh pr create --fill": True, "cat <<EOF\nUsage: x\nEOF\ngh pr create --fill": True,
+    # A < or > touching create may make it another word; one after a blank is a redirection.
+    "gh pr create<(printf body) || gh pr view --json url --jq .url": False, "gh pr create>(cat)": False,
+    "gh pr create<1-3> || gh pr view": False, "gh pr create --fill > out.txt": True, "gh pr create 2>&1": True}
 # The rows of FORMS["maybe"] that name gh pr create; the others do not.
 NAMED_MAYBE = {
     "gh pr create --fill || gh pr view --json url --jq .url", f"gh pr create --fill | cat <<'URL'\n{URL}\nURL",
@@ -976,14 +983,15 @@ class TestDraw(unittest.TestCase):
             self.assertEqual((entry["ready_commit"], entry["model"]), (ticket.commit("b" if ticket.draft else "a"), MODEL),
                              ticket.number)
 
-    def test_a_command_makes_its_session_the_opener_only_when_it_surely_ran_gh_pr_create(self) -> None:
+    def test_a_command_makes_its_session_the_opener_by_its_form_or_by_time_when_it_names_gh_pr_create(self) -> None:
         for does, commands in FORMS.items():
             for command in commands:
                 with self.subTest(command=label(command)):
                     # Ticket 1's session runs the command. Ticket 101's opens its PR and a second session runs it.
                     # Ticket 102's opens its PR and later runs it, printing the URL of a PR in an unlisted repo.
-                    # GitHub's time falls inside each call, so a "maybe" call that names gh pr create opens tickets
-                    # 1's and 101's PRs by time; ticket 102's unlisted PR counts on the form alone.
+                    # GitHub's time for the listed PRs of tickets 1 and 101 falls inside each call, so a "maybe" call
+                    # that names gh pr create opens them by time; ticket 102's unlisted PR has no GitHub time and
+                    # counts on the form alone.
                     world = self.world([Ticket(1, 20, command=command), Ticket(101, 100, rival=command),
                                         Ticket(102, 100, unlisted_pr_command=command)])
                     result = world.draw()

@@ -18,6 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deliver_kit  # noqa: E402
 from test_deliver_merge import AFTER, DEFAULT, PASS, answer, wrapped  # noqa: E402
 
+core = deliver_kit.load("core")
+
 KEPT_MARK = "Kept the run mark, so deliver.py finish can finish the cleanup.\n"
 NO_MARK = "REFUSED finish.no-mark: no run mark in this checkout, so no run is in progress here\nNext: deliver.py start\n"
 
@@ -424,8 +426,8 @@ class Finish(unittest.TestCase):
         self.assert_ends(self.finish(), 10, NO_MARK)
 
     def test_a_run_as_start_writes_it_waits_then_finishes_with_no_mark(self):
-        # deliver.py start writes no start record: the mark's start time bounds the run, and the
-        # branch it cuts, deliver/<route>-<run>, is the run's.
+        # A run begun before start wrote a start record: the mark's start time bounds the run, and
+        # the branch start cut, deliver/<route>-<run>, is the run's.
         w, name = self.world, "deliver/ticket-416-ab12cd34"
         w.git(w.work, "switch", "-q", "-c", name)
         head = w.commit(w.work, "start.txt", "x\n", "fix: as start writes it")
@@ -444,6 +446,39 @@ class Finish(unittest.TestCase):
             f"#416 merged: PR #12\nSwitched this checkout to main.\n"
             f"Removed the remote branch origin/{name}, the local branch {name} and the records of {name}.\n"))
         self.assertEqual((self.tips(name), self.world.records(name), self.mark().exists()), (("", ""), [], False))
+
+    def test_a_start_record_saying_not_created_keeps_a_branch_named_as_start_cuts(self):
+        w, name = self.world, "deliver/ticket-416-cd34ab12"
+        w.git(w.work, "switch", "-q", "-c", name)
+        head = w.commit(w.work, "kept.txt", "x\n", "fix: a branch start kept")
+        w.git(w.work, "push", "-q", "-u", "origin", name)
+        w.write_mark(run="cd34ab12", branch=name)
+        w.save_text(name, "request", "Source: ticket #416\n\nBuild merge.\n")
+        w.add_record(name, "start", run="cd34ab12", branch_created=False, stop_at_ready=False)
+        w.add_record(name, "pr", number=12, url="https://github.com/owner/repo/pull/12")
+        self.github(head, "MERGED")
+        self.assert_ends(self.finish(), 0, f"#416 merged: PR #12\nSwitched this checkout to main.\n"
+                                           f"Kept {name} and its records: this run did not create it.\n")
+        self.assertEqual((self.tips(name), self.mark().exists()), ((head, head), False))
+
+    def test_an_earlier_runs_records_in_the_same_second_as_the_mark_are_not_this_runs(self):
+        w, name, second = self.world, "feat/same-second", "2026-11-27T18:00:00Z"
+        w.git(w.work, "switch", "-q", "-c", name)
+        head = w.commit(w.work, "same.txt", "x\n", "fix: same second")
+        w.git(w.work, "push", "-q", "-u", "origin", name)
+        w.write_mark(run="run-2", branch=name, started=second)
+        log = core.records_dir(w.work / ".git", name) / core.RECORDS
+        log.parent.mkdir(parents=True, exist_ok=True)
+        log.write_text("".join(json.dumps(line) + "\n" for line in (
+            {"event": "pr", "at": second, "number": 12, "url": "https://github.com/owner/repo/pull/12"},
+            {"event": "ready", "at": second, "commit": head, "result": "small edit", "door": "two-way"},
+            {"event": "start", "at": second, "run": "run-2", "branch_created": False, "stop_at_ready": False},
+        )), encoding="utf-8")
+        self.github(head, "MERGED")
+        self.assert_ends(self.finish(), 0, f"{name} not started: no PR was opened\n"
+                                           f"Kept {name} and its records: no PR was opened.\n")
+        self.assertEqual(self.events(name), [("pr", None), ("ready", None), ("start", None), ("finish", False)])
+        self.assertEqual([c["args"] for c in self.world.gh_calls()], [DEFAULT])
 
 
 if __name__ == "__main__":

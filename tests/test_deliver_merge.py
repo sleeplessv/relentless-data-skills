@@ -2,7 +2,8 @@
 
 Each test runs deliver.py merge in the clone of a throwaway world from tests/deliver_kit.py, on a
 branch of its own pushed to the bare remote, with the records written by hand and GitHub played
-by the stand-in gh.
+by the stand-in gh. `StartedRun` begins its run with deliver.py start, which writes the run's
+`start` record.
 
     python3 -m unittest tests.test_deliver_merge
 """
@@ -578,7 +579,7 @@ class Merge(MergeWorld):
         self.assert_untouched("feat/other-run", head)
 
     def test_records_written_before_the_mark_belong_to_another_run(self):
-        # deliver.py start writes no start record: the mark's start time bounds the run.
+        # A run begun before start wrote a start record: the mark's start time bounds the run.
         w = self.world
         w.git(w.work, "switch", "-q", "-c", "deliver/ticket-9-run3")
         head = w.commit(w.work, "nine.txt", "x\n", "fix: nine")
@@ -593,7 +594,7 @@ class Merge(MergeWorld):
         self.assert_untouched("deliver/ticket-9-run3", head)
 
     def start_shaped(self, name: str, run: str) -> str:
-        """A branch with the records deliver.py start and the later commands write: no start record."""
+        """A branch with the records of a run begun before start wrote a start record."""
         w = self.world
         w.git(w.work, "switch", "-q", "-c", name)
         head = w.commit(w.work, f"{run}.txt", "x\n", f"fix: {run}")
@@ -648,6 +649,36 @@ class Merge(MergeWorld):
             "REFUSED merge.one-way: the door is one-way, so the owner merges PR #12\nNext: deliver.py finish\n"))
         self.assert_left_with_line("feat/late-door", head, "merge: left to the owner, one-way door",
                                    [VIEW, CHECKS, ["pr", "checks", "12", "--watch"], CHECKS, VIEW, BODY_NOW, EDIT])
+
+
+class StartedRun(unittest.TestCase):
+    """A run begun by deliver.py start, whose records then gain a PR and a passing ready."""
+
+    def test_merge_withheld_when_stop_at_ready_was_given_at_start(self):
+        w = deliver_kit.World(self.addCleanup)
+        w.install_upstream()
+        w.gh_answer(DEFAULT, "main\n")
+        deliver_kit.github_ok(w)
+        (w.work / "fix.txt").write_text("x\n", encoding="utf-8")
+        started = w.deliver("start", "--stop-at-ready")
+        self.assertEqual(started.returncode, 0, started.stdout + started.stderr)
+        branch = w.git(w.work, "branch", "--show-current")
+        w.git(w.work, "add", "fix.txt")
+        w.git(w.work, "commit", "-q", "-m", "fix: started run")
+        head = w.git(w.work, "rev-parse", "HEAD")
+        w.git(w.work, "push", "-q", "-u", "origin", branch)
+        w.add_record(branch, "pr", number=12, url="https://github.com/owner/repo/pull/12")
+        w.add_record(branch, "ready", commit=head, result="small edit", door="two-way")
+        w.gh_reset()
+        answer(w, head, checks=PASS)
+        result = w.deliver("merge", TMPDIR=str(w.root))
+        self.assertEqual((result.returncode, result.stdout, result.stderr), (10, (
+            "REFUSED merge.withheld: the merge is withheld: stop at ready was given at start\n"
+            "Next: deliver.py finish\n"), ""))
+        self.assertEqual([{k: v for k, v in r.items() if k != "at"} for r in w.records(branch) if r["event"] == "merge"],
+                         [{"event": "merge", "commit": head, "method": None,
+                           "merge_line": "merge: withheld, stop at ready was given at start"}])
+        self.assertEqual([c["args"][:2] for c in w.gh_calls()], [["pr", "view"], ["pr", "view"], ["pr", "edit"]])
 
 
 class Method(unittest.TestCase):

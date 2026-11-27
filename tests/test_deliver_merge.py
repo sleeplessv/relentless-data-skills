@@ -9,6 +9,8 @@ by the stand-in gh.
 from __future__ import annotations
 
 import json
+import os
+import shutil
 import subprocess
 import sys
 import unittest
@@ -49,6 +51,21 @@ def answer(w: deliver_kit.World, head: str, *, checks: list | None = None, after
     w.gh_answer(DEFAULT, "main\n")
 
 
+def wrapped(w: deliver_kit.World, program: str, before: str) -> str:
+    """A PATH whose `program` runs the Python `before` (with `args`, the arguments) and then the real one.
+
+    `before` may end the call itself with `sys.exit`, which makes the call fail without the real one.
+    """
+    real = shutil.which(program, path=w.base_env["PATH"])
+    folder = w.root / f"wrap-{program}-{len(list(w.root.glob(f'wrap-{program}-*')))}"
+    folder.mkdir()
+    script = folder / program
+    script.write_text(f"#!{sys.executable} -I\nimport json, os, sys\nargs = sys.argv[1:]\n{before}\n"
+                      f"os.execv({real!r}, [{real!r}, *args])\n", encoding="utf-8")
+    script.chmod(0o755)
+    return f"{folder}{os.pathsep}{w.base_env['PATH']}"
+
+
 class MergeWorld(unittest.TestCase):
     """A shared world whose clone goes back to main before each test, which cuts its own branch."""
 
@@ -82,8 +99,8 @@ class MergeWorld(unittest.TestCase):
     def answer(self, head: str, **kwargs) -> None:
         answer(self.world, head, **kwargs)
 
-    def merge(self):
-        return self.world.deliver("merge", TMPDIR=str(self.tmp))
+    def merge(self, **env: str):
+        return self.world.deliver("merge", TMPDIR=str(self.tmp), **env)
 
     def assert_ends(self, result, code: int, stdout: str, stderr: str = ""):
         self.assertEqual((result.returncode, result.stdout, result.stderr), (code, stdout, stderr))
@@ -189,9 +206,12 @@ class Merge(MergeWorld):
         w = self.world
         w.git(w.work, "switch", "-q", "-c", "feat/no-pr")
         w.write_mark(branch="feat/no-pr")
+        head = w.git(w.work, "rev-parse", "HEAD")
         self.assert_ends(self.merge(), 10, "REFUSED merge.no-pr: the records of feat/no-pr hold no PR\n"
                                            "Next: deliver.py pr\n")
         self.assertEqual(self.calls(), [])
+        self.assertEqual((w.records("feat/no-pr"), w.git(w.work, "branch", "--show-current")), ([], "feat/no-pr"))
+        self.assertEqual(self.tips("feat/no-pr"), (head, ""))
 
     def test_merge_not_open(self):
         head = self.branch("feat/closed")
@@ -199,6 +219,7 @@ class Merge(MergeWorld):
         self.assert_ends(self.merge(), 10, "REFUSED merge.not-open: PR #12 is merged, not open\n"
                                            "Next: deliver.py finish\n")
         self.assertEqual(self.calls(), [VIEW])
+        self.assert_untouched("feat/closed", head)
 
     def test_merge_not_ready(self):
         head = self.branch("feat/moved")
@@ -358,7 +379,7 @@ class Merge(MergeWorld):
     def test_workflows_that_would_not_run_on_this_pr_are_not_ci(self):
         head = self.branch("feat/not-ci", files={
             ".github/workflows/manual.yml": "on: workflow_dispatch\njobs:\n  a:\n    steps:\n      - run: echo pull_request\n",
-            ".github/workflows/release.yml": "on:\n  push:\n    branches:\n      - 'release/**'\n    tags: [v*]\n",
+            ".github/workflows/release.yml": "on:\n  push:\n    branches:\n      - 'release/*'\n    tags: [v*]\n",
             ".github/workflows/nightly.yml": "on:\n  pull_request:\n    branches: [nightly]\n  schedule:\n    - cron: '0 0 * * *'\n",
         })
         self.no_checks()
@@ -389,6 +410,37 @@ class Merge(MergeWorld):
             ".github/workflows/ci.yml has triggers this script cannot read, so CI may not have started yet\n"
             "Next: deliver.py merge\n"))
         self.assert_untouched("feat/odd-ci", head)
+
+    def assert_ci_unknown(self, branch: str, files: dict[str, str], why: str):
+        head = self.branch(branch, files=files)
+        self.no_checks()
+        self.answer(head)
+        self.assert_ends(self.merge(), 10, (
+            f"REFUSED merge.ci-unknown: GitHub reports no checks on {head[:7]}, but {why}, "
+            "so CI may not have started yet\nNext: deliver.py merge\n"))
+        self.assert_untouched(branch, head)
+
+    def test_branch_filters_this_script_does_not_fully_read_count_as_ci(self):
+        for n, pattern in enumerate(["feat/glob-[0-9]", "feat/**", "feat/glob-?", "feat/glob+"]):
+            with self.subTest(pattern=pattern):
+                self.setUp()
+                self.assert_ci_unknown(f"feat/glob-{n}", {".github/workflows/ci.yml": (
+                    f"on:\n  push:\n    branches: ['{pattern}']\n")}, ".github/workflows/ci.yml runs on push")
+
+    def test_workflow_files_with_spaces_or_accents_in_their_names_are_read(self):
+        for n, name in enumerate(["my ci.yml", "vérify.yml"]):
+            with self.subTest(name=name):
+                self.setUp()
+                self.assert_ci_unknown(f"feat/named-{n}", {f".github/workflows/{name}": "on: push\n"},
+                                       f".github/workflows/{name} runs on push")
+
+    def test_an_indented_workflow_is_read(self):
+        self.assert_ci_unknown("feat/indented", {".github/workflows/ci.yml": (
+            "  name: ci\n  on:\n    push:\n  jobs:\n    a:\n      runs-on: x\n")}, ".github/workflows/ci.yml runs on push")
+
+    def test_a_workflow_with_no_top_level_on_cannot_be_read(self):
+        self.assert_ci_unknown("feat/no-on", {".github/workflows/ci.yml": "name: ci\njobs:\n  a:\n    on: push\n"},
+                               ".github/workflows/ci.yml has triggers this script cannot read")
 
     def test_merge_not_merged(self):
         head = self.branch("feat/queued")
@@ -465,6 +517,17 @@ class Merge(MergeWorld):
         self.assertEqual(self.calls(), [VIEW])
         self.assert_untouched("feat/bad-body", head)
 
+    def test_merge_bad_body_with_a_fence_only_after_the_measurement_section(self):
+        head = self.branch("feat/late-fence")
+        body = ("## Summary\n\n<details><summary>Measurement</summary>\n\n```text\npath: x\n\n</details>\n\n"
+                "## Try it\n\n```sh\nmake check\n```\n")
+        self.answer(head, checks=PASS, body=body)
+        self.assert_ends(self.merge(), 10, (
+            "REFUSED merge.bad-body: the measurement block in PR #12's description has no closing line\n"
+            "Next: close the measurement block in PR #12's description, then deliver.py merge\n"))
+        self.assertEqual(self.calls(), [VIEW])
+        self.assert_untouched("feat/late-fence", head)
+
     def test_the_line_goes_into_the_description_as_it_is_after_the_merge(self):
         head = self.branch("feat/edited")
         self.answer(head, checks=PASS, body_now=BODY.replace("Fix the typo.", "Fix the typo, edited by the owner."))
@@ -499,9 +562,92 @@ class Merge(MergeWorld):
         self.world.add_record("feat/new-run", "start", run="run-2", branch_created=True)
         self.world.write_mark(run="run-2", branch="feat/new-run")
         self.answer(head, checks=PASS)
+        self.saved = self.world.records("feat/new-run")
         self.assert_ends(self.merge(), 10, "REFUSED merge.no-pr: the records of feat/new-run hold no PR\n"
                                            "Next: deliver.py pr\n")
         self.assertEqual(self.calls(), [])
+        self.assert_untouched("feat/new-run", head)
+
+    def test_a_mark_whose_run_has_no_start_of_its_own_decides_nothing(self):
+        head = self.branch("feat/other-run")
+        self.world.write_mark(run="run-2", branch="feat/other-run")
+        self.answer(head, checks=PASS)
+        self.assert_ends(self.merge(), 10, "REFUSED merge.no-pr: the records of feat/other-run hold no PR\n"
+                                           "Next: deliver.py pr\n")
+        self.assertEqual(self.calls(), [])
+        self.assert_untouched("feat/other-run", head)
+
+    def test_records_written_before_the_mark_belong_to_another_run(self):
+        # deliver.py start writes no start record: the mark's start time bounds the run.
+        w = self.world
+        w.git(w.work, "switch", "-q", "-c", "deliver/ticket-9-run3")
+        head = w.commit(w.work, "nine.txt", "x\n", "fix: nine")
+        w.git(w.work, "push", "-q", "-u", "origin", "deliver/ticket-9-run3")
+        w.add_record("deliver/ticket-9-run3", "pr", number=12, url="https://github.com/owner/repo/pull/12")
+        w.add_record("deliver/ticket-9-run3", "ready", commit=head, result="small edit", door="two-way")
+        w.write_mark(run="run3", branch="deliver/ticket-9-run3", started="2999-01-01T00:00:00Z")
+        self.saved = w.records("deliver/ticket-9-run3")
+        self.answer(head, checks=PASS)
+        self.assert_ends(self.merge(), 10, "REFUSED merge.no-pr: the records of deliver/ticket-9-run3 hold no PR\n"
+                                           "Next: deliver.py pr\n")
+        self.assert_untouched("deliver/ticket-9-run3", head)
+
+    def start_shaped(self, name: str, run: str) -> str:
+        """A branch with the records deliver.py start and the later commands write: no start record."""
+        w = self.world
+        w.git(w.work, "switch", "-q", "-c", name)
+        head = w.commit(w.work, f"{run}.txt", "x\n", f"fix: {run}")
+        w.git(w.work, "push", "-q", "-u", "origin", name)
+        w.write_mark(run=run, branch=name, started="2000-01-01T00:00:00Z")
+        w.save_text(name, "request", "Source: ticket #9\n\nFix it.\n")
+        w.add_record(name, "save", kind="request", file="request.md", commit=None)
+        w.add_record(name, "pr", number=12, url="https://github.com/owner/repo/pull/12")
+        w.add_record(name, "ready", commit=head, result="small edit", door="two-way")
+        return head
+
+    def test_a_branch_start_cut_for_the_run_is_removed(self):
+        head = self.start_shaped("deliver/ticket-9-ab12cd34", "ab12cd34")
+        self.answer(head, checks=PASS)
+        self.assert_ends(self.merge(), 0, (
+            f"Merged PR #12 with squash at {head[:7]}.\nSwitched this checkout to main.\n"
+            "Removed the remote branch origin/deliver/ticket-9-ab12cd34 and the local branch deliver/ticket-9-ab12cd34.\n"))
+
+    def test_a_branch_start_found_checked_out_is_kept(self):
+        head = self.start_shaped("feat/owners", "cd34ab12")
+        self.answer(head, checks=PASS)
+        self.assert_ends(self.merge(), 0, (
+            f"Merged PR #12 with squash at {head[:7]}.\nSwitched this checkout to main.\n"
+            "Kept feat/owners: this run did not create it.\n"))
+        self.assertEqual(self.tips("feat/owners"), (head, head))
+
+    def test_merge_behind_when_the_base_moved_past_the_head(self):
+        w = self.world
+        head = self.branch("feat/stale")
+        w.git(w.work, "switch", "-q", "main")
+        w.commit(w.work, "base-moved.txt", "b\n", "chore: the base moves")
+        w.git(w.work, "push", "-q", "origin", "main")
+        w.git(w.work, "switch", "-q", "feat/stale")
+        self.answer(head, checks=PASS)
+        self.assert_ends(self.merge(), 10, (
+            "REFUSED merge.behind: PR #12 is behind main, so it goes back to its author\n" + NEXT_BACK))
+        self.assertEqual(self.calls(), [VIEW, CHECKS, VIEW])
+        self.assert_untouched("feat/stale", head)
+
+    def test_a_ready_record_written_during_the_ci_wait_decides(self):
+        head = self.branch("feat/late-door")
+        log = self.world.work / ".git" / "deliver" / "branches" / "feat" / "late-door" / "records.jsonl"
+        line = json.dumps({"event": "ready", "at": "2026-11-27T20:00:00Z", "commit": head,
+                           "result": "needs review", "door": "one-way"})
+        path = wrapped(self.world, "gh", f"if args[:2] == ['pr', 'checks'] and '--watch' in args:\n"
+                                         f"    open({str(log)!r}, 'a').write({line!r} + '\\n')")
+        self.world.gh_answer(CHECKS, json.dumps([{"name": "tests", "bucket": "pending"}]), once=True)
+        self.world.gh_answer(["pr", "checks", "12", "--watch"])
+        self.answer(head, checks=PASS)
+        self.assert_ends(self.merge(PATH=path), 10, (
+            "Waiting for pending checks on PR #12: tests.\n"
+            "REFUSED merge.one-way: the door is one-way, so the owner merges PR #12\nNext: deliver.py finish\n"))
+        self.assert_left_with_line("feat/late-door", head, "merge: left to the owner, one-way door",
+                                   [VIEW, CHECKS, ["pr", "checks", "12", "--watch"], CHECKS, VIEW, BODY_NOW, EDIT])
 
 
 class Method(unittest.TestCase):
@@ -531,7 +677,7 @@ class Method(unittest.TestCase):
         head = w.commit(w.work, "m.txt", "m\n", "fix: method")
         w.git(w.work, "push", "-q", "-u", "origin", "feat/method")
         w.write_mark(branch="feat/method")
-        w.add_record("feat/method", "start", branch_created=True)
+        w.add_record("feat/method", "start", run="run-1", branch_created=True)
         w.add_record("feat/method", "pr", number=12, url="https://github.com/owner/repo/pull/12")
         w.add_record("feat/method", "ready", commit=head, result="small edit", door="two-way")
         answer(w, head, checks=PASS)
@@ -555,6 +701,12 @@ class Method(unittest.TestCase):
         for n in range(60):
             world.commit(world.work, "direct.txt", f"{n}\n", f"chore: direct push {n}")
         world.git(world.work, "push", "-q", "origin", "main")
+        self.assertEqual(self.merged_with(world)[3], "--merge")
+
+    def test_a_direct_commit_github_made_after_a_merge_is_skipped(self):
+        world = deliver_kit.World(self.addCleanup)
+        self.land(world, "Merge pull request #3 from owner/side", merge=True)
+        self.land(world, "docs: fix a spelling")  # an edit on GitHub: committed by GitHub, dates equal
         self.assertEqual(self.merged_with(world)[3], "--merge")
 
     def test_history_of_squashed_commits_squashes(self):

@@ -1,11 +1,12 @@
 """deliver.py merge: merge the run's PR, or say why it waits (#176 rules 15 to 19; #256 merge row).
 
-`merge` reads only the records of the marked run (`cleanup.run_records`). In order, it:
+`merge` reads only the records of the marked run (`cleanup.run_records`), and reads them again
+after the CI wait. In order, it:
 
 1. refuses `merge.no-pr` when the run's records hold no `pr` record, and `merge.not-open` unless
    GitHub shows that PR open;
-2. refuses `merge.bad-body` when the PR description's measurement block has no closing line, so
-   the merge line could not be written;
+2. refuses `merge.bad-body` when the PR description's measurement block has no closing fence
+   before its `</details>`, so the merge line could not be written;
 3. refuses `merge.not-ready` unless a `ready` record is tied to the PR's head commit. When that
    record's door is not `two-way` it refuses `merge.one-way`, whatever the small test found;
    otherwise it refuses `merge.not-ready` unless the record's result is `small edit`;
@@ -20,16 +21,20 @@
    checks wait through `gh pr checks --watch`, then CI is read again. "No checks reported" is
    trusted only after a second look: a workflow run listed for the head commit, or a workflow in
    the head commit's tree whose triggers would run on this branch's push or on a PR into its
-   base, refuses `merge.ci-unknown`, since CI may not have started. With neither, the merge line
-   records `checks: none reported`;
-7. reads the PR again and runs steps 1 to 5 again on what it shows now, the head commit
-   included, and refuses `merge.mergeable-unknown` while GitHub has not worked out whether the PR
-   can merge. A `BLOCKED` merge state here, with CI done, is withheld by the branch rules;
-8. merges with `gh pr merge <PR> --<method> --match-head-commit <head>`, the method read from the
-   base branch's history (`merge.no-history` when it cannot be read), then confirms with `gh pr
+   base, refuses `merge.ci-unknown`, since CI may not have started. A workflow whose triggers or
+   branch filters this script cannot fully read counts as one that would run. With neither, the
+   merge line records `checks: none reported`;
+7. reads the PR and the run's records again and runs steps 1 to 5 again on what they show now,
+   the head commit included, and refuses `merge.mergeable-unknown` while GitHub has not worked out
+   whether the PR can merge. A `BLOCKED` merge state here, with CI done, is withheld by the
+   branch rules;
+8. reads the method from the base branch's history (`merge.no-history` when it cannot be read)
+   and refuses `merge.behind` unless the base branch's tip on `origin` is in the head commit's
+   history;
+9. merges with `gh pr merge <PR> --<method> --match-head-commit <head>`, then confirms with `gh pr
    view`, routing by the state it shows and not by the exit code: a PR that is not merged
    refuses `merge.not-merged`;
-9. writes the merge line into the description as GitHub holds it then, appends the `merge`
+10. writes the merge line into the description as GitHub holds it then, appends the `merge`
    record and calls cleanup.
 
 The merge line is `merge: <value>` in the PR description's measurement block. It replaces a
@@ -71,13 +76,17 @@ AGAIN = "deliver.py merge"
 BACK = "git pull --no-rebase origin {base}, then deliver.py check, deliver.py pr and deliver.py ready again"
 # Workflow events whose runs report checks on a PR's head commit.
 CI_EVENTS = ("push", "pull_request", "pull_request_target")
+EVENT = re.compile(r"[a-z_]+")
+# A branch filter this script reads: plain characters and single `*`. Anything else counts as CI.
+PLAIN = re.compile(r"(?:[A-Za-z0-9._/-]|\*(?!\*))+")
 
 
 def main(args: list[str], run: core.Run) -> None:
     if args:
         raise core.UsageError(f"merge takes no arguments, got: {' '.join(args)}")
     branch = run.mark["branch"]
-    recs = cleanup.run_records(cleanup.records(run, branch), run.mark["run"])
+    run_id, started = run.mark["run"], run.mark.get("started")
+    recs = cleanup.run_records(cleanup.records(run, branch), run_id, started)
     pr_record = cleanup.latest(recs, "pr")
     if pr_record is None:
         raise core.Refused("merge.no-pr", "deliver.py pr", branch=branch)
@@ -87,8 +96,11 @@ def main(args: list[str], run: core.Run) -> None:
     _eligible(run, branch, recs, number, pr, head, ci_done=False)
     no_checks = _ci(run, number, head, branch, pr["baseRefName"])
     pr = _view(run, number)
+    log = cleanup.records(run, branch)
+    recs = cleanup.run_records(log, run_id, started)
     _eligible(run, branch, recs, number, pr, head, ci_done=True)
     method = _method(run, pr["baseRefName"])
+    _base_in(run, pr["baseRefName"], head, branch, number)
     merged = subprocess.run(
         ["gh", "pr", "merge", str(number), f"--{method}", "--match-head-commit", head],
         cwd=run.checkout, capture_output=True, text=True)
@@ -100,7 +112,8 @@ def main(args: list[str], run: core.Run) -> None:
     line = LINE["merged"].format(method=method) + (LINE["no-checks"] if no_checks else "")
     _write(run, branch, number, head, method, line)
     default = cleanup.default_branch(run)
-    for out in cleanup.clean(run, branch, default, after, recs, remove_records=False).lines:
+    for out in cleanup.clean(run, branch, default, after, remove_records=False, created=cleanup.created(recs, branch, run_id),
+                             later=cleanup.later_run(log, run_id, started)).lines:
         print(out)
 
 
@@ -191,16 +204,22 @@ def _ci(run: core.Run, number: int, head: str, branch: str, base: str) -> bool:
 
 def _workflow_ci(run: core.Run, head: str, branch: str, base: str) -> str | None:
     """Why CI may still report on `head`, read from the workflows in its tree, or None."""
-    if cleanup.git(run, "cat-file", "-e", f"{head}^{{commit}}", check=False).returncode != 0:
-        cleanup.git(run, "fetch", "--quiet", "origin", branch, check=False)
-        if cleanup.git(run, "cat-file", "-e", f"{head}^{{commit}}", check=False).returncode != 0:
-            return f"the workflows of {head[:7]} cannot be read"
-    listed = cleanup.git(run, "ls-tree", "--name-only", f"{head}:.github/workflows", check=False)
-    for name in sorted(listed.stdout.split() if listed.returncode == 0 else []):
+    if not _have(run, head, branch):
+        return f"the workflows of {head[:7]} cannot be read"
+    tree = cleanup.git(run, "ls-tree", f"{head}", ".github/", check=False)
+    if tree.returncode != 0:
+        return f"the workflows of {head[:7]} cannot be read"
+    if not tree.stdout.strip():
+        return None
+    listed = cleanup.git(run, "ls-tree", "-z", "--name-only", f"{head}:.github/workflows", check=False)
+    if listed.returncode != 0:
+        has = cleanup.git(run, "ls-tree", f"{head}:.github", "workflows", check=False)
+        return None if has.returncode == 0 and not has.stdout.strip() else f"the workflows of {head[:7]} cannot be read"
+    for name in sorted(n for n in listed.stdout.split("\0") if n):
         if not name.endswith((".yml", ".yaml")):
             continue
-        text = cleanup.git(run, "show", f"{head}:.github/workflows/{name}").stdout
-        triggers = triggers_of(text)
+        shown = cleanup.git(run, "cat-file", "blob", f"{head}:.github/workflows/{name}", check=False)
+        triggers = triggers_of(shown.stdout) if shown.returncode == 0 else None
         if triggers is None:
             return f".github/workflows/{name} has triggers this script cannot read"
         for event in CI_EVENTS:
@@ -209,23 +228,42 @@ def _workflow_ci(run: core.Run, head: str, branch: str, base: str) -> str | None
     return None
 
 
+def _have(run: core.Run, head: str, branch: str) -> bool:
+    """Whether the head commit is in this clone, fetched from the PR's branch when it is not."""
+    if cleanup.git(run, "cat-file", "-e", f"{head}^{{commit}}", check=False).returncode == 0:
+        return True
+    cleanup.git(run, "fetch", "--quiet", "origin", branch, check=False)
+    return cleanup.git(run, "cat-file", "-e", f"{head}^{{commit}}", check=False).returncode == 0
+
+
 def triggers_of(text: str) -> dict[str, dict | None] | None:
     """A workflow's `on:` events, each with its branch and tag filters, or None when it cannot be read.
 
     Reads the forms `on: push`, `on: [push, pull_request]` and a block of events, each with no
     value or with `branches`, `branches-ignore`, `tags` and `tags-ignore` lists, inline or as a
-    block. Other filters (paths, types) are ignored, which can only count more runs.
+    block, at whatever indentation the file's top level has. Other filters (paths, types) are
+    ignored, which can only count more runs. A file with no top-level `on:`, or with a form not
+    listed here, cannot be read.
     """
     lines = [re.sub(r"(^|\s)#.*$", "", raw).rstrip() for raw in text.splitlines()]
+    lines = [line for line in lines if line.strip() and line.strip() != "---"]
+    if not lines:
+        return None
+    top = min(len(line) - len(line.lstrip()) for line in lines)
+    if "\t" in "".join(line[:len(line) - len(line.lstrip())] for line in lines):
+        return None
+    lines = [line[top:] for line in lines]
     at = next((i for i, line in enumerate(lines) if re.match(r"""^(on|"on"|'on'|true)\s*:""", line)), None)
     if at is None:
-        return {}
+        return None
     rest = lines[at].split(":", 1)[1].strip()
     if rest.startswith("{"):
         return None
     if rest:
         names = _flow_list(rest) if rest.startswith("[") else [_unquote(rest)]
-        return None if names is None else dict.fromkeys(names)
+        if names is None or not all(EVENT.fullmatch(n) for n in names):
+            return None
+        return dict.fromkeys(names)
     block = []
     for line in lines[at + 1:]:
         if line and not line[0].isspace():
@@ -242,12 +280,16 @@ def triggers_of(text: str) -> dict[str, dict | None] | None:
         if depth == indent:
             key = None
             if item.startswith("- "):
+                if not EVENT.fullmatch(_unquote(item[2:])):
+                    return None
                 event, events[_unquote(item[2:])] = None, None
                 continue
             name, _, value = item.partition(":")
             if value.strip() not in ("", "null", "~", "{}"):
                 return None
             event = _unquote(name)
+            if not EVENT.fullmatch(event):
+                return None
             events[event] = None
         elif depth < indent or event is None:
             return None
@@ -274,17 +316,16 @@ def _runs(filters: dict | None, name: str, event: str) -> bool:
     if include is None and exclude is None:
         return not (event == "push" and ("tags" in filters or "tags-ignore" in filters))
     patterns = (include or []) + (exclude or [])
-    if any(p.startswith("!") for p in patterns):
-        return True  # a negated pattern: count the run rather than read the order
+    if any(not PLAIN.fullmatch(p) for p in patterns):
+        return True  # a pattern this script does not fully read (`!`, `**`, `?`, `+`, `[...]`): count the run
     if include is not None:
         return any(_glob(p, name) for p in include)
     return not any(_glob(p, name) for p in exclude)
 
 
 def _glob(pattern: str, name: str) -> bool:
-    """GitHub's filter pattern: `*` stops at `/`, `**` does not."""
-    regex = re.escape(pattern).replace(r"\*\*", "\0").replace(r"\*", "[^/]*").replace("\0", ".*").replace(r"\?", ".")
-    return re.fullmatch(regex, name) is not None
+    """A filter pattern of `PLAIN` characters, where `*` matches any run of characters but `/`."""
+    return re.fullmatch(re.escape(pattern).replace(r"\*", "[^/]*"), name) is not None
 
 
 def _flow_list(text: str) -> list[str] | None:
@@ -299,7 +340,13 @@ def _unquote(text: str) -> str:
 
 
 def _method(run: core.Run, base: str) -> str:
-    """The method the newest PR landed on the base branch shows; squash when no PR has landed."""
+    """The method the newest PR landed on the base branch shows; squash when no PR has landed.
+
+    A commit on the base branch's first-parent line is a PR landing when it has two parents, its
+    subject names a PR (`(#N)` or "Merge pull request #"), or GitHub committed it later than it was
+    authored, as a rebase merge does. Other commits, such as a direct push or an edit made on
+    GitHub, are skipped.
+    """
     fetch = cleanup.git(run, "fetch", "--quiet", "origin", base, check=False)
     if fetch.returncode != 0:
         raise core.Refused("merge.no-history", f"git fetch origin {base}, then {AGAIN}", base=base,
@@ -311,15 +358,26 @@ def _method(run: core.Run, base: str) -> str:
                            error=log.stderr.strip())
     for line in log.stdout.splitlines():
         parents, committer, authored, committed, subject = line.split("\x1f", 4)
-        landed = committer == "GitHub" or PR_NUMBER.search(subject) or subject.startswith("Merge pull request #")
-        if not landed:
-            continue
         if len(parents.split()) > 1:
             return "merge"
-        if committer == "GitHub" and not PR_NUMBER.search(subject) and authored != committed:
+        if PR_NUMBER.search(subject) or subject.startswith("Merge pull request #"):
+            return "squash"
+        if committer == "GitHub" and authored != committed:
             return "rebase"
-        return "squash"
     return "squash"
+
+
+def _base_in(run: core.Run, base: str, head: str, branch: str, number: int) -> None:
+    """Refuse `merge.behind` unless the tip of `origin/<base>`, fetched by `_method`, is in the head's history."""
+    if not _have(run, head, branch):
+        raise core.Refused("merge.no-history", f"git fetch origin {branch}, then {AGAIN}", base=branch,
+                           error=f"the head commit {head[:7]} is not in this clone")
+    within = cleanup.git(run, "merge-base", "--is-ancestor", f"refs/remotes/origin/{base}", head, check=False)
+    if within.returncode == 1:
+        raise core.Refused("merge.behind", BACK.format(base=base), number=number, base=base)
+    if within.returncode != 0:
+        raise core.Refused("merge.no-history", f"git fetch origin {base}, then {AGAIN}", base=base,
+                           error=cleanup._said(within))
 
 
 def _write(run: core.Run, branch: str, number: int, head: str, method: str | None, value: str) -> None:
@@ -344,7 +402,7 @@ def _write(run: core.Run, branch: str, number: int, head: str, method: str | Non
 def with_line(body: str, line: str) -> str | None:
     """The description with the merge line in its measurement block, which is added if missing.
 
-    None when the last block opens but never closes.
+    None when the last block opens but its closing fence does not come before its `</details>`.
     """
     lines = body.replace("\r\n", "\n").rstrip("\n").split("\n")
     opening, closing = list(render.MEASUREMENT_OPEN), render.MEASUREMENT_CLOSE[0]
@@ -355,6 +413,8 @@ def with_line(body: str, line: str) -> str | None:
     if closing not in lines[first:]:
         return None
     end = lines.index(closing, first)
+    if "</details>" in lines[first:end] or "</details>" not in lines[end:]:
+        return None
     old = [i for i in range(first, end) if lines[i].startswith(f"{KEY}:")]
     if old:
         lines[old[0]] = line

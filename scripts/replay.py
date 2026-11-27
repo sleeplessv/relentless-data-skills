@@ -296,10 +296,11 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
         raise unreadable("git ls-files reported an error")
     paths = [Path(os.fsdecode(path)) for path in listed.stdout.split(b"\0") if path]
     # Each path must name a file or link in the clone itself: not under .git/, and not reached through a link
-    # or as a folder, which a forced add would take whole, ignored files and all.
+    # or as a folder, which a forced add would take whole, ignored files and all. os.path answers False where the
+    # name cannot be looked up, too long for one, which Path raises for before Python 3.14.
     return [os.fsencode(path) for path in paths if ".." not in path.parts and path.parts[0] != ".git"
-            and not any((clone / Path(*path.parts[:end])).is_symlink() for end in range(1, len(path.parts)))
-            and ((clone / path).is_symlink() or (clone / path).is_file())]
+            and not any(os.path.islink(clone / Path(*path.parts[:end])) for end in range(1, len(path.parts)))
+            and (os.path.islink(clone / path) or os.path.isfile(clone / path))]
 
 
 def shared_index(data: bytes) -> str | None:

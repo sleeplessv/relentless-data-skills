@@ -176,9 +176,9 @@ The pool is every ticket that meets all of these:
   letters, digits and _ . / , : = @ % + -, of text in single quotes, of a
   backslash and the character after it, of a $ before a name, a name in
   braces or one of 0-9 @ * # ? $ ! -, and of text in double quotes that
-  holds no ` and no other $. A call with any other text before the
-  three words does not name them. This second way takes for granted that no
-  other program opened the PR during that one call.
+  holds no unescaped ` and no other unescaped $. A call with any other
+  text before the three words does not name them. This second way takes
+  for granted that no other program opened the PR during that one call.
   Any other call whose text holds gh, pr and create, in any order or case,
   with any text beside each, once its quotes, backslashes, $ signs and
   backslash-new lines are taken out, may have opened the PR its result

@@ -45,8 +45,6 @@
 set -euo pipefail
 started="$(date '+%Y-%m-%d %H:%M:%S')"
 
-cd "$(git rev-parse --show-toplevel)"
-
 fast=0
 network=0
 browser=0
@@ -74,6 +72,9 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# After the arguments, so --help reads "$0" from the caller's directory.
+cd "$(git rev-parse --show-toplevel)"
 
 if [ -z "$base" ]; then
   base="$(git merge-base HEAD origin/main 2>/dev/null || echo main)"

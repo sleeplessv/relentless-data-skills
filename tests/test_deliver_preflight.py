@@ -16,7 +16,8 @@ import deliver_kit  # noqa: E402
 
 preflight = deliver_kit.load("preflight")
 MISSING = "no docs/agents/stack.toml: every stack setting has its default"
-NO_CHECK = "check_command is empty in docs/agents/stack.toml, so ready relies on the check plan's commands"
+NO_CHECK = ("check_command is empty in docs/agents/stack.toml, so ready relies on the check plan's commands: "
+            "set check_command there to the command that runs this repo's checks")
 
 
 def without_at(lines: list[dict]) -> list[dict]:

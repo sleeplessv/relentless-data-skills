@@ -1,9 +1,10 @@
 """Preflight's checks that do not depend on the harness (#420).
 
-Each test runs `deliver.py preflight` at its command line in one shared throwaway world with a
-run mark, a stand-in `gh` and, where a check reads them, its own git config, stack settings and
-stand-ins. A clean world passes every check, so a test changes one thing and asserts the whole
-output.
+`Order` reads `preflight.CHECKS` in process and pins the order of the checks. Each test in
+`Checks` runs `deliver.py preflight` at its command line in one shared throwaway world with a run
+mark, a stand-in `gh` and, where a check reads them, its own git config, stack settings and
+stand-ins. A clean world passes every check, so a `Checks` test changes one thing and asserts the
+whole output and the exit code.
 
     python3 -m unittest tests.test_deliver_checks_env
 """
@@ -34,6 +35,7 @@ echo "[GNUPG:] SIG_CREATED D 1 8 00 1 X" >&2
 printf -- '-----BEGIN PGP SIGNATURE-----\\n\\nAA==\\n-----END PGP SIGNATURE-----\\n'
 """
 BAD_GPG = '#!/bin/sh\necho "gpg: signing failed: No secret key" >&2\nexit 2\n'
+NO_COUNT = "it printed no count"
 
 
 def repo_view(repo="owner/repo", branch="main", permission="ADMIN", issues=True) -> str:
@@ -58,7 +60,9 @@ class Checks(unittest.TestCase):
         cls.common = Path(cls.world.git(cls.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
         cls.tools = cls.world.root / "tools"
         cls.tools.mkdir()
-        for name, text in (("good-gpg", GOOD_GPG), ("bad-gpg", BAD_GPG)):
+        calls = cls.world.root / "count-calls"
+        counter = f'#!/bin/sh\n[ $# -ge 1 ] || exit 64\nprintf "%s\\n" "$*" >> {calls}\necho 3\n'
+        for name, text in (("good-gpg", GOOD_GPG), ("bad-gpg", BAD_GPG), ("count", counter)):
             (cls.tools / name).write_text(text, encoding="utf-8")
             (cls.tools / name).chmod(0o755)
 
@@ -84,10 +88,12 @@ class Checks(unittest.TestCase):
         return 10, f"REFUSED {code}: {reason}\nNext: {next_command}{RERUN}\n", ""
 
     def path_with(self, **tools: str | Path) -> str:
-        """A PATH holding git, the stand-in gh and the named tools: a file's text, or a link's target."""
+        """A PATH holding git, the stand-in gh and the named tools: a file's text, a link's target, or None for none."""
         folder = self.world.root / f"path-{self.id().rsplit('.', 1)[-1]}"
         folder.mkdir()
         for name, target in {"git": shutil.which("git"), "gh": self.world.bin / "gh", **tools}.items():
+            if target is None:
+                continue
             if isinstance(target, str) and target.startswith("#!"):
                 (folder / name).write_text(target, encoding="utf-8")
                 (folder / name).chmod(0o755)
@@ -121,7 +127,8 @@ class Checks(unittest.TestCase):
         blocked.write_text("a file where the folder goes\n", encoding="utf-8")
         self.addCleanup(blocked.unlink)
         self.assertEqual(self.preflight(), self.refused(
-            "preflight.cannot-write", f"the run cannot write {blocked}: File exists", "make that folder writable"))
+            "preflight.cannot-write", f"the run cannot write {blocked}: File exists",
+            f"move or delete the file {blocked}, which sits where a folder is needed"))
         self.assertEqual(self.world.state_lines("preflight-stops.jsonl")[-1]["code"], "preflight.cannot-write")
 
     def test_preflight_cannot_write_the_machine_directory(self):
@@ -132,7 +139,7 @@ class Checks(unittest.TestCase):
         self.addCleanup(state.chmod, 0o755)
         self.assertEqual(self.preflight(DELIVER_STATE_DIR=str(state)), self.refused(
             "preflight.cannot-write", f"the run cannot write {state}: Permission denied",
-            "make that folder writable or set DELIVER_STATE_DIR to one that is"))
+            f"`chmod u+w {state}`, or set DELIVER_STATE_DIR to a folder you can write"))
         self.assertEqual([r["stops"] for r in self.world.records()][-1:], [["preflight.cannot-write"]])
 
     # Signing: a test signature where git signs commits.
@@ -158,17 +165,22 @@ class Checks(unittest.TestCase):
         self.assertEqual(self.preflight(), self.refused(
             "preflight.gh-signed-out", "gh is not signed in to GitHub", "gh auth login"))
 
+    def test_preflight_no_gh(self):
+        path = self.path_with(gh=None, python3=sys.executable)
+        self.assertEqual(self.preflight(PATH=path), self.refused(
+            "preflight.no-gh", "gh cannot be started: No such file or directory", "install gh from https://cli.github.com"))
+
     def test_preflight_no_github(self):
         self.world.gh_answer(["repo", "view"], stderr="error connecting to api.github.com\n", exit=1)
         self.assertEqual(self.preflight(), self.refused(
             "preflight.no-github", "gh cannot read this repo from GitHub: error connecting to api.github.com",
-            "fix what `gh repo view` prints here"))
+            "`gh repo set-default` to name this checkout's GitHub repo, or `gh auth status` if gh cannot reach GitHub"))
 
     def test_preflight_cannot_push(self):
         self.world.gh_answer(["repo", "view"], stdout=repo_view(permission="READ"))
         self.assertEqual(self.preflight(), self.refused(
             "preflight.cannot-push", "the gh account cannot push to owner/repo: its permission is READ",
-            "gh auth login as an account that can push to owner/repo"))
+            "`gh auth login` as an account that can push to owner/repo"))
 
     def test_write_permission_passes(self):
         self.world.gh_answer(["repo", "view"], stdout=repo_view(permission="WRITE"))
@@ -177,8 +189,8 @@ class Checks(unittest.TestCase):
     def test_issues_off_with_follow_ups_on_warns(self):
         self.world.gh_answer(["repo", "view"], stdout=repo_view(issues=False))
         self.assertEqual(self.preflight(), (
-            0, 'warning: issues are off on owner/repo, so each follow-up is listed as "follow-up not filed"\n' + CLEAN,
-            ""))
+            0, 'warning: issues are off on owner/repo, so each follow-up is listed as "follow-up not filed": turn issues '
+            "on in the repo's settings, or set follow_ups = false in docs/agents/stack.toml\n" + CLEAN, ""))
 
     def test_issues_off_with_follow_ups_off_passes(self):
         self.stack(STACK + "follow_ups = false\n")
@@ -218,7 +230,7 @@ class Checks(unittest.TestCase):
         self.stack("")
         self.assertEqual(self.preflight(), (
             0, "warning: check_command is empty in docs/agents/stack.toml, so ready relies on the check plan's "
-            "commands\n" + CLEAN, ""))
+            "commands: set check_command there to the command that runs this repo's checks\n" + CLEAN, ""))
 
     def test_reach_commands_that_run_pass(self):
         ran = self.world.root / "reach-ran"
@@ -231,31 +243,54 @@ class Checks(unittest.TestCase):
         self.stack(STACK + '[reach]\nread = "true"\nbuild = "echo no build >&2; exit 3"\n')
         self.assertEqual(self.preflight(), self.refused(
             "preflight.reach-failed", "the reach command build, `echo no build >&2; exit 3`, failed with exit 3: "
-            "no build", "fix what `echo no build >&2; exit 3` needs"))
+            "no build", "change [reach] build in docs/agents/stack.toml, or what it reaches, until "
+            "`echo no build >&2; exit 3` exits 0"))
 
-    def recording_sh(self) -> tuple[str, Path]:
-        """A PATH whose first `sh` records each call, and the file it records to."""
-        calls = self.world.root / f"sh-calls-{self.id().rsplit('.', 1)[-1]}"
-        sh = f'#!/bin/sh\nprintf "%s\\n" "$*" >> {calls}\nexec /bin/sh "$@"\n'
-        return f"{self.path_with(sh=sh)}{os.pathsep}{self.world.base_env['PATH']}", calls
+    def test_reach_command_without_sh_stops(self):
+        self.stack(STACK + '[reach]\nread = "true"\n')
+        self.assertEqual(self.preflight(PATH=self.path_with(python3=sys.executable)), self.refused(
+            "preflight.reach-failed", "the reach command read, `true`, failed with exit 127: sh: No such file or directory",
+            "change [reach] read in docs/agents/stack.toml, or what it reaches, until `true` exits 0"))
+
+    def test_reach_output_that_is_not_utf_8_is_read_with_replacement(self):
+        self.stack(STACK + "[reach]\nread = 'printf \"\\377\"'\nbuild = 'printf \"no \\377 build\" >&2; exit 3'\n")
+        self.assertEqual(self.preflight(), self.refused(
+            "preflight.reach-failed", "the reach command build, `printf \"no \\377 build\" >&2; exit 3`, failed with "
+            "exit 3: no \ufffd build", "change [reach] build in docs/agents/stack.toml, or what it reaches, until "
+            "`printf \"no \\377 build\" >&2; exit 3` exits 0"))
+
+    # The dependents command, run as the small test runs it, on the world's one tracked path.
+
+    def dependents(self, command: str) -> None:
+        self.stack(STACK + f'[small_edit]\ndependents_command = "{command}"\n')
 
     def test_empty_dependents_command_runs_nothing_and_warns_nothing(self):
-        path, calls = self.recording_sh()
-        self.assertEqual(self.preflight(PATH=path), (0, CLEAN, ""))
+        """A `README.md` on PATH records a call: an empty command run on the path would start it."""
+        calls = self.world.root / "readme-calls"
+        path = self.path_with(**{"README.md": f'#!/bin/sh\necho ran >> {calls}\necho 3\n', "python3": sys.executable})
+        self.assertEqual(self.preflight(PATH=f"{path}{os.pathsep}/bin"), (0, CLEAN, ""))
         self.assertFalse(calls.exists())
 
-    def test_dependents_command_that_runs_passes(self):
-        path, calls = self.recording_sh()
-        self.stack(STACK + '[small_edit]\ndependents_command = "echo 3"\n')
-        self.assertEqual(self.preflight(PATH=path), (0, CLEAN, ""))
-        self.assertEqual(calls.read_text(encoding="utf-8"), "-c echo 3\n")
+    def test_dependents_command_that_needs_a_path_passes(self):
+        calls = self.world.root / "count-calls"
+        self.addCleanup(lambda: calls.unlink(missing_ok=True))
+        self.dependents(self.tools / "count")
+        self.assertEqual(self.preflight(), (0, CLEAN, ""))
+        self.assertEqual(calls.read_text(encoding="utf-8"), "README.md\n")
 
     def test_failing_dependents_command_warns(self):
-        self.stack(STACK + '[small_edit]\ndependents_command = "exit 4"\n')
+        self.dependents(self.tools / "bad-gpg")
         self.assertEqual(self.preflight(), (
-            0, "warning: the dependents command `exit 4` failed with exit 4, so every change gets a review\n" + CLEAN,
-            ""))
+            0, f"warning: the dependents command `{self.tools / 'bad-gpg'} README.md` failed (exit 2), so every change "
+            "gets a review: fix [small_edit] dependents_command in docs/agents/stack.toml until it prints a count "
+            "first, or empty it\n" + CLEAN, ""))
 
+    def test_dependents_command_that_prints_no_count_warns(self):
+        self.dependents("true")
+        self.assertEqual(self.preflight(), (
+            0, f"warning: the dependents command `true README.md` failed ({NO_COUNT}), so every change gets a review: "
+            "fix [small_edit] dependents_command in docs/agents/stack.toml until it prints a count first, or empty "
+            "it\n" + CLEAN, ""))
 
 if __name__ == "__main__":
     unittest.main()

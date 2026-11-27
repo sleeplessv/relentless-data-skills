@@ -488,9 +488,12 @@ class World:
         self.bin.mkdir(parents=True)
         (self.bin / "gh").write_text(GH)
         (self.bin / "gh").chmod(0o755)
-        # The scripts run from a copy, so a test sees anything a run writes beside them.
-        self.source = root / "source"
-        shutil.copytree(SCRIPTS, self.source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        # The scripts run from a copy of both script folders, so a test sees anything a run writes beside them.
+        for folder in ("scripts", "skills/deliver/scripts"):
+            shutil.copytree(SCRIPTS.parent / folder, root / "source" / folder,
+                            ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        self.source = root / "source" / "scripts"
+        self.scan_source = root / "source" / "skills" / "deliver" / "scripts"
         refused = [ticket.number for ticket in tickets if ticket.refuses_checkout]
         if refused:  # git reads the hook folder from $HOME/.gitconfig
             hooks = root / "hooks"
@@ -2117,7 +2120,8 @@ class TestDraw(unittest.TestCase):
             with self.subTest(signal=number.name, after=step, sets=each is world):
                 state = each.root / f"state-{at}"
                 shutil.copytree(each.state, state)
-                prelude = (f"import os, sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(each.source)!r})\n"
+                prelude = (f"import os, sys\nsys.dont_write_bytecode = True\n"
+                           f"sys.path[:0] = {[str(each.source), str(each.scan_source)]!r}\n"
                            + steps[step].format(number=int(number)))
                 result = each.draw("--seed", "1", state=state, prelude=prelude)
                 self.assertNotIn("Traceback", result.stderr)
@@ -2208,7 +2212,8 @@ class TestDraw(unittest.TestCase):
             with self.subTest(first=first.name, then=then):
                 state = world.root / f"state-{at}"
                 shutil.copytree(world.state, state)
-                prelude_ = (f"import sys\nsys.dont_write_bytecode = True\nsys.path.insert(0, {str(world.source)!r})\n"
+                prelude_ = (f"import sys\nsys.dont_write_bytecode = True\n"
+                            f"sys.path[:0] = {[str(world.source), str(world.scan_source)]!r}\n"
                             + prelude.replace("{first}", sent).replace("{second}", second))
                 result = world.draw("--seed", "1", state=state, prelude=prelude_)
                 self.assertNotIn("Traceback", result.stderr)

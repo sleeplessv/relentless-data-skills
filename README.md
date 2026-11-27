@@ -194,7 +194,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 ## Repo layout
 
 - `skills/<skill>/`: each skill has `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`. Workflow skills can depend on companion skills.
-- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `scan.py`, which reads one Claude Code session from its log, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `report.py`, which prints the comparison between versions on the replay set and the verdicts on warning signs 1 and 2, and `statusline_screenshots.py`, which renders the statusline README's screenshots.
+- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`.
 - `.claude-plugin/marketplace.json`: declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
 ## Maintenance and CI

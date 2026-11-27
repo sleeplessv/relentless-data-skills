@@ -21,6 +21,7 @@ from pathlib import Path
 if sys.version_info < (3, 13):
     sys.exit("deliver.py needs Python 3.13 or newer")
 
+sys.dont_write_bytecode = True  # importing the subcommands would otherwise write __pycache__/ into the skill's folder
 import core  # noqa: E402
 
 HERE = Path(__file__).resolve().parent

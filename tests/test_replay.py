@@ -918,7 +918,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
-                                        f"(Is a directory). Write the row with: python3 scripts/scan.py "
+                                        f"(Is a directory). Write the row with: python3 skills/deliver/scripts/deliver.py scan "
                                         f"{self.session()}\n")
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.world.rows(), [])
@@ -930,7 +930,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
-                                        f"(ValueError). Write the row with: python3 scripts/scan.py {self.session()}\n")
+                                        f"(ValueError). Write the row with: python3 skills/deliver/scripts/deliver.py scan {self.session()}\n")
         self.assertEqual(self.world.rows(), [])
 
     def test_a_warning_before_a_failed_row_write_is_not_printed(self) -> None:
@@ -940,7 +940,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
-                                        f"(Is a directory). Write the row with: python3 scripts/scan.py "
+                                        f"(Is a directory). Write the row with: python3 skills/deliver/scripts/deliver.py scan "
                                         f"{self.session()}\n")
 
     def test_the_warnings_of_a_row_that_is_written_are_printed(self) -> None:
@@ -1333,7 +1333,7 @@ class ReplayTest(unittest.TestCase):
                  "counts as one git cannot list."),
         (*EXITS, "A row that cannot be written, after the version was recorded, ends it with one line on standard "
                  "error that says the version is recorded without its row and names the command that writes the row "
-                 "from the session's log, python3 scripts/scan.py SESSION; the version's line stays in "
+                 "from the session's log, python3 skills/deliver/scripts/deliver.py scan SESSION; the version's line stays in "
                  "versions.jsonl, and the scan's own warnings are printed only when the row is written."),
     )
     # The conditions and outcomes inside those sentences; the check must fail when any one is dropped.
@@ -1345,7 +1345,7 @@ class ReplayTest(unittest.TestCase):
         "lists a copy of the clone's index", "that exist", "not a regular file", "cannot copy or list with git",
         "with one line on standard error and nothing recorded", "exits 0 but writes to standard error",
         "counts as one git cannot list", "A row that cannot be written", "after the version was recorded",
-        "says the version is recorded without its row", "python3 scripts/scan.py SESSION",
+        "says the version is recorded without its row", "python3 skills/deliver/scripts/deliver.py scan SESSION",
         "the version's line stays in versions.jsonl")
     # Rewordings that reverse a condition or an outcome; the check must fail for each.
     REVERSED = (

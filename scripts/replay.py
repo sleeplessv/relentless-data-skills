@@ -20,7 +20,8 @@ from pathlib import Path
 sys.dont_write_bytecode = True  # importing the siblings would otherwise write scripts/__pycache__/ into the checkout
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import draw  # noqa: E402  (a sibling script, not an installed package)
-import scan  # noqa: E402
+sys.path.insert(1, str(Path(__file__).resolve().parent.parent / "skills" / "deliver" / "scripts"))
+import scan  # noqa: E402  (deliver.py's scan, found from this repo's skills/deliver/scripts/)
 
 VERSION = "direct"
 GENERATION_TWO = ("deliver", "squad")
@@ -136,7 +137,7 @@ as git does when it cannot read such a tree, counts as one git cannot list.
 A row that cannot be written, after the version was
 recorded, ends it with one line on standard error that says the version is
 recorded without its row and names the command that writes the row from the session's log,
-python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl, and
+python3 skills/deliver/scripts/deliver.py scan SESSION; the version's line stays in versions.jsonl, and
 the scan's own warnings are printed only when the row is written. A clone or version repo
 already in place is an error: remove both to replay the ticket again. Exit 2:
 bad usage."""
@@ -512,7 +513,7 @@ def replay(label: str, ticket: int, group: SetupGroup) -> int:
     except Exception as error:  # a full disk, a lock that is a folder, a row json cannot write
         raise ReplayError(f"{label}-{ticket} {VERSION} is recorded at {commit} without its row "
                           f"({getattr(error, 'strerror', None) or type(error).__name__}). Write the row with: "
-                          f"python3 scripts/scan.py {session}") from None
+                          f"python3 skills/deliver/scripts/deliver.py scan {session}") from None
     sys.stderr.write(warnings.getvalue())
     print(f"Recorded {label}-{ticket} {VERSION} at {commit}: session exit {status}"
           + (", skills unknown, marked not direct." if skills is None

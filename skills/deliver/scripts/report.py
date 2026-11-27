@@ -13,9 +13,11 @@ import textwrap
 from fractions import Fraction
 from pathlib import Path
 
-sys.dont_write_bytecode = True  # importing the siblings would otherwise write scripts/__pycache__/ into the checkout
+sys.dont_write_bytecode = True  # importing the siblings would otherwise write __pycache__/ into the checkout
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import draw  # noqa: E402  (a sibling script, not an installed package)
+# The replay scripts stay in this repo's scripts/, so the report runs from this repo's tree only.
+sys.path.insert(1, str(Path(__file__).resolve().parents[3] / "scripts"))
+import draw  # noqa: E402  (a replay script, not an installed package)
 import judge  # noqa: E402
 import replay  # noqa: E402
 import scan  # noqa: E402
@@ -100,7 +102,7 @@ Print the comparison between versions on the replay set and the verdicts on
 warning sign 1, one agent alone makes more mistakes, and warning sign 2, a
 small cut fixes the cost.
 
-Usage: python3 scripts/report.py
+Usage: deliver.py report
 
 The report reads the machine directory, $DELIVER_STATE_DIR (default
 ~/.local/state/deliver), and writes nothing: it makes no folder and takes no
@@ -134,7 +136,7 @@ versions.jsonl or verdicts.jsonl for a ticket in no set are left out and
 counted.
 
 A nonblank line of scan-rows.jsonl is no row when the scan would not read it as a
-JSON object (json_object in scripts/scan.py says which) or when it is an object
+JSON object (json_object in scan.py says which) or when it is an object
 whose session is not text. The scan keeps such a line, and the report leaves it
 out: it names the line once on standard error, with the file, the line number and
 the reason, as it reads the file, and prints on standard output how many lines it
@@ -143,7 +145,7 @@ and is passed over and not counted. A session whose row was such a line is left
 out of the token figures and counted, like one with no row.
 
 Every token figure includes the tokens a resumed session copied: the report
-takes none out of a figure or a verdict. python3 scripts/scan.py --help says
+takes none out of a figure or a verdict. deliver.py scan --help says
 which lines are copied and what copied_tokens holds. A copied response counts
 in total_tokens and, wherever the scan puts it, in a helper's tokens or in the
 session's own. Each version's block ends with the copied_tokens of the tickets
@@ -176,7 +178,7 @@ waits, as for warning sign 1, until every ticket has both versions judged.
 The report reads each helper's description and the head of its brief, and
 puts the helper in a step of generation one or leaves it not sorted. How it
 chooses, and where it can sort wrong, are in step() and named() in
-scripts/report.py, with each step's words in STEPS, the words read past in
+report.py, with each step's words in STEPS, the words read past in
 NO_ROLE and those that make a review a re-check in AGAIN. A helper sorted
 into the wrong step can move the cut either way. The steps:
 
@@ -211,7 +213,7 @@ Files read, all written by the other scripts:
                         of each line (scripts/judge.py).
   scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes
                         and helpers of each row, and description, brief_head
-                        and total_tokens of each helper (scripts/scan.py).
+                        and total_tokens of each helper (deliver.py scan).
 
 A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing
 yet. A folder or file that cannot be read, a line of versions.jsonl or
@@ -547,7 +549,7 @@ def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
     return [*lines, "The two verdicts differ: the spend not sorted decides the sign."]
 
 
-def main(argv: list[str]) -> int:
+def cli(argv: list[str]) -> int:
     if argv in (["-h"], ["--help"]):
         print(HELP)
         return 0
@@ -574,5 +576,8 @@ def main(argv: list[str]) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+def main(args: list[str], run: object = None) -> None:
+    """deliver.py's entry: `run` is unused, since the report reads the machine directory, not a checkout."""
+    code = cli(args)
+    if code:
+        raise SystemExit(code)

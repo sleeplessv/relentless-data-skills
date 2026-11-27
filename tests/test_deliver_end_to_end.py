@@ -100,7 +100,7 @@ class EndToEnd(unittest.TestCase):
         self.world.git(self.work, "commit", "-q", "-m", "feat: add double")
         return self.head()
 
-    def through_pr(self, branch: str) -> None:
+    def through_pr(self) -> None:
         """Steps 6 to 8 up to `pr`: the check on the last commit, the summary, and the draft PR."""
         self.deliver("check", "--", *CHECK.split())
         self.drop("summary", SUMMARY)
@@ -113,7 +113,7 @@ class EndToEnd(unittest.TestCase):
             "test_calc.py": (self.work / "test_calc.py").read_text(encoding="utf-8")
             + "\n    def test_double(self):\n        self.assertEqual(calc.double(4), 8)\n",
         })
-        self.through_pr(branch)
+        self.through_pr()
 
         records = self.world.records(branch)
         check = records[4]

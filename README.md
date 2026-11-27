@@ -196,7 +196,7 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 
 ### `deliver`
 
-`deliver` comes as a Claude Code plugin: the plugin brings its skill, its guard hook
+`deliver` installs as a Claude Code plugin, which brings its skill, its guard hook
 (`hooks/hooks.json`) and its reader agent (`agents/`).
 
 1. Add this repo as a marketplace and install the plugin:
@@ -209,8 +209,8 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 2. Do not also link `skills/deliver` into Claude Code's user-level skills folder
    (`~/.claude/skills`). A linked copy is a second `deliver` skill, while the guard hook
    runs from the plugin's copy only.
-3. Install `code-review`, `ponytail-review` and `pr`. They are required: preflight stops
-   when any of them is missing. `deliver.py` looks for each in `~/.claude/skills`, in the
+3. Install `code-review`, `ponytail-review` and `pr`. They are required, and preflight
+   stops when any of them is missing. `deliver.py` looks for each in `~/.claude/skills`, in the
    repo's `.claude/skills`, and in the installed Claude Code plugins.
 
    ```bash
@@ -222,8 +222,8 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 missing file gives every default. Set `check_command` to the command that runs the repo's
 checks. When you set `[small_edit] dependents_command`, `deliver` runs it in the checkout
 with each changed path as an argument. The command prints the count of the change's
-dependents on its first line. Each further non-blank line names a report or exposure the change
-feeds. The change goes to review when the count is over `dependents_limit` (default 5),
+dependents on its first line. Each further non-blank line names a report or exposure
+the change feeds. The change goes to review when the count is over `dependents_limit` (default 5),
 when a line follows the count, or when the command exits non-zero or prints no count first.
 
 ## Repo layout

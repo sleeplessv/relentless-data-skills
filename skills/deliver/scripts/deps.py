@@ -4,26 +4,37 @@ The contract is `upstream.toml` at the plugin root: one table per upstream depen
 `takes`, `supplies` and `folder_hash`. `deliver.py deps` finds each one installed, works out its
 folder hash and prints one line per difference: `<skill>: not installed`, or `<skill>: folder
 hash <installed> differs from the contract's <recorded>`. With no difference it prints
-`Upstream skills match the contract.` It writes nothing, and refuses only when a skill in
-`REQUIRED` is missing.
+`Upstream skills match the contract.` It saves no record, writes nothing to the machine
+directory or the checkout, and refuses only when a skill in `REQUIRED` is missing.
 
-Preflight runs two checks of this module on a run, after git and `gh`: `check_required_skills`
-stops when a skill in `REQUIRED` is missing, and `check_skill_hashes` warns, in one line, about
-each of them whose hash differs. The planning skills are compared by `deps` only (#177 rule 17).
-`ready` reads `review_skill_hashes` for the measurement block's `review skills` line.
+Preflight runs two checks of this module: `check_required_skills` stops when a skill in
+`REQUIRED` is missing, and `check_skill_hashes` warns, in one line, about each of them whose
+hash differs. They are meant to run after the harness, git and `gh` checks, which later tickets
+add before them in `preflight.CHECKS`. The planning skills are compared by `deps` only (#177
+rule 17). `review_skill_hashes` is for `ready`, a later ticket, to fill the measurement block's
+`review skills` line; nothing calls it yet.
 
-A skill is found in the first of these folders that holds its `SKILL.md`, where `<config>` is
+A skill is found in the first of these places that holds it, where `<config>` is
 `$CLAUDE_CONFIG_DIR` or `~/.claude`:
 
 1. `<config>/skills/<name>`, the user's skills folder;
 2. `<checkout>/.claude/skills/<name>`, the project's, when run inside a git working tree;
-3. `<installPath>/skills/<name>` for each plugin listed in `<config>/plugins/installed_plugins.json`,
-   in the file's order.
+3. each plugin in Claude Code's plugin registry, in the registry's order, that is installed for
+   the user, by the organisation (`managed`), or for this checkout (a `project` or `local`
+   install whose `projectPath` is the checkout or a folder in it). The registry is
+   `installed_plugins.json` in `$CLAUDE_CODE_PLUGIN_CACHE_DIR`, or else in `<config>/plugins`
+   (`<config>/cowork_plugins` when `CLAUDE_CODE_USE_COWORK_PLUGINS` is set). A plugin publishes
+   skills from its `skills` folder and from each path its `.claude-plugin/plugin.json` or its
+   marketplace entry lists under `skills`. Such a path is one skill when it holds `SKILL.md`,
+   named by its front matter's `name` or else its folder name, as Claude Code names it;
+   otherwise each folder in it that holds `SKILL.md` is a skill named by that folder.
 
-The folder hash is the git tree id of the folder, the value the skills installer records as
-`skillFolderHash` and upstream's own tree holds: SHA-1 over the files' bytes, names and modes
-(executable or not, symbolic link), with empty folders and `.git` left out. It is the same on
-every machine and whatever order the files were written in.
+The folder hash is the git tree id of the folder: SHA-1 over every file's bytes, name and mode
+(executable or not, symbolic link), with empty folders and `.git` left out. It counts every
+other file in the folder, also one a `.gitignore` names, so it equals `git add -A` then `git
+write-tree` only on a folder that ignores nothing. That is the value the skills installer
+records as `skillFolderHash` and upstream's own tree holds. It is the same on every machine and
+whatever order the files were written in.
 """
 from __future__ import annotations
 
@@ -50,24 +61,97 @@ def load_contract() -> dict[str, dict]:
 def find(name: str, checkout: Path | None) -> Path | None:
     """The installed folder of skill `name`, or None when it is installed nowhere."""
     config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    roots = [config, *([checkout / ".claude"] if checkout else []), *_plugin_folders(config)]
-    for root in roots:
-        folder = root / "skills" / name
-        if (folder / "SKILL.md").is_file():
-            return folder
+    for root in (config, *([checkout / ".claude"] if checkout else [])):
+        if (root / "skills" / name / "SKILL.md").is_file():
+            return root / "skills" / name
+    for plugin, path in _plugin_skill_paths(_registry_dir(config), checkout):
+        if (path / "SKILL.md").is_file():
+            if _skill_name(path, plugin) == name:
+                return path
+        elif (path / name / "SKILL.md").is_file():
+            return path / name
     return None
 
 
-def _plugin_folders(config: Path) -> list[Path]:
+def _registry_dir(config: Path) -> Path:
+    if cache := os.environ.get("CLAUDE_CODE_PLUGIN_CACHE_DIR"):
+        return Path(cache).expanduser()
+    return config / ("cowork_plugins" if os.environ.get("CLAUDE_CODE_USE_COWORK_PLUGINS") else "plugins")
+
+
+def _plugin_skill_paths(registry: Path, checkout: Path | None) -> list[tuple[str, Path]]:
+    """Each plugin installed for this checkout, with each of its skills paths, in the registry's order.
+
+    An unreadable registry is no plugins; an unreadable manifest or marketplace skips that plugin.
+    """
+    errors = (OSError, ValueError, KeyError, TypeError, AttributeError)
     try:
-        plugins = json.loads((config / "plugins" / "installed_plugins.json").read_text(encoding="utf-8"))["plugins"]
-        return [Path(install["installPath"]) for installs in plugins.values() for install in installs]
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+        plugins = _read_json(registry / "installed_plugins.json")["plugins"]
+        installs = [(plugin_id, install) for plugin_id, entries in plugins.items() for install in entries]
+    except errors:
         return []
+    paths = []
+    for plugin_id, install in installs:
+        try:
+            if not _applies(install, checkout):
+                continue
+            plugin, _, marketplace = plugin_id.partition("@")
+            root = Path(install["installPath"])
+            declared = _declared(_manifest(root)) + _declared(_marketplace_entry(registry, marketplace, plugin))
+            paths += [(plugin, path) for path in (root / "skills", *(root / path for path in declared))]
+        except errors:
+            continue
+    return paths
+
+
+def _applies(install: dict, checkout: Path | None) -> bool:
+    if install.get("scope") in ("user", "managed"):
+        return True
+    project = install.get("projectPath")
+    if not project or checkout is None:
+        return False
+    project, checkout = Path(project).resolve(), checkout.resolve()
+    return project == checkout or checkout in project.parents
+
+
+def _manifest(root: Path) -> dict:
+    path = root / ".claude-plugin" / "plugin.json"
+    return _read_json(path) if path.is_file() else {}
+
+
+def _marketplace_entry(registry: Path, marketplace: str, plugin: str) -> dict:
+    known = registry / "known_marketplaces.json"
+    location = (_read_json(known) if known.is_file() else {}).get(marketplace, {}).get("installLocation")
+    path = Path(location) / ".claude-plugin" / "marketplace.json" if location else None
+    if path is None or not path.is_file():
+        return {}
+    return next((entry for entry in _read_json(path).get("plugins", []) if entry.get("name") == plugin), {})
+
+
+def _declared(manifest: dict) -> list[str]:
+    skills = manifest.get("skills", [])
+    return [skills] if isinstance(skills, str) else list(skills)
+
+
+def _skill_name(folder: Path, plugin: str) -> str:
+    """A skill's name as Claude Code reads it: the front matter's `name`, else the folder's name."""
+    lines = (folder / "SKILL.md").read_text(encoding="utf-8", errors="replace").splitlines()
+    if lines[:1] == ["---"]:
+        for line in lines[1:]:
+            if line == "---":
+                break
+            key, _, value = line.partition(":")
+            if key.strip() == "name" and (value := value.strip().strip("'\"")):
+                return value.removeprefix(f"{plugin}:") or folder.name
+    return folder.name
+
+
+def _read_json(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def folder_hash(folder: Path) -> str:
-    """The git tree id of `folder`, as `git add -A` then `git write-tree` would give it."""
+    """The git tree id of every file under `folder` but `.git`, whatever a `.gitignore` says."""
     return _tree(os.fsencode(folder)) or _object(b"tree", b"")
 
 

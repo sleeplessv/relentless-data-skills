@@ -1,7 +1,8 @@
 """deliver.py deps, the upstream contract and preflight's two upstream-skill checks.
 
-The folder hash and the contract are tested in this process. Everything else runs deliver.py at
-its command line in a throwaway world whose home folder holds the installed stand-in skills.
+The folder hash, the contract, the order of preflight's checks and `review_skill_hashes` are
+tested in this process. The rest runs deliver.py at its command line in a throwaway world whose
+home folder holds the installed stand-in skills.
 
     python3 -m unittest tests.test_deliver_deps
 """
@@ -145,7 +146,7 @@ class Deps(unittest.TestCase):
         (self.folders["to-spec"] / "SKILL.md").unlink()
         self.assert_ends(self.world.deliver("deps"), 0, "to-spec: not installed\n")
 
-    def test_writes_nothing(self):
+    def test_saves_no_record_and_writes_no_state(self):
         self.change("pr")
         self.world.deliver("deps")
         self.assertFalse(self.world.state.exists())
@@ -174,10 +175,22 @@ class WhereSkillsAreFound(unittest.TestCase):
         return target
 
     def plugins(self, *install_paths: Path, config: Path | None = None) -> None:
-        listing = (config or self.config) / "plugins" / "installed_plugins.json"
+        self.registry({f"p{i}@market": [{"scope": "user", "installPath": str(path)}]
+                       for i, path in enumerate(install_paths)}, (config or self.config) / "plugins")
+
+    def registry(self, plugins: dict, folder: Path | None = None) -> None:
+        listing = (folder or self.config / "plugins") / "installed_plugins.json"
         listing.parent.mkdir(parents=True, exist_ok=True)
-        plugins = {f"p{i}@market": [{"scope": "user", "installPath": str(path)}] for i, path in enumerate(install_paths)}
         listing.write_text(json.dumps({"version": 2, "plugins": plugins}), encoding="utf-8")
+
+    def manifest(self, root: Path, skills) -> None:
+        (root / ".claude-plugin").mkdir(parents=True, exist_ok=True)
+        (root / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": "kit", "skills": skills}),
+                                                             encoding="utf-8")
+
+    def assert_found(self, **env: str):
+        result = self.world.deliver("deps", **env)
+        self.assertEqual((result.returncode, result.stdout), (0, "Upstream skills match the contract.\n"))
 
     def test_a_symlinked_install_is_hashed_through_the_link(self):
         real = self.world.root / "agents" / "pr"
@@ -220,6 +233,102 @@ class WhereSkillsAreFound(unittest.TestCase):
         self.assertEqual(self.world.deliver("deps").returncode, 10)
         result = self.world.deliver("deps", CLAUDE_CONFIG_DIR=str(config))
         self.assertEqual((result.returncode, result.stdout), (0, "Upstream skills match the contract.\n"))
+
+    def test_found_in_a_skill_folder_the_plugin_manifest_declares(self):
+        plugin = self.world.root / "kit"
+        shutil.move(self.folders["pr"], plugin / "engineering" / "pr")
+        self.manifest(plugin, ["./engineering/pr"])
+        self.plugins(plugin)
+        self.assert_found()
+
+    def test_found_in_a_folder_of_skills_the_plugin_manifest_declares(self):
+        plugin = self.world.root / "kit"
+        self.move("pr", plugin / "extra")
+        self.manifest(plugin, "./extra/skills")
+        self.plugins(plugin)
+        self.assert_found()
+
+    def test_found_at_a_plugin_root_by_its_front_matter_name(self):
+        plugin = self.world.root / "kit"
+        plugin.parent.mkdir(exist_ok=True)
+        shutil.move(self.folders["pr"], plugin)
+        (plugin / "SKILL.md").write_text("---\nname: market:pr\n---\n", encoding="utf-8")
+        self.manifest(plugin, ["."])
+        self.registry({"market@m": [{"scope": "user", "installPath": str(plugin)}]})
+        result = self.world.deliver("deps")
+        self.assertEqual((result.returncode, result.stdout), (
+            0, f"pr: folder hash {deps.folder_hash(plugin)} differs from the contract's {recorded(self.world, 'pr')}\n"))
+
+    def test_found_in_a_folder_the_marketplace_entry_declares(self):
+        plugin = self.world.root / "kit"
+        self.move("pr", plugin / "custom")
+        market = self.world.root / "market"
+        (market / ".claude-plugin").mkdir(parents=True)
+        (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+            {"name": "m", "plugins": [{"name": "other", "skills": ["./nowhere"]},
+                                      {"name": "kit", "strict": False, "skills": ["./custom/skills"]}]}),
+            encoding="utf-8")
+        (self.config / "plugins").mkdir()
+        (self.config / "plugins" / "known_marketplaces.json").write_text(
+            json.dumps({"m": {"installLocation": str(market)}}), encoding="utf-8")
+        self.registry({"kit@m": [{"scope": "user", "installPath": str(plugin)}]})
+        self.assert_found()
+
+    def test_the_registry_in_the_configured_plugin_cache(self):
+        plugin = self.world.root / "kit"
+        self.move("pr", plugin)
+        cache = self.world.root / "cache"
+        self.registry({"kit@m": [{"scope": "user", "installPath": str(plugin)}]}, cache)
+        self.assertEqual(self.world.deliver("deps").returncode, 10)
+        self.assert_found(CLAUDE_CODE_PLUGIN_CACHE_DIR=str(cache))
+
+    def test_the_registry_of_cowork_plugins(self):
+        plugin = self.world.root / "kit"
+        self.move("pr", plugin)
+        self.registry({"kit@m": [{"scope": "user", "installPath": str(plugin)}]}, self.config / "cowork_plugins")
+        self.assertEqual(self.world.deliver("deps").returncode, 10)
+        self.assert_found(CLAUDE_CODE_USE_COWORK_PLUGINS="1")
+
+    def test_a_plugin_installed_for_another_project_does_not_count(self):
+        plugin = self.world.root / "kit"
+        self.move("pr", plugin)
+        other = self.world.root / "other-project"
+        other.mkdir()
+        for scope in ("project", "local"):
+            with self.subTest(scope):
+                self.registry({"kit@m": [{"scope": scope, "installPath": str(plugin), "projectPath": str(other)}]})
+                self.assertEqual(self.world.deliver("deps").returncode, 10)
+        self.registry({"kit@m": [{"scope": "project", "installPath": str(plugin)}]})
+        self.assertEqual(self.world.deliver("deps").returncode, 10)
+
+    def test_a_plugin_installed_for_this_checkout_counts(self):
+        plugin = self.world.root / "kit"
+        self.move("pr", plugin)
+        for scope, project in (("project", self.world.work), ("local", self.world.work / "app"), ("managed", None)):
+            with self.subTest(scope):
+                install = {"scope": scope, "installPath": str(plugin), **({"projectPath": str(project)} if project else {})}
+                self.registry({"kit@m": [install]})
+                self.assert_found()
+                if project:
+                    self.assertEqual(self.world.deliver("deps", cwd=self.world.home).returncode, 10)
+
+    def test_each_project_gets_its_own_installed_copy(self):
+        here, there = self.world.root / "kit-here", self.world.root / "kit-there"
+        self.move("pr", here)
+        changed = self.world.install_skill("pr", there)
+        (changed / "SKILL.md").write_text("another\n", encoding="utf-8")
+        other = self.world.root / "other-project"
+        self.registry({"kit@m": [{"scope": "project", "installPath": str(there), "projectPath": str(other)},
+                                 {"scope": "project", "installPath": str(here), "projectPath": str(self.world.work)}]})
+        self.assert_found()
+
+    def test_a_broken_plugin_manifest_skips_only_that_plugin(self):
+        broken, plugin = self.world.root / "broken", self.world.root / "kit"
+        (broken / ".claude-plugin").mkdir(parents=True)
+        (broken / ".claude-plugin" / "plugin.json").write_text("{", encoding="utf-8")
+        self.move("pr", plugin)
+        self.plugins(broken, plugin)
+        self.assert_found()
 
     def test_an_unreadable_plugin_list_is_no_plugins(self):
         listing = self.config / "plugins" / "installed_plugins.json"
@@ -289,7 +398,8 @@ class ReviewSkillHashes(unittest.TestCase):
         world = deliver_kit.World(self.addCleanup)
         folders = world.install_upstream(("code-review", "pr"))
         with mock.patch.dict(os.environ, {"HOME": str(world.home)}):
-            os.environ.pop("CLAUDE_CONFIG_DIR", None)
+            for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "CLAUDE_CODE_USE_COWORK_PLUGINS"):
+                os.environ.pop(name, None)
             hashes = deps.review_skill_hashes(world.work)
         self.assertEqual(hashes, {"code-review": deps.folder_hash(folders["code-review"]), "ponytail-review": None})
 

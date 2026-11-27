@@ -1,4 +1,4 @@
-# model-router
+# router
 
 Pick the model, reasoning effort and harness for each task a session hands to
 another agent, across Anthropic, OpenAI and Google models. The skill produces a
@@ -9,7 +9,7 @@ belong to the skill doing the work.
 
 Ask a session to route a plan:
 
-> Load `model-router` and split this migration into tasks, each on the model that fits it.
+> Load `router` and split this migration into tasks, each on the model that fits it.
 
 Name a harness and its models are used first:
 
@@ -66,7 +66,7 @@ model classes from it ([`implement-ticket`](../implement-ticket/),
 [`implement-feature`](../implement-feature/) and
 [`implement-backlog`](../implement-backlog/)) still choose their own models,
 under different class names: their strong class is Opus, which this skill calls
-`apex`. Loaded beside one of them, `model-router` routes only the work the main
+`apex`. Loaded beside one of them, `router` routes only the work the main
 session hands out directly; the workers those skills start never load it and
 keep their own classes. Load the two together only once
 [#331](https://github.com/sleeplessv/relentless-data-skills/issues/331) lands;
@@ -79,10 +79,10 @@ Use the [repository installation instructions](../../README.md#install), or
 install this skill directly:
 
 ```bash
-npx skills add sleeplessv/relentless-data-skills/skills/model-router
+npx skills add sleeplessv/relentless-data-skills/skills/router
 ```
 
 ```text
 /plugin marketplace add sleeplessv/relentless-data-skills
-/plugin install model-router@relentless-data-skills
+/plugin install router@relentless-data-skills
 ```

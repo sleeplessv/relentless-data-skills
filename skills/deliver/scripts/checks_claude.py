@@ -35,7 +35,7 @@ PLUGIN = "deliver"
 PLUGIN_ROOT = Path(__file__).resolve().parent.parent
 READER = "deliver-reader"
 RERUN = "deliver.py preflight"
-MARKETPLACE_KEY = f"{PLUGIN}@relentless-data-skills"
+PLUGIN_KEY = f"{PLUGIN}@relentless-data-skills"
 
 # Seen: Claude Code's folder is ~/.claude. Not yet seen: a session with CLAUDE_CONFIG_DIR set.
 CONFIG_DIR_VAR = "CLAUDE_CONFIG_DIR"
@@ -48,6 +48,7 @@ MANAGED_SETTINGS = {
 HOOKS_OFF_KEY = "disableAllHooks"
 ENABLED_PLUGINS_KEY = "enabledPlugins"
 INSTALLED_PLUGINS = Path("plugins") / "installed_plugins.json"
+# Seen: the shell tool's name in the hook inputs of tests/deliver_guard_inputs/.
 SHELL_TOOL = "Bash"
 PLUGIN_ROOT_VAR = "${CLAUDE_PLUGIN_ROOT}"
 # Interpreters a known hook command may name before its script.
@@ -283,7 +284,7 @@ def check_reader(ctx):
         return None
     return _result(ctx).Stop(
         "preflight.no-reader",
-        f"run claude plugin uninstall {MARKETPLACE_KEY} and claude plugin install {MARKETPLACE_KEY}, then run {RERUN}",
+        f"run claude plugin uninstall {PLUGIN_KEY} and claude plugin install {PLUGIN_KEY}, then run {RERUN}",
         {"path": str(path)},
     )
 

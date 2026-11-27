@@ -91,6 +91,8 @@ REFUSALS = {
     "ready.no-pass": "`{command}` has no counted pass on the head commit {commit}",
     "ready.no-query-numbers": "the query of {requirement}, `{command}`, has no saved {missing} numbers",
     "ready.needs-review": "this change needs a review: {why}",
+    "ready.bad-query": "the proof of {requirement} names a query, and its query command cannot be read",
+    "ready.stale-pr": "PR #{number}'s head on GitHub is {remote}, not the tested HEAD {commit}",
     "merge.no-mark": NO_MARK,
     "merge.no-pr": "the records of {branch} hold no PR",
     "merge.not-open": "PR #{number} is {state}, not open",

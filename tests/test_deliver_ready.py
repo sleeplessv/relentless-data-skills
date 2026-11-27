@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -95,6 +96,10 @@ class Ready(unittest.TestCase):
         self.add(branch, "check", at=at, command=command, exit=exit, output=name, commit=commit,
                  selected_nothing=selected_nothing, slot_wait_s=slot_wait_s)
 
+    def on_github(self, head: str) -> None:
+        """The stand-in gh answers `gh pr view` with `head` as the PR's head commit."""
+        self.world.gh_answer(["pr", "view"], head + "\n")
+
     def ready(self, checkout: Path):
         tmp = self.world.root / "tmp"
         tmp.mkdir(exist_ok=True)
@@ -124,13 +129,15 @@ class Ready(unittest.TestCase):
         self.check("feat/pass", "echo ok", head, slot_wait_s=1.5)
         self.check("feat/pass", "echo ok", head, slot_wait_s=2.0)
         self.check("feat/pass", "echo old", None, slot_wait_s=9.0, at="2026-11-27T17:00:00Z")  # before the mark
+        self.on_github(head)
         self.assert_ends(self.ready(checkout), 0, (
             "small edit: a two-way door, 1 line and a low blast radius.\n"
             f"Marked PR #12 ready: {URL}\n"))
         calls = self.world.gh_calls()
-        body_file = calls[1]["args"][-1]
+        body_file = calls[2]["args"][-1]
         self.assertEqual([c["args"] for c in calls], [
             ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+            ["pr", "view", "12", "--json", "headRefOid", "--jq", ".headRefOid"],
             ["pr", "edit", "12", "--body-file", body_file],
             ["pr", "ready", "12"],
         ])
@@ -152,7 +159,7 @@ class Ready(unittest.TestCase):
             "waiver: none\n"
             "merge: pending\n"
             "```\n\n</details>\n")
-        body = calls[1]["body"]
+        body = calls[2]["body"]
         self.assertTrue(body.endswith("\n## Findings\n\nNo review: small edit.\n\n" + block), body)
         self.assertEqual(body.count("<details"), 1)
         self.assertIn("**Blast Radius:** low. 1 line, no critical path changed, and no dependents command is set\n",
@@ -161,7 +168,12 @@ class Ready(unittest.TestCase):
         self.assertIn(f"- R1: pass at {head[:7]}\n", body)
         self.assertNotRegex(body, r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
         self.assertNotIn("session", body.lower())
-        merged = deliver_kit.load("merge").with_line(body, "merge: squash at abc1234")
+        # merge.py in a process of its own: in a full run another skill's `render` is already imported.
+        merged = subprocess.run(
+            [sys.executable, "-I", "-c", "import sys; sys.path.insert(0, sys.argv[1]); import merge; "
+             "sys.stdout.write(merge.with_line(sys.stdin.read(), sys.argv[2]))",
+             str(deliver_kit.SCRIPTS), "merge: squash at abc1234"],
+            input=body, capture_output=True, text=True, check=True).stdout
         self.assertEqual(merged, body.replace("merge: pending\n", "merge: squash at abc1234\n"))
         self.assertEqual(self.ready_records("feat/pass"), [{
             "event": "ready", "commit": head, "result": "small edit",
@@ -249,17 +261,17 @@ class Ready(unittest.TestCase):
             self.assert_refused(checkout, "feat/match", (
                 f"REFUSED ready.no-pass: `make test` has no counted pass on the head commit {head[:7]}\n"
                 "Next: deliver.py check -- 'make test'\n"))
-        with self.subTest("the exact commands through deliver.py check count"):
-            for command in ("echo ok", "make test"):
-                self.check("feat/match", command, head)
+        with self.subTest("records of the exact commands count, one written by hand and one by deliver.py check"):
+            self.check("feat/match", "make test", head)
             saved = self.world.deliver("check", "--", "echo ok", cwd=checkout)
             self.assertEqual(saved.returncode, 0, saved.stderr)
+            self.on_github(head)
             self.assertEqual(self.ready(checkout).returncode, 0)
             self.assertEqual(self.calls()[-1], ["pr", "ready", "12"])
             self.assertEqual(self.scan_starts(), 1)
 
     def test_ready_no_query_numbers(self):
-        """A query proof needs a check with a number in its output before the change and a counted one on HEAD."""
+        """A query proof needs a check ending in a number before the change and a counted one on HEAD."""
         view = ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
         missing = "REFUSED ready.no-query-numbers: the query of R2, `echo rows`, has no saved {} numbers\n"
         after_only = "Next: deliver.py check -- 'echo rows'\n"
@@ -268,6 +280,9 @@ class Ready(unittest.TestCase):
             ("a before run with no number in its output", "no rows\n", "118\n", "before"),
             ("before numbers only", "120\n", None, "after"),
             ("an after run with no number in its output", "120\n", "none\n", "after"),
+            ("a digit in a message is no number", "client-v2: no result\n", "client-v2: no result\n",
+             "before and after"),
+            ("a number followed by more text", "120\nrows dropped\n", "118 rows\n", "before and after"),
             ("before and after numbers", "120\n", "118\n", None),
         ]):
             with self.subTest(case):
@@ -281,12 +296,39 @@ class Ready(unittest.TestCase):
                 if after is not None:
                     self.check(branch, "echo rows", head, output=after)
                 if refused is None:
+                    self.on_github(head)
                     self.assertEqual(self.ready(checkout).returncode, 0)
                     self.assertEqual(self.scan_starts(), 1)
                     continue
                 fix = after_only if refused == "after" else (
                     f"Next: git switch --detach {base[:7]}, deliver.py check -- 'echo rows', git switch {branch}\n")
                 self.assert_refused(checkout, branch, missing.format(refused) + fix, [view])
+
+    def test_ready_bad_query(self):
+        """A proof that names a query outside its code spans and is not one query proof is refused, never skipped."""
+        view = ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"]
+        for n, proof in enumerate(["query `echo rows` against `orders`", "run the query `echo rows`: 120 then 118",
+                                   "a query shows the rows drop"]):
+            with self.subTest(proof):
+                self.setUp()
+                branch = f"feat/bad-query-{n}"
+                checkout, head = self.branch(branch, plan=PLAN.replace("no check exists, meaning unchanged", proof))
+                self.check(branch, "echo ok", head)
+                self.assert_refused(checkout, branch, (
+                    "REFUSED ready.bad-query: the proof of R2 names a query, and its query command cannot be read\n"
+                    "Next: give R2 one query proof in .deliver/plan.md, then deliver.py save plan\n"), [view])
+
+    def test_ready_stale_pr(self):
+        """The PR's head on GitHub must be the HEAD ready tested, or nothing is written to the PR."""
+        checkout, head = self.branch("feat/stale")
+        pushed = self.world.git(checkout, "rev-parse", "HEAD~1")
+        self.check("feat/stale", "echo ok", head)
+        self.on_github(pushed)
+        self.assert_refused(checkout, "feat/stale", (
+            f"REFUSED ready.stale-pr: PR #12's head on GitHub is {pushed[:7]}, not the tested HEAD {head[:7]}\n"
+            "Next: deliver.py pr\n"), [
+            ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+            ["pr", "view", "12", "--json", "headRefOid", "--jq", ".headRefOid"]])
 
     def test_ready_needs_review(self):
         checkout, head = self.branch("feat/one-way", plan=PLAN.replace("door: two-way", "door: one-way"))

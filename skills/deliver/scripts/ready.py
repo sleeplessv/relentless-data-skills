@@ -11,17 +11,22 @@ order, it refuses:
 5. `ready.no-pass` when a command proof, or a set `check_command`, has no counted pass on `HEAD`.
    A `check` record counts when its `command` is the proof's command, or `check_command`,
    character for character, it exited 0, it selected something, and its `commit` is the full
-   `HEAD`. `render.counted` holds this rule for the Evidence lines too;
-6. `ready.no-query-numbers` when a query proof lacks its before or its after numbers. A query proof
-   starts with the word `query` and holds one code span, the query command. Its before numbers
-   are a check of that command that exited 0 at a commit in the history of the merge base with
-   `origin/<default branch>`; its after numbers are a counted pass on `HEAD`. Each check's saved
-   output must hold a digit.
+   `HEAD`. `render.counted` holds every condition but the last, for the Evidence lines too; `ready`
+   compares the commit with `HEAD` itself;
+6. `ready.bad-query` when a proof that is not a command proof names a query (the word `query`
+   outside its code spans) and is not one query proof: the word `query` first and one code span,
+   the query command;
+7. `ready.no-query-numbers` when a query proof lacks its before or its after number. Its before
+   number is a check of that command that exited 0 at a commit in the history of the merge base
+   with `origin/<default branch>`; its after number is a counted pass on `HEAD`. A check holds a
+   number when the last non-blank line of its saved output is a number and nothing else (`118`,
+   `-3`, `0.25`).
 
 It then runs the small test (`small_test.measure`) on `HEAD` against `origin/<default branch>`.
 A change that fails it gets a `ready` record with result `needs review` and the refusal
 `ready.needs-review`, which names no next command, and the PR stays a draft (#267 rule 40). A
-change that passes gets, in this order: its description rendered again from the saved records
+change that passes is refused `ready.stale-pr` when the PR's head commit on GitHub is not the
+full `HEAD` it tested, before anything is written to the PR. Otherwise it gets, in this order: its description rendered again from the saved records
 with the blast radius, the door and the measurement block (`gh pr edit`), `gh pr ready`, the
 `ready` record with result `small edit`, and one call of `scan.start_background()`.
 
@@ -52,6 +57,8 @@ import small_test
 
 DROP = ".deliver"
 QUERY = re.compile(r"query\b[^`]*`([^`]+)`[^`]*", re.IGNORECASE)
+NAMES_QUERY = re.compile(r"\bquery\b", re.IGNORECASE)
+NUMBER = re.compile(r"-?[0-9]+(\.[0-9]+)?")
 VERSION = json.loads((Path(__file__).resolve().parent.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 AGAIN = "deliver.py ready"
 
@@ -95,6 +102,9 @@ def main(args: list[str], run: core.Run) -> None:
     for requirement in saved.requirements:
         if query := QUERY.fullmatch(requirement.proof.strip()):
             _query_numbers(run, folder, records, requirement.number, query.group(1), head, base, branch)
+        elif not render.COMMAND.match(requirement.proof) and NAMES_QUERY.search(re.sub(r"`[^`]*`", "", requirement.proof)):
+            raise core.Refused("ready.bad-query", f"give {requirement.number} one query proof in {DROP}/plan.md, "
+                               "then deliver.py save plan", requirement=requirement.number)
 
     result = small_test.measure(run.checkout, base, stack, saved.door,
                                 {r.number: r.proof for r in saved.requirements})
@@ -103,6 +113,10 @@ def main(args: list[str], run: core.Run) -> None:
         raise core.Refused("ready.needs-review", why=result["reason"].removeprefix("needs review: "))
 
     number, url = prs[-1]["number"], prs[-1]["url"]
+    remote = _gh(run, "pr", "view", str(number), "--json", "headRefOid", "--jq", ".headRefOid").strip()
+    if remote != head:
+        raise core.Refused("ready.stale-pr", "deliver.py pr", number=number, remote=remote[:7] or "unknown",
+                           commit=head[:7])
     try:
         body = render.description(folder, blast=("low", _blast(result, stack)), door=(result["door"], saved.door_reason),
                                   measurement=_measurement(run, records, preflights[-1], result))
@@ -128,7 +142,7 @@ def _query_numbers(run: core.Run, folder: Path, records: list[dict], rid: str, c
     """Refuse unless the query has saved numbers from before the change and on `HEAD`."""
     fork = _git(run, "merge-base", base, "HEAD").strip()
     numbers = [r for r in records if r["event"] == "check" and r.get("command") == command and r.get("exit") == 0
-               and r.get("commit") and re.search(r"\d", _output(folder, r))]
+               and r.get("commit") and _number(folder, r)]
     before = any(subprocess.run(["git", "merge-base", "--is-ancestor", r["commit"], fork], cwd=run.checkout,
                                 capture_output=True).returncode == 0 for r in numbers)
     after = any(render.counted(r, command) and r["commit"] == head for r in numbers)
@@ -140,11 +154,14 @@ def _query_numbers(run: core.Run, folder: Path, records: list[dict], rid: str, c
                            missing=" and ".join(missing))
 
 
-def _output(folder: Path, record: dict) -> str:
+def _number(folder: Path, record: dict) -> bool:
+    """Whether the check's saved output ends in a number: its last non-blank line is one and nothing else."""
     try:
-        return (folder / record.get("output", "")).read_text(encoding="utf-8", errors="replace")
+        text = (folder / record.get("output", "")).read_text(encoding="utf-8", errors="replace")
     except OSError:
-        return ""
+        return False
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    return bool(lines) and bool(NUMBER.fullmatch(lines[-1]))
 
 
 def _blast(result: dict, stack: dict) -> str:

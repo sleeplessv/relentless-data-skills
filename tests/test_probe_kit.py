@@ -13,16 +13,23 @@ touches the network or reads the real machine directory.
 """
 from __future__ import annotations
 
+import argparse
+import contextlib
+import dataclasses
+import importlib.util
+import io
 import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 KIT = Path(__file__).resolve().parent / "probe_kit.py"
 SESSION = "sess-7f3a9c41"  # the session id the stand-in harness prints
@@ -1168,22 +1175,36 @@ class TestX7(HookTest):
 # K1 to K5, D3 to D5, R2, R5 and A2 to A4 (#385). A third stand-in harness, installed as all five harness
 # commands, follows the prompt and each brief as a model would. It reads the roles from its own definition
 # folder, and Cursor's also from ~/.cursor/agents/. Each `Read <path> and follow it.` starts an agent of the
-# role named before it; the starts of one prompt or brief run at once, in threads. An agent writes the words
-# its brief asks for, runs its shell commands, deletes its brief when asked, and starts the agents its brief
-# names while its depth is below the limit: Cortex Code's maxSubagentDepth from the variable, default 1, and
-# no limit elsewhere. A resume or follow-up first waits for the agents before it, and the resumed agent keeps
-# its first brief's word. On Antigravity each tool call goes to the registered hook, with the agent's model,
-# and runs only on an allow; a write_file call is refused to a role whose tools list lacks it. Knobs:
-# STANDIN_AGENT_OFF starts no agent; STANDIN_DEPTH sets the depth limit; STANDIN_CAP lets that many agents of
-# one prompt or brief run at once, the rest queued, or refused with STANDIN_CAP_REFUSE; STANDIN_NO_KILL lets
-# the killed agent's sleep finish, with no kill_agent call; STANDIN_HIDE_KILL leaves the kill_agent call out
-# of the output; STANDIN_NO_CLOSE leaves close_agent out; STANDIN_RESUME_FRESH resumes without the first
-# word; STANDIN_RESUME_FAIL leaves a resume unanswered; STANDIN_OUTSIDE_DENIED refuses the write outside the
-# folder; STANDIN_NO_USER_AGENTS ignores ~/.cursor/agents/; STANDIN_TOOLS_IGNORED lets a withheld tool run;
-# STANDIN_NO_TRY makes no write_file call; STANDIN_SHELL_WRITE writes through run_command instead;
-# STANDIN_TIER_WINS=file lets the file's tier win over the call's; STANDIN_SLEEP waits before it acts.
+# role named before it; the starts between two waits run at once, in threads. An agent remembers the word its
+# brief gives it to keep, writes the words its brief asks for, lists its agent tools, deletes its brief when
+# asked, runs its shell commands, and starts the agents its brief names. On Cortex Code an agent below the depth
+# limit (maxSubagentDepth from the variable, default 1) has task, agent, agent_output and kill_agent, and one at
+# the limit has none and starts nothing; elsewhere there is no limit. Cortex Code's output shows each task call
+# with its parent and its result, which gives the agentId or the depth error, and each kill_agent and
+# agent_output call; Codex's shows each collab_tool_call item started and completed, with its thread. The kill
+# lands while the agent's sleep runs. A resume or follow-up first waits for the agents before it. On
+# Antigravity the session's invoke_subagent calls and the agents' run_command and write_file calls go to the
+# registered hook, with the caller's model, and run only on an allow; the agents' other writes and the session's
+# shell commands do not. A write_file call is refused to a role whose tools list lacks it. Knobs:
+# STANDIN_AGENT_OFF starts no agent; STANDIN_DEPTH sets the depth limit; STANDIN_TOOLS_KEPT leaves an agent at
+# the limit its tools, so its call is refused; STANDIN_SKIP_NESTED makes an agent start none; STANDIN_CAP lets
+# that many agents of one prompt or brief run at once, the rest queued, or refused with STANDIN_CAP_REFUSE;
+# STANDIN_STEP_APART lets each start end before the next; STANDIN_NO_KILL lets the sleep finish, with no
+# kill_agent call; STANDIN_HIDE_KILL leaves the kill out of the output; STANDIN_KILL_OTHER names another agent
+# in it; STANDIN_KILL_FAILS gives it an error; STANDIN_NO_CLOSE leaves close_agent out; STANDIN_CLOSE_OTHER
+# names another thread in it; STANDIN_CLOSE_FAILS marks it failed; STANDIN_RESUME_FRESH resumes without the
+# kept word; STANDIN_RESUME_FROM_DISK takes the first marker's word instead; STANDIN_RESUME_OTHER resumes
+# another agent; STANDIN_RESUME_FAIL leaves a resume unanswered; STANDIN_OUTSIDE_DENIED refuses the write
+# outside the folder; STANDIN_NO_USER_AGENTS ignores ~/.cursor/agents/; STANDIN_TOOLS_IGNORED lets a withheld
+# tool run; STANDIN_NO_TRY makes no write_file call but reports it refused; STANDIN_OTHER_TOOL calls view_file
+# on the marker instead; STANDIN_SHELL_WRITE writes through run_command instead; STANDIN_WRITE_ERROR lets the
+# write_file call fail another way; STANDIN_TIER_WINS=file lets the file's tier win over the call's;
+# STANDIN_SAME_TIERS gives every tier one model; STANDIN_NO_TIER drops the call's tier; STANDIN_FOREGROUND
+# starts every agent in the foreground, or with =inner every agent an agent starts; STANDIN_NO_MODEL leaves the
+# agents' models out of the output; STANDIN_DECOY puts an unrelated call with a model first; STANDIN_SLEEP waits
+# before it acts.
 LIMIT_HARNESS = r'''#!{python}
-import json, os, re, subprocess, sys, threading, time, tomllib
+import json, os, re, signal, subprocess, sys, threading, time, tomllib
 from pathlib import Path
 name, args = Path(sys.argv[0]).name, sys.argv[1:]
 prompt = args[args.index("-p") + 1] if name in ("cortex", "agy") else args[-1]
@@ -1212,19 +1233,30 @@ hooks = cwd / ".agents" / "hooks.json"
 hook = next(iter(json.loads(hooks.read_text()).values()))["PreToolUse"][0]["hooks"][0]["command"] \
     if hooks.is_file() else None
 user_files = sorted(p.name for p in user_agents.glob("*")) if user_agents.is_dir() else []
-lock, events, records, memory, sent, counter = threading.Lock(), [], [], {}, [], [0]
-WRITES = re.compile(r"[Ww]rite the word (?P<word>\S+), a space(?P<recall>, the word your first brief gave you, a "
-                    r"space)? and your role word to the file (?P<file>\S+) in (?P<outside>your worktree, )?the "
-                    r"folder (?P<folder>\S+?)(?P<tool> with the write_file tool, not with run_command)?\.(?:\s|$)")
+lock, events, records, sent, counter = threading.Lock(), [], [], [], [0]
+memory, markers, ids, ready, sleepers = {}, {}, {}, {}, {}
+WRITES = re.compile(r"[Ww]rite the word (?P<word>\S+), a space(?P<recall>, the word your first brief asked you to "
+                    r"remember, a space)? and your role word to the file (?P<file>\S+) in (?P<outside>your worktree, )?"
+                    r"the folder (?P<folder>\S+?)(?P<tool> with the write_file tool, not with run_command)?\.(?:\s|$)")
+LISTS = re.compile(r"write the word (\S+), a space and the names of those of these tools you have: task, agent, "
+                   r"agent_output, kill_agent, or the word none, to the file (\S+) in the folder (\S+?)\.(?:\s|$)")
 TOKENS = re.compile(r"(?:subagent_type|agent_type|of the role) (?P<role>probe-[a-z-]+)|run_in_background "
                     r"(?P<bg>true|false)|Model (?P<tier>\w+)|(?P<resume>resume set to that agentId|with "
-                    r"followup_task)|call (?P<stop>kill_agent|close_agent) |Read (?P<line>\S+) and follow it\.")
+                    r"followup_task)|call (?P<stop>kill_agent|close_agent) |(?P<wait>call agent_output with wait "
+                    r"true)|Read (?P<line>\S+) and follow it\.")
+AGENT_TOOLS = "task agent agent_output kill_agent"
 time.sleep(float(knob("STANDIN_SLEEP", "0")))
 
 
 def emit(**event):
     with lock:
         events.append({key: value for key, value in event.items() if value is not None})
+
+
+def next_id(kind):
+    with lock:
+        counter[0] += 1
+        return f"{kind}_{counter[0]}"
 
 
 def tool(model, call, given, run):
@@ -1241,109 +1273,216 @@ def tool(model, call, given, run):
         run()
 
 
+def result(parent, call, text, error=False):
+    emit(type="user", parent_tool_use_id=parent, message={"content": [
+        {"type": "tool_result", "tool_use_id": call, "content": text, "is_error": error}]})
+
+
 def agent(own, role_name, line, depth, parent, resume, background, call_tier, slots):
     record = {"role": role_name, "depth": depth, "background": background, "resume": resume is not None,
               "brief": Path(line).name, "ran": False}
     with lock:
         records.append(record)
     role = roles.get(role_name)
-    if knob("STANDIN_AGENT_OFF") or role is None or depth > limit:
-        return
-    if not slots.acquire(blocking=not knob("STANDIN_CAP_REFUSE")):
-        return
     try:
-        if name == "cortex":
-            started = {"subagent_type": role_name, "run_in_background": background}
-            emit(type="assistant", parent_tool_use_id=parent, message={"content": [
-                {"type": "tool_use", "id": own, "name": "task",
-                 "input": {**started, "resume": resume} if resume else started}]})
-        elif name == "codex":
-            emit(type="item.completed", item={"type": "collab_tool_call",
-                                              "tool": "followup_task" if resume else "spawn_agent"})
-        if resume and knob("STANDIN_RESUME_FAIL"):
+        if knob("STANDIN_AGENT_OFF") or role is None:
             return
-        first = None if knob("STANDIN_RESUME_FRESH") else memory.get(resume)
-        record["ran"] = True
-        if name == "agy":
-            wins = role["tier"] if knob("STANDIN_TIER_WINS") == "file" and role["tier"] else call_tier or role["tier"]
-            model = f"standin-{wins or 'default'}-model"
-        else:
-            model = f"standin-{'resumed' if resume else 'agent'}-model-{name}"
-        if name == "cortex":
-            emit(type="assistant", parent_tool_use_id=own, message={"model": model})
-        brief = Path(line)
-        text, word = brief.read_text(), role["word"]
-        control = re.search(r"Run the shell command `([^`]+)` in the folder (\S+), with your role word as a second "
-                            r"argument\.", text)
-        if control:
-            command = f"{control[1]} {word}"
-            tool(model, "run_command", {"CommandLine": command, "Cwd": control[2]},
-                 lambda: subprocess.run(command, shell=True, cwd=control[2], capture_output=True))
-        for task in WRITES.finditer(text):
-            words = [task["word"], *([first] if task["recall"] and first else []), word]
-            target, body = Path(task["folder"]) / task["file"], " ".join(words) + "\n"
-            memory.setdefault(own, task["word"])
-            if task["outside"] and knob("STANDIN_OUTSIDE_DENIED"):
-                continue
-            if not task["tool"]:
-                target.write_text(body)
-            elif knob("STANDIN_SHELL_WRITE"):
-                tool(model, "run_command", {"CommandLine": f"echo {body.strip()} > {target}"},
-                     lambda: target.write_text(body))
-            elif not knob("STANDIN_NO_TRY"):
-                withheld = role["tools"] is not None and "write_file" not in role["tools"]
-                refused = withheld and not knob("STANDIN_TOOLS_IGNORED")
-                tool(model, "write_file", {"TargetFile": str(target), "CodeContent": body},
-                     None if refused else lambda: target.write_text(body))
-        shared = re.search(r"run this shell command in the folder (\S+): `([^`]+)`", text)
-        if shared:
-            subprocess.run(shared[2].replace("sleep 1", "sleep 0.05"), shell=True, cwd=shared[1], capture_output=True)
-        slow = re.search(r"run the bash command `([^`]+)`", text)
-        if slow and knob("STANDIN_NO_KILL"):  # else the kill lands during the sleep
-            subprocess.run(slow[1].replace("sleep 300", "sleep 0"), shell=True, capture_output=True)
-        if "Then delete this brief file." in text:
-            brief.unlink()
-        follow(text, depth, own)
+        if not slots.acquire(blocking=not knob("STANDIN_CAP_REFUSE")):
+            return
+        try:
+            run(own, role_name, role, line, depth, parent, resume, background, call_tier, record)
+        finally:
+            slots.release()
     finally:
-        slots.release()
+        ready[own].set()
 
 
-def follow(text, depth, parent):
-    """Start the agents the text asks for, the starts between two waits at once."""
+def run(own, role_name, role, line, depth, parent, resume, background, call_tier, record):
+    target = ids[resume] if resume else f"{'thread' if name == 'codex' else 'agent'}-{own}"
+    named = ("thread-other" if name == "codex" else "agent-other") if resume and knob("STANDIN_RESUME_OTHER") \
+        else target
+    ids[own] = target
+    if name == "cortex":
+        given = {"subagent_type": role_name, "run_in_background": background, "prompt": f"Read {line} and follow it."}
+        emit(type="assistant", parent_tool_use_id=parent, message={"content": [
+            {"type": "tool_use", "id": own, "name": "task", "input": {**given, "resume": named} if resume else given}]})
+        if depth > limit:
+            result(parent, own, "Maximum subagent nesting depth of 1 reached.", True)
+            return
+        result(parent, own, f"Agent started. agentId: {named}")
+    elif name == "codex":
+        emit(type="item.completed", item={"id": f"item_{own}", "type": "collab_tool_call",
+                                          "tool": "followup_task" if resume else "spawn_agent",
+                                          "receiver_thread_ids": [named], "status": "completed"})
+    if depth > limit or (resume and (knob("STANDIN_RESUME_FAIL") or knob("STANDIN_RESUME_OTHER"))):
+        return
+    if knob("STANDIN_RESUME_FRESH"):
+        first = None
+    elif knob("STANDIN_RESUME_FROM_DISK"):
+        first = markers[resume].read_text().split()[0] if resume in markers else None
+    else:
+        first = memory.get(resume)
+    record["ran"] = True
+    if name == "agy":
+        wins = role["tier"] if knob("STANDIN_TIER_WINS") == "file" and role["tier"] else call_tier or role["tier"]
+        model = "standin-same-model" if knob("STANDIN_SAME_TIERS") else f"standin-{wins or 'default'}-model"
+    else:
+        model = f"standin-{'resumed' if resume else 'agent'}-model-{name}"
+    if name == "cortex" and not knob("STANDIN_NO_MODEL"):
+        emit(type="assistant", parent_tool_use_id=own, message={"model": model})
+    brief = Path(line)
+    text, word = brief.read_text(), role["word"]
+    keep = re.search(r"Remember the word (\S+) for later", text)
+    if keep:
+        memory[own] = keep[1]
+    control = re.search(r"Run the shell command `([^`]+)` in the folder (\S+), with your role word as a third "
+                        r"argument\.", text)
+    if control:
+        command = f"{control[1]} {word}"
+        tool(model, "run_command", {"CommandLine": command, "Cwd": control[2]},
+             lambda: subprocess.run(command, shell=True, cwd=control[2], capture_output=True))
+    ended = None
+    for task in WRITES.finditer(text):
+        words = [task["word"], *([first] if task["recall"] and first else []), word]
+        target, body = Path(task["folder"]) / task["file"], " ".join(words) + "\n"
+        markers.setdefault(own, target)
+        if task["outside"] and knob("STANDIN_OUTSIDE_DENIED"):
+            continue
+        if not task["tool"]:
+            target.write_text(body)
+        elif knob("STANDIN_SHELL_WRITE"):
+            tool(model, "run_command", {"CommandLine": f"echo {body.strip()} > {target}"},
+                 lambda: target.write_text(body))
+            ended = "wrote"
+        elif knob("STANDIN_OTHER_TOOL"):
+            tool(model, "view_file", {"AbsolutePath": str(target), "Note": body.strip()}, None)
+            ended = "refused"
+        elif knob("STANDIN_NO_TRY"):
+            ended = "refused"
+        else:
+            withheld = role["tools"] is not None and "write_file" not in role["tools"]
+            refused = withheld and not knob("STANDIN_TOOLS_IGNORED")
+            failing = knob("STANDIN_WRITE_ERROR")
+            tool(model, "write_file", {"TargetFile": str(target), "CodeContent": body},
+                 None if refused or failing else lambda: target.write_text(body))
+            ended = "failed" if failing else "refused" if refused else "wrote"
+    report = re.search(r"run the shell command `([^`]+)` in the folder (\S+), with your role word and then one word "
+                       r"for how the write_file call ended", text)
+    if report and ended:
+        command = f"{report[1]} {word} {ended}"
+        tool(model, "run_command", {"CommandLine": command, "Cwd": report[2]},
+             lambda: subprocess.run(command, shell=True, cwd=report[2], capture_output=True))
+    has = depth < limit or knob("STANDIN_TOOLS_KEPT") or name != "cortex"
+    for task in LISTS.finditer(text):
+        kept = AGENT_TOOLS if has and (role["tools"] is None or "task" in role["tools"]) else "none"
+        (Path(task[3]) / task[2]).write_text(f"{task[1]} {kept}\n")
+    if "Then delete this brief file." in text:
+        brief.unlink()
+    shared = re.search(r"run this shell command in the folder (\S+): `([^`]+)`", text)
+    if shared:
+        subprocess.run(shared[2].replace("sleep 1", "sleep 0.05"), shell=True, cwd=shared[1], capture_output=True)
+    slow = re.search(r"run the bash command `([^`]+)`", text)
+    if slow:  # a live sleep: the kill ends it, or STANDIN_NO_KILL lets a short one finish
+        sleeper = sleepers[own] = subprocess.Popen(
+            slow[1].replace("sleep 300", "sleep 0" if knob("STANDIN_NO_KILL") else "sleep 5"), shell=True,
+            start_new_session=True)
+        ready[own].set()
+        sleeper.wait()
+    follow(text, depth, own, model, has)
+
+
+def follow(text, depth, parent, model, able=True):
+    """Start the agents the text asks for, the starts between two waits at once; an agent with no tools starts none."""
     role = background = tier = last = None
-    resume, threads = False, []
+    resume, threads, pending = False, [], []
     slots = threading.BoundedSemaphore(int(knob("STANDIN_CAP", "8")))
+    if depth and knob("STANDIN_SKIP_NESTED"):
+        return
+
+    def begin(args):
+        own, resumed = args[0], args[5]
+        if name == "codex":
+            emit(type="item.started", item={"id": f"item_{own}", "type": "collab_tool_call",
+                                            "tool": "followup_task" if resumed else "spawn_agent",
+                                            "receiver_thread_ids": [], "status": "in_progress"})
+        thread = threading.Thread(target=agent, args=args)
+        threads.append(thread)
+        return thread
+
+    def flush():
+        if knob("STANDIN_STEP_APART"):
+            for args in pending:
+                thread = begin(args)
+                thread.start()
+                thread.join()
+        else:
+            for thread in [begin(args) for args in pending]:
+                thread.start()
+        pending.clear()
+
+    def settle():
+        flush()
+        for thread in threads:
+            thread.join()
+
     for token in TOKENS.finditer(text):
         if token["role"]:
             role = token["role"]
         elif token["bg"]:
-            background = token["bg"] == "true"
+            forced = knob("STANDIN_FOREGROUND") and (depth or knob("STANDIN_FOREGROUND") != "inner")
+            background = token["bg"] == "true" and not forced
         elif token["tier"]:
-            tier = token["tier"]
-        elif token["resume"] or token["stop"]:
-            for thread in threads:
-                thread.join()
-            if token["resume"]:
-                resume = True
-            elif token["stop"] == "kill_agent" and not (knob("STANDIN_NO_KILL") or knob("STANDIN_HIDE_KILL")):
+            tier = None if knob("STANDIN_NO_TIER") else token["tier"]
+        elif token["wait"]:
+            settle()
+            if name == "cortex":
                 emit(type="assistant", parent_tool_use_id=parent, message={"content": [
-                    {"type": "tool_use", "id": "toolu_kill", "name": "kill_agent", "input": {"agent_id": last}}]})
-            elif token["stop"] == "close_agent" and not knob("STANDIN_NO_CLOSE"):
-                emit(type="item.completed", item={"type": "collab_tool_call", "tool": "close_agent"})
-        else:
+                    {"type": "tool_use", "id": next_id("toolu_wait"), "name": "agent_output",
+                     "input": {"agent_id": ids.get(last), "wait": True}}]})
+        elif token["stop"] == "kill_agent":
+            flush()
+            ready[last].wait(10)
+            if not (knob("STANDIN_NO_KILL") or knob("STANDIN_HIDE_KILL")):
+                kill = next_id("toolu_kill")
+                emit(type="assistant", parent_tool_use_id=parent, message={"content": [
+                    {"type": "tool_use", "id": kill, "name": "kill_agent",
+                     "input": {"agent_id": "agent-other" if knob("STANDIN_KILL_OTHER") else ids.get(last)}}]})
+                result(parent, kill, "Error: no such agent" if knob("STANDIN_KILL_FAILS") else "Agent killed.",
+                       bool(knob("STANDIN_KILL_FAILS")))
+            if last in sleepers and not knob("STANDIN_NO_KILL"):
+                os.killpg(sleepers[last].pid, signal.SIGTERM)
+            settle()
+        elif token["stop"] == "close_agent":
+            settle()
+            if not knob("STANDIN_NO_CLOSE"):
+                emit(type="item.completed", item={
+                    "id": next_id("item_close"), "type": "collab_tool_call", "tool": "close_agent",
+                    "receiver_thread_ids": ["thread-other" if knob("STANDIN_CLOSE_OTHER") else ids.get(last)],
+                    "status": "failed" if knob("STANDIN_CLOSE_FAILS") else "completed"})
+        elif token["resume"]:
+            settle()
+            resume = True
+        elif not able:
             with lock:
-                counter[0] += 1
-                own = f"toolu_{counter[0]}"
-            thread = threading.Thread(target=agent, args=(own, role, token["line"], depth + 1, parent,
-                                                          last if resume else None, background, tier, slots))
-            threads.append(thread)
-            thread.start()
+                records.append({"role": role, "depth": depth + 1, "background": background, "resume": resume,
+                                "brief": Path(token["line"]).name, "ran": False})
+        else:
+            own = next_id("toolu")
+            ready[own] = threading.Event()
+            if name == "agy":
+                tool(model, "invoke_subagent", {"Prompt": f"Read {token['line']} and follow it.",
+                                                **({"Model": tier} if tier else {})}, None)
+            pending.append((own, role, token["line"], depth + 1, parent, last if resume else None, background, tier,
+                            slots))
             last, resume = own, False
-    for thread in threads:
-        thread.join()
+    settle()
 
 
-follow(prompt, 0, None)
+if knob("STANDIN_DECOY"):  # an unrelated call first, whose own event names a model
+    emit(type="assistant", message={"content": [{"type": "tool_use", "id": "toolu_decoy", "name": "read",
+                                                 "input": {"path": "notes.md"}}]})
+    emit(type="assistant", parent_tool_use_id="toolu_decoy", message={"model": "standin-decoy-model"})
+follow(prompt, 0, None, "standin-session-model")
 if name == "cortex":
     print(json.dumps({"type": "system", "subtype": "init", "session_id": "{session}", "cwd": str(cwd)}))
 elif name == "codex":
@@ -1384,9 +1523,35 @@ class TestLimitEntries(HookTest):
         return [(a["role"], a["depth"], a["brief"], a["resume"], a["ran"])
                 for a in self.world.harness_starts()[-1]["agents"]]
 
+    def load_kit(self):
+        spec = importlib.util.spec_from_file_location("probe_kit_under_test", KIT)
+        kit = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = kit  # dataclass looks its module up there before Python 3.14
+        self.addCleanup(sys.modules.pop, spec.name, None)
+        spec.loader.exec_module(kit)
+        return kit
+
+    def run_in_process(self, kit, err: io.StringIO, *patches, **knobs: str) -> object:
+        """R5's run_probe in this process against the world, with the patches given: its result or its exception."""
+        saved = self.world.root / "saved"
+        saved.mkdir(exist_ok=True)
+        env = {"PATH": f"{self.world.bin}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(self.world.home),
+               "STANDIN_HC_DIR": str(self.world.hc_dir), "STANDIN_STARTS": str(self.world.starts),
+               "STANDIN_UV_CALLS": str(self.world.uv_calls), **knobs}
+        with contextlib.ExitStack() as stack:
+            for patch in (mock.patch.dict(os.environ, env), mock.patch.object(tempfile, "tempdir", str(self.world.tmp)),
+                          contextlib.redirect_stderr(err), *patches):
+                stack.enter_context(patch)
+            try:
+                return kit.run_probe("cursor", "R5", argparse.Namespace(connection=None, time_limit=30.0, poll=0.05),
+                                     saved)
+            except BaseException as error:  # noqa: BLE001 - the test reads which one
+                return error
+
     def test_k1_is_seen_when_neither_a_foreground_nor_a_background_agent_can_start_an_agent(self):
         self.assertEqual(self.run_entry("cortex", "K1"),
-                         "K1 cortex seen: neither a foreground nor a background agent could start an agent\n")
+                         "K1 cortex seen: neither a foreground nor a background agent could start an agent: the "
+                         "foreground author had none of task, agent; the background author had none of task, agent\n")
         start = self.world.harness_starts()[-1]
         self.assertEqual((start["features"], start["limit"]), ("{}", 1))
         brief = "<work>/.git/deliver/branches/probe-agent/brief-k1"
@@ -1399,37 +1564,67 @@ class TestLimitEntries(HookTest):
         self.assertEqual(sorted(start["definitions"]), [".cortex/agents/probe-author.md",
                                                        ".cortex/agents/probe-reviewer.md"])
         self.assertNotIn("tools:", start["definitions"][".cortex/agents/probe-author.md"])
-        self.assertEqual(self.agents(), [("probe-author", 1, "brief-k1-bg.md", False, True),
-                                         ("probe-reviewer", 2, "brief-k1-bgleaf.md", False, False),
-                                         ("probe-author", 1, "brief-k1-fg.md", False, True),
-                                         ("probe-reviewer", 2, "brief-k1-fgleaf.md", False, False)])
+        expected = [("probe-author", 1, "brief-k1-bg.md", False, True),
+                    ("probe-reviewer", 2, "brief-k1-bgleaf.md", False, False),
+                    ("probe-author", 1, "brief-k1-fg.md", False, True),
+                    ("probe-reviewer", 2, "brief-k1-fgleaf.md", False, False)]
+        self.assertEqual(self.agents(), expected)
+        self.assertEqual(self.run_entry("cortex", "K1", STANDIN_TOOLS_KEPT="1"),
+                         "K1 cortex seen: neither a foreground nor a background agent could start an agent: the "
+                         "foreground author's call to start an agent was refused; the background author's call to "
+                         "start an agent was refused\n")
+        self.assertEqual(self.agents(), expected)
 
-    def test_k1_fails_when_an_agent_starts_one_or_no_author_ran(self):
+    def test_k1_fails_when_an_agent_starts_one_no_author_ran_or_an_author_with_the_tools_did_not_try(self):
         self.assertEqual(self.run_entry("cortex", "K1", STANDIN_DEPTH="2"),
                          "K1 cortex failed: a foreground agent started an agent of the reviewer role\n")
         self.assertEqual(self.run_entry("cortex", "K1", STANDIN_AGENT_OFF="1"),
                          "K1 cortex failed: no foreground agent of the author role ran\n")
+        skipped = ("K1 cortex failed: the foreground author had task, agent, agent_output, kill_agent, but the output "
+                   "shows no call of its to start an agent\n")
+        self.assertEqual(self.run_entry("cortex", "K1", STANDIN_DEPTH="2", STANDIN_SKIP_NESTED="1"), skipped)
+        self.assertEqual(self.run_entry("cortex", "K1", STANDIN_TOOLS_KEPT="1", STANDIN_SKIP_NESTED="1"), skipped)
 
-    def test_k2_and_k3_see_both_reviewers_under_the_author_at_once_or_one_after_the_other(self):
-        self.assertEqual(self.run_entry("cortex", "K2"), "K2 cortex seen: both agents of the reviewer role ran "
-                                                         "under the author, at once\n")
+    def test_k2_and_k3_see_both_leaves_under_the_author_with_their_modes_and_no_agent_tools(self):
+        self.assertEqual(self.run_entry("cortex", "K2"),
+                         "K2 cortex seen: both agents of the leaf role ran at once under the foreground author, two "
+                         "layers down, and neither had task, agent, agent_output or kill_agent\n")
         start = self.world.harness_starts()[-1]
         self.assertEqual((start["features"], start["limit"]), ('{"maxSubagentDepth": 2}', 2))
         self.assertEqual(self.agents(), [("probe-author", 1, "brief-k2-author.md", False, True),
-                                         ("probe-reviewer", 2, "brief-k2-first.md", False, True),
-                                         ("probe-reviewer", 2, "brief-k2-second.md", False, True)])
+                                         ("probe-leaf", 2, "brief-k2-first.md", False, True),
+                                         ("probe-leaf", 2, "brief-k2-second.md", False, True)])
+        self.assertNotIn("tools:", start["definitions"][".cortex/agents/probe-leaf.md"])
         self.assertEqual(self.run_entry("cortex", "K3", STANDIN_CAP="1"),
-                         "K3 cortex seen: both foreground agents of the reviewer role ran under the background "
-                         "author, one after the other\n")
-        self.assertEqual([a["background"] for a in self.world.harness_starts()[-1]["agents"]], [True, False, False])
+                         "K3 cortex seen: both foreground agents of the leaf role ran under the background author, "
+                         "one after the other; with background inner calls, 2 of 2 agents of the leaf role ran\n")
+        self.assertEqual([(a["brief"], a["background"]) for a in self.world.harness_starts()[-1]["agents"]],
+                         [("brief-k3-author.md", True), ("brief-k3-first.md", False), ("brief-k3-second.md", False),
+                          ("brief-k3-variant.md", True), ("brief-k3-vfirst.md", True),
+                          ("brief-k3-vsecond.md", True)])
+        self.assertEqual(self.run_entry("cortex", "K3"),
+                         "K3 cortex seen: both foreground agents of the leaf role ran under the background author, "
+                         "at once; with background inner calls, 2 of 2 agents of the leaf role ran\n")
 
-    def test_k2_and_k3_fail_without_both_reviewers_or_without_the_author(self):
+    def test_k2_and_k3_fail_without_both_leaves_the_author_the_modes_at_once_or_the_depth(self):
         self.assertEqual(self.run_entry("cortex", "K2", STANDIN_DEPTH="1"),
-                         "K2 cortex failed: 0 of the 2 agents of the reviewer role ran under the author\n")
+                         "K2 cortex failed: 0 of the 2 agents of the leaf role ran under the author\n")
         self.assertEqual(self.run_entry("cortex", "K3", STANDIN_AGENT_OFF="1"),
                          "K3 cortex failed: no agent of the author role ran\n")
+        self.assertEqual(self.run_entry("cortex", "K2", STANDIN_CAP="1"),
+                         "K2 cortex failed: both agents of the leaf role ran under the author, but one after the "
+                         "other\n")
+        self.assertEqual(self.run_entry("cortex", "K2", STANDIN_DEPTH="3"),
+                         "K2 cortex failed: an agent of the leaf role, two layers down, has task, agent, agent_output, "
+                         "kill_agent, so the limit is deeper than 2\n")
+        self.assertEqual(self.run_entry("cortex", "K3", STANDIN_FOREGROUND="1"),
+                         "K3 cortex failed: the output does not show the session starting the author in the "
+                         "background\n")
+        self.assertEqual(self.run_entry("cortex", "K3", STANDIN_FOREGROUND="inner"),
+                         "K3 cortex failed: the output does not show the author for background inner calls starting "
+                         "both its agents in the background\n")
 
-    def test_k4_is_seen_when_the_killed_agent_resumes_with_its_first_brief_s_word(self):
+    def test_k4_is_seen_when_the_killed_agent_resumes_with_the_word_only_its_first_brief_gave(self):
         self.assertEqual(self.run_entry("cortex", "K4"),
                          "K4 cortex seen: the killed agent resumed with its earlier context\n")
         self.assertEqual(self.agents(), [("probe-reader", 1, "brief-k4-first.md", False, True),
@@ -1438,40 +1633,60 @@ class TestLimitEntries(HookTest):
                       "that agentId. Step 3: call the task tool again with resume set to that agentId",
                       self.world.harness_starts()[-1]["prompt"])
 
-    def test_k4_fails_on_a_finished_sleep_no_kill_call_a_fresh_agent_or_no_answer(self):
+    def test_k4_fails_on_a_finished_sleep_a_missing_wrong_or_failed_kill_a_fresh_agent_or_no_answer(self):
         cases = {"STANDIN_NO_KILL": "the agent was not killed: its sleep finished",
                  "STANDIN_HIDE_KILL": "the output shows no kill_agent call",
+                 "STANDIN_KILL_OTHER": "the kill_agent call names another agent",
+                 "STANDIN_KILL_FAILS": "the kill_agent call did not succeed",
+                 "STANDIN_RESUME_OTHER": "the output shows no task call that resumes that agent",
                  "STANDIN_RESUME_FRESH": "the agent that answered lacks its first brief's word, so it was not "
                                          "the same agent",
+                 "STANDIN_RESUME_FROM_DISK": "the agent that answered lacks its first brief's word, so it was not "
+                                             "the same agent",
                  "STANDIN_RESUME_FAIL": "no agent answered the call-back",
                  "STANDIN_AGENT_OFF": "no agent of the reader role ran"}
         for knob, fact in cases.items():
             self.assertEqual(self.run_entry("cortex", "K4", **{knob: "1"}), f"K4 cortex failed: {fact}\n")
 
-    def test_k5_records_the_resumed_agent_s_model_from_the_events_tied_to_the_resuming_call(self):
-        self.assertEqual(self.run_entry("cortex", "K5"),
-                         "K5 cortex recorded: the resumed agent ran on standin-resumed-model-cortex, its first run on "
-                         "standin-agent-model-cortex, at assistant event .message.model\n")
-        self.assertEqual(self.run_entry("cortex", "K5", STANDIN_RESUME_FRESH="1"),
-                         "K5 cortex failed: the agent that answered lacks its first brief's word, so it was not the "
-                         "same agent\n")
+    def test_k5_records_the_models_of_the_calls_that_started_and_resumed_the_agent(self):
+        line = ("K5 cortex recorded: the resumed agent ran on standin-resumed-model-cortex, its first run on "
+                "standin-agent-model-cortex, at assistant event .message.model\n")
+        self.assertEqual(self.run_entry("cortex", "K5"), line)
+        self.assertEqual(self.run_entry("cortex", "K5", STANDIN_DECOY="1"), line)
 
-    def test_d3_sees_both_agents_asked_for_in_one_message(self):
-        self.assertEqual(self.run_entry("codex", "D3"), "D3 codex seen: both agents asked for in one message ran; "
-                                                        "the kit does not read the model step\n")
+    def test_k5_fails_on_a_fresh_or_other_agent_or_no_model(self):
+        cases = {"STANDIN_RESUME_FRESH": "the agent that answered lacks its first brief's word, so it was not the "
+                                         "same agent",
+                 "STANDIN_RESUME_FROM_DISK": "the agent that answered lacks its first brief's word, so it was not "
+                                             "the same agent",
+                 "STANDIN_RESUME_OTHER": "the output shows no task call that resumes that agent",
+                 "STANDIN_NO_MODEL": "no assistant event tied to the call that resumed the agent names a model"}
+        for knob, fact in cases.items():
+            self.assertEqual(self.run_entry("cortex", "K5", **{knob: "1"}), f"K5 cortex failed: {fact}\n")
+
+    def test_d3_is_seen_only_when_both_starts_were_under_way_at_once(self):
+        self.assertEqual(self.run_entry("codex", "D3"), "D3 codex seen: both agents ran, and both spawn_agent calls "
+                                                        "started before either ended, so one model step made them\n")
         self.assertEqual(self.agents(), [("probe-reader", 1, "brief-d3-one.md", False, True),
                                          ("probe-reader", 1, "brief-d3-two.md", False, True)])
         self.assertEqual(self.run_entry("codex", "D3", STANDIN_AGENT_OFF="1"),
                          "D3 codex failed: 0 of the 2 agents asked for in one message ran\n")
+        self.assertEqual(self.run_entry("codex", "D3", STANDIN_STEP_APART="1"),
+                         "D3 codex failed: both agents ran, but the output does not show both starts in one model "
+                         "step, so the step was not measured\n")
 
-    def test_d4_sees_the_closed_agent_answer_and_fails_without_a_close_or_its_first_word(self):
+    def test_d4_sees_the_closed_agent_answer_and_fails_without_its_own_successful_close_or_its_kept_word(self):
         self.assertEqual(self.run_entry("codex", "D4"),
                          "D4 codex seen: the closed agent answered with its earlier context\n")
-        self.assertEqual(self.run_entry("codex", "D4", STANDIN_NO_CLOSE="1"),
-                         "D4 codex failed: the output shows no close_agent call, so the agent was not unloaded\n")
-        self.assertEqual(self.run_entry("codex", "D4", STANDIN_RESUME_FRESH="1"),
-                         "D4 codex failed: the agent that answered lacks its first brief's word, so it was not the "
-                         "same agent\n")
+        cases = {"STANDIN_NO_CLOSE": "the output shows no close_agent call, so the agent was not unloaded",
+                 "STANDIN_CLOSE_OTHER": "the close_agent call names another agent",
+                 "STANDIN_CLOSE_FAILS": "the close_agent call did not succeed",
+                 "STANDIN_RESUME_FRESH": "the agent that answered lacks its first brief's word, so it was not the "
+                                         "same agent",
+                 "STANDIN_RESUME_FROM_DISK": "the agent that answered lacks its first brief's word, so it was not "
+                                             "the same agent"}
+        for knob, fact in cases.items():
+            self.assertEqual(self.run_entry("codex", "D4", **{knob: "1"}), f"D4 codex failed: {fact}\n")
 
     def test_d5_runs_codex_without_the_temporary_folders_and_sees_the_write_outside(self):
         self.assertEqual(self.run_entry("codex", "D5"), "D5 codex seen: the agent wrote in its worktree outside the "
@@ -1486,13 +1701,13 @@ class TestLimitEntries(HookTest):
         self.assertEqual(self.run_entry("codex", "D5", STANDIN_AGENT_OFF="1"),
                          "D5 codex failed: no agent of the reader role ran\n")
 
-    def test_the_cap_probes_ask_for_4_agents_and_record_the_cap_or_none(self):
+    def test_the_cap_probes_ask_for_4_agents_and_record_the_overlap_naming_no_cap_below_4(self):
+        fewer = "all 4 agents ran, at most {} at once; nothing shows a limit or a queue, so no cap is named"
         cases = [("cursor", "R2", {}, "R2 cursor recorded: no cap up to 4: all 4 agents ran at once\n"),
-                 ("cursor", "R2", {"STANDIN_CAP": "2"}, "R2 cursor recorded: cap 2: all 4 agents ran, at most 2 at "
-                                                        "once\n"),
+                 ("cursor", "R2", {"STANDIN_CAP": "2"}, f"R2 cursor recorded: {fewer.format(2)}\n"),
+                 ("cursor", "R2", {"STANDIN_STEP_APART": "1"}, f"R2 cursor recorded: {fewer.format(1)}\n"),
                  ("antigravity", "A4", {}, "A4 antigravity recorded: no cap up to 4: all 4 agents ran at once\n"),
-                 ("antigravity", "A4", {"STANDIN_CAP": "3"}, "A4 antigravity recorded: cap 3: all 4 agents ran, at "
-                                                             "most 3 at once\n")]
+                 ("antigravity", "A4", {"STANDIN_CAP": "3"}, f"A4 antigravity recorded: {fewer.format(3)}\n")]
         for harness, entry, knobs, line in cases:
             self.assertEqual(self.run_entry(harness, entry, **knobs), line)
             self.assertEqual(self.agents(), [("probe-reader", 1, f"brief-{entry.lower()}-agent{n}.md", False, True)
@@ -1521,6 +1736,31 @@ class TestLimitEntries(HookTest):
         self.assert_private(out, err)
         self.assert_home_empty()
 
+    def test_r5_names_each_file_before_it_exists_and_leaves_one_it_did_not_make(self):
+        kit, err, owner = self.load_kit(), io.StringIO(), "---\nname: owner-role\n---\n\nYour role word is owner-1.\n"
+        agents, real_open, made = self.world.home / ".cursor" / "agents", os.open, []
+
+        def watched(path, flags, *rest, **options):
+            if Path(path).parent == agents:  # the stream as the file is made
+                made.append((Path(path).name, Path(path).exists(), err.getvalue()))
+                if len(made) == 1:  # the owner takes this very name first
+                    Path(path).write_text(owner)
+            return real_open(path, flags, *rest, **options)
+        got = self.run_in_process(kit, err, mock.patch.object(os, "open", watched))
+        self.assertEqual(got, ("seen", "an agent of the role defined only in ~/.cursor/agents/ wrote the marker its "
+                                       "brief names"))
+        (taken, _, _), (name, _, _) = made
+        writes = "probe_kit: R5 writes ~/.cursor/agents/{} and removes it when the probe ends"
+        self.assertEqual([(existed, stream.splitlines()[-1]) for _, existed, stream in made],
+                         [(False, writes.format(taken)), (False, writes.format(name))])
+        self.assertEqual(err.getvalue().splitlines(), [
+            writes.format(taken), f"probe_kit: R5 leaves ~/.cursor/agents/{taken}, which was there already, and "
+                                  f"picks another name", writes.format(name),
+            f"probe_kit: R5 removed ~/.cursor/agents/{name}"])
+        self.assertEqual(sorted(self.world.home.rglob("*")), [agents.parent, agents, agents / taken])
+        self.assertEqual((agents / taken).read_text(), owner)
+        self.assert_private(err.getvalue())
+
     def test_r5_removes_its_file_after_a_failed_probe_and_keeps_folders_it_did_not_make(self):
         self.assertEqual(self.run_entry("cursor", "R5", STANDIN_NO_USER_AGENTS="1"),
                          "R5 cursor failed: no marker the brief names\n")
@@ -1535,7 +1775,6 @@ class TestLimitEntries(HookTest):
         self.assertEqual(own.read_text(), owner)
 
     def test_r5_removes_its_file_when_the_kit_is_interrupted(self):
-        import signal
         env = {"PATH": f"{self.world.bin}{os.pathsep}/usr/bin{os.pathsep}/bin", "HOME": str(self.world.home),
                "DELIVER_STATE_DIR": str(self.world.state), "TMPDIR": str(self.world.tmp),
                "STANDIN_HC_DIR": str(self.world.hc_dir), "STANDIN_STARTS": str(self.world.starts),
@@ -1561,59 +1800,81 @@ class TestLimitEntries(HookTest):
         self.assert_home_empty()
 
     def test_r5_removes_its_file_when_the_probe_raises(self):
-        import argparse
-        import contextlib
-        import importlib.util
-        import io
-        from unittest import mock
-        spec = importlib.util.spec_from_file_location("probe_kit_under_test", KIT)
-        kit = importlib.util.module_from_spec(spec)
-        sys.modules[spec.name] = kit  # dataclass looks its module up there before Python 3.14
-        self.addCleanup(sys.modules.pop, spec.name, None)
-        spec.loader.exec_module(kit)
-
         def broken(*args):
             raise RuntimeError("hc broke")
-        saved, err = self.world.root / "saved", io.StringIO()
-        saved.mkdir()
-        options = argparse.Namespace(connection=None, time_limit=5.0, poll=0.05)
-        with mock.patch.dict(os.environ, {"HOME": str(self.world.home)}), \
-                mock.patch.object(tempfile, "tempdir", str(self.world.tmp)), mock.patch.object(kit, "hc", broken), \
-                contextlib.redirect_stderr(err), self.assertRaisesRegex(RuntimeError, "hc broke"):
-            kit.run_probe("cursor", "R5", options, saved)
+        kit, err = self.load_kit(), io.StringIO()
+        got = self.run_in_process(kit, err, mock.patch.object(kit, "hc", broken))
+        self.assertEqual((type(got), str(got)), (RuntimeError, "hc broke"))
         self.assertEqual([line.split(" ~/")[0] for line in err.getvalue().splitlines()],
                          ["probe_kit: R5 writes", "probe_kit: R5 removed"])
         self.assert_home_empty()
         self.assertEqual(list(self.world.tmp.iterdir()), [])
 
-    def test_a2_is_seen_when_the_hook_logged_a_refused_call_to_the_withheld_tool(self):
+    def test_r5_removes_its_file_on_an_interrupt_after_set_up_or_when_ending_the_terminal_raises(self):
+        kit = self.load_kit()
+
+        def interrupt(harness):
+            raise KeyboardInterrupt
+
+        def broken(command, *args):
+            if command == "run":
+                return {"address": "w1:probe-r5"}
+            raise RuntimeError(f"hc {command} broke")
+        cases = [("interrupt", KeyboardInterrupt, "",
+                  mock.patch.dict(kit.PROBES, R5=dataclasses.replace(kit.PROBES["R5"], prompt=interrupt))),
+                 ("get and kill raise", RuntimeError, "hc kill broke", mock.patch.object(kit, "hc", broken))]
+        for label, kind, message, patch in cases:
+            with self.subTest(label):
+                err = io.StringIO()
+                got = self.run_in_process(kit, err, patch)
+                self.assertEqual((type(got), str(got)), (kind, message))
+                self.assertEqual([line.split(" ~/")[0] for line in err.getvalue().splitlines()],
+                                 ["probe_kit: R5 writes", "probe_kit: R5 removed"])
+                self.assert_home_empty()
+                self.assertEqual(list(self.world.tmp.iterdir()), [])
+
+    def test_a2_is_seen_when_the_agent_s_write_file_call_to_its_marker_was_refused(self):
         self.assertEqual(self.run_entry("antigravity", "A2"),
-                         "A2 antigravity seen: a call to the withheld tool write_file was refused\n")
+                         "A2 antigravity seen: the agent's write_file call to the marker was refused, as it "
+                         "reported\n")
         start = self.world.harness_starts()[-1]
         self.assertIn("tools: [view_file, run_command]\n", start["definitions"][".agents/agents/probe-reviewer.md"])
-        self.assertEqual([s["toolCall"]["name"] for s in start["sent"]], ["run_command", "write_file"])
+        self.assertEqual([s["toolCall"]["name"] for s in start["sent"]],
+                         ["invoke_subagent", "run_command", "write_file", "run_command"])
 
-    def test_a2_fails_when_the_file_is_written_no_call_is_made_or_no_agent_ran(self):
+    def test_a2_fails_on_a_written_file_another_tool_no_call_another_error_or_no_agent(self):
+        no_call = "the agent made no write_file call to the marker, so the withheld tool's absence is not shown"
         cases = {"STANDIN_TOOLS_IGNORED": "the withheld tool wrote the file",
                  "STANDIN_SHELL_WRITE": "the agent wrote the file through run_command, not the withheld tool",
-                 "STANDIN_NO_TRY": "the agent made no call to the withheld tool, so its absence is not shown",
+                 "STANDIN_NO_TRY": no_call,
+                 "STANDIN_OTHER_TOOL": no_call,
+                 "STANDIN_WRITE_ERROR": "the agent's write_file call failed another way, as it reported, so no "
+                                        "refusal is shown",
                  "STANDIN_AGENT_OFF": "no agent of the reviewer role ran a command the hook saw"}
         for knob, fact in cases.items():
             self.assertEqual(self.run_entry("antigravity", "A2", **{knob: "1"}), f"A2 antigravity failed: {fact}\n")
 
-    def test_a3_records_which_tier_wins_from_the_model_in_each_agent_s_hook_input(self):
+    def test_a3_records_which_tier_wins_against_the_models_pro_and_flash_gave(self):
         self.assertEqual(self.run_entry("antigravity", "A3"),
-                         "A3 antigravity recorded: the call's tier won: the agent whose file names flash ran on "
-                         "standin-pro-model, as the one whose file names no tier did\n")
-        definitions = self.world.harness_starts()[-1]["definitions"]
+                         "A3 antigravity recorded: the call's tier won: the agent whose file names flash, called with "
+                         "pro, ran on standin-pro-model; pro gave standin-pro-model and flash standin-flash-model\n")
+        start = self.world.harness_starts()[-1]
+        definitions = start["definitions"]
         self.assertIn("\nmodel: flash\n---\n", definitions[".agents/agents/probe-reader.md"])
         self.assertNotIn("model:", definitions[".agents/agents/probe-author.md"])
         self.assertNotIn("tools:", definitions[".agents/agents/probe-author.md"])
+        self.assertEqual([s["toolCall"]["args"].get("Model") for s in start["sent"]
+                          if s["toolCall"]["name"] == "invoke_subagent"], ["pro", "pro", "flash"])
         self.assertEqual(self.run_entry("antigravity", "A3", STANDIN_TIER_WINS="file"),
-                         "A3 antigravity recorded: the file's tier won: the agent whose file names flash ran on "
-                         "standin-flash-model, the one whose file names no tier on standin-pro-model\n")
-        self.assertEqual(self.run_entry("antigravity", "A3", STANDIN_AGENT_OFF="1"),
-                         "A3 antigravity failed: no agent of the reader role ran\n")
+                         "A3 antigravity recorded: the file's tier won: the agent whose file names flash, called with "
+                         "pro, ran on standin-flash-model; pro gave standin-pro-model and flash standin-flash-model\n")
+
+    def test_a3_fails_when_no_agent_ran_the_call_named_no_tier_or_the_tiers_gave_one_model(self):
+        cases = {"STANDIN_AGENT_OFF": "no agent of the reader role ran for the tiered brief",
+                 "STANDIN_NO_TIER": "the hook saw no invoke_subagent call with Model pro for the tiered brief",
+                 "STANDIN_SAME_TIERS": "precedence could not be told: pro and flash both ran on standin-same-model"}
+        for knob, fact in cases.items():
+            self.assertEqual(self.run_entry("antigravity", "A3", **{knob: "1"}), f"A3 antigravity failed: {fact}\n")
 
 
 if __name__ == "__main__":

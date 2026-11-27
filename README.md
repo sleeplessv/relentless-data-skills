@@ -235,7 +235,9 @@ and needs no guard before it, as [`scripts/check.sh --help`](scripts/check.sh) e
   and README skills table match each skill's `plugin.json`.
 - `python3 scripts/skill_versions.py --check --base origin/main` checks skill
   versions against the fetched `main` branch. CI compares the proposed merge
-  with its base branch, or a push with its previous commit. Scheduled and manual
+  with its base branch, or a push with its previous commit. A PR into a branch
+  other than `main`, such as an integration branch, is compared with its merge
+  base with `main`, as `scripts/check.sh` does. Scheduled and manual
   runs validate current metadata without requiring a historical bump.
 
 After editing a skill's `plugin.json`, run

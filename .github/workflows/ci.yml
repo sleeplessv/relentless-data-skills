@@ -82,6 +82,39 @@ jobs:
       - name: Lint SKILL.md files
         run: python scripts/lint_skill.py
 
+  # The rule gate (#407): a PR into the default branch that changes skills/deliver/
+  # carries the evidence its ## Change kind block declares. The script says when it
+  # does not apply. It reads the body from this run's event payload, so a body edited
+  # after the push is read on the next push: pull_request does not fire on `edited`
+  # here, because an edit would cancel and rerun every job of the PR.
+  gate-check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The PR's merge commit and its first parent, the base branch's tip.
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Check the change kind block
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          printf '%s' "$PR_BODY" > "$RUNNER_TEMP/body.md"
+          git diff -z --name-only --no-renames HEAD^1 HEAD > "$RUNNER_TEMP/changed"
+          # The base's copy judges the PR, so a PR cannot loosen the gate that judges it.
+          # A base without the script (before the gate lands) runs the PR's copy.
+          git show HEAD^1:scripts/gate_check.py > "$RUNNER_TEMP/gate_check.py" 2>/dev/null \
+            || cp scripts/gate_check.py "$RUNNER_TEMP/gate_check.py"
+          python "$RUNNER_TEMP/gate_check.py" --body "$RUNNER_TEMP/body.md" --base "$BASE_REF" \
+            --default-branch "$DEFAULT_BRANCH" --base-rev HEAD^1 --changed "$RUNNER_TEMP/changed"
+
   # The generated-registry check runs in skill-version-check, the check the
   # main ruleset requires, so it is not duplicated in a separate job.
 

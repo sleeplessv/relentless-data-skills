@@ -956,6 +956,7 @@ class TestDraw(unittest.TestCase):
         for terms in (("draw asked GitHub about the PR",), ("result", "not an error", "PR's URL"),
                       ("GitHub's time", "span"), ("names gh pr create",), ("plain", "unquoted", "in that order"),
                       ("NAME=value",), ("here-document's body", "quotes"),
+                      ("text in double quotes that holds no unescaped ` and no other unescaped $.",),
                       ("takes for granted", "no other program opened the PR during that one call")):
             with self.subTest(terms=terms):
                 for term in terms:

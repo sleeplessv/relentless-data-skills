@@ -305,7 +305,8 @@ class CheckLockTest(unittest.TestCase):
         self.addCleanup(holder.release)
         return holder
 
-    def start(self, *args: str, name: str = "", cwd: Path | None = None, preexec=None, **env: str) -> subprocess.Popen:
+    def start(self, *args: str, name: str = "", cwd: Path | None = None, preexec=None, script: str = "scripts/check.sh",
+              **env: str) -> subprocess.Popen:
         """Start check.sh in the background, its output going to files under state/.
 
         preexec runs in the child before bash starts, to set what the run inherits.
@@ -319,7 +320,7 @@ class CheckLockTest(unittest.TestCase):
         self.addCleanup(out.close)
         self.addCleanup(err.close)
         proc = subprocess.Popen(
-            [BASH, "scripts/check.sh", *args], cwd=cwd or self.repo, env=run_env,
+            [BASH, script, *args], cwd=cwd or self.repo, env=run_env,
             stdout=out, stderr=err, start_new_session=True, preexec_fn=preexec,
         )
         proc.tag = tag
@@ -432,6 +433,11 @@ class CheckLockTest(unittest.TestCase):
         rc, out, err = self.run_check("--bogus", name="bogus", CHECK_LOCK_WAIT="0")
         self.assertEqual((rc, out, err), (2, "", "check.sh: unknown argument: --bogus\n"))
         self.assertEqual(self.log(), [])
+
+    def test_help_prints_from_inside_scripts_by_a_relative_path(self) -> None:
+        rc, out, err = self.run_check("--help", name="help", cwd=self.repo / "scripts", script="check.sh")
+        self.assertEqual((rc, err), (0, ""))
+        self.assertIn("A run with --fast, --help or a usage error takes no lock and never waits.", " ".join(out.split()))
 
     def test_the_waiting_line_names_the_holder_where_the_file_gives_it(self) -> None:
         shapes = {

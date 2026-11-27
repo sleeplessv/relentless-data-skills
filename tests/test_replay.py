@@ -174,6 +174,26 @@ def process_state(pid: int) -> str:
                          f"{ps.stderr!r}")
 
 
+def run_to_exit(args: list[str], at_exit: Callable[[], None] | None = None, **options: object
+                ) -> subprocess.CompletedProcess[str]:
+    """`args` run to the end, with its output in files rather than pipes, so it is known to have exited as soon as
+    wait() returns, however long another process holds its output open. `at_exit` is called then, before any output
+    is read."""
+    with tempfile.TemporaryFile("w+") as out, tempfile.TemporaryFile("w+") as err:
+        process = subprocess.Popen(args, text=True, stdout=out, stderr=err, **options)
+        try:
+            process.wait(timeout=120)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+            raise
+        if at_exit:
+            at_exit()
+        out.seek(0)
+        err.seek(0)
+        return subprocess.CompletedProcess(args, process.returncode, out.read(), err.read())
+
+
 def run_git(*args: str, cwd: Path, env: dict[str, str]) -> str:
     return subprocess.run(["git", *args], cwd=cwd, env=env, check=True, text=True,
                           capture_output=True).stdout.strip()
@@ -242,11 +262,16 @@ class World:
                    STANDIN_STARTS=str(self.starts), TMPDIR=str(self.root), **PARENT)
         return {**env, **extra}
 
-    def replay(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
-        """Run the replay in env(**extra), less the variables unset names."""
+    def replay(self, *args: str, unset: tuple[str, ...] = (), at_exit: Callable[[], None] | None = None,
+               **extra: str) -> subprocess.CompletedProcess[str]:
+        """Run the replay in env(**extra), less the variables unset names; `at_exit` is called as it exits."""
         env = {key: value for key, value in self.env(**extra).items() if key not in unset}
-        return subprocess.run([sys.executable, str(SCRIPTS / "replay.py"), *args], cwd=self.root,
-                              env=env, text=True, capture_output=True, timeout=120)
+        return run_to_exit([sys.executable, str(SCRIPTS / "replay.py"), *args], at_exit, cwd=self.root, env=env)
+
+    def clear(self) -> None:
+        """Remove the clone and the version's repo, for a subtest that replays the same ticket again."""
+        shutil.rmtree(self.clone, ignore_errors=True)
+        shutil.rmtree(self.store, ignore_errors=True)
 
     @property
     def clone(self) -> Path:
@@ -297,9 +322,10 @@ class ReplayTest(unittest.TestCase):
         root.mkdir()
         return root
 
-    def replay(self, *args: str, unset: tuple[str, ...] = (), **extra: str) -> subprocess.CompletedProcess[str]:
+    def replay(self, *args: str, unset: tuple[str, ...] = (), at_exit: Callable[[], None] | None = None,
+               **extra: str) -> subprocess.CompletedProcess[str]:
         """Run the replay, then hold every session it started to the whole confinement."""
-        result = self.world.replay(*args, unset=unset, **extra)
+        result = self.world.replay(*args, unset=unset, at_exit=at_exit, **extra)
         for start in self.world.starts_made():
             self.assert_confined(start)
         return result
@@ -514,12 +540,14 @@ class ReplayTest(unittest.TestCase):
         probe.unlink()
         self.assert_version_holds(self.replay("A", "7", STANDIN_TRACK=os.fsdecode(name)), name)
 
-    def assert_index_refused(self, result: subprocess.CompletedProcess[str], why: str, kept: bool = True) -> None:
+    def assert_index_refused(self, result: subprocess.CompletedProcess[str], why: str, kept: bool = True,
+                             shown: str | None = None) -> None:
         """One line and nothing recorded. What the replay made is kept when the session had run, and removed when
-        the index was refused before the session."""
-        index = self.world.clone / ".git" / "index"
+        the index was refused before the session. `shown` is the index's path as the line gives it, where the
+        replay's locale shows it otherwise than this test's."""
+        shown = shown or repr(str(self.world.clone / ".git" / "index"))
         self.assertEqual(result.returncode, 1)
-        self.assertEqual(result.stderr, f"replay: the clone's index {str(index)!r} cannot be read ({why}).\n")
+        self.assertEqual(result.stderr, f"replay: the clone's index {shown} cannot be read ({why}).\n")
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.world.versions(), [])
         self.assertEqual(self.world.rows(), [])
@@ -585,15 +613,14 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(list(self.world.store.glob("sharedindex.*")), [])
 
     def test_a_shared_index_of_the_same_name_in_the_version_s_repo_is_neither_read_nor_touched(self) -> None:
-        # The session puts a copy of the shared index in the version's repo, under the same name. With the clone's
-        # own copy in place the index is listed; with it removed, the index is refused, not read from the copy. The
+        # The session puts a file named as the shared index in the version's repo: a valid copy, which must not stand
+        # in for the clone's own copy once that is removed, or other bytes, which must be left as they are. The
         # refusal comes first, as it records nothing.
-        store_copy = "cp .git/sharedindex.* ../A-7-direct.git/"
         for removed in (True, False):
             with self.subTest(clone_copy_removed=removed):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
-                prepare = store_copy + (" && rm .git/sharedindex.*" if removed else "")
+                self.world.clear()
+                prepare = ("cp .git/sharedindex.* ../A-7-direct.git/ && rm .git/sharedindex.*" if removed else
+                           "for f in .git/sharedindex.*; do echo session > \"../A-7-direct.git/${f#.git/}\"; done")
                 result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_SPLIT="1", STANDIN_PREPARE=prepare)
                 if removed:
                     self.assert_index_refused(result, "git ls-files exited 128")
@@ -601,26 +628,33 @@ class ReplayTest(unittest.TestCase):
                 else:
                     self.assert_version_holds(result, b"dep.lock")
                     [clone_copy] = (self.world.clone / ".git").glob("sharedindex.*")
-                    self.assertEqual((self.world.store / clone_copy.name).read_bytes(), clone_copy.read_bytes())
+                    self.assertEqual((self.world.store / clone_copy.name).read_bytes(), b"session\n")
                 self.assertEqual(len(list(self.world.store.glob("sharedindex.*"))), 1)
 
     def test_a_stale_alternates_entry_does_not_stop_an_index_git_lists(self) -> None:
         # The clone's alternates file names a folder that does not exist. Native git says so on standard error,
-        # lists the index and exits 0; so must the replay.
-        prepare = "echo ../nowhere/objects > .git/objects/info/alternates"
-        self.assert_version_holds(self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare),
-                                  b"dep.lock")
-        native = subprocess.run(["git", "ls-files", "-z"], cwd=self.world.clone, env=self.world.git_env(),
-                                capture_output=True)
-        self.assertEqual(native.returncode, 0)
-        self.assertIn(b"dep.lock\0", native.stdout)
-        self.assertIn(b"nowhere", native.stderr)
+        # lists the index and exits 0; so must the replay, for a plain index and for a sparse one whose tree the
+        # clone holds.
+        stale = "echo ../nowhere/objects > .git/objects/info/alternates"
+        for kind, prepare, name in (("plain", stale, "dep.lock"),
+                                    ("sparse", f"{self.SPARSE} && {stale} && mkdir pins && echo pinned > pins/dep.lock",
+                                     "pins/dep.lock")):
+            with self.subTest(index=kind):
+                self.world.clear()
+                result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
+                self.assertEqual((result.returncode, result.stderr), (0, ""))
+                [version] = self.world.versions()
+                self.assertIn(name.encode(), self.world.names(version["commit"]))
+                native = subprocess.run(["git", "ls-files", "-z"], cwd=self.world.clone, env=self.world.git_env(),
+                                        capture_output=True)
+                self.assertEqual(native.returncode, 0)
+                self.assertIn(name.encode() + b"\0", native.stdout)
+                self.assertIn(b"nowhere", native.stderr)
 
     def test_a_missing_index_means_no_paths(self) -> None:
         for prepare in ("rm .git/index", "mv .git ../real-git && ln -s ../real-git .git && rm ../real-git/index"):
             with self.subTest(prepare=prepare):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 shutil.rmtree(self.world.state / "replays" / "real-git", ignore_errors=True)
                 result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
                 self.assertEqual((result.returncode, result.stderr), (0, ""))
@@ -645,8 +679,7 @@ class ReplayTest(unittest.TestCase):
         }
         for state, (prepare, why) in states.items():
             with self.subTest(state=state):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 shutil.rmtree(self.world.state / "replays" / "moved", ignore_errors=True)
                 result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
                 if why is None:
@@ -670,8 +703,7 @@ class ReplayTest(unittest.TestCase):
                 if locked.exists():
                     locked.chmod(0o755)
                     shutil.rmtree(locked)
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
                 self.assert_version_holds(result, b"dep.lock")
                 self.assertEqual(self.world.versions()[0]["exit_status"], 0)
@@ -692,12 +724,11 @@ class ReplayTest(unittest.TestCase):
         (stand_in / "git").chmod(0o755)
         result = self.world.replay("A", "7", LC_ALL="C", PYTHONUTF8="0",
                                    PATH=f"{stand_in}{os.pathsep}{self.world.env()['PATH']}")
-        self.assertEqual(result.returncode, 1)
-        [line] = result.stderr.splitlines()
-        self.assertTrue(line.startswith("replay: the clone's index '") and
-                        line.endswith(".git/index' cannot be read (git init exited 128)."), line)
-        self.assertEqual((self.world.starts_made(), self.world.versions(), self.world.rows()), ([], [], []))
-        self.assertFalse(self.world.clone.exists())
+        # The index's path as the replay's own Python shows it under that locale.
+        shown = subprocess.run([sys.executable, "-c", "import os, sys; sys.stderr.write(repr(os.path.join("
+                                "os.environ['DELIVER_STATE_DIR'], 'replays', 'A-7-direct', '.git', 'index')))"],
+                               env=self.world.env(LC_ALL="C", PYTHONUTF8="0"), capture_output=True, text=True).stderr
+        self.assert_index_refused(result, "git init exited 128", kept=False, shown=shown)
 
     # Fails the nth call of subprocess.run whose arguments hold sys.argv[1], as `how` says.
     FAIL_NTH_RUN = ("real, calls, word, nth = subprocess.run, [], sys.argv[1], int(sys.argv[2])\n"
@@ -731,8 +762,7 @@ class ReplayTest(unittest.TestCase):
         for failure, body, argv, why in (("no space", no_space, (), "No space left on device"),
                                           ("git init exits 7", init_fails, ("init", "3"), "git init exited 7")):
             with self.subTest(failure=failure):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 self.assert_index_refused(self.patched_replay(body, *argv), why)
 
     def test_a_folder_of_replays_the_session_made_read_only_ends_in_one_line_and_keeps_both(self) -> None:
@@ -745,13 +775,14 @@ class ReplayTest(unittest.TestCase):
             self.skipTest("this user is granted what the mode bits deny, so no permission error can be asserted")
         self.assert_index_refused(result, "Permission denied")
 
+    # The session moves the ignored tracked file into a new folder, commits, and turns on a sparse index whose cone
+    # leaves that folder out; the index then holds the folder as one entry, a tree only the clone has.
+    SPARSE = ("mkdir pins && git mv dep.lock pins/ && git commit -q -m move && "
+              "git sparse-checkout set --sparse-index elsewhere && git ls-files --sparse | grep -qx pins/")
+
     def test_a_sparse_index_keeps_a_tracked_file_under_a_folder_the_session_made(self) -> None:
-        # The session moves the ignored tracked file into a new folder, commits, and turns on a sparse index whose
-        # cone leaves that folder out; the index then holds the folder as one entry, a tree only the clone has.
-        # The file is written back after that, so it is in the working tree.
-        prepare = ("mkdir pins && git mv dep.lock pins/ && git commit -q -m move && "
-                   "git sparse-checkout set --sparse-index elsewhere && git ls-files --sparse | grep -qx pins/ && "
-                   "mkdir pins && echo pinned > pins/dep.lock")
+        # The file is written back after the sparse index is made, so it is in the working tree.
+        prepare = f"{self.SPARSE} && mkdir pins && echo pinned > pins/dep.lock"
         result = self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare)
         self.assertEqual((result.returncode, result.stderr), (0, ""))
         [version] = self.world.versions()
@@ -760,8 +791,7 @@ class ReplayTest(unittest.TestCase):
 
     def test_a_sparse_index_whose_tree_cannot_be_read_is_refused_not_read_as_fewer_paths(self) -> None:
         # Git expands the sparse folder entry from its tree and exits 0 when that tree is gone.
-        prepare = ("mkdir pins && git mv dep.lock pins/ && git commit -q -m move && "
-                   "git sparse-checkout set --sparse-index elsewhere && git ls-files --sparse | grep -qx pins/ && "
+        prepare = (f"{self.SPARSE} && "
                    't=$(git rev-parse HEAD:pins) && rm ".git/objects/$(echo $t | cut -c1-2)/$(echo $t | cut -c3-)" && '
                    "mkdir pins && echo pinned > pins/dep.lock")
         self.assert_index_refused(self.replay("A", "7", STANDIN_TRACK="dep.lock", STANDIN_PREPARE=prepare),
@@ -834,11 +864,10 @@ class ReplayTest(unittest.TestCase):
 
     def test_what_setup_starts_runs_through_the_session_and_is_gone_when_the_replay_has_exited(self) -> None:
         watch = self.watch_setup()
-        result = self.replay("A", "7", STANDIN_WATCH=str(watch))
+        result = self.replay("A", "7", STANDIN_WATCH=str(watch), at_exit=lambda: self.assert_gone(watch))
         self.assertEqual(result.returncode, 0, result.stderr)
         [start] = self.world.starts_made()
         self.assertIs(start["watched_alive"], True)
-        self.assert_gone(watch)
 
     def test_what_setup_starts_is_gone_when_the_setup_fails_or_the_session_s_start_is_refused(self) -> None:
         for tail, extra, message in (
@@ -847,17 +876,16 @@ class ReplayTest(unittest.TestCase):
                                                   "nothing, so no session started.")):
             with self.subTest(tail=tail, extra=extra):
                 watch = self.watch_setup(tail)
-                result = self.replay("A", "7", STANDIN_WATCH=str(watch), **extra)
+                result = self.replay("A", "7", STANDIN_WATCH=str(watch), at_exit=lambda: self.assert_gone(watch),
+                                     **extra)
                 self.assertEqual(result.returncode, 1)
                 self.assertEqual(result.stderr.splitlines()[-1], message)  # the stand-in's own error comes before
-                self.assert_gone(watch)
 
     def test_what_setup_starts_is_gone_when_the_replay_is_interrupted_during_setup_or_the_session(self) -> None:
         for number in (signal.SIGINT, signal.SIGTERM):
             for where in ("setup", "session"):
                 with self.subTest(signal=number.name, where=where):
-                    shutil.rmtree(self.world.clone, ignore_errors=True)
-                    shutil.rmtree(self.world.store, ignore_errors=True)
+                    self.world.clear()
                     holding = self.world.root / "holding"
                     holding.unlink(missing_ok=True)
                     watch = self.watch_setup(f" && touch {shlex.quote(str(holding))} && sleep 60" if where == "setup" else "")
@@ -870,11 +898,12 @@ class ReplayTest(unittest.TestCase):
                         time.sleep(0.05)
                     self.assertTrue(holding.exists())
                     replay.send_signal(number)
-                    _, stderr = replay.communicate(timeout=60)
+                    replay.wait(timeout=60)  # its output is small enough to wait in the pipe
+                    self.assert_gone(watch)
+                    _, stderr = replay.communicate()
                     self.assertNotEqual(replay.returncode, 0)
                     if number == signal.SIGTERM:
                         self.assertEqual((replay.returncode, stderr), (128 + signal.SIGTERM, "replay: stopped by SIGTERM.\n"))
-                    self.assert_gone(watch)
 
     def patched_replay(self, body: str, *argv: str) -> subprocess.CompletedProcess[str]:
         """The replay's main(), run in a process that first runs `body` to patch it, with `argv` as that process's
@@ -884,10 +913,8 @@ class ReplayTest(unittest.TestCase):
         code = (f"import os, signal, subprocess, sys, time\nsys.path[:0] = [{str(SCRIPTS)!r}, {str(TESTS)!r}]\n"
                 f"import replay, scan\n{body}\nsys.exit(replay.main(['A', '7']))\n")
         try:
-            result = subprocess.run([sys.executable, "-c", code, *argv], cwd=self.world.root,
-                                    env=self.world.env(STANDIN_WATCH=str(watch)), text=True, capture_output=True,
-                                    timeout=120)
-            self.assert_gone(watch)
+            return run_to_exit([sys.executable, "-c", code, *argv], lambda: self.assert_gone(watch),
+                               cwd=self.world.root, env=self.world.env(STANDIN_WATCH=str(watch)))
         except BaseException as failure:  # this invocation failed: do not leave its process behind
             if watch.exists():
                 try:
@@ -897,7 +924,23 @@ class ReplayTest(unittest.TestCase):
                 except Exception as error:
                     failure.add_note(f"the process setup started may still run: {error!r}")
             raise
-        return result
+
+    def test_a_run_that_fails_names_a_process_it_could_not_kill(self) -> None:
+        # The run fails, and the kill of the watched process then fails for another reason than its being gone.
+        (self.world.root / "watched.pid").write_text("4242\n")
+        for kill, note in ((ProcessLookupError(), None), (PermissionError("denied"), "may still run")):
+            with self.subTest(kill=type(kill).__name__):
+                with (mock.patch(f"{__name__}.run_to_exit", side_effect=RuntimeError("the run failed")),
+                      mock.patch.object(os, "kill", side_effect=kill) as killed):
+                    with self.assertRaisesRegex(RuntimeError, "the run failed") as raised:
+                        self.patched_replay("")
+                killed.assert_called_once_with(4242, signal.SIGKILL)
+                notes = getattr(raised.exception, "__notes__", [])
+                if note:
+                    self.assertEqual(len(notes), 1)
+                    self.assertIn(note, notes[0])
+                else:
+                    self.assertEqual(notes, [])
 
     def test_the_group_setup_started_is_stopped_whichever_call_after_it_is_interrupted(self) -> None:
         # The invariant: once setup has run, no exit of the replay leaves a process of its group running.
@@ -915,8 +958,7 @@ class ReplayTest(unittest.TestCase):
                 "setattr(module, name, interrupted)")
         for module, name, nth in points:
             with self.subTest(call=f"{module}.{name} #{nth}"):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 result = self.patched_replay(body, module, name, str(nth))
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("KeyboardInterrupt", result.stderr)
@@ -989,8 +1031,7 @@ class ReplayTest(unittest.TestCase):
                 "replay.SetupGroup.stop = stop")
         for name in ("SIGTERM", "SIGINT"):
             with self.subTest(signal=name):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 result = self.patched_replay(body, name)
                 self.assertEqual(result.stdout.splitlines(), ["signalled before stop()"] * 2)
                 if name == "SIGTERM":
@@ -1037,8 +1078,7 @@ class ReplayTest(unittest.TestCase):
         with open(self.world.gitconfig, "a") as config:
             config.write("[replay]\n\tglobal = caller\n")
         for unset in (("GIT_CONFIG_GLOBAL",), ()):
-            shutil.rmtree(self.world.clone, ignore_errors=True)
-            shutil.rmtree(self.world.store, ignore_errors=True)
+            self.world.clear()
             result = self.replay("A", "7", XDG_CONFIG_HOME=str(xdg), unset=unset)
             self.assertEqual(result.returncode, 0, result.stderr)
             env = self.world.starts_made()[-1]["env"]
@@ -1070,8 +1110,7 @@ class ReplayTest(unittest.TestCase):
     def test_a_session_that_loaded_a_skill_of_either_generation_is_marked_not_direct(self) -> None:
         for skill, marked in (("implement-ticket", True), ("deliver", True), ("fan-out", True), ("tdd", False)):
             with self.subTest(skill=skill):
-                shutil.rmtree(self.world.clone, ignore_errors=True)
-                shutil.rmtree(self.world.store, ignore_errors=True)
+                self.world.clear()
                 result = self.replay("A", "7", STANDIN_SKILL=skill)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 [version] = self.world.versions()
@@ -1148,34 +1187,33 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.stderr, f"replay: no replay set in {self.world.state} holds project A ticket 9.\n")
         self.assertFalse(self.world.gh_log.exists())
 
-    # Each rule the help states: the section it is in, its condition, and the outcomes that one sentence of that
-    # section must state with the condition. Key terms, not the help's whole wording.
+    # Each rule the help states, as one whole sentence of the section it is in, with the section's first and next
+    # headings.
+    RUNS, COMMITS, EXITS = ("2. Runs", "3. Starts"), ("4. Commits", "5. Scans"), ("Exit 0:", None)
     HELP_RULES = (
-        ("2. Runs", "3. Starts", "Runs the repo's setup command", ("in a process group made for the replay",)),
-        ("2. Runs", "3. Starts", "What setup starts", ("runs on through the session",)),
-        ("2. Runs", "3. Starts", "It is stopped once the session has ended",
-         ("before step 4 commits the working tree",
-          "and on every other way the replay ends: a setup that fails, a start that is refused, an error, Ctrl-C or "
-          "SIGTERM")),
-        ("2. Runs", "3. Starts", "SIGKILL to the replay",
-         ("leaves it running", "a process that starts its own group or session is not followed")),
-        ("4. Commits", "5. Scans", "The replay reads each name in the index", ("as the bytes git holds it, in any locale",)),
-        ("4. Commits", "5. Scans", "The replay's own git commands",
-         (f"set GIT_CONFIG_NOSYSTEM to 1 and GIT_CONFIG_GLOBAL to {os.devnull}",
-          "which switch off git's default lookups of the system config file and of the user config files "
-          "(~/.gitconfig and $XDG_CONFIG_HOME/git/config)",
-          "a config file that a repo's own config names with include.path is still read")),
-        ("4. Commits", "5. Scans", "The version's repo", ("records the tree",)),
-        ("4. Commits", "5. Scans", "A private repo", ("lists a copy of the clone's index",)),
-        ("Exit 0:", None, "A clone index that is not a regular file",
-         ("or that the replay cannot copy or list with git",
-          "ends the replay with one line on standard error and nothing recorded")),
-        ("Exit 0:", None, "A listing that exits 0 but writes to standard error", ("counts as one git cannot list",)),
-        ("Exit 0:", None, "A row that cannot be written",
-         ("after the version was recorded", "ends it with one line on standard error",
-          "says the version is recorded without its row",
-          "names the command that writes the row from the session's log, python3 scripts/scan.py SESSION",
-          "the version's line stays in versions.jsonl")),
+        (*RUNS, "Runs the repo's setup command from repos.json, where it has one, with sh in the clone, in a process "
+                "group made for the replay."),
+        (*RUNS, "What setup starts runs on through the session."),
+        (*RUNS, "It is stopped once the session has ended, before step 4 commits the working tree, and on every other "
+                "way the replay ends: a setup that fails, a start that is refused, an error, Ctrl-C or SIGTERM."),
+        (*RUNS, "SIGKILL to the replay leaves it running, and a process that starts its own group or session is not "
+                "followed."),
+        (*COMMITS, "The replay reads each name in the index as the bytes git holds it, in any locale."),
+        (*COMMITS, f"The replay's own git commands, gh's aside, set GIT_CONFIG_NOSYSTEM to 1 and GIT_CONFIG_GLOBAL to "
+                   f"{os.devnull}, which switch off git's default lookups of the system config file and of the user "
+                   "config files (~/.gitconfig and $XDG_CONFIG_HOME/git/config); a config file that a repo's own "
+                   "config names with include.path is still read."),
+        (*COMMITS, "The version's repo records the tree."),
+        (*COMMITS, "A private repo, made beside it for this step, lists a copy of the clone's index and reads objects "
+                   "from the clone's .git/objects, but not from the folders that its alternates file names."),
+        (*EXITS, "A clone index that is not a regular file, or that the replay cannot copy or list with git, ends the "
+                 "replay with one line on standard error and nothing recorded."),
+        (*EXITS, "A listing that exits 0 but writes to standard error, as git does when it cannot read such a tree, "
+                 "counts as one git cannot list."),
+        (*EXITS, "A row that cannot be written, after the version was recorded, ends it with one line on standard "
+                 "error that says the version is recorded without its row and names the command that writes the row "
+                 "from the session's log, python3 scripts/scan.py SESSION; the version's line stays in "
+                 "versions.jsonl, and the scan's own warnings are printed only when the row is written."),
     )
     # Rewordings that reverse a condition or an outcome; the check must fail for each.
     REVERSED = (
@@ -1187,30 +1225,27 @@ class ReplayTest(unittest.TestCase):
         ("A clone index that is not a regular file", "A clone index that is a regular file"),
         ("cannot copy or list with git", "can copy or list with git"),
         ("and nothing recorded", "and the version recorded"),
-        ("counts as one git cannot list", "counts as one git can list"),
+        ("counts as one git cannot list", "never counts as one git cannot list"),
         ("A row that cannot be written", "A row that was written successfully"),
-        ("one line on standard error that says", "one line on standard output that says"),
+        ("ends it with one line on standard error", "never ends it with one line on standard error"),
+        ("after the version was recorded", "except after the version was recorded"),
     )
 
     def assert_help_states(self, text: str) -> None:
-        """The help, whitespace joined: each rule's condition in one sentence of its section, with every outcome."""
+        """The help, whitespace joined: each rule, whole, as one sentence of its section."""
         self.assertNotIn("no user or system config file", text)
-        for start, end, condition, outcomes in self.HELP_RULES:
+        for start, end, rule in self.HELP_RULES:
             self.assertEqual(text.count(start), 1, start)
             section = text[text.index(start):text.index(end) if end else None]
-            sentences = [sentence for sentence in re.split(r"(?<=\.)\s+(?=[A-Z0-9])", section) if condition in sentence]
-            self.assertEqual(len(sentences), 1, f"{start!r}: {condition!r}")
-            for outcome in outcomes:
-                self.assertEqual(sentences[0].count(outcome), 1, f"{condition!r}: {outcome!r}")
+            self.assertIn(rule, re.split(r"(?<=\.)\s+(?=[A-Z0-9])", section.strip()))
 
     def test_the_help_check_fails_when_a_rule_is_dropped_or_reversed(self) -> None:
         text = " ".join(self.world.replay("--help").stdout.split())
         self.assert_help_states(text)
-        for _, _, condition, outcomes in self.HELP_RULES:
-            for phrase in (condition, *outcomes):
-                with self.subTest(dropped=phrase):
-                    with self.assertRaises(AssertionError):
-                        self.assert_help_states(text.replace(phrase, "x"))
+        for _, _, rule in self.HELP_RULES:
+            with self.subTest(dropped=rule[:40]):
+                with self.assertRaises(AssertionError):
+                    self.assert_help_states(text.replace(rule, ""))
         for old, new in self.REVERSED:
             with self.subTest(reversed=old):
                 self.assertEqual(text.count(old), 1)

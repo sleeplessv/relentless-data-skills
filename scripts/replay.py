@@ -72,8 +72,8 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    that a repo's own config names with include.path is still read. They carry
    no GIT_* variable from the caller. The version's repo records the tree. A
    private repo, made beside it for this step, lists a copy of the clone's
-   index, and reads objects from the clone's .git/objects when it cannot list
-   the copy without them. Neither repo reads
+   index and reads objects from the clone's .git/objects, but not from the
+   folders that its alternates file names. Neither repo reads
    the clone's config, so nothing the session left in the clone's .git/ runs.
    Git's default
    attribute and ignore files still apply: $XDG_CONFIG_HOME/git/attributes and git/ignore (by default under
@@ -277,16 +277,19 @@ def tracked(store: Path, clone: Path) -> list[bytes]:
                 with contextlib.suppress(OSError):  # any other may be unreadable or a link to anywhere; git fails
                     if stat.S_ISREG(shared.lstat().st_mode):  # below when the named one is missing
                         shutil.copyfile(shared, meta / shared.name)
+            # A sparse index names trees, which are in the clone's objects. They are read through a folder of links
+            # to what the clone's objects folder holds, less its info/ folder: an entry of the clone's own alternates
+            # file that names no folder would be reported on standard error. The folder has a name of the replay's
+            # own, so the alternates file holds no path of the caller's.
+            mirror = meta / "clone-objects"
+            mirror.mkdir()
+            for entry in os.scandir(index.parent / "objects"):
+                if entry.name != "info":
+                    (mirror / entry.name).symlink_to(entry.path)
+            (meta / "objects" / "info" / "alternates").write_text("../clone-objects\n")
             listing = ["git", "-c", "advice.sparseIndexExpanded=false", "-C", str(clone), "ls-files", "-z"]
-            env = trusted(meta, clone, "index")
-            listed = subprocess.run(listing, stdin=subprocess.DEVNULL, capture_output=True, env=env)
-            if listed.returncode or listed.stderr:  # a sparse index names trees, which are in the clone's objects
-                # Only then are they read: git also reads the clone's own alternates file, and reports an entry of it
-                # that names no folder on standard error. A link with a name of the replay's own, so the alternates
-                # file holds no path of the caller's.
-                (meta / "clone-objects").symlink_to(index.parent / "objects")
-                (meta / "objects" / "info" / "alternates").write_text("../clone-objects\n")
-                listed = subprocess.run(listing, stdin=subprocess.DEVNULL, capture_output=True, env=env)
+            listed = subprocess.run(listing, stdin=subprocess.DEVNULL, capture_output=True,
+                                    env=trusted(meta, clone, "index"))
     except OSError as error:
         raise unreadable(error.strerror or type(error).__name__) from None
     if listed.returncode:

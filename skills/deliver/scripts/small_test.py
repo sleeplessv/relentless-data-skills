@@ -1,4 +1,6 @@
-"""The small test `ready` runs on the finished branch (spec #407, "The small test and the door").
+"""The small test, for `ready` to run on the finished branch (spec #407, "The small test and the door").
+
+Nothing calls it yet: #423 connects it to `ready`. Of the program's modules it imports only `core`.
 
 `measure` reads the committed diff of `HEAD` against its merge base with the target branch, the
 stack settings as `settings.load` merges them, and the saved plan's door and proofs. It returns a
@@ -10,10 +12,12 @@ result, never a refusal:
 
 `small_test`, `door` and `door_paths` are the `ready` record's fields of the same names.
 
-- Lines are added plus removed. Files matching `exclude_generated`, and newly added files
-  matching `exclude_tests`, are left out; a binary file adds none. Renames count as a removal
-  and an addition. More than `LIMIT` lines fails.
-- Every changed path, left out of the count or not, meets the critical list and the one-way list.
+- Lines are added plus removed, read with git's rename detection: a moved file counts only the
+  lines its move changed. Files whose new name matches `exclude_generated`, and newly added
+  files matching `exclude_tests`, are left out; a renamed file is not newly added. A binary file
+  adds none. More than `LIMIT` lines fails.
+- Every changed path, both names of a moved file and paths left out of the count included, meets
+  the critical list, the one-way list and the dependents command.
 - The dependents command runs through the shell in the checkout, with every changed path
   appended as a quoted argument. Its first output line is the count. Every further non-blank
   line names a report or exposure the change feeds. `dependents` is None with no command,
@@ -43,13 +47,17 @@ def measure(checkout: Path, base: str, settings: dict, door: str | None, proofs:
     """Run the small test on `HEAD` against its merge base with `base`; `proofs` maps requirement to proof."""
     small_edit = settings["small_edit"]
     diff = f"{base}...HEAD"
-    added = set(_git(checkout, "diff", "--name-only", "-z", "--no-renames", "--diff-filter=A", diff).split("\0"))
-    changed, lines = [], 0
-    for row in _git(checkout, "diff", "--numstat", "-z", "--no-renames", diff).split("\0"):
+    changed = [p for p in _git(checkout, "diff", "--name-only", "-z", "--no-renames", diff).split("\0") if p]
+    added = set(_git(checkout, "diff", "--name-only", "-z", "--find-renames", "--diff-filter=A", diff).split("\0"))
+    rows = iter(_git(checkout, "diff", "--numstat", "-z", "--find-renames", diff).split("\0"))
+    lines = 0
+    for row in rows:
         if not row:
             continue
         plus, minus, path = row.split("\t", 2)
-        changed.append(path)
+        if not path:  # a rename: the old and the new name follow
+            next(rows)
+            path = next(rows)
         left_out = path_matches(path, small_edit["exclude_generated"]) or (
             path in added and path_matches(path, small_edit["exclude_tests"]))
         if not left_out and plus != "-":  # git prints - for a binary file's counts

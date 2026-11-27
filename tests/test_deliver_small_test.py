@@ -1,8 +1,8 @@
 """The small test: counted lines, the critical lists, the dependents command and the door.
 
-small_test.py is called by `ready` and imports only core, so these tests load it
-alone. Each class shares one throwaway world; each test cuts its own branch from `main` in a
-worktree and measures it against `main`.
+small_test.py is meant for `ready`, which does not call it yet. Of the program's modules it
+imports only core, so these tests load it alone. Each class shares one throwaway world; each
+test cuts its own branch from `main` in a worktree and measures it against `main`.
 
     python3 -m unittest tests.test_deliver_small_test
 """
@@ -23,6 +23,9 @@ small_test = deliver_kit.load("small_test")
 settings = deliver_kit.load("settings")
 
 
+MOVE = "move from "
+
+
 def lines(n: int, word: str = "line") -> str:
     return "".join(f"{word} {i}\n" for i in range(n))
 
@@ -30,7 +33,8 @@ def lines(n: int, word: str = "line") -> str:
 class Case(unittest.TestCase):
     """One world per class. `main` holds the files of `SEED`."""
 
-    SEED = {"src/app.py": lines(10), "tests/test_app.py": lines(10)}
+    SEED = {"src/app.py": lines(10), "tests/test_app.py": lines(10), "src/big.py": lines(60),
+            "config/old.py": lines(5)}
 
     @classmethod
     def setUpClass(cls):
@@ -40,12 +44,18 @@ class Case(unittest.TestCase):
         cls.branches = 0
 
     def branch(self, changes: dict[str, str | None]) -> Path:
-        """A worktree on a new branch from main with one commit; a change of None removes the file."""
+        """A worktree on a new branch from main with one commit.
+
+        A change of None removes the file; MOVE + an old name moves that file here first.
+        """
         type(self).branches += 1
         tree = self.world.worktree(f"tree-{self.branches}", f"branch-{self.branches}")
         for name, content in changes.items():
             if content is None:
                 self.world.git(tree, "rm", "-q", name)
+            elif content.startswith(MOVE):
+                (tree / name).parent.mkdir(parents=True, exist_ok=True)
+                self.world.git(tree, "mv", content[len(MOVE):], name)
             else:
                 path = tree / name
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +118,29 @@ class Lines(Case):
         self.assertEqual(self.counted({"tests/test_app.py": lines(10) + lines(60, "more")})[0], 60)
         self.assertEqual(self.counted({"tests/test_app.py": None})[0], 10)
 
+    def test_a_moved_file_counts_only_its_changed_lines(self):
+        self.assertEqual(self.counted({"lib/big.py": MOVE + "src/big.py"}),
+                         (0, True, "small edit: a two-way door, 0 lines and a low blast radius"))
+        self.assertEqual(self.counted({"lib/big.py": MOVE + "src/big.py", "src/app.py": lines(61)}),
+                         (51, False, "needs review: 51 lines, over the limit of 50"))
+        tree = self.branch({"lib/big.py": MOVE + "src/big.py"})
+        (tree / "lib/big.py").write_text(lines(59) + "edited\n", encoding="utf-8")
+        self.world.git(tree, "commit", "-q", "-am", "feat: edit")
+        self.assertEqual(small_test.measure(tree, "main", self.stack(), "two-way", {})["small_test"]["lines"], 2)
+
+    def test_a_file_moved_to_a_generated_name_is_left_out(self):
+        tree = self.branch({"data/big.lock": MOVE + "src/big.py"})
+        (tree / "data/big.lock").write_text(lines(59) + "edited\n", encoding="utf-8")
+        self.world.git(tree, "commit", "-q", "-am", "feat: edit")
+        self.assertEqual(small_test.measure(tree, "main", self.stack(), "two-way", {})["small_test"]["lines"], 0)
+
+    def test_a_renamed_test_file_is_not_newly_added(self):
+        self.assertEqual(self.counted({"tests/test_main.py": MOVE + "tests/test_app.py"}, "")[0], 0)
+        tree = self.branch({"tests/test_main.py": MOVE + "tests/test_app.py"})
+        (tree / "tests/test_main.py").write_text(lines(9) + "edited\n", encoding="utf-8")
+        self.world.git(tree, "commit", "-q", "-am", "feat: edit")
+        self.assertEqual(small_test.measure(tree, "main", self.stack(), "two-way", {})["small_test"]["lines"], 2)
+
     def test_a_binary_file_adds_no_lines(self):
         self.assertEqual(self.counted({"src/app.py": lines(11), "img/logo.png": "\0PNG\0" * 100})[0], 1)
 
@@ -141,6 +174,12 @@ class Critical(Case):
         for path in ("docs/agents/stack.toml", "AGENTS.md", "billing/rates.py"):
             with self.subTest(path):
                 self.assertEqual(self.measure({path: "x\n"}, stack)["small_test"]["critical_paths"], [path])
+
+    def test_both_names_of_a_moved_file_meet_the_lists(self):
+        stack = '[one_way]\npaths = ["infra/**"]\n'
+        result = self.measure({"src/old.py": MOVE + "config/old.py", "infra/big.py": MOVE + "src/big.py"}, stack)
+        self.assertEqual((result["small_test"]["lines"], result["small_test"]["critical_paths"], result["door_paths"]),
+                         (0, ["config/old.py"], ["infra/big.py"]))
 
     def test_a_path_on_no_list_is_not_critical(self):
         self.assertEqual(self.measure({"billing/rates.py": "x\n"})["small_test"]["critical_paths"], [])
@@ -182,6 +221,11 @@ class Dependents(Case):
         self.calls.unlink(missing_ok=True)
         self.measure({"src/app.py": None, "src/new.py": "x\n", "data/cache.lock": "x\n"}, self.stand_in("0\n"))
         self.assertEqual(deliver_kit.read_lines(self.calls), [["data/cache.lock", "src/app.py", "src/new.py"]])
+
+    def test_the_command_gets_both_names_of_a_moved_file(self):
+        self.calls.unlink(missing_ok=True)
+        self.measure({"lib/big.py": MOVE + "src/big.py"}, self.stand_in("0\n"))
+        self.assertEqual(deliver_kit.read_lines(self.calls), [["lib/big.py", "src/big.py"]])
 
     def test_a_count_up_to_the_limit_is_low(self):
         self.assertEqual(self.judged("5\n"), ({"count": 5, "feeds": []},

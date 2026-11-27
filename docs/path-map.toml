@@ -1,0 +1,17 @@
+# The path map: for each generation-two path, the files it loads and its word limit.
+# No run loads this file. scripts/word_count.py counts each row, and scripts/check.sh runs it.
+#
+# Each [[path]] row has:
+#   name   the path
+#   files  the files the path loads, from the repo root. Scripts are not counted.
+#   limit  the most words those files may hold together. A row without it has no limit yet:
+#          the lint prints its count and does not refuse it.
+#
+# A limit is the path's launch size plus 10%. Raising one takes the owner's own PR, stating why.
+
+[[path]]
+name = "small edit"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/agents/deliver-reader.md",
+]

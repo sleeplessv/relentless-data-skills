@@ -71,6 +71,26 @@
       ]
     },
     {
+      "name": "deliver",
+      "source": "./skills/deliver",
+      "description": "Take a change from request to pull request through one tested program, with preflight, guards and saved evidence.",
+      "version": "0.1.0",
+      "author": {
+        "name": "sleeplessv"
+      },
+      "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/deliver",
+      "repository": "https://github.com/sleeplessv/relentless-data-skills",
+      "license": "Apache-2.0",
+      "keywords": [
+        "git",
+        "github",
+        "pull-requests",
+        "workflow",
+        "automation",
+        "gh-cli"
+      ]
+    },
+    {
       "name": "dlt-bootstrap",
       "source": "./skills/dlt-bootstrap",
       "description": "Set up dlt projects with the dltHub AI Harness and Relentless Data conventions.",

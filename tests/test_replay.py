@@ -1308,6 +1308,27 @@ class ReplayTest(unittest.TestCase):
         self.assertEqual(result.stderr, f"replay: no replay set in {self.world.state} holds project A ticket 9.\n")
         self.assertFalse(self.world.gh_log.exists())
 
+    def test_a_ticket_marked_browser_is_refused_with_nothing_made_or_recorded(self) -> None:
+        saved = json.loads((self.world.state / "replay-set-1.json").read_text())
+        saved["tickets"][0]["browser"] = True
+        self.world.write("replay-set-1.json", saved)
+        before = sorted(self.world.state.rglob("*"))
+        for args in (("A", "7"), ("--version", "deliver", "A", "7")):
+            with self.subTest(args=args):
+                result = self.world.replay(*args)
+                self.assertEqual(result.returncode, 1)
+                self.assertEqual(result.stderr, "replay: the original session of project A ticket 7 started a "
+                                                "headless browser, which the replay's sandbox does not let start, so "
+                                                "the replay cannot run it.\n")
+                self.assertEqual(sorted(self.world.state.rglob("*")), before)
+                self.assertEqual(self.world.starts_made(), [])
+                self.assertFalse(self.world.gh_log.exists())
+        self.assertIn('An entry with "browser": true is a ticket whose original session started a headless browser. '
+                      "The chief of staff sets that mark by hand. The confinement above does not let a browser start, "
+                      "so the replay refuses a marked entry for every version: before it makes anything, it exits 1 "
+                      "with one line on standard error, and it records nothing.",
+                      " ".join(self.world.replay("--help").stdout.split()))
+
     # Each rule the help states, as one whole sentence of the section it is in, with the section's first and next
     # headings.
     RUNS, COMMITS, EXITS = ("2. Runs", "3. Starts"), ("4. Commits", "5. Scans"), ("Exit 0:", None)

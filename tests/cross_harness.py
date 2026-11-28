@@ -479,7 +479,7 @@ def main(argv: list[str] | None = None) -> int:
     go.add_argument("tasks", nargs="+", choices=TASKS)
     go.add_argument("--fixture", required=True, help="the fixture repo, OWNER/REPO")
     go.add_argument("--connection", help="Cortex Code's Snowflake connection; never printed")
-    go.add_argument("--skill", type=Path, default=SKILL,
+    go.add_argument("--skill", type=Path, default=SKILL, metavar="PATH",
                     help="the folder of the copy of deliver the run uses (default: the checkout's skills/deliver)")
     go.add_argument("--base-tag", default="base", help="the fixture's tag the reset restores (default: base)")
     go.add_argument("--time-limit", type=float, help="seconds per task, in place of 300 for G and 600 for T1")

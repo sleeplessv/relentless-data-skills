@@ -31,6 +31,7 @@ import check_guard
 import checks_claude
 import checks_harness
 import checks_env
+import checks_install
 import core
 import deps
 import settings
@@ -87,6 +88,7 @@ CHECKS: list[Check] = [
     checks_claude.check_effort,
     check_guard.check_guard_probe,
     checks_harness.check_cursor_guard,
+    checks_install.check_installed,
     checks_env.check_python,
     checks_env.check_writable,
     checks_env.check_signing,

@@ -132,7 +132,7 @@ def main(args: list[str], run: core.Run) -> None:
         os.unlink(body_file)
     _gh(run, "pr", "ready", str(number))
     _record(run, head, "small edit", result)
-    scan.start_background()
+    scan.start_background(preflights[-1].get("harness"), run)
     print(f"{result['reason']}.")
     print(f"Marked PR #{number} ready: {url}")
 

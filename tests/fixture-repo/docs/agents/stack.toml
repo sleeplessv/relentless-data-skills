@@ -1,1 +1,1 @@
-check = "python3 -m unittest -v"
+check_command = "python3 -m unittest -v"

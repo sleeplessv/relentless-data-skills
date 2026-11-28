@@ -1,0 +1,13 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "transcript_path": "<home>/.snowflake/cortex/conversations/00000000-0000-4000-8000-000000000000.json",
+  "cwd": "<cwd>",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "uv run --python 3.13 --no-project /x/scripts/deliver.py merge",
+    "description": "<description>"
+  },
+  "tool_use_id": "toolu_000000000000000000000000"
+}

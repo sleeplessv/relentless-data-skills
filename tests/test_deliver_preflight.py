@@ -47,6 +47,18 @@ class Runner(unittest.TestCase):
     def test_settings_is_the_first_check(self):
         self.assertIs(preflight.CHECKS[0], preflight.check_settings)
 
+    def test_claude_code_checks_are_skipped_off_claude_code(self):
+        def claude_check(ctx):
+            return preflight.Warn("claude")
+        claude_check.__module__ = "checks_claude"
+        checks = [claude_check, lambda ctx: preflight.Warn("other")]
+        self.assertEqual(preflight.run_checks(preflight.Context(run=None, harness="codex"), checks), (None, ["other"]))
+        self.assertEqual(preflight.run_checks(preflight.Context(run=None), checks), (None, ["claude", "other"]))
+
+    def test_the_cursor_warning_follows_the_guard_probe(self):
+        names = [check.__name__ for check in preflight.CHECKS]
+        self.assertEqual(names[names.index("check_guard_probe") + 1], "check_cursor_guard")
+
 
 class Preflight(unittest.TestCase):
     def setUp(self):

@@ -1,0 +1,16 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "turn_id": "00000000-0000-4000-8000-000000000002",
+  "agent_id": "00000000-0000-4000-8000-000000000001",
+  "agent_type": "deliver-reader",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "hook_event_name": "PreToolUse",
+  "model": "<model>",
+  "permission_mode": "default",
+  "tool_name": "apply_patch",
+  "tool_input": {
+    "command": "*** Begin Patch\n*** Add File: notes.txt\n+then: cd sub && gh pr merge 12\n*** End Patch"
+  },
+  "tool_use_id": "exec-00000000-0000-4000-8000-000000000000"
+}

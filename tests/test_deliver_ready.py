@@ -22,6 +22,7 @@ from test_deliver_render import SUMMARY, TICKET_REQUEST  # noqa: E402
 
 render = deliver_kit.load("render")
 deps = deliver_kit.load("deps")
+VERSION = json.loads((deliver_kit.SCRIPTS.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 URL = "https://github.com/owner/repo/pull/12"
 AT = "2026-11-27T19:00:00Z"
 PLAN = """\
@@ -39,7 +40,7 @@ import os
 from pathlib import Path
 
 
-def start_background():
+def start_background(harness=None, run=None):
     with (Path(os.environ["DELIVER_KIT_WORLD"]) / "scan-starts.txt").open("a") as f:
         f.write("start\\n")
     return True
@@ -144,7 +145,7 @@ class Ready(unittest.TestCase):
         self.assertFalse(Path(body_file).exists())
         block = (
             "<details><summary>Measurement</summary>\n\n```text\n"
-            "version: 0.1.0\n"
+            f"version: {VERSION}\n"
             "path: small edit\n"
             "harness: claude-code\n"
             "small test: pass, 1 line, no critical path, no dependents command\n"

@@ -16,6 +16,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from unittest import mock
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -39,7 +40,7 @@ def figures(given: int, output: int, write: int, read: int) -> dict[str, int]:
 def whole_row(session: str, tokens: tuple[int, int, int, int], minutes: float, *, copied: int = 0,
               skills: tuple[str, ...] = (), helpers: tuple[dict, ...] = ()) -> dict:
     """A row of a log with no compaction whose responses name MODEL."""
-    return {"session": session, **figures(*tokens), "copied_tokens": copied, "active_minutes": minutes,
+    return {"session": session, "harness": "claude-code", **figures(*tokens), "copied_tokens": copied, "active_minutes": minutes,
             "auto_compactions": 0, "typed_compactions": 0, "model": MODEL, "skills": list(skills),
             "helpers": list(helpers)}
 
@@ -335,7 +336,7 @@ class TestScan(unittest.TestCase):
                          (0, 0, [], []))
 
     def assert_blank_row(self, session: str) -> None:
-        self.assertEqual(self.rows(), [{"session": session, **dict.fromkeys([
+        self.assertEqual(self.rows(), [{"session": session, "harness": "claude-code", **dict.fromkeys([
             "input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens", "total_tokens", "copied_tokens",
             "active_minutes", "auto_compactions", "typed_compactions", "model", "skills", "helpers"])}])
 
@@ -692,7 +693,8 @@ class TestScan(unittest.TestCase):
         # The draw passes skills() lines whose times nothing has checked, so this calls it in the scan's module.
         spec = importlib.util.spec_from_file_location("scan_under_test", SCRIPTS / "scan.py")
         module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
+        with mock.patch.object(sys, "path", [str(SCRIPTS), *sys.path]):  # as draw.py finds scan_harness beside it
+            spec.loader.exec_module(module)
         log = Log(self.session)
         for stamp_given, folder in ((7, "/skills/not-text"), ("soon", "/skills/unreadable"),
                                     ("2026-01-05T10:03:00", "/skills/no-zone"), ("2026-01-05T10:02:00Z", "/skills/utc"),

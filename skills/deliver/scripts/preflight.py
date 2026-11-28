@@ -6,6 +6,9 @@ the first stop. A check is a function of the `Context` that returns None for a p
 with its one line, or a `Stop` whose code is in `core.REFUSALS` and whose next command is the
 fix the owner can run. A check may read `ctx.settings` once the settings check has run, and
 may set `ctx.guard_probe`, `ctx.permission_mode` and `ctx.harness`, which the record saves.
+`run` names the harness with `checks_harness.detect` before the first check. Off Claude Code the
+runner skips the checks of `checks_claude`, and a full run prints `adapter: <path>` before its
+warnings.
 
 To add a check, write it in its own module beside this one, import it here and put it in
 `CHECKS` at its place in the order. Give each new stop code its line in `core.REFUSALS` and
@@ -26,7 +29,9 @@ from dataclasses import dataclass, field
 
 import check_guard
 import checks_claude
+import checks_harness
 import checks_env
+import checks_install
 import core
 import deps
 import settings
@@ -82,6 +87,8 @@ CHECKS: list[Check] = [
     checks_claude.check_agents_at_once,
     checks_claude.check_effort,
     check_guard.check_guard_probe,
+    checks_harness.check_cursor_guard,
+    checks_install.check_installed,
     checks_env.check_python,
     checks_env.check_writable,
     checks_env.check_signing,
@@ -99,9 +106,14 @@ CHECKS: list[Check] = [
 
 
 def run_checks(ctx: Context, checks: list[Check]) -> tuple[Stop | None, list[str]]:
-    """Call the checks in order until one stops; return the stop and the warnings."""
+    """Call the checks in order until one stops; return the stop and the warnings.
+
+    Off Claude Code the checks of `checks_claude` are skipped.
+    """
     warnings = []
     for check in checks:
+        if ctx.harness != checks_harness.CLAUDE_CODE and check.__module__ == checks_claude.__name__:
+            continue
         result = check(ctx)
         if isinstance(result, Stop):
             return result, warnings
@@ -116,7 +128,7 @@ def run(run: core.Run, checks: list[Check] | None = None, *, probe: bool = True)
     `start` passes `probe=False`, before the session has run the guard probe: the probe check is
     skipped, and a pass prints only its warnings and is not saved, so it never counts as passing.
     """
-    ctx = Context(run)
+    ctx = Context(run, harness=checks_harness.detect())
     checks = [c for c in (CHECKS if checks is None else checks) if probe or c is not check_guard.check_guard_probe]
     stop, warnings = run_checks(ctx, checks)
     if not (stop or probe):
@@ -130,6 +142,8 @@ def run(run: core.Run, checks: list[Check] | None = None, *, probe: bool = True)
             "preflight", run=run_id, result="stop" if stop else "pass", stops=[stop.code] if stop else [],
             warnings=warnings, guard_probe=ctx.guard_probe, permission_mode=ctx.permission_mode, harness=ctx.harness,
         )
+    if adapter := checks_harness.adapter(ctx.harness):
+        print(f"adapter: {adapter}")
     for line in warnings:
         print(f"warning: {line}")
     if stop:

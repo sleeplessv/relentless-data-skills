@@ -16,3 +16,35 @@ files = [
   "skills/deliver/agents/deliver-reader.md",
 ]
 limit = 534
+
+[[path]]
+name = "small edit on Cortex Code"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/cortex.md",
+]
+limit = 714
+
+[[path]]
+name = "small edit on Codex"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/codex.md",
+]
+limit = 670
+
+[[path]]
+name = "small edit on Cursor"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/cursor.md",
+]
+limit = 674
+
+[[path]]
+name = "small edit on Antigravity"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/antigravity.md",
+]
+limit = 676

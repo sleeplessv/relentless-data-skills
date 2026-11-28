@@ -9,8 +9,9 @@ prints it. The script is never installed. It reuses the probe kit's Herdr calls:
 
 Each task runs in a fresh clone of the fixture, under a terminal name unique on the machine. Each
 task also gets its own machine directory for deliver (`DELIVER_STATE_DIR`), so the refusal log holds
-that run only. G is a plain prompt that lists the guard commands in order. T1 is the typed skill
-with the first paragraph of the fixture's `tasks/small-edit.md`. On Cursor the terminal's shell runs
+that run only. G is a plain prompt that lists the guard commands in order. T1 is the typed skill,
+`$deliver` on Cortex Code and Codex and `/deliver` on Claude Code, Cursor and Antigravity, followed
+by the first paragraph of the fixture's `tasks/small-edit.md`. On Cursor the terminal's shell runs
 `deliver.py install cursor` in the clone before the harness starts, not the driver's own process,
 which may run inside a Claude Code session, where install refuses. Install keeps its ledger in the
 machine directory. On the other harnesses the owner runs `deliver.py install <harness>` once
@@ -122,7 +123,7 @@ def g_prompt(harness: str, deliver: str) -> str:
 def t1_prompt(harness: str, clone: Path) -> str:
     text = (clone / "tasks" / "small-edit.md").read_text()
     paragraph = text.split("\n\n")[1].strip()  # the line after the heading
-    return f"{'$' if harness == 'cortex' else '/'}deliver {paragraph}"
+    return f"{'$' if harness in ('cortex', 'codex') else '/'}deliver {paragraph}"
 
 
 def run_quiet(argv: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:

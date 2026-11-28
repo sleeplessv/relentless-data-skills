@@ -183,7 +183,8 @@ def read_call(data: dict) -> tuple[str, str, object]:
     tool = data.get("toolCall")
     if isinstance(tool, dict):
         args = tool.get("args")
-        return "antigravity", "antigravity", args.get("CommandLine") if tool.get("name") == "run_command" and isinstance(args, dict) else None
+        shell = tool.get("name") == "run_command" and isinstance(args, dict)
+        return "antigravity", "antigravity", args.get("CommandLine") if shell else None
     if data.get("hook_event_name") == "beforeShellExecution":
         return "cursor", "cursor", data.get("command")
     tool_input = data.get("tool_input")

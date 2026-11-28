@@ -1,0 +1,16 @@
+{
+  "deliver-guard": {
+    "PreToolUse": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "deliver_guard=@GUARD@; [ -f \"$deliver_guard\" ] || exit 0; if command -v uv >/dev/null 2>&1; then exec uv run --python 3.13 --no-project --quiet \"$deliver_guard\" antigravity; fi; python3 -c 'import sys; sys.exit(sys.version_info < (3, 13))' 2>/dev/null || exit 0; exec python3 \"$deliver_guard\" antigravity",
+            "timeout": 20
+          }
+        ]
+      }
+    ]
+  }
+}

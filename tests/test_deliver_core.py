@@ -21,7 +21,7 @@ TESTS = Path(__file__).resolve().parent
 USAGE = """\
 usage: deliver.py <subcommand> [arguments]
 
-Subcommands: start, preflight, check, save, pr, ready, merge, finish, deps, scan, report, install.
+Subcommands: start, preflight, check, save, pr, ready, merge, finish, deps, scan, report, install, brief.
 start, deps, scan, report and install never need a run mark. finish needs none only to resume a run whose
 earlier finish left its PR waiting. Every other subcommand needs one.
 Exit codes: 0 done, 10 refused, 20 a question for the owner, any other a crash.

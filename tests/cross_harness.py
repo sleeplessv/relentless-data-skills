@@ -1,6 +1,6 @@
-"""Run deliver's cross-harness tasks G and T1 on one harness against the fixture repo (#188, spec #457).
+"""Run deliver's cross-harness tasks G, T1 and T2 on one harness against the fixture repo (#188, #457, #479).
 
-    python3 tests/cross_harness.py run HARNESS G T1 --fixture OWNER/REPO [--connection NAME] [--skill PATH]
+    python3 tests/cross_harness.py run HARNESS G T1 T2 --fixture OWNER/REPO [--connection NAME] [--skill PATH]
 
 HARNESS is one of claude, cortex, codex, cursor and antigravity. Cortex Code needs --connection,
 the Snowflake connection its runs spend. The driver passes the connection to the harness and never
@@ -11,7 +11,8 @@ Each task runs in a fresh clone of the fixture, under a terminal name unique on 
 task also gets its own machine directory for deliver (`DELIVER_STATE_DIR`), so the refusal log holds
 that run only. G is a plain prompt that lists the guard commands in order. T1 is the typed skill,
 `$deliver` on Cortex Code and Codex and `/deliver` on Claude Code, Cursor and Antigravity, followed
-by the first paragraph of the fixture's `tasks/small-edit.md`. On Cursor the terminal's shell runs
+by the first paragraph of the fixture's `tasks/small-edit.md`. T2 is the typed skill followed by the
+section of ticket A in the fixture's `tasks/spec.md`. On Cursor the terminal's shell runs
 `deliver.py install cursor` in the clone before the harness starts, not the driver's own process,
 which may run inside a Claude Code session, where install refuses. Install keeps its ledger in the
 machine directory. On the other harnesses the owner runs `deliver.py install <harness>` once
@@ -20,18 +21,22 @@ G's prompt runs its scripts/deliver.py, Claude Code loads it with --plugin-dir, 
 runs from it. The default is the checkout's skills/deliver. On Cortex Code, Codex, Cursor and
 Antigravity, pass the installed copy that `install` was run from. Install works the guard's path out
 from its own folder, so another copy stops at preflight with preflight.install-differs. A task fails
-past its time limit, 300 seconds for G and 600 for T1, and the driver ends its terminal. The driver
-judges G from deliver's records in the clone and the refusal log. The refusal log is the hook's
+past its time limit, 300 seconds for G, 600 for T1 and 1800 for T2, and the driver ends its terminal.
+The driver judges G from deliver's records in the clone and the refusal log. The refusal log is the hook's
 log: the guard hook writes one line to it per refusal. The driver judges T1 from the PR the run opened, found on
 GitHub, because `deliver.py finish` removes the records after a merge. It reads that PR's state and
-measurement block. On Antigravity it also reads the output's `denied_actions`. It keeps the
+measurement block. On Antigravity it also reads the output's `denied_actions`. It judges T2 the
+same way, from the PR's state and its measurement block's path, roles, findings and merge lines, and
+from the two brief lines (`Read <path>/briefs/requirements-0.md and follow it.` and the defect one),
+which the output must hold, under any key, before the first `save review` command. It keeps the
 harness's reply and never judges it.
 
 The driver prints one line per task, `<task> <harness> passed: <facts>; tokens: <in> in, <out> out`,
 with `failed` in place of `passed` and the failed facts only when a task fails. A count is `blank`
-where the output has none. After the first failure the next task prints `T1 <harness> not run: G
-failed`. No line holds a session id, the connection or a local path. The raw output, the records and
-the refusal log stay in `cross-harness/<run id>/` of the machine directory.
+where the output has none. T2's passed line prints the roles line. After the first failure each
+later task prints, for example, `T1 <harness> not run: G failed`. No line holds a session id, the
+connection or a local path. The raw output, the records and the refusal log stay in
+`cross-harness/<run id>/` of the machine directory.
 
 After each task the driver closes the open PRs the run opened and deletes the branches the run
 pushed. PRs and branches that were there before the run stay.
@@ -59,8 +64,8 @@ import probe_kit
 
 CHECKOUT = Path(__file__).resolve().parent.parent
 SKILL = CHECKOUT / "skills" / "deliver"  # the copy of deliver a run uses without --skill
-TASKS = ("G", "T1")
-LIMITS = {"G": 300.0, "T1": 600.0}
+TASKS = ("G", "T1", "T2")
+LIMITS = {"G": 300.0, "T1": 600.0, "T2": 1800.0}
 # The name preflight saves for each harness in its record (#458).
 RECORD_NAMES = {"claude": "claude-code", "cortex": "cortex-code", "codex": "codex", "cursor": "cursor",
                 "antigravity": "antigravity"}
@@ -101,6 +106,8 @@ retry a refused command, change it or work around it, and change no file yoursel
 9. `{deliver} finish`
 """
 G_REQUEST = "Run the guard commands of the cross-harness task G. Change no file.\n"
+BRIEF_ROLES = ("requirements", "defect")
+SAVE_REVIEW = re.compile(r"\bsave review (?:requirements|defect)\b")  # a command, so on one line
 
 
 class DriverError(Exception):
@@ -120,10 +127,18 @@ def g_prompt(harness: str, deliver: str) -> str:
     return G_PROMPT.format(deliver=deliver, probe=PROBE, standins=STANDINS, agent_task=merge)
 
 
+def typed(harness: str, text: str) -> str:
+    return f"{'$' if harness in ('cortex', 'codex') else '/'}deliver {text}"
+
+
 def t1_prompt(harness: str, clone: Path) -> str:
     text = (clone / "tasks" / "small-edit.md").read_text()
-    paragraph = text.split("\n\n")[1].strip()  # the line after the heading
-    return f"{'$' if harness in ('cortex', 'codex') else '/'}deliver {paragraph}"
+    return typed(harness, text.split("\n\n")[1].strip())  # the line after the heading
+
+
+def t2_prompt(harness: str, clone: Path) -> str:
+    spec = (clone / "tasks" / "spec.md").read_text()
+    return typed(harness, re.search(r"^## Ticket A\n(.*?)(?=^## |\Z)", spec, re.M | re.S)[1].strip())
 
 
 def run_quiet(argv: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess:
@@ -230,21 +245,37 @@ def judge_g(run: Run) -> list[tuple[bool, str]]:
 
 
 def measurement(body: str) -> list[str]:
-    """The lines of the PR body's measurement block."""
-    match = re.search(r"<summary>Measurement.*?```text\n(.*?)```", body, re.S)
-    return match.group(1).splitlines() if match else []
+    """The lines of the PR body's last measurement block."""
+    blocks = re.findall(r"<summary>Measurement.*?```text\n(.*?)```", body, re.S)
+    return blocks[-1].splitlines() if blocks else []
+
+
+def run_pr(run: Run, fixture: str) -> tuple[dict | None, str]:
+    """The first PR the run opened, or None and why there is none."""
+    found = prs(fixture)
+    if found is None:
+        return None, "gh pr list of the fixture failed"
+    opened = sorted((pr for pr in found if pr.get("number") not in run.prs_before), key=lambda pr: pr["number"])
+    return (opened[0], "") if opened else (None, "the run opened no PR")
+
+
+def merge_facts(pr: dict, block: list[str]) -> list[tuple[bool, str]]:
+    merged = pr.get("state") == "MERGED"
+    by_session = any(line.startswith("merge: by the session") for line in block)  # merge.py writes it
+    facts = [(True, f"the session merged PR {pr['number']}")] if merged and by_session else []
+    if not merged:
+        facts.append((False, f"PR {pr['number']} is not merged"))
+    if not by_session:
+        facts.append((False, "the measurement block has no merge line by the session"))
+    return facts
 
 
 def judge_t1(run: Run, fixture: str) -> list[tuple[bool, str]]:
     agent = started_agent(run.events, run.harness)
     facts = [(not agent, "the session started an agent" if agent else "one session and no agent")]
-    found = prs(fixture)
-    if found is None:
-        return [*facts, (False, "gh pr list of the fixture failed")]
-    opened = sorted((pr for pr in found if pr.get("number") not in run.prs_before), key=lambda pr: pr["number"])
-    if not opened:
-        return [*facts, (False, "the run opened no PR")]
-    pr = opened[0]
+    pr, missing = run_pr(run, fixture)
+    if pr is None:
+        return [*facts, (False, missing)]
     block = measurement(str(pr.get("body") or ""))
     small = next((line for line in block if line.startswith("small test:")), None)
     if small is None:
@@ -252,19 +283,86 @@ def judge_t1(run: Run, fixture: str) -> list[tuple[bool, str]]:
     else:
         passed = small.startswith("small test: pass")
         facts.append((passed, "the small test passed" if passed else "the small test did not pass"))
-    merged = pr.get("state") == "MERGED"
-    by_session = any(line.startswith("merge: by the session") for line in block)  # merge.py writes it
-    if merged and by_session:
-        facts.append((True, f"the session merged PR {pr['number']}"))
-    if not merged:
-        facts.append((False, f"PR {pr['number']} is not merged"))
-    if not by_session:
-        facts.append((False, "the measurement block has no merge line by the session"))
+    facts += merge_facts(pr, block)
     if run.harness == "antigravity":
         denied = probe_kit.last_at(run.events, DENIED, False)
         if denied:
             facts.append((False, f"denied_actions holds {len(denied)}"))
     return facts
+
+
+def judge_t2(run: Run, fixture: str) -> list[tuple[bool, str]]:
+    pr, missing = run_pr(run, fixture)
+    if pr is None:
+        return [(False, missing)]
+    block = measurement(str(pr.get("body") or ""))
+    line = {key: next((text for text in block if text.startswith(f"{key}:")), None)
+            for key in ("path", "roles", "findings")}
+    facts = merge_facts(pr, block)
+    if line["path"] is None:
+        facts.append((False, "the measurement block has no path line"))
+    else:
+        single = line["path"] == "path: single ticket"
+        facts.append((single, line["path"] if single else f"the measurement block reads {line['path']}, "
+                                                          "not path: single ticket"))
+    if line["roles"] is None:
+        facts.append((False, "the measurement block has no roles line"))
+    else:
+        roles = role_facts(line["roles"])
+        facts += roles or [(True, line["roles"])]
+    if line["findings"] is None:
+        facts.append((False, "the measurement block has no findings line"))
+    else:
+        parts = line["findings"].removeprefix("findings:").split(";")
+        absent = [r for r in BRIEF_ROLES if not any(re.fullmatch(rf"{r} review \d+ \(\d+ proven\)", p.strip())
+                                                    for p in parts)]
+        facts += [(False, f"the findings line names no {r} review") for r in absent]
+        facts += [] if absent else [(True, "both reviews in the findings line")]
+    return facts + brief_facts(run.events)
+
+
+def role_facts(line: str) -> list[tuple[bool, str]]:
+    """What the roles line lacks: each reviewer with a model, never auto, and an effort."""
+    parts = [p.strip() for p in line.removeprefix("roles:").split(";")]
+    facts = []
+    for role in (f"{r} reviewer" for r in BRIEF_ROLES):
+        part = next((p for p in parts if p.startswith(role)), None)
+        if part is None:
+            facts.append((False, f"the roles line names no {role}"))
+            continue
+        model, slash, effort = (text.strip() for text in part[len(role):].rpartition("/"))
+        if not slash:
+            facts.append((False, f"the roles line gives the {role} no model and effort"))
+        elif model in ("", "auto"):
+            facts.append((False, f"the roles line gives the {role} " + ("the model auto" if model else "no model")))
+        elif not effort:
+            facts.append((False, f"the roles line gives the {role} no effort"))
+    return facts
+
+
+def brief_facts(events: list[dict]) -> list[tuple[bool, str]]:
+    """Whether the output holds both brief lines, under any key, before the first `save review` command."""
+    briefs = {r: re.compile(rf"Read \S*/briefs/{r}-0\.md and follow it\.") for r in BRIEF_ROLES}
+    first: dict[str, int] = {}
+    for at, event in enumerate(events):
+        for text in strings(event):
+            for role, pattern in briefs.items():
+                if role not in first and pattern.search(text):
+                    first[role] = at
+            if "save" not in first and "\n" not in text and SAVE_REVIEW.search(text):
+                first["save"] = at
+    facts = [(False, f"the output has no {r} brief line") for r in BRIEF_ROLES if r not in first]
+    if not facts:
+        late = [r for r in BRIEF_ROLES if first[r] >= first.get("save", len(events))]
+        facts = [(False, f"the first save review came before the {r} brief line") for r in late]
+    return facts or [(True, "both brief lines before the first save review")]
+
+
+def strings(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    items = value.values() if isinstance(value, dict) else value if isinstance(value, list) else []
+    return [text for item in items for text in strings(item)]
 
 
 def prs(fixture: str) -> list[dict] | None:
@@ -365,7 +463,7 @@ class Driver:
             (run.clone / ".deliver" / "request.md").write_text(G_REQUEST)
             prompt = g_prompt(harness, deliver)
         else:
-            prompt = t1_prompt(harness, run.clone)
+            prompt = (t1_prompt if task == "T1" else t2_prompt)(harness, run.clone)
         argv = [part.replace("{prompt}", prompt) for part in COMMANDS[harness]]
         if harness == "claude":
             argv += ["--plugin-dir", str(self.args.skill)]
@@ -402,7 +500,8 @@ class Driver:
         run.exit_code = info.get("exit_code")
         if harness == "cursor" and (refused := install_failed(installed)):
             return [(False, refused)]
-        facts = judge_g(run) if task == "G" else judge_t1(run, self.args.fixture)
+        judge = {"T1": judge_t1, "T2": judge_t2}
+        facts = judge_g(run) if task == "G" else judge[task](run, self.args.fixture)
         if run.exit_code != 0:
             facts.append((False, f"the harness exited {run.exit_code}"))
         return facts
@@ -452,7 +551,7 @@ def run(args: argparse.Namespace) -> int:
     for program in ("hc", "gh", "git", COMMANDS[args.harness][0]):
         if shutil.which(program) is None:
             raise DriverError(f"{program} is not on PATH")
-    tasks = [task for task in TASKS if task in args.tasks]  # G before T1
+    tasks = [task for task in TASKS if task in args.tasks]  # G, then T1, then T2
     state = Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver")
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + f"-{os.getpid()}"
     saved = state / "cross-harness" / run_id
@@ -483,7 +582,8 @@ def main(argv: list[str] | None = None) -> int:
     go.add_argument("--skill", type=Path, default=SKILL, metavar="PATH",
                     help="the folder of the copy of deliver the run uses (default: the checkout's skills/deliver)")
     go.add_argument("--base-tag", default="base", help="the fixture's tag the reset restores (default: base)")
-    go.add_argument("--time-limit", type=float, help="seconds per task, in place of 300 for G and 600 for T1")
+    go.add_argument("--time-limit", type=float,
+                    help="seconds per task, in place of 300 for G, 600 for T1 and 1800 for T2")
     go.add_argument("--poll", type=float, default=5.0, help="seconds between hc get calls (default: 5)")
     args = parser.parse_args(argv)
     try:

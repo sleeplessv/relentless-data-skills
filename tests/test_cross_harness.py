@@ -4,9 +4,10 @@ Each test builds its own world in a temporary folder: a copy of the driver and t
 beside a stand-in skills/deliver/scripts/deliver.py, the probe kit tests' stand-in `hc`, one
 stand-in harness installed as all five harness commands, a stand-in `gh`, a `git` that logs each
 call before it runs the real one, and a local bare repo as the fixture, its base commit tagged
-`base`. The stand-in harness writes what a real run of G or T1 leaves: deliver's records, which T1
-removes after its merge as `deliver.py finish` does, refusal log lines, the stand-in commands' markers, a PR the stand-in `gh` answers for, a merge pushed to
-the fixture, and output with a session id and local paths in it. PATH holds only the stand-ins
+`base`. The stand-in harness writes what a real run of G, T1 or T2 leaves: deliver's records, which T1
+and T2 remove after their merge as `deliver.py finish` does, refusal log lines, the stand-in commands' markers, a PR the stand-in `gh` answers for, a merge pushed to
+the fixture, and output with a session id and local paths in it. T2's output also holds the two
+brief lines and the two `save review` commands, in tool calls of no harness's real shape. PATH holds only the stand-ins
 and the system folders, and HOME and the machine directory point inside the world, so no test
 starts a real session, touches the network or reads the real machine directory.
 """
@@ -41,6 +42,9 @@ COMMAND_NAMES = {"claude": "claude", "cortex": "cortex", "codex": "codex", "curs
 # Knobs, comma-separated in STANDIN: drop=<class>|<class> leaves those refusals out of the log;
 # no-control, oneway-ran, no-warning, no-finish, preflight-stop, no-agent-probe, harness=<name>;
 # agent starts an agent, agent-event prints an event an agent made, no-cached leaves Codex's cached count out; no-small-test, merge-owner, not-merged, no-merge, denied, no-usage.
+# T2: path=<path>, no-path, no-roles, roles-<knob> (ROLES below), no-findings, no-defect-review, no-brief=<role>,
+# brief-key=<key> puts the defect brief line under that key, save-first saves the first review before the defect brief,
+# two-blocks puts a stale measurement block before the run's own.
 HARNESS = (r'''#!{python}
 import json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -79,6 +83,12 @@ def git(*a):
     subprocess.run(["git", *a], check=True, capture_output=True)
 
 
+ROLES = {"": "roles: author; requirements reviewer standin-opus/high; defect reviewer standin-sonnet/high, not applied",
+         "roles-no-defect": "roles: author; requirements reviewer standin-opus/high",
+         "roles-text-only": "roles: author; requirements reviewer standin-opus/high; defect reviewer not needed, text only",
+         "roles-no-model": "roles: author; requirements reviewer /high; defect reviewer standin-sonnet/high",
+         "roles-auto": "roles: author; requirements reviewer standin-opus/high; defect reviewer auto/high",
+         "roles-no-effort": "roles: author; requirements reviewer standin-opus/; defect reviewer standin-sonnet/high"}
 agent_events, result = [], {}
 typed = prompt.startswith(("/deliver ", "$deliver "))
 record("start", run="run-1", branch_created=True, stop_at_ready=False)
@@ -107,7 +117,7 @@ if not typed:  # G
     if name == "claude" and "no-agent-probe" not in knobs:
         agent_events.append({"type": "assistant", "parent_tool_use_id": "toolu_1", "message": {"content": [
             {"type": "tool_use", "name": "Bash", "input": {"command": "''' + PROBE + r'''"}}]}})
-else:  # T1
+elif "multiply" not in prompt:  # T1
     (cwd / "calc.py").write_text((cwd / "calc.py").read_text().replace("Return a + b.", "Return the sum of a and b."))
     git("commit", "-q", "-am", "docs: reword add")
     git("push", "-q", "origin", "HEAD:refs/heads/deliver/run-1")
@@ -131,6 +141,45 @@ else:  # T1
         records.unlink()
     if "denied" in knobs:
         result["denied_actions"] = [{"tool": "run_command"}]
+else:  # T2, ticket A
+    (cwd / "calc.py").write_text((cwd / "calc.py").read_text() + "\n\ndef multiply(a, b):\n    return a * b\n")
+    git("commit", "-q", "-am", "feat: multiply")
+    git("push", "-q", "origin", "HEAD:refs/heads/deliver/run-1")
+    saved = Path(os.environ["STANDIN_GH_DIR"]) / "prs.json"
+    prs = json.loads(saved.read_text())
+    number = max(map(int, prs)) + 1
+    record("pr", number=number, url=f"https://github.example/pr/{number}")
+    roles = ROLES.get(next((k for k in knobs if k.startswith("roles-")), ""), ROLES[""])
+    findings = ("findings: requirements review 2 (1 proven)" + ("" if "no-defect-review" in knobs
+                else "; defect review 1 (0 proven)"))
+    block = ["version: 0.1.2", "" if "no-path" in knobs else "path: " + knobs.get("path", "single ticket"),
+             "small test: fail, needs review: high blast radius, critical paths changed: test_calc.py",
+             "door: two-way", "" if "no-roles" in knobs else roles, "" if "no-findings" in knobs else findings,
+             "fix rounds: 1", "follow-ups: 0 filed, 0 not filed",
+             "merge: left to the owner, one-way door" if "merge-owner" in knobs else "merge: by the session, squash"]
+    def details(lines):
+        return "<details><summary>Measurement</summary>\n\n```text\n" + "".join(l + "\n" for l in lines if l) + "```\n\n</details>\n"
+    stale = details(["version: 0.1.2", "path: small edit", "small test: pass, 1 line"]) + "\n" if "two-blocks" in knobs else ""
+    prs[str(number)] = {"state": "OPEN" if "not-merged" in knobs else "MERGED", "body": "Add multiply.\n\n" + stale + details(block)}
+    saved.write_text(json.dumps(prs))
+    if "not-merged" not in knobs:
+        git("push", "-q", "origin", "HEAD:refs/heads/main")
+        records.unlink()
+    briefs = records.parent / "briefs"
+    deliver = "uv run --python 3.13 --no-project " + str(cwd) + "/deliver.py"
+    def call(**fields):
+        return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_2", **fields}]}}
+    said = {role: call(name="Agent", input={"prompt": f"Read {briefs}/{role}-0.md and follow it."})
+            for role in ("requirements", "defect") if knobs.get("no-brief") != role}
+    if "brief-key" in knobs and "defect" in said:  # a key the driver does not know
+        said["defect"] = {"type": "item.completed", "item": {knobs["brief-key"]: f"Read {briefs}/defect-0.md and follow it."}}
+    save = {role: call(name="Bash", input={"command": f"{deliver} save review {role}"}) for role in ("requirements", "defect")}
+    order = (["requirements", "save requirements", "defect", "save defect"] if "save-first" in knobs
+             else ["requirements", "defect", "save requirements", "save defect"])
+    for step in order:
+        event = save[step.split()[1]] if step.startswith("save") else said.get(step)
+        if event:
+            print(json.dumps(event), flush=True)
 starting = "agent" in knobs
 usage = None if "no-usage" in knobs else {"input_tokens": 12, "output_tokens": 340}
 
@@ -502,6 +551,75 @@ class CrossHarnessTest(unittest.TestCase):
                 code, out = self.run_on(harness, "T1", STANDIN=knob)
                 self.assertEqual(out, [f"T1 {harness} failed: {fact.format(pr=pr)}; tokens: 12 in, 340 out"])
                 self.assertEqual(code, 1)
+
+    def t2_passed(self, harness: str, pr: int) -> str:
+        return (f"T2 {harness} passed: the session merged PR {pr}; path: single ticket; roles: author; requirements "
+                "reviewer standin-opus/high; defect reviewer standin-sonnet/high, not applied; both reviews in the "
+                "findings line; both brief lines before the first save review; tokens: 12 in, 340 out")
+
+    def test_t2_passes_on_each_harness_after_g_and_t1(self):
+        for harness in HARNESSES:
+            with self.subTest(harness=harness):
+                pr = self.next_pr()
+                code, out = self.run_on(harness, "G", "T1", "T2")
+                self.assertEqual(out[2:], [self.t2_passed(harness, pr + 2)])  # T1 opened two PRs before it
+                self.assertEqual([line.split()[:3] for line in out[:2]], [["G", harness, "passed:"],
+                                                                         ["T1", harness, "passed:"]])
+                self.assertEqual(code, 0)
+
+    def test_t2_types_the_skill_with_ticket_a_and_is_not_run_after_a_failure(self):
+        text = ("Add `multiply(a, b)` to `calc.py`. It returns the product of `a` and `b`. Add a test of it to "
+                "`test_calc.py`.\n\nFiles: `calc.py`, `test_calc.py`\n\nAcceptance criteria:\n\n"
+                "- `multiply(4, 3)` returns `12`.\n- `test_calc.py` has a test of `multiply`, and the check command "
+                "passes.")
+        for harness in HARNESSES:
+            with self.subTest(harness=harness):
+                before = len(self.world.starts())
+                self.run_on(harness, "T2")
+                start, = self.world.starts()[before:]
+                typed = "$deliver " if harness in ("cortex", "codex") else "/deliver "
+                self.assertEqual(start["prompt"], typed + text)
+        code, out = self.run_on("claude", "T1", "T2", STANDIN="no-small-test")
+        self.assertEqual(out[1:], ["T2 claude not run: T1 failed"])
+
+    def test_each_t2_failure_names_its_fact(self):
+        cases = {
+            "not-merged": "PR {pr} is not merged",
+            "path=small edit": "the measurement block reads path: small edit, not path: single ticket",
+            "no-path": "the measurement block has no path line",
+            "no-roles": "the measurement block has no roles line",
+            "roles-no-defect": "the roles line names no defect reviewer",
+            "roles-text-only": "the roles line gives the defect reviewer no model and effort",
+            "roles-no-model": "the roles line gives the requirements reviewer no model",
+            "roles-auto": "the roles line gives the defect reviewer the model auto",
+            "roles-no-effort": "the roles line gives the requirements reviewer no effort",
+            "no-findings": "the measurement block has no findings line",
+            "no-defect-review": "the findings line names no defect review",
+            "merge-owner": "the measurement block has no merge line by the session",
+            "no-brief=requirements": "the output has no requirements brief line",
+            "no-brief=defect": "the output has no defect brief line",
+            "save-first": "the first save review came before the defect brief line",
+        }
+        for knob, fact in cases.items():
+            with self.subTest(knob=knob):
+                pr = self.next_pr()
+                code, out = self.run_on("codex", "T2", STANDIN=knob)
+                self.assertEqual(out, [f"T2 codex failed: {fact.format(pr=pr)}; tokens: 12 in, 340 out"])
+                self.assertEqual(code, 1)
+
+    def test_t2_finds_a_brief_line_under_an_unknown_key_and_reads_the_last_measurement_block(self):
+        for knob in ("brief-key=zzUnknownCall", "two-blocks"):
+            with self.subTest(knob=knob):
+                pr = self.next_pr()
+                code, out = self.run_on("cursor", "T2", STANDIN=knob)
+                self.assertEqual(out, [self.t2_passed("cursor", pr)])
+                self.assertEqual(code, 0)
+
+    def test_t2_waits_1800_seconds_unless_the_time_limit_says_otherwise(self):
+        code, out, err = self.world.drive("run", "--help")
+        self.assertIn("in place of 300 for G, 600 for T1 and 1800 for T2", " ".join(out.split()))
+        code, out = self.run_on("claude", "T2", "--time-limit", "1", STANDIN_SLEEP="30")
+        self.assertEqual(out, ["T2 claude failed: no finish within 1 seconds, terminal ended; tokens: blank in, blank out"])
 
     def test_tokens_print_blank_where_the_output_has_none(self):
         code, out = self.run_on("codex", "T1", STANDIN="no-usage")

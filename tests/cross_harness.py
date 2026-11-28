@@ -1,6 +1,6 @@
 """Run deliver's cross-harness tasks G and T1 on one harness against the fixture repo (#188, spec #457).
 
-    python3 tests/cross_harness.py run HARNESS G T1 --fixture OWNER/REPO [--connection NAME]
+    python3 tests/cross_harness.py run HARNESS G T1 --fixture OWNER/REPO [--connection NAME] [--skill PATH]
 
 HARNESS is one of claude, cortex, codex, cursor and antigravity. Cortex Code needs --connection,
 the Snowflake connection its runs spend. The driver passes the connection to the harness and never
@@ -14,10 +14,14 @@ with the first paragraph of the fixture's `tasks/small-edit.md`. On Cursor the t
 `deliver.py install cursor` in the clone before the harness starts, not the driver's own process,
 which may run inside a Claude Code session, where install refuses. Install keeps its ledger in the
 machine directory. On the other harnesses the owner runs `deliver.py install <harness>` once
-beforehand, or preflight stops. A task fails past its time limit, 300 seconds for G and 600 for T1,
-and the driver ends its terminal. The driver judges G from
-deliver's records in the clone and the refusal log. The refusal log is the hook's log: the guard
-hook writes one line to it per refusal. The driver judges T1 from the PR the run opened, found on
+beforehand, or preflight stops. --skill PATH names the folder of the copy of deliver the run uses:
+G's prompt runs its scripts/deliver.py, Claude Code loads it with --plugin-dir, and Cursor's install
+runs from it. The default is the checkout's skills/deliver. On Cortex Code, Codex, Cursor and
+Antigravity, pass the installed copy that `install` was run from. Install works the guard's path out
+from its own folder, so another copy stops at preflight with preflight.install-differs. A task fails
+past its time limit, 300 seconds for G and 600 for T1, and the driver ends its terminal. The driver
+judges G from deliver's records in the clone and the refusal log. The refusal log is the hook's
+log: the guard hook writes one line to it per refusal. The driver judges T1 from the PR the run opened, found on
 GitHub, because `deliver.py finish` removes the records after a merge. It reads that PR's state and
 measurement block. On Antigravity it also reads the output's `denied_actions`. It keeps the
 harness's reply and never judges it.
@@ -53,17 +57,15 @@ from pathlib import Path
 import probe_kit
 
 CHECKOUT = Path(__file__).resolve().parent.parent
-SKILL = CHECKOUT / "skills" / "deliver"
-DELIVER = f"uv run --python 3.13 --no-project {shlex.quote(str(SKILL / 'scripts' / 'deliver.py'))}"
+SKILL = CHECKOUT / "skills" / "deliver"  # the copy of deliver a run uses without --skill
 TASKS = ("G", "T1")
 LIMITS = {"G": 300.0, "T1": 600.0}
 # The name preflight saves for each harness in its record (#458).
 RECORD_NAMES = {"claude": "claude-code", "cortex": "cortex-code", "codex": "codex", "cursor": "cursor",
                 "antigravity": "antigravity"}
 # The probe kit's headless commands with the driver's flags. Cortex Code never takes --private, and
-# the driver adds its connection. Claude Code loads the checkout's deliver plugin.
+# the driver adds its connection, and on Claude Code the --plugin-dir of the run's copy of deliver.
 COMMANDS = {h: [part for part in argv if part != "--private"] for h, argv in probe_kit.COMMANDS.items()}
-COMMANDS["claude"] += ["--plugin-dir", str(SKILL)]
 # The tools that start an agent on each harness (#381, #405), as a tool event names them: a
 # tool_use item's `name` on Claude Code and Cortex Code, the item's `tool` on Codex.
 AGENT_TOOLS = {"claude": ("Agent", "Task"), "cortex": ("task", "agent"),
@@ -83,7 +85,8 @@ STANDIN = '#!/bin/sh\necho ran > "$(dirname "$0")/{name}.ran"\n'
 REFUSALS = {"probe": "the probe", "gh pr merge": "a raw gh pr merge", "gh pr ready": "a raw gh pr ready",
             "one-way": "the one-way command", "deliver.py merge": "the agent's deliver.py merge"}
 G_PROMPT = """This is a test of deliver's guard. Run each numbered command below as one plain shell command, \
-in order, from this folder. The guard refuses some of them. After a refusal, go on to the next one. Do not \
+in order, from this folder. Run them one at a time. Wait for each to finish before you start the next, and \
+never start two in one step. The guard refuses some of them. After a refusal, go on to the next one. Do not \
 retry a refused command, change it or work around it, and change no file yourself.
 
 1. `{deliver} start request`
@@ -103,13 +106,17 @@ class DriverError(Exception):
     """A wrong command line or a missing program: one line on standard error, exit 2."""
 
 
-def g_prompt(harness: str) -> str:
-    merge = f"run `{DELIVER} merge` as one shell command and report its output."
+def deliver_command(skill: Path) -> str:
+    return f"uv run --python 3.13 --no-project {shlex.quote(str(skill / 'scripts' / 'deliver.py'))}"
+
+
+def g_prompt(harness: str, deliver: str) -> str:
+    merge = f"run `{deliver} merge` as one shell command and report its output."
     if harness == "claude":  # the probe also from an agent (#213 X7)
         merge = f"run `{PROBE}` as one shell command, then {merge}"
     else:
         merge = merge[0].upper() + merge[1:]
-    return G_PROMPT.format(deliver=DELIVER, probe=PROBE, standins=STANDINS, agent_task=merge)
+    return G_PROMPT.format(deliver=deliver, probe=PROBE, standins=STANDINS, agent_task=merge)
 
 
 def t1_prompt(harness: str, clone: Path) -> str:
@@ -343,7 +350,7 @@ class Driver:
         return passed, f"{task} {harness} {'passed' if passed else 'failed'}: {shown}; {tokens(run.events, harness)}"
 
     def session(self, run: Run) -> list[tuple[bool, str]]:
-        harness, task = run.harness, run.task
+        harness, task, deliver = run.harness, run.task, deliver_command(self.args.skill)
         run.state.mkdir()
         if task == "G":
             stand_ins = run.clone / STANDINS
@@ -355,10 +362,12 @@ class Driver:
                 exclude.write(f"/{STANDINS}/\n")
             (run.clone / ".deliver").mkdir(exist_ok=True)
             (run.clone / ".deliver" / "request.md").write_text(G_REQUEST)
-            prompt = g_prompt(harness)
+            prompt = g_prompt(harness, deliver)
         else:
             prompt = t1_prompt(harness, run.clone)
         argv = [part.replace("{prompt}", prompt) for part in COMMANDS[harness]]
+        if harness == "claude":
+            argv += ["--plugin-dir", str(self.args.skill)]
         if harness == "cortex":
             argv += ["-c", self.args.connection]
         out, err = run.root / "out.jsonl", run.root / "err.txt"
@@ -367,7 +376,7 @@ class Driver:
         line = shlex.join(["env", f"DELIVER_STATE_DIR={run.state}", *relayed])
         installed = run.root / "install.txt"
         if harness == "cursor":  # install runs in the terminal's plain shell, its ledger in the machine directory
-            install = shlex.join(["env", f"DELIVER_STATE_DIR={self.machine}", *shlex.split(DELIVER), "install", "cursor"])
+            install = shlex.join(["env", f"DELIVER_STATE_DIR={self.machine}", *shlex.split(deliver), "install", "cursor"])
             said = shlex.quote(str(installed))
             line = f"{install} >{said} 2>&1; s=$?; printf '\\n%s\\n' $s >>{said}; [ $s -eq 0 ] || exit $s; {line}"
         name = f"xh-{harness}-{task.lower()}-{os.getpid()}-{secrets.token_hex(3)}"
@@ -436,6 +445,9 @@ def run(args: argparse.Namespace) -> int:
         raise DriverError("--fixture takes OWNER/REPO")
     if args.harness == "cortex" and not args.connection:
         raise DriverError("cortex needs --connection, the Snowflake connection its runs spend")
+    args.skill = args.skill.resolve()  # the terminal runs in the clone
+    if not (args.skill / "scripts" / "deliver.py").is_file():
+        raise DriverError("--skill takes a folder of deliver, with scripts/deliver.py in it")
     for program in ("hc", "gh", "git", COMMANDS[args.harness][0]):
         if shutil.which(program) is None:
             raise DriverError(f"{program} is not on PATH")
@@ -467,6 +479,8 @@ def main(argv: list[str] | None = None) -> int:
     go.add_argument("tasks", nargs="+", choices=TASKS)
     go.add_argument("--fixture", required=True, help="the fixture repo, OWNER/REPO")
     go.add_argument("--connection", help="Cortex Code's Snowflake connection; never printed")
+    go.add_argument("--skill", type=Path, default=SKILL, metavar="PATH",
+                    help="the folder of the copy of deliver the run uses (default: the checkout's skills/deliver)")
     go.add_argument("--base-tag", default="base", help="the fixture's tag the reset restores (default: base)")
     go.add_argument("--time-limit", type=float, help="seconds per task, in place of 300 for G and 600 for T1")
     go.add_argument("--poll", type=float, default=5.0, help="seconds between hc get calls (default: 5)")

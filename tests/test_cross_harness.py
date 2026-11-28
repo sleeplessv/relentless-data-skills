@@ -426,10 +426,32 @@ class CrossHarnessTest(unittest.TestCase):
                 self.assertEqual(re.findall(r"`([^`]+)`", prompt), [*commands, *agent, f"{deliver} finish"])
                 self.assertIn("\n8. Start one agent of your default kind, give it this task and wait for it to "
                               "finish: ", prompt)
+                self.assertIn(" Run them one at a time. Wait for each to finish before you start the next, and never "
+                              "start two in one step. ", prompt)  # Cursor started two at once (#470)
                 self.assertEqual(start["request"], "Run the guard commands of the cross-harness task G. Change no file.\n")
                 clone = Path(start["cwd"])
                 self.assertFalse((clone / ".cross-harness").exists())  # the clone is gone after the run
 
+    def test_skill_names_the_given_copy_in_the_prompt_the_plugin_dir_and_the_install(self):
+        skill = self.world.root / "installed" / "deliver"
+        (skill / "scripts").mkdir(parents=True)
+        (skill / "scripts" / "deliver.py").write_text(DELIVER)
+        deliver = f"uv run --python 3.13 --no-project {skill}/scripts/deliver.py"
+        checkout = str(self.world.tree / "skills")  # the relay still runs the checkout's probe kit
+        for harness in ("claude", "cursor"):
+            with self.subTest(harness=harness):
+                before = len(self.world.starts())
+                self.run_on(harness, "G", "--skill", str(skill))
+                start, = self.world.starts()[before:]
+                self.assertIn(f"1. `{deliver} start request`", start["prompt"])
+                self.assertNotIn(checkout, json.dumps(start))
+        claude, cursor = self.world.starts()
+        self.assertEqual(claude["args"][-2:], ["--plugin-dir", str(skill)])
+        install, = lines(self.world.root / "deliver.jsonl")  # Cursor's install ran from the given copy
+        self.assertEqual(install["args"], ["install", "cursor"])
+        run = [call for call in lines(self.world.root / "hc" / "calls.jsonl") if call[0] == "run"][-1]
+        self.assertIn(f"{skill}/scripts/deliver.py install cursor", run[-1])
+        self.assertNotIn(checkout, run[-1])
 
     def test_each_g_failure_names_its_fact_and_stops_the_harness(self):
         cases = {
@@ -534,6 +556,8 @@ class CrossHarnessTest(unittest.TestCase):
             (("run", "cortex", "G", "--fixture", FIXTURE), "cross_harness: cortex needs --connection, the Snowflake "
                                                             "connection its runs spend"),
             (("run", "codex", "G", "--fixture", "not-a-repo"), "cross_harness: --fixture takes OWNER/REPO"),
+            (("run", "codex", "G", "--fixture", FIXTURE, "--skill", str(self.world.root)),
+             "cross_harness: --skill takes a folder of deliver, with scripts/deliver.py in it"),
         ]
         for args, line in cases:
             with self.subTest(args=args):
@@ -543,6 +567,7 @@ class CrossHarnessTest(unittest.TestCase):
         code, out, err = self.world.drive("run", "antigravity", "G", "--fixture", FIXTURE)
         self.assertEqual((code, out, err), (2, "", "cross_harness: agy is not on PATH\n"))
         self.assertEqual(self.world.starts(), [])
+        self.assertEqual(lines(self.world.root / "hc" / "calls.jsonl"), [])  # no terminal started
 
     def test_the_raw_output_is_kept_in_the_machine_directory(self):
         code, out, err = self.world.drive("run", "codex", "G", "--fixture", FIXTURE)

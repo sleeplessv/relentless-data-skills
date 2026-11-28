@@ -13,7 +13,7 @@ import install
 
 def check_installed(ctx):
     """Stop at the first file or registration that is missing or differs from the skill's copy."""
-    harness = install.detect()
+    harness = ctx.harness
     if harness not in install.TARGETS:
         return None
     for item in install.items(harness, ctx.run):

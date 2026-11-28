@@ -14,7 +14,8 @@ add before them in `preflight.CHECKS`. The planning skills are compared by `deps
 rule 17). `review_skill_hashes` is for `ready`, a later ticket, to fill the measurement block's
 `review skills` line; nothing calls it yet.
 
-A skill is found in the first of these places that holds it, where `<config>` is
+Off Claude Code, a skill is found in the first folder of `checks_harness.skill_roots` that holds
+it. On Claude Code, it is found in the first of these places that holds it, where `<config>` is
 `$CLAUDE_CONFIG_DIR` or `~/.claude`:
 
 1. `<config>/skills/<name>`, the user's skills folder;
@@ -46,6 +47,7 @@ import sys
 import tomllib
 from pathlib import Path
 
+import checks_harness
 import core
 
 CONTRACT = Path(__file__).resolve().parent.parent / "upstream.toml"
@@ -59,7 +61,10 @@ def load_contract() -> dict[str, dict]:
 
 
 def find(name: str, checkout: Path | None) -> Path | None:
-    """The installed folder of skill `name`, or None when it is installed nowhere."""
+    """The installed folder of skill `name` on this harness, or None when it is installed nowhere."""
+    if (harness := checks_harness.detect()) != checks_harness.CLAUDE_CODE:
+        return next((root / name for root in checks_harness.skill_roots(harness, checkout)
+                     if (root / name / "SKILL.md").is_file()), None)
     config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
     for root in (config, *([checkout / ".claude"] if checkout else [])):
         if (root / "skills" / name / "SKILL.md").is_file():

@@ -21,6 +21,7 @@ import shlex
 import subprocess
 from pathlib import Path
 
+import checks_harness
 import core
 
 HERE = Path(__file__).resolve().parent
@@ -32,14 +33,6 @@ GUARD_SLOT = "@GUARD@"
 MARKER = "deliver_guard="
 PLUGIN_LINE = "claude plugin install deliver@relentless-data-skills"
 TRUST_STEP = "Codex runs no hook you have not trusted: start codex, type /hooks, trust deliver's guard, then quit."
-# Spec #457, "Harness detection": the first variable set names the harness.
-DETECTION = (
-    ("CORTEX_SESSION_ID", "cortex-code"),
-    ("CODEX_THREAD_ID", "codex"),
-    ("CURSOR_AGENT", "cursor"),
-    ("ANTIGRAVITY_AGENT", "antigravity"),
-    ("CLAUDECODE", "claude-code"),
-)
 # Per harness, named as checks_harness names it: its folder in `harness/` (named as its adapter is), the reader's
 # folder under HOME (None: the checkout's `.cursor/agents/`) and the user hook file (#189).
 TARGETS = {
@@ -52,8 +45,14 @@ CURSOR_AGENTS = Path(".cursor/agents")
 
 
 def detect() -> str | None:
-    """The harness this process runs in, or None in a plain shell."""
-    return next((harness for var, harness in DETECTION if os.environ.get(var)), None)
+    """The harness this process runs in, or None in a plain shell.
+
+    `checks_harness.detect` names a plain shell Claude Code too, so `CLAUDECODE` tells them apart here.
+    """
+    harness = checks_harness.detect()
+    if harness == checks_harness.CLAUDE_CODE and not os.environ.get("CLAUDECODE"):
+        return None
+    return harness
 
 
 def _make_parents(path: Path) -> list[str]:

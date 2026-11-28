@@ -380,11 +380,17 @@ class Preflight(unittest.TestCase):
         self.world.probe()
         deliver_kit.github_ok(self.world)
         self.world.install_upstream()
+        # Off Claude Code, preflight finds the required skills in `~/.agents/skills` (#458).
+        shutil.copytree(self.world.home / ".claude" / "skills", self.world.home / ".agents" / "skills")
         (self.world.work / "docs" / "agents").mkdir(parents=True)
         (self.world.work / "docs" / "agents" / "stack.toml").write_text('check_command = "make check"\n')
 
     def preflight(self, **env: str) -> subprocess.CompletedProcess:
-        return self.world.deliver("preflight", **env)
+        """Preflight, without the adapter line and Cursor warning that #458 prints first."""
+        result = self.world.deliver("preflight", **env)
+        result.stdout = "".join(line for line in result.stdout.splitlines(keepends=True)
+                                if not line.startswith(("adapter: ", "warning: on Cursor")))
+        return result
 
     def test_preflight_install_missing(self):
         for harness, var in (("cortex-code", "CORTEX_SESSION_ID"), ("cursor", "CURSOR_AGENT")):

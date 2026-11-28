@@ -230,6 +230,8 @@ class Guard(unittest.TestCase):
         self.assertEqual(imported - sys.stdlib_module_names, {"__future__"} - sys.stdlib_module_names)
 
 
+# The harness each input folder logs as.
+LOGGED = {"cortex": "cortex-code"}
 FORMS = {"cortex": "claude", "codex": "claude", "cursor": "cursor", "antigravity": "antigravity"}
 # Each case's answer and logged class; a missing class is an allow.
 CASES = {"probe": "probe", "raw-merge": "gh pr merge", "raw-ready": "gh pr ready", "one-way": "one-way",
@@ -300,9 +302,9 @@ class Harnesses(unittest.TestCase):
                         self.assertIn(str(self.mark), reason)
                         self.assertIn(FINISH, reason)
             refused = [n for n in names if CASES[n]]
-            lines = [r for r in self.refusals() if r["harness"] == harness]
+            lines = [r for r in self.refusals() if r["harness"] == LOGGED.get(harness, harness)]
             self.assertEqual([(r["class"], r["run"]) for r in lines], [(CASES[n], "run-7") for n in refused])
-        self.assertEqual({r["harness"] for r in self.refusals()}, set(FORMS))
+        self.assertEqual({r["harness"] for r in self.refusals()}, {LOGGED.get(h, h) for h in FORMS})
 
     def test_the_merge_script_from_an_agent_is_a_case_on_each_harness_that_marks_agents(self):
         names = {harness: [n for n in self.cases(harness) if n.startswith("merge-agent")] for harness in FORMS}
@@ -391,7 +393,7 @@ class Harnesses(unittest.TestCase):
         self.assertNotIn(SESSION, " ".join(p.name for p in self.world.state.rglob("*")))
 
     def test_the_harness_of_a_claude_form_input(self):
-        cases = [("session.json", {}, "claude-code"), ("session.json", {"CORTEX_SESSION_ID": "x"}, "cortex"),
+        cases = [("session.json", {}, "claude-code"), ("session.json", {"CORTEX_SESSION_ID": "x"}, "cortex-code"),
                  ("session.json", {"CODEX_THREAD_ID": "x"}, "codex"), ("session.json", {"CURSOR_AGENT": "1"}, "cursor")]
         for recorded, env, _ in cases:
             self.world.guard("gh pr merge 1", recorded, **env)
@@ -399,7 +401,7 @@ class Harnesses(unittest.TestCase):
         self.saved("codex", "raw-merge", CORTEX_SESSION_ID="x")
         self.run_guard(self.claude_form("gh pr ready 1"), CORTEX_SESSION_ID="x")
         self.assertEqual([r["harness"] for r in self.refusals()],
-                         [h for _, _, h in cases] + ["cortex", "codex", "cursor"])
+                         [h for _, _, h in cases] + ["cortex-code", "codex", "cursor"])
 
 
 class Registration(unittest.TestCase):

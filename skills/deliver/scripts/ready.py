@@ -80,23 +80,8 @@ def main(args: list[str], run: core.Run) -> None:
     prs = [r for r in records if r["event"] == "pr"]
     if not prs:
         raise core.Refused("ready.no-pr", "deliver.py pr", branch=branch)
-    try:
-        saved = plan.read(run)
-        if saved is None:
-            raise plan.PlanError("it is not saved")
-    except plan.PlanError as e:
-        raise core.Refused("ready.unreadable", f"rewrite {DROP}/plan.md, then deliver.py save plan",
-                           kind="plan", why=str(e)) from None
-    try:
-        stack, _ = settings.load(run.checkout)
-    except settings.SettingsError as e:
-        raise core.Refused("ready.bad-settings", f"fix {settings.PATH}, then {AGAIN}", error=str(e)) from None
     head = _git(run, "rev-parse", "HEAD").strip()
-    commands = [m.group(1) for r in saved.requirements if (m := render.COMMAND.match(r.proof))]
-    for command in commands + ([stack["check_command"]] if stack["check_command"] else []):
-        if not any(render.counted(r, command) and r["commit"] == head for r in records):
-            raise core.Refused("ready.no-pass", f"deliver.py check -- {shlex.quote(command)}", command=command,
-                               commit=head[:7])
+    saved, stack = passes_on_head(run, records, head, "ready", AGAIN)
     default = _gh(run, "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name").strip()
     base = f"origin/{default}"
     for requirement in saved.requirements:
@@ -135,6 +120,30 @@ def main(args: list[str], run: core.Run) -> None:
     scan.start_background(preflights[-1].get("harness"), run)
     print(f"{result['reason']}.")
     print(f"Marked PR #{number} ready: {url}")
+
+
+def passes_on_head(run: core.Run, records: list[dict], head: str, prefix: str, again: str) -> tuple[plan.Plan, dict]:
+    """The saved plan and the stack settings, once each command proof and `check_command` has a counted pass on `head`.
+
+    Refuses `<prefix>.unreadable`, `<prefix>.bad-settings` or `<prefix>.no-pass`; `ready` and `brief` share it.
+    """
+    try:
+        saved = plan.read(run)
+        if saved is None:
+            raise plan.PlanError("it is not saved")
+    except plan.PlanError as e:
+        raise core.Refused(f"{prefix}.unreadable", f"rewrite {DROP}/plan.md, then deliver.py save plan",
+                           kind="plan", why=str(e)) from None
+    try:
+        stack, _ = settings.load(run.checkout)
+    except settings.SettingsError as e:
+        raise core.Refused(f"{prefix}.bad-settings", f"fix {settings.PATH}, then {again}", error=str(e)) from None
+    commands = [m.group(1) for r in saved.requirements if (m := render.COMMAND.match(r.proof))]
+    for command in commands + ([stack["check_command"]] if stack["check_command"] else []):
+        if not any(render.counted(r, command) and r["commit"] == head for r in records):
+            raise core.Refused(f"{prefix}.no-pass", f"deliver.py check -- {shlex.quote(command)}", command=command,
+                               commit=head[:7])
+    return saved, stack
 
 
 def _query_numbers(run: core.Run, folder: Path, records: list[dict], rid: str, command: str, head: str, base: str,

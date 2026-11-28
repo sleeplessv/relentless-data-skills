@@ -74,7 +74,7 @@
       "name": "deliver",
       "source": "./skills/deliver",
       "description": "Take a change from request to pull request through one tested program, with preflight, guards and saved evidence.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "author": {
         "name": "sleeplessv"
       },

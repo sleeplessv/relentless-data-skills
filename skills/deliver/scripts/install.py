@@ -1,14 +1,14 @@
 """deliver.py install [--remove] <harness>: set deliver up on a harness other than Claude Code, or take it off.
 
-`install` copies the reader's file from `harness/<harness>/` in the skill to the harness's agents
-folder and merges the guard's registration into the harness's user hook file, leaving every other
-entry alone (spec #457, "Install"). On Cursor the reader's file goes into the checkout's
-`.cursor/agents/`, with one line in the shared git directory's `info/exclude`, so it is run once per
-checkout. A second run changes nothing and says so. `--remove` takes out deliver's guard and deletes
-each reader file that still matches the skill's copy. From the ledger `install` keeps in the machine
-directory, a file it finds as `install` left it gets back the bytes it held before, or is deleted if
+`install` copies each role file (the reader and the two reviewers) from `harness/<harness>/` in the
+skill to the harness's agents folder and merges the guard's registration into the harness's user hook
+file, leaving every other entry alone (spec #457, "Install"; spec #479). On Cursor the role files go
+into the checkout's `.cursor/agents/`, with one line each in the shared git directory's `info/exclude`,
+so it is run once per checkout. A second run changes nothing and says so. `--remove` takes out
+deliver's guard and deletes each role file that still matches the skill's copy. From the ledger
+`install` keeps in the machine directory, a file it finds as `install` left it gets back the bytes it held before, or is deleted if
 `install` made it; a file the owner changed since keeps those changes, a folder `install` made is
-deleted if nothing else is in it, and the ledger goes once nothing is installed. A reader file the
+deleted if nothing else is in it, and the ledger goes once nothing is installed. A role file the
 owner edited stays, and so does its exclude line. Claude Code refuses, as the plugin supplies both.
 
 Each thing `install` writes is an item with a state (`ok`, `missing` or `differs`), an `apply` and
@@ -269,10 +269,13 @@ class HookEntry:
 
 
 class ExcludeLine:
-    """One line in a git `info/exclude` file, for a reader file in each of the repo's checkouts."""
+    """One line in a git `info/exclude` file, for a reader file in each of the repo's checkouts.
 
-    def __init__(self, path: Path, line: str, readers: list[Path]):
-        self.path, self.line, self.readers = path, line, readers
+    `ours` is every line `install` writes to that file, so the last one out can give back its earlier bytes.
+    """
+
+    def __init__(self, path: Path, line: str, readers: list[Path], ours: list[str]):
+        self.path, self.line, self.readers, self.ours = path, line, readers, ours
 
     def _lines(self) -> list[str]:
         return self.path.read_text(encoding="utf-8").splitlines() if self.path.is_file() else []
@@ -300,7 +303,8 @@ class ExcludeLine:
             ledger.restore(self.path)
         else:
             self.path.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
-            ledger.forget(self.path)
+            if not set(kept) & set(self.ours):
+                ledger.forget(self.path)
         return f"took {self.line} out of {self.path}"
 
 
@@ -315,8 +319,10 @@ def items(harness: str, run: core.Run | None) -> list:
             raise core.Refused("install.not-a-checkout", harness=harness)
         found = [File(run.checkout / CURSOR_AGENTS / p.name, p.read_bytes()) for p in readers]
         checkouts = _checkouts(run)
-        found += [ExcludeLine(run.common_dir / "info" / "exclude", f"/{CURSOR_AGENTS / p.name}",
-                              [checkout / CURSOR_AGENTS / p.name for checkout in checkouts]) for p in readers]
+        lines = [f"/{CURSOR_AGENTS / p.name}" for p in readers]
+        found += [ExcludeLine(run.common_dir / "info" / "exclude", line,
+                              [checkout / CURSOR_AGENTS / p.name for checkout in checkouts], lines)
+                  for p, line in zip(readers, lines)]
     else:
         found = [File(home / folder / p.name, p.read_bytes()) for p in readers]
     text = (source / "hooks.json").read_text(encoding="utf-8")

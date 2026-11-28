@@ -24,6 +24,8 @@ render = deliver_kit.load("render")
 deps = deliver_kit.load("deps")
 URL = "https://github.com/owner/repo/pull/12"
 AT = "2026-11-27T19:00:00Z"
+# The skill's own version, which the measurement block names; a version bump changes it.
+VERSION = json.loads((deliver_kit.SCRIPTS.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 PLAN = """\
 | # | Requirement | Proof |
 |---|---|---|
@@ -144,7 +146,7 @@ class Ready(unittest.TestCase):
         self.assertFalse(Path(body_file).exists())
         block = (
             "<details><summary>Measurement</summary>\n\n```text\n"
-            "version: 0.1.0\n"
+            f"version: {VERSION}\n"
             "path: small edit\n"
             "harness: claude-code\n"
             "small test: pass, 1 line, no critical path, no dependents command\n"

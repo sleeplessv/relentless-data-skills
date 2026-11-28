@@ -14,8 +14,9 @@ harness from the input alone, so a registration calls it with no argument:
   `CORTEX_SESSION_ID`, `CODEX_THREAD_ID` and `CURSOR_AGENT` set in the environment names the
   harness, and with none it is Claude Code.
 
-It finds a run mark (`deliver-mark.json` in the checkout's own git directory) by walking up from
-the input's `cwd` and from its own working directory to the nearest `.git`. It starts no `git`
+It finds a run mark (`deliver-mark.json` in the checkout's own git directory) by walking up to
+the nearest `.git` from each starting folder in turn: the input's `cwd` when it is not empty, each
+folder in Cursor's `workspace_roots`, then its own working directory. It starts no `git`
 process and imports nothing of the program, so a broken program never breaks it.
 
 With no mark it allows the command. With a mark it refuses:
@@ -258,7 +259,9 @@ def main() -> int:
     harness, form, command = read_call(data)
     found = None
     if isinstance(command, str):
-        starts = [Path(data["cwd"])] if isinstance(data.get("cwd"), str) else []
+        roots = data.get("workspace_roots")
+        starts = [data.get("cwd"), *(roots if isinstance(roots, list) else [])]
+        starts = [Path(s) for s in starts if isinstance(s, str) and s]
         found = next(filter(None, (find_mark(s) for s in [*starts, Path.cwd()])), None)
     cls = classify(command, is_agent(harness, data), found[0]) if found else None
     if cls is None:

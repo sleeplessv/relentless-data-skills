@@ -145,12 +145,8 @@ def evidence_lines(requirements: list[Requirement], records: list[dict]) -> list
     return lines
 
 
-def counted(record: dict, command: str) -> bool:
-    """Whether a record is a counted pass of `command`: a check of that exact text that exited 0,
-    is tied to a commit and selected something (#256 rules 29, 30). `ready` also wants the commit
-    to be `HEAD`."""
-    return (record.get("event") == "check" and record.get("command") == command and record.get("exit") == 0
-            and bool(record.get("commit")) and not record.get("selected_nothing"))
+# A counted pass lives in `findings`, which imports no other deliver module; `ready` reads it here.
+counted = findings.counted
 
 
 def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tuple[str, str] | None = None,
@@ -171,9 +167,10 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
         refuse_secret(f"The {name} given to the renderer", name, text)
     records = _records(folder)
     found = findings.all_findings(records)
+    states = {f["number"]: findings.state(f, records) for f in found}
     for finding in found:
         refuse_secret(f"Finding {finding['number']}", "finding",
-                      "\n".join((finding["where"], finding["text"], finding["evidence"])))
+                      "\n".join((finding["where"], finding["text"], finding["evidence"], states[finding["number"]])))
     source, ticket, quote = read_source(texts["request"])
     plan = read_plan(texts["plan"])
     evidence = evidence_lines(plan.requirements, records)
@@ -208,7 +205,7 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
         for f in found:
             text = f"`{f['where']}`: {f['text'].rstrip('.')}" + (f"; {f['evidence']}" if f["proven"] else "")
             out.append(f"| {f['number']} | {findings.REPORTERS[f['reviewer']]} | {_cell(shown(text))} | {f['scope']} "
-                       f"| {findings.state(f)} |")
+                       f"| {_cell(shown(states[f['number']]))} |")
     else:
         out.append("No review: small edit.")
     if block:

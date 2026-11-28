@@ -40,7 +40,7 @@ import os
 from pathlib import Path
 
 
-def start_background():
+def start_background(harness=None, run=None):
     with (Path(os.environ["DELIVER_KIT_WORLD"]) / "scan-starts.txt").open("a") as f:
         f.write("start\\n")
     return True

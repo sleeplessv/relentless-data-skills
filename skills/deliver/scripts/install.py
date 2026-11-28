@@ -6,9 +6,10 @@ entry alone (spec #457, "Install"). On Cursor the reader's file goes into the ch
 `.cursor/agents/`, with one line in the shared git directory's `info/exclude`, so it is run once per
 checkout. A second run changes nothing and says so. `--remove` takes out deliver's guard and deletes
 each reader file that still matches the skill's copy. From the ledger `install` keeps in the machine
-directory, a file it finds as `install` left it gets back the bytes it held before, and a file or
-folder `install` made is deleted; the ledger goes once nothing is installed. A reader file the owner
-edited stays, and so does its exclude line. Claude Code refuses, as the plugin supplies both.
+directory, a file it finds as `install` left it gets back the bytes it held before, or is deleted if
+`install` made it; a file the owner changed since keeps those changes, a folder `install` made is
+deleted if nothing else is in it, and the ledger goes once nothing is installed. A reader file the
+owner edited stays, and so does its exclude line. Claude Code refuses, as the plugin supplies both.
 
 Each thing `install` writes is an item with a state (`ok`, `missing` or `differs`), an `apply` and
 an `undo`. `checks_install` reads the same items, so preflight stops on the state `install` fixes.
@@ -292,7 +293,7 @@ class ExcludeLine:
             return None
         left = [reader for reader in self.readers if reader.exists()]
         if left:
-            return f"kept {self.line} in {self.path}: {', '.join(map(str, left))} is still there"
+            return f"kept {self.line} in {self.path}: {', '.join(map(str, left))} {'is' if len(left) == 1 else 'are'} still there"
         kept = [line for line in lines if line != self.line]
         before = ledger.original(self.path)
         if kept == (before or b"").decode("utf-8").splitlines():

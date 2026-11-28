@@ -276,8 +276,9 @@ npx skills remove -g deliver
 
 `install --remove` takes out deliver's guard and each reader file that still matches the
 skill's copy. From the record `install` keeps in deliver's machine folder, a file that is as
-`install` left it gets back the bytes it held before, and a file or folder that `install` made is
-deleted. A reader file you edited stays, and `--remove` says so.
+`install` left it gets back the bytes it held before, or is deleted if `install` made it. A file
+you changed since keeps your changes, and a folder that `install` made is deleted if nothing else
+is in it. A reader file you edited stays, and `--remove` says so.
 On Cursor, run it in each checkout where you ran `install cursor`. The exclude line, which the
 checkouts share, comes out once no checkout holds the reader file.
 

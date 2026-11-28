@@ -1,0 +1,210 @@
+"""The core every deliver.py subcommand shares: endings, refusal codes, the run mark and records.
+
+Endings (#256 rule 4). A subcommand returns for exit 0. It raises `Refused` for exit 10, which
+prints `REFUSED <code>: <reason>` and, on the next line, `Next: <command>` when there is one. It
+raises `Question` for exit 20, which prints the question for the owner. Anything else is a crash.
+`UsageError` is exit 2 with the usage text.
+
+Refusal codes are `<subcommand>.<reason>`, lower case with hyphens, and every one is in
+`REFUSALS`. To add one, add its line here, raise `Refused("<code>", ...)`, and add a test named
+`test_<code>`, or starting `test_<code>_`, with dots and hyphens as underscores (for
+`ready.no-preflight`, `test_ready_no_preflight`) in a `tests/test_deliver_*.py` file. The meta-test in
+`tests/test_deliver_core.py` fails while a code has no such test.
+
+Layout (spec #407, "Records and the run mark"):
+
+- The run mark is `deliver-mark.json` in the checkout's own git directory (`git rev-parse
+  --git-dir`): `{"run", "branch", "role", "started"}`.
+- A branch's records are under `deliver/branches/<branch>/` in the shared git directory (`git
+  rev-parse --git-common-dir`). Every event appends one JSON line, with `event` and `at` first,
+  to its `records.jsonl`.
+- The machine directory is `$DELIVER_STATE_DIR`, default `~/.local/state/deliver` (#256 rule 7).
+  No line written there holds a session id.
+"""
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+import subprocess
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+MARK = "deliver-mark.json"
+RECORDS = "records.jsonl"
+NO_MARK = "no run mark in this checkout, so no run is in progress here"
+
+# Every refusal code of the program, with its reason. A reason may hold str.format fields.
+REFUSALS = {
+    "start.not-a-repo": "{cwd} is not in a git working tree",
+    "start.run-in-progress": "run {run} is in progress in this checkout (run mark: {mark}); "
+                             "deliver.py start --resume resumes it",
+    "start.no-run": "no run mark in this checkout, so there is no run to resume",
+    "start.not-built": "{form} is a multi-ticket run, and multi-ticket runs come with a later build stage",
+    "start.nothing-to-start": "the tree has no changes and no ticket or request was named. start accepts: "
+                              "start <ticket>; start request, after the request is written word for word "
+                              "into .deliver/request.md; start with changes in the tree; start --resume",
+    "start.no-request": "{file} is missing or empty, and a request is read from there only",
+    "start.no-ticket": "gh cannot read ticket #{ticket}: {error}",
+    "start.fetch-failed": "git fetch origin {branch} failed, so no fresh branch was cut: {error}",
+    "start.cannot-carry": "git cannot carry the changes in the tree onto a fresh branch from origin/{branch}, "
+                          "so nothing was changed: {error}",
+    "preflight.no-mark": NO_MARK,
+    "preflight.bad-settings": "the stack settings cannot be read: {error}",
+    "preflight.guards-off": "the guards are off: no refusal of the guard probe is logged for run {run} since its mark was written",
+    "preflight.no-python": "this machine has neither uv nor a python3 of 3.13 or newer",
+    "preflight.cannot-write": "the run cannot write {path}: {error}",
+    "preflight.no-signature": "git signs commits here, and a test signature failed: {error}",
+    "preflight.no-gh": "gh cannot be started: {error}",
+    "preflight.gh-signed-out": "gh is not signed in to GitHub",
+    "preflight.no-github": "gh cannot read this repo from GitHub: {error}",
+    "preflight.cannot-push": "the gh account cannot push to {repo}: its permission is {permission}",
+    "preflight.reach-failed": "the reach command {name}, `{command}`, failed with exit {exit}: {error}",
+    "preflight.background": "this Claude Code session runs where nobody can stop it: {var} is {value}",
+    "preflight.untrusted": "Claude Code does not trust {folder}: {path} records no accepted trust dialog for it",
+    "preflight.hooks-off": "Claude Code's hooks are switched off: {path} sets {key}",
+    "preflight.unknown-hook": "a hook deliver does not know runs on shell commands: {path} registers {command}",
+    "preflight.claude-unreadable": "Claude Code's file {path} cannot be read: {error}",
+    "preflight.no-reader": "the deliver plugin has no reader role file: {path} is missing",
+    "preflight.role-clash": "the role file {path} has the name of deliver's role {role}",
+    "preflight.plugin-twice": "deliver is also in Claude Code's user-level skills folder: {path}",
+    "preflight.missing-skill": "a required upstream skill is not installed: {skills}",
+    "check.no-mark": NO_MARK,
+    "save.no-mark": NO_MARK,
+    "save.missing-file": "there is no {file} to save",
+    "save.bad-plan": "the plan cannot be read: {error}",
+    "save.no-proof": "a requirement has no proof: {requirements}",
+    "pr.no-mark": NO_MARK,
+    "pr.not-saved": "the author's files are not saved: {files}",
+    "pr.unreadable": "the saved {kind}.md cannot be read: {why}",
+    "pr.default-branch": "{branch} is the default branch, and a PR needs a branch of its own",
+    "pr.wrong-branch": "the checked-out branch is {branch}, and the run mark's branch is {marked}",
+    "pr.push-rejected": "the push of {branch} to origin failed, and nothing was forced",
+    "ready.no-mark": NO_MARK,
+    "ready.no-preflight": "no passing preflight is saved for run {run}",
+    "ready.drop-folder": "the drop folder .deliver/ still holds {files}",
+    "ready.no-pr": "the records of {branch} hold no PR",
+    "ready.unreadable": "the saved {kind}.md cannot be read: {why}",
+    "ready.bad-settings": "the stack settings cannot be read: {error}",
+    "ready.no-pass": "`{command}` has no counted pass on the head commit {commit}",
+    "ready.no-query-numbers": "the query of {requirement}, `{command}`, has no saved {missing} numbers",
+    "ready.needs-review": "this change needs a review: {why}",
+    "ready.bad-query": "the proof of {requirement} names a query, and its query command cannot be read",
+    "ready.stale-pr": "PR #{number}'s head on GitHub is {remote}, not the tested HEAD {commit}",
+    "merge.no-mark": NO_MARK,
+    "merge.no-pr": "the records of {branch} hold no PR",
+    "merge.not-open": "PR #{number} is {state}, not open",
+    "merge.not-ready": "`ready` has not passed on the PR's head commit {commit}",
+    "merge.one-way": "the door is one-way, so the owner merges PR #{number}",
+    "merge.withheld": "the merge is withheld: {why}",
+    "merge.bad-settings": "the stack settings cannot be read: {error}",
+    "merge.conflicting": "PR #{number} conflicts with {base}, so it goes back to its author",
+    "merge.behind": "PR #{number} is behind {base}, so it goes back to its author",
+    "merge.ci-red": "CI is red on {commit}: {checks}",
+    "merge.ci-unknown": "GitHub reports no checks on {commit}, but {why}, so CI may not have started yet",
+    "merge.not-merged": "gh pr merge did not merge PR #{number}: GitHub shows it {state}",
+    "merge.bad-body": "the measurement block in PR #{number}'s description has no closing line",
+    "merge.mergeable-unknown": "GitHub has not worked out yet whether PR #{number} can merge",
+    "merge.no-history": "the history of origin/{base} cannot be read: {error}",
+    "finish.no-mark": NO_MARK,
+    "deps.missing-skill": "a required upstream skill is not installed: {skills}",
+}
+
+
+class Refused(Exception):
+    """Exit 10: the subcommand refused, with a fixed code and the next command."""
+
+    def __init__(self, code: str, next_command: str | None = None, **fields: object):
+        self.code = code
+        self.reason = REFUSALS[code].format(**fields)
+        self.next_command = next_command
+        super().__init__(f"{code}: {self.reason}")
+
+    def lines(self) -> list[str]:
+        out = [f"REFUSED {self.code}: {self.reason}"]
+        if self.next_command:
+            out.append(f"Next: {self.next_command}")
+        return out
+
+
+class Question(Exception):
+    """Exit 20: the run waits for the owner, who answers the question."""
+
+
+class UsageError(Exception):
+    """Exit 2: the arguments do not fit the subcommand."""
+
+
+@dataclass
+class Run:
+    """Where a subcommand runs: the checkout, its git directories and its run mark, if any."""
+
+    checkout: Path
+    git_dir: Path
+    common_dir: Path
+    mark: dict | None
+
+    def record(self, event: str, **fields: object) -> None:
+        """Append one event to the records of the run's branch."""
+        append_record(self.common_dir, self.mark["branch"], event, **fields)
+
+
+def now() -> str:
+    return datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def find_run(cwd: Path) -> Run | None:
+    """The checkout holding `cwd` with its run mark, or None outside a git working tree."""
+    proc = subprocess.run(
+        ["git", "rev-parse", "--path-format=absolute", "--show-toplevel", "--git-dir", "--git-common-dir"],
+        cwd=cwd, capture_output=True, text=True,
+    )
+    if proc.returncode != 0:
+        return None
+    checkout, git_dir, common_dir = (Path(line) for line in proc.stdout.splitlines())
+    return Run(checkout, git_dir, common_dir, read_mark(git_dir))
+
+
+def read_mark(git_dir: Path) -> dict | None:
+    try:
+        return json.loads((git_dir / MARK).read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return None
+
+
+def write_mark(git_dir: Path, run: str, branch: str, role: str = "session") -> dict:
+    mark = {"run": run, "branch": branch, "role": role, "started": now()}
+    (git_dir / MARK).write_text(json.dumps(mark) + "\n", encoding="utf-8")
+    return mark
+
+
+def records_dir(common_dir: Path, branch: str) -> Path:
+    return common_dir / "deliver" / "branches" / branch
+
+
+def append_record(common_dir: Path, branch: str, event: str, **fields: object) -> None:
+    _append(records_dir(common_dir, branch) / RECORDS, {"event": event, "at": now(), **fields})
+
+
+def state_dir() -> Path:
+    return Path(os.environ.get("DELIVER_STATE_DIR") or Path.home() / ".local" / "state" / "deliver").absolute()
+
+
+def append_state(name: str, **fields: object) -> None:
+    """Append one line to a log in the machine directory, which never holds a session id."""
+    if any("session" in key for key in fields):
+        raise ValueError(f"no session id goes into the machine directory: {sorted(fields)}")
+    _append(state_dir() / name, {"at": now(), **fields})
+
+
+def path_matches(path: str, patterns: list[str]) -> bool:
+    """Whether a repo-relative path matches any glob of a lists.toml path list."""
+    return any(re.match(glob.translate(p, recursive=True, include_hidden=True), path) for p in patterns)
+
+
+def _append(path: Path, line: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(line, ensure_ascii=False) + "\n")

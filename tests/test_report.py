@@ -1,9 +1,9 @@
-"""Exercise scripts/report.py at its command line against a machine directory the tests build.
+"""Exercise `deliver.py report` at its command line against a machine directory the tests build.
 
 Each test writes its own replay sets, versions, verdicts and scan rows into a
 machine directory in a temporary folder, in the shapes scripts/draw.py,
-scripts/replay.py, scripts/judge.py and scripts/scan.py write them, and runs
-the report from a copy of scripts/. No test reads the real machine directory
+scripts/replay.py, scripts/judge.py and `deliver.py scan` write them, and runs
+the report from a copy of scripts/ and skills/deliver/scripts/. No test reads the real machine directory
 or a session log, starts a session or touches the network.
 """
 from __future__ import annotations
@@ -18,11 +18,11 @@ import unittest
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-SCRIPTS = Path(__file__).resolve().parent.parent / "scripts"
+ROOT = Path(__file__).resolve().parent.parent
 BUCKETS = ("0-50", "51-300", "301-1500")
 REPO = "example-org/alpha"  # what project-labels.json maps label A to; the report must never print it
 TITLE = "Print the total of example-org/alpha"
-OLD = object()  # a copied_tokens for a row written before scripts/scan.py had the column: the row has no such field
+OLD = object()  # a copied_tokens for a row written before the scan had the column: the row has no such field
 SCANNED = object()  # a figure as the scan gives it: blank beside a blank total_tokens, else the test's usual one
 
 
@@ -35,7 +35,7 @@ def session(number: int) -> str:
 
 
 def helper(description: str | None, brief: str | None, tokens: int | float | None) -> dict:
-    """One helper of a session's scan row, as scripts/scan.py lists it: blank counts when it has no tokens of its
+    """One helper of a session's scan row, as the scan lists it: blank counts when it has no tokens of its
     own."""
     counts = [None] * 4 if tokens is None else [tokens, 0, 0, 0]
     return {"id": f"a{len(str(description)):04x}{len(str(brief)):012x}", "description": description,
@@ -51,9 +51,10 @@ class World:
         self.state = root / "state"
         self.state.mkdir()
         (root / "home").mkdir()
-        # The report runs from a copy of scripts/, so a test sees anything a run writes beside it.
-        self.source = root / "source"
-        shutil.copytree(SCRIPTS, self.source, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        # The report runs from a copy of both script folders, so a test sees anything a run writes beside it.
+        for folder in ("scripts", "skills/deliver/scripts"):
+            shutil.copytree(ROOT / folder, root / "source" / folder, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+        self.source = root / "source" / "skills" / "deliver" / "scripts"
         self.sets: list[list[dict]] = []
         self.versions: list[dict] = []
         self.verdicts: list[dict] = []
@@ -108,7 +109,7 @@ class World:
 
     def scan(self, name: str, tokens: int | float | None, minutes: object = SCANNED, helpers: object = SCANNED,
              copied: object = 0) -> None:
-        """A row as scan() in scripts/scan.py writes it. With a total, the token columns add up to it and the other
+        """A row as scan() in scan.py writes it. With a total, the token columns add up to it and the other
         figures are given. With a blank total, as for a log that is gone, every figure is blank. A blank minutes or
         helpers beside a total, a figure beside a blank total, or a copied of OLD (no such field) is a row a test
         builds on purpose."""
@@ -148,7 +149,7 @@ class World:
             self.save()
         env = {key: value for key, value in os.environ.items() if key != "PYTHONDONTWRITEBYTECODE"}
         env.update({"HOME": str(self.root / "home"), "DELIVER_STATE_DIR": str(self.state)})
-        return subprocess.run([sys.executable, str(self.source / "report.py"), *args], cwd=self.root, env=env,
+        return subprocess.run([sys.executable, str(self.source / "deliver.py"), "report", *args], cwd=self.root, env=env,
                               text=text, capture_output=True)
 
 
@@ -1095,7 +1096,7 @@ class TestReport(unittest.TestCase):
         (self.world.state / "scan-rows.jsonl").write_bytes(b"".join(line + b"\n" for line in lines))
 
     def scan_writes(self, session_name: str) -> None:
-        """Run scripts/scan.py's row writer, the code that keeps a line it cannot read, over the rows file."""
+        """Run the scan's row writer, the code that keeps a line it cannot read, over the rows file."""
         code = "import json, sys; sys.path.insert(0, sys.argv[1]); import scan; scan.write_row(json.loads(sys.argv[2]))"
         self.world.scan(session_name, 1, 1.0)
         env = {**os.environ, "HOME": str(self.world.root / "home"), "DELIVER_STATE_DIR": str(self.world.state)}
@@ -1183,7 +1184,7 @@ class TestReport(unittest.TestCase):
         text = self.world.report("--help").stdout
         self.assertIn(
             "A nonblank line of scan-rows.jsonl is no row when the scan would not read it as a\n"
-            "JSON object (json_object in scripts/scan.py says which) or when it is an object\n"
+            "JSON object (json_object in scan.py says which) or when it is an object\n"
             "whose session is not text. The scan keeps such a line, and the report leaves it\n"
             "out: it names the line once on standard error, with the file, the line number and\n"
             "the reason, as it reads the file, and prints on standard output how many lines it\n"
@@ -1200,7 +1201,7 @@ class TestReport(unittest.TestCase):
     def test_help_states_once_that_every_token_figure_includes_copied_tokens(self) -> None:
         text = self.world.report("--help").stdout + "\n"
         rule = ("Every token figure includes the tokens a resumed session copied: the report\n"
-                "takes none out of a figure or a verdict. python3 scripts/scan.py --help says\n"
+                "takes none out of a figure or a verdict. deliver.py scan --help says\n"
                 "which lines are copied and what copied_tokens holds. A copied response counts\n"
                 "in total_tokens and, wherever the scan puts it, in a helper's tokens or in the\n"
                 "session's own. Each version's block ends with the copied_tokens of the tickets\n"
@@ -1219,7 +1220,7 @@ class TestReport(unittest.TestCase):
                       "tokens. Each copied share is of the total printed beside it.\n", text)
         self.assertIn("  scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes\n"
                       "                        and helpers of each row, and description, brief_head\n"
-                      "                        and total_tokens of each helper (scripts/scan.py).\n", text)
+                      "                        and total_tokens of each helper (deliver.py scan).\n", text)
         self.assertIn("A missing versions.jsonl, verdicts.jsonl or scan-rows.jsonl holds nothing\n"
                       "yet. A folder or file that cannot be read, a line of versions.jsonl or\n"
                       "verdicts.jsonl that is not a JSON object, a field missing or of the wrong type\n"
@@ -1237,7 +1238,7 @@ class TestReport(unittest.TestCase):
             "The report reads each helper's description and the head of its brief, and\n"
             "puts the helper in a step of generation one or leaves it not sorted. How it\n"
             "chooses, and where it can sort wrong, are in step() and named() in\n"
-            "scripts/report.py, with each step's words in STEPS, the words read past in\n"
+            "report.py, with each step's words in STEPS, the words read past in\n"
             "NO_ROLE and those that make a review a re-check in AGAIN. A helper sorted\n"
             "into the wrong step can move the cut either way. The steps:\n",
             self.world.report("--help").stdout)

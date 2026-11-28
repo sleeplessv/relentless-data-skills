@@ -1,0 +1,151 @@
+# The built-in lists of deliver, read by deliver.py (settings.py) and by the guard hook.
+# Each reader loads this file with tomllib alone and imports nothing of the program, so a
+# broken program never breaks the guard. A repo adds to these lists in its stack settings
+# (docs/agents/stack.toml) and never removes from them.
+#
+# Command patterns are Python regular expressions searched in the command text. Each one
+# starts with the same prefix. Where the text's quoting is plain (every quote closed, and no
+# heredoc, `#` comment, $'...' string, $(...) or backtick), the prefix steps over whole quoted
+# strings, so text inside quotes (a commit message, a PR title) never matches. Otherwise the
+# pattern is searched in the raw text, quotes included, so a doubt about quoting matches rather
+# than lets a command through. Path patterns are globs matched against a path relative to the repo root:
+# `*` stays inside one folder, `**/` matches any number of folders (none included), and a
+# leading dot is matched like any other character.
+
+# Commands that wait for the owner inside a run: #178 rule 21, amended by #213 X7.
+one_way_commands = [
+  # A force push.
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgit\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\spush\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?(?:--force\S*|-[A-Za-z]*f[A-Za-z]*(?=\s|$)|\+\S+)',
+  # Deleting a remote branch or tag, or a mirror or pruning push, which can do both.
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgit\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\spush\b(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?(?:--delete\b|--mirror\b|--prune\b|-d(?=\s|$)|:\S+)',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgh\s+api\b(?=(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?(?:-X\s*|--method[=\s]\s*)["\x27]?DELETE\b)(?=(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s["\x27]?[^\s\x27"]*\bgit/refs/)',
+  # Creating a release.
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgh\s+release\s+create\b',
+  # Publishing a package.
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\b(?:npm|pnpm|yarn|bun|uv|poetry|hatch|flit|cargo)\s+publish\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\btwine\s+upload\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bgem\s+push\b',
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)\bdocker\s+push\b',
+  # Any command aimed at a target named production (prod or production, any case, quoted or not):
+  # a target option set to it,
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])(?:--(?:target|env|environment|stage|profile|context|connection|namespace|stack|project|remote|inventory)|-[tcnsP])(?:=|\s+)["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
+  # a variable set to it whose name is or ends in TARGET, STAGE, ENVIRONMENT, ENV (but not NODE_ENV),
+  # PROFILE, PROJECT or STACK,
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])(?i:[a-z_]*(?:target|stage|environment|(?<!node_)env|profile|project|stack))=["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
+  # it as the argument after push, select, project, use-context, ansible's -i or a word holding deploy,
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])(?:push|select|project|use-context|\S*deploy\S*|ansible\S*(?:[^;&|\n\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?\s-i)(?:\s+-\S+)*\s+["\x27]?(?i:prod|production)["\x27]?(?=$|[\s;&|)])',
+  # or the --prod deploy flag.
+  '\A(?:(?=[\s\S]*?(?:<<|\$\x27|\$\(|\x60|(?<![^\s;&|(])\#)|(?!(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*+\Z))[\s\S]*?|(?:[^\x27"\\]|\\[\s\S]|\x27[^\x27]*\x27|"(?:[^"\\]|\\[\s\S])*")*?)(?<![^\s;&|(])--prod(?=$|[\s;&|)])',
+]
+
+# Paths whose change makes the door one-way at `ready`: #256 rule 51.
+one_way_paths = [
+  # CI workflows and the rest of .github/.
+  ".github/**",
+  "**/CODEOWNERS",
+  "**/CLAUDE.md",
+  "**/AGENTS.md",
+  ".claude/**",
+  "**/.mcp.json",
+  # Git hooks.
+  ".githooks/**",
+  ".husky/**",
+  "**/.pre-commit-config.yaml",
+  "**/lefthook.yml",
+  # Files that set permissions or hold secrets.
+  "**/.env",
+  "**/.env.*",
+  "**/*.pem",
+  "**/*.key",
+  "**/secrets/**",
+  "**/*secret*",
+  "**/*credential*",
+  "**/permissions/**",
+  "**/*permission*",
+]
+
+# Paths where every change gets a review: #171 rule 4, with the stack settings file and
+# AGENTS.md always on it (#179 rule 4).
+critical_paths = [
+  # Agent instructions: skill text, AGENTS.md, prompts.
+  "**/SKILL.md",
+  "**/AGENTS.md",
+  "**/CLAUDE.md",
+  ".claude/**",
+  ".cursor/**",
+  ".codex/**",
+  "**/prompts/**",
+  "**/*.prompt.md",
+  "docs/agents/stack.toml",
+  # CI workflows.
+  ".github/workflows/**",
+  ".gitlab-ci.yml",
+  ".circleci/**",
+  "**/azure-pipelines.yml",
+  "**/Jenkinsfile",
+  # Dependency files and lockfiles.
+  "**/pyproject.toml",
+  "**/requirements*.txt",
+  "**/setup.py",
+  "**/setup.cfg",
+  "**/Pipfile",
+  "**/Pipfile.lock",
+  "**/uv.lock",
+  "**/poetry.lock",
+  "**/package.json",
+  "**/package-lock.json",
+  "**/pnpm-lock.yaml",
+  "**/yarn.lock",
+  "**/go.mod",
+  "**/go.sum",
+  "**/Cargo.toml",
+  "**/Cargo.lock",
+  "**/Gemfile",
+  "**/Gemfile.lock",
+  "**/packages.yml",
+  "**/package-lock.yml",
+  "**/dependencies.yml",
+  # Configuration, permissions, secrets and sign-in code.
+  "**/CODEOWNERS",
+  "**/.mcp.json",
+  "**/.env",
+  "**/.env.*",
+  "**/*.pem",
+  "**/*.key",
+  "**/secrets/**",
+  "**/*secret*",
+  "**/*credential*",
+  "**/permissions/**",
+  "**/*permission*",
+  "**/auth/**",
+  "**/*auth*.*",
+  "**/*login*.*",
+  "**/config/**",
+  "**/*.config.*",
+  "**/settings.*",
+  # Database migrations and schema files.
+  "**/migrations/**",
+  "**/alembic/**",
+  "**/schema.*",
+  "**/*.schema.*",
+  "**/*.prisma",
+  # dbt sources, shared macros, snapshots and project config.
+  "**/*sources*.yml",
+  "**/*sources*.yaml",
+  "**/macros/**",
+  "**/snapshots/**",
+  "**/dbt_project.yml",
+  "**/profiles.yml",
+  "**/selectors.yml",
+  # Semantic-model relationships and row-level security.
+  "**/relationships.tmdl",
+  "**/roles/*.tmdl",
+  "**/*.bim",
+]
+
+# Hooks on the shell tool that preflight knows: #178 rule 38, as reading 8 of spec #407 sets it.
+# `script` is the end of the hook command's path inside the named plugin.
+known_hooks = [
+  { name = "deliver guard", plugin = "deliver", script = "scripts/guard.py" },
+  { name = "snowman guard", plugin = "snowman", script = "hooks/snow_guard.py" },
+]

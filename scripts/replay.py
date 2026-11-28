@@ -20,9 +20,11 @@ from pathlib import Path
 sys.dont_write_bytecode = True  # importing the siblings would otherwise write scripts/__pycache__/ into the checkout
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import draw  # noqa: E402  (a sibling script, not an installed package)
-import scan  # noqa: E402
+sys.path.insert(1, str(Path(__file__).resolve().parent.parent / "skills" / "deliver" / "scripts"))
+import scan  # noqa: E402  (deliver.py's scan, found from this repo's skills/deliver/scripts/)
 
-VERSION = "direct"
+VERSION = "direct"  # the version replayed with no --version; report.py names the direct version by it
+VERSIONS = (VERSION, "deliver")
 GENERATION_TWO = ("deliver", "squad")
 MARKED = draw.GENERATION_ONE + GENERATION_TWO
 # Tool caches a sandboxed command may read and write, under the home folder.
@@ -35,12 +37,22 @@ SOCKETS = (f"/tmp/claude-{os.getuid()}", f"/private/tmp/claude-{os.getuid()}")
 KEPT = ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_OAUTH_TOKEN")
 DROPPED = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN", "GH_CONFIG_DIR")
 ORIGIN = "replay-origin.git"  # the clone's remote, inside its .git/
-REF = f"refs/replay/{VERSION}"  # the version's commit, in the version's repo, outside refs/heads/ where branches live
+# The deliver version's plugin, and its folder in the clone's .git/: the stand-in gh in bin/, the stand-in's gh.json
+# and gh-calls.jsonl, and state/, the session's DELIVER_STATE_DIR. Under .git/, none of it is in the version's commit.
+PLUGIN = Path(__file__).resolve().parent.parent / "skills" / "deliver"
+STAND_IN = "replay-deliver"
 
 HELP = f"""\
-Rerun one ticket of the replay set with one agent, as its `{VERSION}` version.
+Rerun one ticket of the replay set with one agent, as its `{VERSION}` version or
+its `deliver` version.
 
 Usage: python3 scripts/replay.py LABEL TICKET
+       python3 scripts/replay.py --version deliver LABEL TICKET
+
+With no --version, the replay is the {VERSION} version. Steps 1 to 6 and the
+confinement after them describe the {VERSION} version. The deliver version
+follows them too, except where the paragraph after the confinement says it
+differs.
 
 LABEL and TICKET name an entry of a replay-set-<n>.json in the machine
 directory, $DELIVER_STATE_DIR (default ~/.local/state/deliver). Sets, the repo
@@ -83,10 +95,11 @@ list and the label key are read as scripts/draw.py reads them. The replay:
    log and changed nothing is taken as no session: nothing is recorded.
 5. Scans the session. A log that is missing or cannot be scanned gives the
    scan's row of blanks.
-6. Records the commit as the ticket's {VERSION} version with the session's exit
-   status, then writes the row to scan-rows.jsonl. A session that loaded a
-   skill of either generation ({", ".join(MARKED)}), or whose
-   skills the scan cannot tell, is marked not direct.
+6. Records the commit as the ticket's version with the session's exit status,
+   then writes the row to scan-rows.jsonl. A session that loaded a skill of
+   either generation ({", ".join(MARKED)}), or whose skills the
+   scan cannot tell, is marked not direct; a deliver session's own skill,
+   deliver, does not mark it.
 
 Every session starts with --setting-sources project,local, --strict-mcp-config
 with no MCP server, and these settings: the command sandbox on, a start refused
@@ -105,17 +118,55 @@ GIT_CONFIG_COUNT, and carries no other GIT_* variable of the caller's. These
 settings replace git's default lookups of the system config file, of
 ~/.gitconfig, and of the config, ignore and attributes files under
 $XDG_CONFIG_HOME/git/ (~/.config/git/ when XDG_CONFIG_HOME is unset).
-Nothing is pushed, and no PR is opened.
+The {VERSION} version pushes nothing and opens no PR.
+
+The deliver version differs from {VERSION} in these ways and no other. Its
+session loads the plugin in this tree's skills/deliver/ for that session only,
+with --plugin-dir, and runs with hooks on: deliver's own hook, and any hook in
+the clone's project settings. That folder is also a working directory of the
+session, through --add-dir, so the session's commands and file tools may read
+the folder past the read block. They may not write it: a permission deny rule,
+Edit(//<folder>/**), holds the file tools off it, and
+sandbox.filesystem.denyWrite holds sandboxed commands off it. Its sandboxed
+commands may also read, through sandbox.filesystem.allowRead, each path under
+the home folder, outside the folders above, that deliver's preflight opens,
+lists or stats, and the path that a link among them leads to. To find them, the
+replay runs preflight's Claude Code checks once before the session, with the
+session's environment, and notes each such path that exists, leaving out a
+folder that is only stat'ed. They are paths in Claude Code's folder
+($CLAUDE_CONFIG_DIR, else ~/.claude) and the places its links lead to:
+settings.json, agents/, the upstream skills, and the plugin files preflight
+reads. Each of them is also in sandbox.filesystem.denyWrite, which holds
+sandboxed commands off it. Nothing else in the home folder opens, and the trust
+record, ~/.claude.json, stays closed. Its prompt is the typed command
+/deliver:deliver TICKET. Its environment also leaves out every variable whose
+name, in any case, starts with GH_ or holds GITHUB.
+Before setup, the replay copies the stand-in gh, scripts/replay_gh.py, to
+.git/replay-deliver/bin/gh in the clone, and the session finds it first on its
+PATH. The stand-in answers issue view with the ticket's title and body from the
+replay set, records every call in .git/replay-deliver/gh-calls.jsonl, and
+merges a PR by squashing its branch onto the default branch of the clone's bare
+remote, where the session's pushes go, whichever merge method the call names.
+After the merge it moves the clone's own default branch to the new commit when
+that branch is still at the old tip and not checked out. A call it has no
+answer for exits 1 with one line that names the call. The session's
+DELIVER_STATE_DIR is .git/replay-deliver/state/ in the clone, a scratch folder;
+the replay's own records stay in the machine directory. All of
+.git/replay-deliver/ is outside the version's commit, which is taken from the
+working tree as for {VERSION}: after deliver's cleanup switches the clone to
+its default branch it holds the merged change, and when ready refused it holds
+the branch.
 
 Files, all in the machine directory:
 
-  replays/<label>-<ticket>-{VERSION}/
+  replays/<label>-<ticket>-<version>/
                 The clone, as the session left it, kept until its version is
                 judged. Its remote is .git/{ORIGIN}.
-  replays/<label>-<ticket>-{VERSION}.git/
+  replays/<label>-<ticket>-<version>.git/
                 The version's repo, out of the session's reach: the history
-                up to base_commit, the version's commit at {REF}, and
-                replay-index, the index the commit was written from.
+                up to base_commit, the version's commit at
+                refs/replay/<version>, and replay-index, the index the commit
+                was written from.
   versions.jsonl
                 One JSON line per ticket and version, replaced when the same
                 one is recorded again: label, ticket, version, commit, repo,
@@ -136,10 +187,10 @@ as git does when it cannot read such a tree, counts as one git cannot list.
 A row that cannot be written, after the version was
 recorded, ends it with one line on standard error that says the version is
 recorded without its row and names the command that writes the row from the session's log,
-python3 scripts/scan.py SESSION; the version's line stays in versions.jsonl, and
+python3 skills/deliver/scripts/deliver.py scan SESSION; the version's line stays in versions.jsonl, and
 the scan's own warnings are printed only when the row is written. A clone or version repo
 already in place is an error: remove both to replay the ticket again. Exit 2:
-bad usage."""
+bad usage, a --version other than {VERSION} or deliver among it."""
 
 
 class ReplayError(Exception):
@@ -184,41 +235,125 @@ def repo(drawer: draw.Draw, label: str) -> dict:
     return found
 
 
-def settings(clone: Path) -> dict:
-    """The confinement every session starts with."""
-    home = Path.home()
+# Run by claude_reads in a child Python: deliver's own Claude Code checks from preflight, as a print-mode session runs
+# them in the clone, under an audit hook that notes each path under the home folder they open, list or stat. A path
+# under a folder the session may already read is left out, as are a missing path, which the sandbox reports missing
+# either way, and a folder that is only stat'ed, whose metadata the sandbox lets through. It prints the paths as JSON.
+RECORD = r"""
+import json, os, stat, sys, types
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import checks_claude, preflight
+home, clone, open_already = sys.argv[2], Path(sys.argv[3]), sys.argv[4:]
+os.environ[checks_claude.ENTRYPOINT_VAR] = checks_claude.PRINT_ENTRYPOINT
+real_stat, real_lstat, seen, busy = os.stat, os.lstat, set(), []
+def within(path, folder):
+    return path == folder or path.startswith(folder + os.sep)
+def note(path, follow=True, listed=False):
+    if busy or path is None or isinstance(path, int):
+        return
+    busy.append(True)  # the stat below would note itself
+    try:
+        path = os.path.abspath(os.fsdecode(path))
+        if within(path, home) and not any(within(path, folder) for folder in open_already):
+            try:
+                mode = (real_stat if follow else real_lstat)(path).st_mode
+            except OSError:
+                return
+            if listed or not stat.S_ISDIR(mode):
+                seen.add(path)
+    finally:
+        busy.clear()
+def hook(event, args):
+    if event in ("open", "os.scandir", "os.listdir") and args:
+        note(args[0], listed=event != "open")
+sys.addaudithook(hook)
+os.stat = lambda path, *a, **k: (note(path, k.get("follow_symlinks", True)), real_stat(path, *a, **k))[1]
+os.lstat = lambda path, *a, **k: (note(path, False), real_lstat(path, *a, **k))[1]
+ctx = preflight.Context(types.SimpleNamespace(checkout=clone))
+for check in preflight.CHECKS:
+    if check.__module__ in ("checks_claude", "deps"):
+        check(ctx)
+print(json.dumps(sorted(seen)))
+"""
+
+
+def claude_reads(clone: Path, open_already: list[str]) -> list[str]:
+    """The paths under the home folder that deliver's preflight opens, lists or stats on the deliver version's
+    session, outside `open_already`, found by running its Claude Code checks here with the session's environment,
+    each also at its real place when a link leads there, and none inside another. The trust record is not among them:
+    preflight does not read it in print mode."""
+    result = subprocess.run([sys.executable, "-I", "-c", RECORD, str(PLUGIN / "scripts"), str(Path.home()), str(clone),
+                             *open_already], env=environment(clone, "deliver"), capture_output=True, text=True)
+    if result.returncode:
+        raise ReplayError(f"deliver's Claude Code checks failed before the session: {result.stderr.strip()}")
+    found = {path for seen in json.loads(result.stdout) for path in (seen, os.path.realpath(seen))}
+    return sorted(path for path in found if not any(path.startswith(other + os.sep) for other in found))
+
+
+def settings(clone: Path, version: str = VERSION) -> dict:
+    """The confinement every session starts with; the deliver version's also reads its plugin, may not write it, and
+    runs its hook, and its commands may read what preflight reads in Claude Code's folder and may not write it."""
+    home, deliver = Path.home(), version == "deliver"
     caches = [str(home / cache) for cache in CACHES]
+    opened = [str(clone), *caches, *([str(PLUGIN)] if deliver else [])]
+    claude = claude_reads(clone, opened) if deliver else []
     return {
         "sandbox": {
             "enabled": True,
             "failIfUnavailable": True,
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
-            "filesystem": {"denyRead": [str(home)], "allowRead": [str(clone), *caches], "allowWrite": caches},
+            "filesystem": {"denyRead": [str(home)],
+                           "allowRead": [*opened, *claude],
+                           "allowWrite": caches,
+                           # --add-dir makes the plugin folder writable to sandboxed commands; this takes it back.
+                           # Nothing grants a write in Claude Code's folder: its entries are a second hold.
+                           **({"denyWrite": [str(PLUGIN), *claude]} if deliver else {})},
             "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True, "allowLocalBinding": True,
                         "allowUnixSockets": list(SOCKETS)},
         },
         # The sandbox binds commands only, not the web tools; a deny holds with prompts switched off.
         "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True,
-                        "deny": ["WebFetch", "WebSearch"]},
+                        "deny": ["WebFetch", "WebSearch", *([f"Edit(/{PLUGIN}/**)"] if deliver else [])]},
         "disableClaudeAiConnectors": True,
-        "disableAllHooks": True,
+        "disableAllHooks": not deliver,
     }
 
 
-def command(clone: Path, model: str, session: str) -> list[str]:
+def command(clone: Path, model: str, session: str, version: str = VERSION) -> list[str]:
     return ["claude", "-p", "--model", model, "--session-id", session, "--permission-mode", "bypassPermissions",
             "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-            "--settings", json.dumps(settings(clone))]
+            "--settings", json.dumps(settings(clone, version)),
+            # A working directory is the one way past the read block; settings() takes writes back.
+            *(["--plugin-dir", str(PLUGIN), "--add-dir", str(PLUGIN)] if version == "deliver" else [])]
 
 
-def environment() -> dict[str, str]:
-    """The session's, with the git settings --help gives."""
+def environment(clone: Path, version: str = VERSION) -> dict[str, str]:
+    """The session's, with the git settings --help gives; the deliver version's finds the stand-in gh first, keeps
+    its state in the clone and carries no GH_* or *GITHUB* variable."""
     env = {key: value for key, value in plain().items()
            if not (key.startswith("CLAUDE") and key not in KEPT) and key not in DROPPED}
+    if version == "deliver":  # the stand-in needs no credential, so no GitHub variable of any name reaches it
+        env = {key: value for key, value in env.items() if not key.upper().startswith("GH_") and "GITHUB" not in key.upper()}
+        folder = clone / ".git" / STAND_IN
+        env.update(PATH=f"{folder / 'bin'}{os.pathsep}{env.get('PATH', os.defpath)}",
+                   DELIVER_STATE_DIR=str(folder / "state"))
     return {**env, "ENABLE_CLAUDEAI_MCP_SERVERS": "false", "GIT_CONFIG_COUNT": "2",
             "GIT_CONFIG_KEY_0": "core.excludesFile", "GIT_CONFIG_VALUE_0": os.devnull,
             "GIT_CONFIG_KEY_1": "core.attributesFile", "GIT_CONFIG_VALUE_1": os.devnull}
+
+
+def stand_in(clone: Path, label: str, found: dict) -> None:
+    """Put the deliver version's stand-in gh, what it serves and the session's state folder in the clone's .git/."""
+    folder = clone / ".git" / STAND_IN
+    (folder / "bin").mkdir(parents=True)
+    (folder / "state").mkdir(mode=0o700)
+    shutil.copyfile(Path(__file__).resolve().parent / "replay_gh.py", folder / "bin" / "gh")
+    (folder / "bin" / "gh").chmod(0o755)
+    (folder / "gh.json").write_text(json.dumps({
+        "repo": f"replay/{label}", "origin": str(clone / ".git" / ORIGIN), "ticket": found["ticket"],
+        "title": found["title"], "body": found["body"]}))
 
 
 def trusted(store: Path, clone: Path, index: str = "replay-index") -> dict[str, str]:
@@ -444,7 +579,7 @@ def record(state: Path, version: dict) -> None:
         scan.write_private(path, "".join(text + "\n" for text in [*kept, json.dumps(version)]))
 
 
-def replay(label: str, ticket: int, group: SetupGroup) -> int:
+def replay(label: str, ticket: int, group: SetupGroup, version: str = VERSION) -> int:
     drawer = draw.Draw(0)
     state = drawer.state
     found = entry(drawer, label, ticket)
@@ -453,7 +588,7 @@ def replay(label: str, ticket: int, group: SetupGroup) -> int:
         os.environ["CLAUDE_CONFIG_DIR"] = str(config.absolute())
     replays = state / "replays"
     replays.mkdir(mode=0o700, exist_ok=True)
-    name = f"{label}-{ticket}-{VERSION}"
+    name = f"{label}-{ticket}-{version}"
     clone, store = replays / name, replays / f"{name}.git"
     listed = repo(drawer, label)
     try:
@@ -468,15 +603,17 @@ def replay(label: str, ticket: int, group: SetupGroup) -> int:
                 raise ReplayError(f"{store} is already in place. Remove it and {clone} to replay the ticket again.")
             made.append(store)
             cut(listed["repo"], label, found, clone, store)
+            if version == "deliver":
+                stand_in(clone, label, found)
             setup = listed.get("setup")
             if setup:
                 code = group.run(setup, clone)
                 if code:
                     raise ReplayError(f"the setup command exited {code}; no session started.")
             before = snapshot(store, clone, found["base_commit"])
-            prompt = f"{found['title']}\n\n{found['body']}"
-            status = subprocess.run(command(clone, found["model"], session), cwd=clone, input=prompt, text=True,
-                                    env=environment()).returncode
+            prompt = f"/deliver:deliver {ticket}" if version == "deliver" else f"{found['title']}\n\n{found['body']}"
+            status = subprocess.run(command(clone, found["model"], session, version), cwd=clone, input=prompt,
+                                    text=True, env=environment(clone, version)).returncode
         finally:  # after the session, or on any way out before it ends: before the working tree is committed
             group.stop()
     except BaseException:
@@ -489,34 +626,36 @@ def replay(label: str, ticket: int, group: SetupGroup) -> int:
         remove(made)
         raise ReplayError(f"claude exited {status}, left no session log and changed nothing, so no session started.")
     commit = git(store, "commit-tree", "--no-gpg-sign", tree, "-p", found["base_commit"], "-m",
-                 f"{VERSION} replay of {label}-{ticket}", env=trusted(store, clone))
-    git(store, "update-ref", REF, commit, env=trusted(store, clone))
+                 f"{version} replay of {label}-{ticket}", env=trusted(store, clone))
+    git(store, "update-ref", f"refs/replay/{version}", commit, env=trusted(store, clone))
     warnings = io.StringIO()  # what the scan and the row writer say stays unsaid when the row cannot be written
     with contextlib.redirect_stderr(warnings):
         try:  # nothing the log holds may stop the record
             row = scan.scan(session, log)
             skills = row["skills"]
-            not_direct = skills is None or any(skill.split(":")[-1] in MARKED for skill in skills)
+            # A deliver session loads deliver by design: only a skill of another version marks it.
+            not_direct = skills is None or any(skill.split(":")[-1] in MARKED and skill.split(":")[-1] != version
+                                               for skill in skills)
         except (Exception, SystemExit) as failure:  # scan exits on a line that is not JSON
             print(f"replay: the session's log could not be scanned ({failure}); its row is left blank.",
                   file=sys.stderr)
             row, skills, not_direct = scan.scan(session, Path()), None, True  # a path that is no file: blanks
-    version = {"label": label, "ticket": ticket, "version": VERSION, "commit": commit,
-               "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
-               "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
-               "not_direct": not_direct}
-    record(state, version)
+    line = {"label": label, "ticket": ticket, "version": version, "commit": commit,
+            "repo": str(store.relative_to(state)), "base_commit": found["base_commit"],
+            "clone": str(clone.relative_to(state)), "exit_status": status, "session": session, "skills": skills,
+            "not_direct": not_direct}
+    record(state, line)
     try:
         with contextlib.redirect_stderr(warnings):
             scan.write_row(row)
     except Exception as error:  # a full disk, a lock that is a folder, a row json cannot write
-        raise ReplayError(f"{label}-{ticket} {VERSION} is recorded at {commit} without its row "
+        raise ReplayError(f"{label}-{ticket} {version} is recorded at {commit} without its row "
                           f"({getattr(error, 'strerror', None) or type(error).__name__}). Write the row with: "
-                          f"python3 scripts/scan.py {session}") from None
+                          f"python3 skills/deliver/scripts/deliver.py scan {session}") from None
     sys.stderr.write(warnings.getvalue())
-    print(f"Recorded {label}-{ticket} {VERSION} at {commit}: session exit {status}"
+    print(f"Recorded {label}-{ticket} {version} at {commit}: session exit {status}"
           + (", skills unknown, marked not direct." if skills is None
-             else ", marked not direct." if version["not_direct"] else "."))
+             else ", marked not direct." if not_direct else "."))
     return 0
 
 
@@ -524,7 +663,10 @@ def main(argv: list[str]) -> int:
     if argv in (["-h"], ["--help"]):
         print(HELP)
         return 0
-    if len(argv) != 2 or not argv[1].isdecimal() or argv[0].startswith("-"):
+    version = VERSION
+    if argv[:1] == ["--version"]:
+        version, argv = (argv[1] if len(argv) > 1 else ""), argv[2:]
+    if version not in VERSIONS or len(argv) != 2 or not argv[1].isdecimal() or argv[0].startswith("-"):
         print(HELP, file=sys.stderr)
         return 2
     group = SetupGroup()
@@ -532,7 +674,7 @@ def main(argv: list[str]) -> int:
     if signal.getsignal(signal.SIGINT) is signal.default_int_handler:  # not where the caller has Ctrl-C ignored
         signal.signal(signal.SIGINT, group.stopping(signal.default_int_handler))
     try:
-        return replay(argv[0], int(argv[1]), group)
+        return replay(argv[0], int(argv[1]), group, version)
     except (ReplayError, draw.DrawError) as error:
         print(f"replay: {error}", file=sys.stderr)
         return 1

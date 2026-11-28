@@ -918,7 +918,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
-                                        f"(Is a directory). Write the row with: python3 scripts/scan.py "
+                                        f"(Is a directory). Write the row with: python3 skills/deliver/scripts/deliver.py scan "
                                         f"{self.session()}\n")
         self.assertEqual(result.stdout, "")
         self.assertEqual(self.world.rows(), [])
@@ -930,7 +930,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
-                                        f"(ValueError). Write the row with: python3 scripts/scan.py {self.session()}\n")
+                                        f"(ValueError). Write the row with: python3 skills/deliver/scripts/deliver.py scan {self.session()}\n")
         self.assertEqual(self.world.rows(), [])
 
     def test_a_warning_before_a_failed_row_write_is_not_printed(self) -> None:
@@ -940,7 +940,7 @@ class ReplayTest(unittest.TestCase):
         [version] = self.world.versions()
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stderr, f"replay: A-7 direct is recorded at {version['commit']} without its row "
-                                        f"(Is a directory). Write the row with: python3 scripts/scan.py "
+                                        f"(Is a directory). Write the row with: python3 skills/deliver/scripts/deliver.py scan "
                                         f"{self.session()}\n")
 
     def test_the_warnings_of_a_row_that_is_written_are_printed(self) -> None:
@@ -1333,7 +1333,7 @@ class ReplayTest(unittest.TestCase):
                  "counts as one git cannot list."),
         (*EXITS, "A row that cannot be written, after the version was recorded, ends it with one line on standard "
                  "error that says the version is recorded without its row and names the command that writes the row "
-                 "from the session's log, python3 scripts/scan.py SESSION; the version's line stays in "
+                 "from the session's log, python3 skills/deliver/scripts/deliver.py scan SESSION; the version's line stays in "
                  "versions.jsonl, and the scan's own warnings are printed only when the row is written."),
     )
     # The conditions and outcomes inside those sentences; the check must fail when any one is dropped.
@@ -1345,7 +1345,7 @@ class ReplayTest(unittest.TestCase):
         "lists a copy of the clone's index", "that exist", "not a regular file", "cannot copy or list with git",
         "with one line on standard error and nothing recorded", "exits 0 but writes to standard error",
         "counts as one git cannot list", "A row that cannot be written", "after the version was recorded",
-        "says the version is recorded without its row", "python3 scripts/scan.py SESSION",
+        "says the version is recorded without its row", "python3 skills/deliver/scripts/deliver.py scan SESSION",
         "the version's line stays in versions.jsonl")
     # Rewordings that reverse a condition or an outcome; the check must fail for each.
     REVERSED = (
@@ -1409,6 +1409,558 @@ class ReplayTest(unittest.TestCase):
                       "/private/tmp/claude-<uid>, and in no other folder;", " ".join(result.stdout.split()))
         self.assert_help_states(" ".join(result.stdout.split()))
         self.assertFalse(self.world.starts.exists())
+
+
+PLUGIN = TESTS.parent / "skills" / "deliver"
+# deliver's own cleanup after a merge (skills/deliver/scripts/cleanup.py), run on the clone with the PR merged at the
+# head commit given as its argument; it prints the lines cleanup gives.
+CLEANUP = ("import sys; from pathlib import Path; sys.path.insert(0, sys.argv[1]); import cleanup, core; "
+           "print(cleanup.clean(core.find_run(Path.cwd()), 'deliver/ticket-7', 'main', "
+           "cleanup.Pr(1, 'MERGED', sys.argv[2]), created=True, remove_records=False).lines)")
+# What the stand-in `claude` does as a deliver session ends, in place of deliver.py: the change goes on a branch that
+# is pushed to the clone's bare remote, opened as a PR on the stand-in gh, marked ready and merged, and deliver's
+# cleanup runs. Setup's file is ignored here, so cleanup finds a clean checkout.
+DELIVER_RUN = ("echo .setup-done >> .git/info/exclude"
+               " && git switch -q -c deliver/ticket-7 && git add replayed.txt && git commit -q -m 'feat: print the total'"
+               " && git push -q -u origin deliver/ticket-7 && printf 'The total.\\n' > .git/pr-body.md"
+               " && gh pr create --draft --base main --head deliver/ticket-7 --title 'feat: print the total'"
+               " --body-file .git/pr-body.md >/dev/null && gh pr ready 1"
+               ' && head=$(git rev-parse HEAD) && gh pr merge 1 {method} --match-head-commit "$head"'
+               f" && python3 -c {shlex.quote(CLEANUP)} {shlex.quote(str(PLUGIN / 'scripts'))} \"$head\""
+               " > .git/cleanup.txt")
+
+
+class DeliverVersionTest(unittest.TestCase):
+    """`--version deliver`: the session's command, settings, environment and prompt, and the version it records."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.world = World(ReplayTest.root_of(temp))
+        self.git = self.world.git
+        self.clone = self.world.state / "replays" / "A-7-deliver"
+        self.store = self.world.state / "replays" / "A-7-deliver.git"
+        self.standin = self.clone / ".git" / "replay-deliver"
+
+    def replay(self, *args: str, **extra: str) -> subprocess.CompletedProcess[str]:
+        result = self.world.replay("--version", "deliver", *args, **extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return result
+
+    def test_the_session_s_command_differs_from_direct_s_only_by_the_plugin_loaded_for_it_and_hooks_on(self) -> None:
+        self.assertEqual(self.world.replay("A", "7").returncode, 0)
+        self.replay("A", "7")
+        direct, deliver = self.world.starts_made()
+        settings = json.loads(direct["args"][direct["args"].index("--settings") + 1])
+
+        def start(args: list[str], settings: dict) -> list[str]:
+            session = args[args.index("--session-id") + 1]
+            return ["-p", "--model", MODEL, "--session-id", session, "--permission-mode", "bypassPermissions",
+                    "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                    "--settings", json.dumps(settings)]
+        # The direct command ends at its settings, which assert_confined pins whole: no plugin, no added directory.
+        self.assertEqual(direct["args"], start(direct["args"], settings))
+        settings["sandbox"]["filesystem"]["allowRead"][0] = str(self.clone)
+        settings["sandbox"]["filesystem"]["allowRead"].append(str(PLUGIN))
+        # The plugin folder is a working directory, so the read block lets its commands through; the deny rule and
+        # denyWrite take writes back from the file tools and from sandboxed commands.
+        settings["sandbox"]["filesystem"]["denyWrite"] = [str(PLUGIN)]
+        settings["permissions"]["deny"].append(f"Edit(/{PLUGIN}/**)")
+        settings["disableAllHooks"] = False
+        self.assertEqual(deliver["args"], [*start(deliver["args"], settings), "--plugin-dir", str(PLUGIN),
+                                           "--add-dir", str(PLUGIN)])
+        self.assertEqual(deliver["cwd"], str(self.clone))
+        self.assertTrue(deliver["setup_done"])
+
+    def test_the_prompt_is_the_typed_deliver_command_with_the_ticket_s_number(self) -> None:
+        self.replay("A", "7")
+        [start] = self.world.starts_made()
+        self.assertEqual(start["prompt"], "/deliver:deliver 7")
+
+    def test_the_session_s_environment_differs_from_direct_s_by_the_stand_in_gh_a_scratch_state_and_no_github_name(
+            self) -> None:
+        self.assertEqual(self.world.replay("A", "7").returncode, 0)
+        self.replay("A", "7")
+        direct, deliver = (start["env"] for start in self.world.starts_made())
+        github = {key: value for key, value in direct.items() if key.startswith("GH_") or "GITHUB" in key}
+        self.assertEqual(sorted(github), ["GH_LOG", "GH_REMOTES"])  # the world's own gh, for the clone
+        self.assertEqual(deliver, {**{key: value for key, value in direct.items() if key not in github},
+                                   "PATH": f"{self.standin / 'bin'}{os.pathsep}{direct['PATH']}",
+                                   "DELIVER_STATE_DIR": str(self.standin / "state")})
+        self.assertEqual(direct["DELIVER_STATE_DIR"], str(self.world.state))
+        self.assertEqual([key for key in deliver if key in PARENT], ["CLAUDE_CODE_OAUTH_TOKEN"])
+        self.assertTrue((self.standin / "state").is_dir())
+
+    def test_no_github_credential_variable_reaches_the_deliver_session(self) -> None:
+        names = ("GITHUB_PERSONAL_ACCESS_TOKEN", "GITHUB_PAT", "GH_HOST", "GH_ENTERPRISE_TOKEN", "github_token",
+                 "MY_GITHUB_KEY")
+        self.replay("A", "7", **{name: "made-up-credential" for name in names})
+        [start] = self.world.starts_made()
+        self.assertEqual([key for key in start["env"] if "github" in key.lower() or key.upper().startswith("GH_")],
+                         [])
+        self.assertNotIn("made-up-credential", json.dumps(start["env"]))
+
+    def test_a_deliver_run_merges_on_the_bare_remote_and_the_merged_tree_is_recorded_as_the_deliver_version(
+            self) -> None:
+        result = self.replay("A", "7", STANDIN_PREPARE=DELIVER_RUN.format(method="--squash"))
+        [version] = self.world.versions()
+        commit = version["commit"]
+        session = self.world.starts_made()[0]["args"][self.world.starts_made()[0]["args"].index("--session-id") + 1]
+        self.assertEqual(version, {
+            "label": "A", "ticket": 7, "version": "deliver", "commit": commit, "repo": "replays/A-7-deliver.git",
+            "base_commit": self.world.base, "clone": "replays/A-7-deliver", "exit_status": 0, "session": session,
+            "skills": [], "not_direct": False})
+        self.assertEqual(result.stdout, f"Recorded A-7 deliver at {commit}: session exit 0.\n")
+        origin = self.clone / ".git" / "replay-origin.git"
+        self.assertEqual(self.git("log", "--format=%s", "main", cwd=origin), "feat: print the total (#1)\nstart")
+        # The merged change, with the file setup made beside it in the working tree.
+        self.assertEqual(self.git("ls-tree", "-r", "main", cwd=origin).splitlines(),
+                         [line for line in self.git("ls-tree", "-r", commit, cwd=self.store).splitlines()
+                          if not line.endswith("\t.setup-done")])
+        self.assertEqual(self.git("rev-parse", "refs/replay/deliver", cwd=self.store), commit)
+        self.assertEqual(self.git("rev-parse", f"{commit}^", cwd=self.store), self.world.base)
+        self.assertEqual(self.git("log", "-1", "--format=%s", commit, cwd=self.store), "deliver replay of A-7")
+        self.assertEqual(self.git("ls-tree", "-r", "--name-only", commit, cwd=self.store).split(),
+                         [".gitignore", ".setup-done", "README.md", "replayed.txt"])
+        calls = [json.loads(line)["args"] for line in (self.standin / "gh-calls.jsonl").read_text().splitlines()]
+        self.assertEqual([call[:2] for call in calls], [["pr", "create"], ["pr", "ready"], ["pr", "merge"]])
+        # The world's own gh, which stands in for the real one, saw only the clone.
+        self.assertEqual(len(self.world.gh_log.read_text().splitlines()), 1)
+        # deliver's cleanup, which pulls nothing, left the clone on main at the merged commit.
+        self.assertEqual((self.clone / ".git" / "cleanup.txt").read_text(), str([
+            "Switched this checkout to main.",
+            "Removed the remote branch origin/deliver/ticket-7 and the local branch deliver/ticket-7."]) + "\n")
+        self.assertEqual(self.git("rev-parse", "main", cwd=self.clone), self.git("rev-parse", "main", cwd=origin))
+
+    def test_a_merge_with_each_method_deliver_sends_is_recorded_as_the_merged_change(self) -> None:
+        for method in ("--squash", "--merge", "--rebase"):
+            with self.subTest(method=method):
+                shutil.rmtree(self.clone, ignore_errors=True)
+                shutil.rmtree(self.store, ignore_errors=True)
+                self.replay("A", "7", STANDIN_PREPARE=DELIVER_RUN.format(method=method))
+                commit = self.world.versions()[-1]["commit"]
+                self.assertEqual(self.git("show", f"{commit}:replayed.txt", cwd=self.store), "the replay's change")
+                origin = self.clone / ".git" / "replay-origin.git"
+                self.assertEqual(self.git("rev-list", "--parents", "-1", "main", cwd=origin).split()[1:],
+                                 [self.world.base])
+
+    def test_the_replay_s_own_records_stay_in_the_machine_directory(self) -> None:
+        self.replay("A", "7")
+        self.assertEqual(len(self.world.versions()), 1)
+        self.assertEqual(len(self.world.rows()), 1)
+        self.assertEqual(sorted(path.name for path in (self.standin / "state").iterdir()), [])
+
+    def test_a_deliver_session_is_marked_not_direct_by_a_marked_skill_other_than_deliver(self) -> None:
+        for skill, marked in (("deliver", False), ("implement-ticket", True), ("squad", True), ("tdd", False)):
+            with self.subTest(skill=skill):
+                shutil.rmtree(self.clone, ignore_errors=True)
+                shutil.rmtree(self.store, ignore_errors=True)
+                self.replay("A", "7", STANDIN_SKILL=skill)
+                [version] = self.world.versions()
+                self.assertEqual((version["skills"], version["not_direct"]), ([skill], marked))
+
+    def test_a_version_other_than_direct_or_deliver_is_bad_usage(self) -> None:
+        for args in (("--version", "squad", "A", "7"), ("--version",), ("--version", "deliver", "A"),
+                     ("A", "7", "--version", "deliver")):
+            with self.subTest(args=args):
+                result = self.world.replay(*args)
+                self.assertEqual(result.returncode, 2)
+                self.assertTrue(result.stderr.startswith("Rerun one ticket of the replay set"), result.stderr)
+        self.assertFalse(self.world.starts.exists())
+
+    def test_the_help_states_the_deliver_version_s_differences(self) -> None:
+        text = " ".join(self.world.replay("--help").stdout.split())
+        sentences = re.split(r"(?<=\.)\s+(?=[A-Z0-9/])", text)
+        for rule in (
+                "Usage: python3 scripts/replay.py LABEL TICKET python3 scripts/replay.py --version deliver LABEL TICKET",
+                "With no --version, the replay is the direct version.",
+                "The deliver version differs from direct in these ways and no other.",
+                "Its session loads the plugin in this tree's skills/deliver/ for that session only, with "
+                "--plugin-dir, and runs with hooks on: deliver's own hook, and any hook in the clone's project "
+                "settings.",
+                "That folder is also a working directory of the session, through --add-dir, so the session's commands "
+                "and file tools may read the folder past the read block.",
+                "They may not write it: a permission deny rule, Edit(//<folder>/**), holds the file tools off it, "
+                "and sandbox.filesystem.denyWrite holds sandboxed commands off it.",
+                "Its sandboxed commands may also read, through sandbox.filesystem.allowRead, each path under the "
+                "home folder, outside the folders above, that deliver's preflight opens, lists or stats, and the path "
+                "that a link among them leads to.",
+                "To find them, the replay runs preflight's Claude Code checks once before the session, with the "
+                "session's environment, and notes each such path that exists, leaving out a folder that is only "
+                "stat'ed.",
+                "They are paths in Claude Code's folder ($CLAUDE_CONFIG_DIR, else ~/.claude) and the places its links "
+                "lead to: settings.json, agents/, the upstream skills, and the plugin files preflight reads.",
+                "Each of them is also in sandbox.filesystem.denyWrite, which holds sandboxed commands off it.",
+                "Nothing else in the home folder opens, and the trust record, ~/.claude.json, stays closed.",
+                "Its prompt is the typed command /deliver:deliver TICKET.",
+                "Its environment also leaves out every variable whose name, in any case, starts with GH_ or holds "
+                "GITHUB.",
+                "The stand-in answers issue view with the ticket's title and body from the replay set, records "
+                "every call in .git/replay-deliver/gh-calls.jsonl, and merges a PR by squashing its branch onto "
+                "the default branch of the clone's bare remote, where the session's pushes go, whichever merge "
+                "method the call names.",
+                "After the merge it moves the clone's own default branch to the new commit when that branch is "
+                "still at the old tip and not checked out.",
+                "The session's DELIVER_STATE_DIR is .git/replay-deliver/state/ in the clone, a scratch folder; "
+                "the replay's own records stay in the machine directory."):
+            with self.subTest(rule=rule[:40]):
+                self.assertIn(rule, text if rule.startswith(("Usage", "With no")) else sentences)
+
+
+# deliver's preflight checks of Claude Code (the checks_claude and deps entries of preflight.CHECKS), run on a made-up
+# home folder as the deliver session's sandbox lets its commands read it: under the home folder, a path that exists
+# opens only when it and its real place are inside an allowRead entry of replay.settings(); elsewhere, and for a path
+# that does not exist, the call goes through, as macOS's sandbox answers a missing path with "no such file". An audit
+# hook polices opening and listing, and os.stat and os.lstat are wrapped, which the hook does not see. The checks run
+# once with every entry and once with each entry of replay.claude_reads() dropped. It prints JSON: the reads, the
+# deliver version's filesystem settings, and per run the results, the refused paths and the paths opened under home.
+PREFLIGHT_SANDBOXED = r'''
+import errno, json, os, sys, types
+from pathlib import Path
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+import replay, preflight
+home, clone = Path.home(), Path(sys.argv[3])
+filesystem = replay.settings(clone, "deliver")["sandbox"]["filesystem"]
+reads = filesystem["allowRead"][len(replay.CACHES) + 2:]  # after the clone, the caches and the plugin
+checks = [c for c in preflight.CHECKS if c.__module__ in ("checks_claude", "deps")]
+real_stat, real_lstat = os.stat, os.lstat
+allowed, refused, opened, busy = [], [], [], []
+
+
+def inside(path, folders):
+    return any(path == folder or path.startswith(folder + os.sep) for folder in folders)
+
+
+def police(path, follow=True, listed=True):
+    if isinstance(path, int) or path is None or busy:  # busy: this function's own lstat calls
+        return
+    busy.append(True)
+    try:
+        path = os.path.abspath(os.fsdecode(path))
+        if not inside(path, [str(home)]) or not os.path.lexists(path):
+            return
+        if not listed and os.path.isdir(path) and (follow or not os.path.islink(path)):
+            return  # the sandbox lets a folder's metadata through
+        where = os.path.realpath(path) if follow else os.path.join(os.path.realpath(os.path.dirname(path)),
+                                                                     os.path.basename(path))
+        if inside(path, allowed) and inside(where, allowed):
+            opened.extend((path, where))
+            return
+    finally:
+        busy.clear()
+    refused.append(path)
+    raise PermissionError(errno.EPERM, "Operation not permitted", path)
+
+
+def hook(event, args):
+    if event in ("open", "os.scandir", "os.listdir") and args:
+        police(args[0])
+
+
+sys.addaudithook(hook)
+os.stat = lambda path, *a, **k: (police(path, k.get("follow_symlinks", True), False), real_stat(path, *a, **k))[1]
+os.lstat = lambda path, *a, **k: (police(path, False, False), real_lstat(path, *a, **k))[1]
+runs = []
+for dropped in [None, *reads]:
+    allowed[:] = [entry for entry in filesystem["allowRead"] if entry != dropped]
+    del refused[:], opened[:]
+    ctx = preflight.Context(types.SimpleNamespace(checkout=clone))
+    results = []
+    for check in checks:
+        try:
+            result = check(ctx)
+        except PermissionError as e:
+            result = types.SimpleNamespace(code=f"PermissionError {e.filename}")
+        results.append(None if result is None else getattr(result, "code", "warn"))
+    runs.append({"dropped": dropped, "results": results, "refused": sorted(set(refused)), "opened": sorted(set(opened))})
+print(json.dumps({"reads": reads, "filesystem": filesystem, "runs": runs}))
+'''
+
+
+class ClaudeReadsTest(unittest.TestCase):
+    """The deliver version reads what preflight reads in Claude Code's folder, and nothing wider."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name).resolve()
+        self.home = root / "home"
+        self.clone = self.home / ".local" / "state" / "deliver" / "replays" / "A-7-deliver"
+        self.config = self.home / ".claude"
+        self.install = install = self.config / "plugins" / "cache" / "market" / "helper" / "1.0"
+        self.market = market = self.config / "plugins" / "marketplaces" / "market"
+        self.idle = self.config / "plugins" / "cache" / "market" / "idle" / "1.0"
+        self.target = self.home / ".agents" / "skills" / "code-review"
+        self.role = self.home / "dotfiles" / "linked-role.md"
+        objects = {
+            self.config / "settings.json": {"enabledPlugins": {"helper@market": True}},
+            # idle comes after helper, which holds pr, and is not enabled: preflight reads its manifest for the skills
+            # it declares, and opens neither its hooks nor its skills.
+            self.config / "plugins" / "installed_plugins.json":
+                {"plugins": {"helper@market": [{"scope": "user", "installPath": str(install)}],
+                             "idle@market": [{"scope": "user", "installPath": str(self.idle)}]}},
+            self.config / "plugins" / "known_marketplaces.json": {"market": {"installLocation": str(market)}},
+            market / ".claude-plugin" / "marketplace.json": {"plugins": [{"name": "helper", "skills": ["listed"]}]},
+            install / "hooks" / "hooks.json": {"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": []}]}},
+            install / ".claude-plugin" / "plugin.json": {"name": "helper", "hooks": "more-hooks.json", "skills": "more"},
+            install / "more-hooks.json": {"hooks": {}},
+            self.idle / "hooks" / "hooks.json": {"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": []}]}},
+            self.idle / ".claude-plugin" / "plugin.json": {"name": "idle"},
+            # Decoys: the trust record and a credential store.
+            self.home / ".claude.json": {"projects": {str(self.clone): {"hasTrustDialogAccepted": True}}},
+            self.config / ".credentials.json": {"token": "made-up"},
+        }
+        texts = {
+            self.target / "SKILL.md": "---\nname: code-review\n---\n",
+            self.config / "skills" / "ponytail-review" / "SKILL.md": "---\nname: ponytail-review\n---\n",
+            install / "skills" / "SKILL.md": "---\nname: helper-skill\n---\n",
+            install / "more" / "SKILL.md": "---\nname: other-skill\n---\n",
+            install / "listed" / "pr" / "SKILL.md": "---\nname: pr\n---\n",
+            self.idle / "skills" / "pr" / "SKILL.md": "---\nname: pr\n---\n",
+            self.config / "agents" / "helper-role.md": "---\nname: helper-role\n---\n",
+            self.role: "---\nname: linked-role\n---\n",
+            # Decoys: history, a transcript, a key elsewhere in the home folder.
+            self.config / "history.jsonl": "{}\n",
+            self.config / "projects" / "-made-up" / "session.jsonl": "{}\n",
+            self.home / ".ssh" / "id_made_up": "made-up\n",
+            self.clone / "README.md": "A report.\n",
+        }
+        for path, text in [*((path, json.dumps(data)) for path, data in objects.items()), *texts.items()]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        (self.config / "skills" / "code-review").symlink_to(self.target)
+        (self.config / "agents" / "linked-role.md").symlink_to(self.role)
+        self.out = self.sandboxed(self.home, self.clone)
+
+    def sandboxed(self, home: Path, clone: Path) -> dict:
+        """PREFLIGHT_SANDBOXED's output for a made-up home folder."""
+        env = {key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")}
+        env.update(HOME=str(home), CLAUDE_CODE_ENTRYPOINT="sdk-cli", CLAUDE_CODE_EFFORT_LEVEL="medium",
+                   DELIVER_STATE_DIR=str(home.parent / "state"))
+        result = subprocess.run([sys.executable, "-c", PREFLIGHT_SANDBOXED, str(SCRIPTS), str(PLUGIN / "scripts"),
+                                 str(clone)], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout)
+
+    def test_the_reads_are_the_files_preflight_reads_and_the_real_place_of_each_link(self) -> None:
+        config, install = self.config, self.install
+        # deps.find opens SKILL.md in each skills folder it passes on the way to pr, and hashes the folder it finds.
+        self.assertEqual(self.out["reads"], sorted(str(path) for path in (
+            config / "settings.json", config / "agents", self.role,
+            config / "skills" / "code-review", self.target, config / "skills" / "ponytail-review",
+            config / "plugins" / "installed_plugins.json", config / "plugins" / "known_marketplaces.json",
+            self.market / ".claude-plugin" / "marketplace.json", install / "hooks" / "hooks.json",
+            install / ".claude-plugin" / "plugin.json", install / "more-hooks.json", install / "skills" / "SKILL.md",
+            install / "more" / "SKILL.md", install / "listed" / "pr", self.idle / ".claude-plugin" / "plugin.json")))
+
+    def test_each_read_is_one_preflight_opens(self) -> None:
+        opened = self.out["runs"][0]["opened"]
+        for read in self.out["reads"]:
+            with self.subTest(read=read):
+                self.assertTrue([path for path in opened if path == read or path.startswith(read + os.sep)])
+
+    def test_with_the_skills_in_claude_code_s_folder_and_no_plugin_on_no_plugin_file_is_read(self) -> None:
+        settings = self.config / "settings.json"
+        settings.write_text(json.dumps({"enabledPlugins": {"helper@market": False}}))
+        (self.config / "skills" / "pr").mkdir()
+        (self.config / "skills" / "pr" / "SKILL.md").write_text("---\nname: pr\n---\n")
+        out = self.sandboxed(self.home, self.clone)
+        self.assertEqual(out["reads"], sorted(str(path) for path in (
+            settings, self.config / "agents", self.role, self.config / "skills" / "code-review", self.target,
+            self.config / "skills" / "ponytail-review", self.config / "skills" / "pr")))
+        self.assertEqual(out["runs"][0]["refused"], [])
+
+    def test_preflight_s_claude_code_checks_pass_reading_only_the_allowed_paths(self) -> None:
+        full = self.out["runs"][0]
+        # check_skill_hashes warns: the made-up skills' hashes are not the contract's.
+        self.assertEqual([result for result in full["results"] if result], ["warn"])
+        self.assertEqual(full["refused"], [])
+        for path in (self.config / "settings.json", self.config / "plugins" / "installed_plugins.json",
+                     self.install / "hooks" / "hooks.json", self.install / "more-hooks.json",
+                     self.market / ".claude-plugin" / "marketplace.json", self.config / "skills" / "code-review" / "SKILL.md",
+                     self.install / "listed" / "pr" / "SKILL.md", self.config / "agents" / "linked-role.md"):
+            self.assertIn(str(path), full["opened"])
+
+    def test_each_read_dropped_leaves_preflight_refused_a_path_it_reads(self) -> None:
+        self.assertEqual([run["dropped"] for run in self.out["runs"][1:]], self.out["reads"])
+        for run in self.out["runs"][1:]:
+            with self.subTest(dropped=run["dropped"]):
+                self.assertNotEqual(run["refused"], [])
+
+    def assert_narrow(self, allowed: list[str]) -> None:
+        """No entry is the home folder, Claude Code's folder or a folder above them, and none holds a decoy."""
+        for entry in allowed:
+            for kept in (self.home, self.config, self.home / ".claude.json", self.config / ".credentials.json",
+                         self.config / "history.jsonl", self.config / "projects", self.home / ".ssh"):
+                self.assertFalse(str(kept) == entry or str(kept).startswith(entry + os.sep), (entry, kept))
+
+    def test_neither_the_trust_record_nor_a_wider_folder_is_readable(self) -> None:
+        allowed = self.out["filesystem"]["allowRead"]
+        self.assert_narrow(allowed)
+        self.assertEqual(self.out["filesystem"]["denyRead"], [str(self.home)])
+        for wider in (self.home, self.config, self.home / ".claude.json", self.config / "projects"):
+            with self.subTest(wider=wider), self.assertRaises(AssertionError):
+                self.assert_narrow([*allowed, str(wider)])
+
+    def test_sandboxed_commands_may_not_write_what_they_may_read(self) -> None:
+        reads = self.out["reads"]
+        self.assertEqual(self.out["filesystem"]["denyWrite"], [str(PLUGIN), *reads])
+        self.assertEqual(self.out["filesystem"]["allowRead"][-len(reads):], reads)
+
+
+class StandInGhTest(unittest.TestCase):
+    """scripts/replay_gh.py on its own: a clone's .git/ holding the stand-in, its gh.json and a bare remote."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.world = World(ReplayTest.root_of(temp))
+        self.work = self.world.root / "clone"
+        self.world.git("clone", "-q", str(self.world.bare), str(self.work), cwd=self.world.root)
+        self.origin = self.work / ".git" / "replay-origin.git"
+        self.world.git("clone", "-q", "--bare", str(self.world.bare), str(self.origin), cwd=self.world.root)
+        self.world.git("remote", "set-url", "origin", str(self.origin), cwd=self.work)
+        self.home = self.work / ".git" / "replay-deliver"
+        (self.home / "bin").mkdir(parents=True)
+        shutil.copyfile(SCRIPTS / "replay_gh.py", self.home / "bin" / "gh")
+        (self.home / "bin" / "gh").chmod(0o755)
+        (self.home / "gh.json").write_text(json.dumps({"repo": "replay/A", "origin": str(self.origin), "ticket": 7,
+                                                       "title": TITLE, "body": BODY}))
+
+    def gh(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run([str(self.home / "bin" / "gh"), *args], cwd=self.work, capture_output=True, text=True,
+                              env=self.world.git_env())
+
+    def calls(self) -> list[dict]:
+        return [json.loads(line) for line in (self.home / "gh-calls.jsonl").read_text().splitlines()]
+
+    def test_issue_view_serves_the_ticket_and_no_other(self) -> None:
+        served = self.gh("issue", "view", "7", "--json", "title,body,comments")
+        self.assertEqual((served.returncode, served.stdout, served.stderr),
+                         (0, json.dumps({"title": TITLE, "body": BODY, "comments": []}) + "\n", ""))
+        other = self.gh("issue", "view", "8", "--json", "title,body,comments")
+        self.assertEqual((other.returncode, other.stdout, other.stderr), (
+            1, "", "stand-in gh: no answer for gh issue view 8 --json title,body,comments "
+                   "(not a call the stand-in answers)\n"))
+
+    def test_every_call_is_recorded_answered_or_not(self) -> None:
+        self.gh("auth", "token")
+        self.gh("repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name")
+        self.gh("secret", "list")
+        self.assertEqual(self.calls(), [
+            {"args": ["auth", "token"], "cwd": str(self.work)},
+            {"args": ["repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+             "cwd": str(self.work)},
+            {"args": ["secret", "list"], "cwd": str(self.work)}])
+
+    def test_preflight_s_calls_are_answered_as_a_repo_the_session_can_push_to(self) -> None:
+        self.assertEqual(self.gh("repo", "view", "--json", "nameWithOwner,defaultBranchRef,viewerPermission,"
+                                 "hasIssuesEnabled").stdout,
+                         json.dumps({"nameWithOwner": "replay/A", "defaultBranchRef": {"name": "main"},
+                                     "viewerPermission": "ADMIN", "hasIssuesEnabled": True}) + "\n")
+        self.assertEqual(self.gh("repo", "view", "--json", "defaultBranchRef", "--jq",
+                                 ".defaultBranchRef.name").stdout, "main\n")
+        self.assertEqual(self.gh("api", "repos/replay/A/rules/branches/main").stdout, "[]\n")
+        self.assertEqual(self.gh("auth", "token").returncode, 0)
+
+    def test_a_squash_merge_leaves_the_change_on_the_bare_remote_s_default_branch(self) -> None:
+        git = self.world.git
+        git("switch", "-q", "-c", "deliver/ticket-7", cwd=self.work)
+        (self.work / "total.py").write_text("print(43)\n")
+        git("add", "total.py", cwd=self.work)
+        git("commit", "-q", "-m", "first", cwd=self.work)
+        (self.work / "total.py").write_text("print(44)\n")
+        git("commit", "-q", "-am", "second", cwd=self.work)
+        git("push", "-q", "origin", "deliver/ticket-7", cwd=self.work)
+        head = git("rev-parse", "HEAD", cwd=self.work)
+        (self.work / "body.md").write_text("The total.\n")
+        made = self.gh("pr", "create", "--draft", "--base", "main", "--head", "deliver/ticket-7", "--title",
+                       "feat: print the total", "--body-file", "body.md")
+        self.assertEqual((made.returncode, made.stdout), (0, "https://github.invalid/replay/A/pull/1\n"))
+        self.assertEqual(self.gh("pr", "list", "--head", "deliver/ticket-7", "--state", "open", "--json",
+                                 "number,url").stdout,
+                         json.dumps([{"number": 1, "url": "https://github.invalid/replay/A/pull/1"}]) + "\n")
+        checks = self.gh("pr", "checks", "1", "--json", "name,bucket")
+        self.assertEqual((checks.returncode, checks.stderr),
+                         (1, "no checks reported on the 'deliver/ticket-7' branch\n"))
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", "0" * 40).returncode, 1)
+        merged = self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head)
+        self.assertEqual((merged.returncode, merged.stderr), (0, ""))
+        self.assertEqual(git("log", "--format=%s", "main", cwd=self.origin),
+                         "feat: print the total (#1)\nthe merged change\nstart")
+        self.assertEqual(git("show", "main:total.py", cwd=self.origin), "print(44)")
+        self.assertEqual(git("rev-parse", "main^", cwd=self.origin), self.world.merged)
+        self.assertEqual(json.loads(self.gh("pr", "view", "1", "--json", "state,headRefOid").stdout),
+                         {"state": "MERGED", "headRefOid": head})
+        self.assertEqual(self.calls()[0]["body"], "The total.\n")
+
+    def open_pr(self) -> str:
+        """Push a branch with one change and open PR 1 for it; its head commit."""
+        git = self.world.git
+        git("switch", "-q", "-c", "topic", cwd=self.work)
+        (self.work / "total.py").write_text("print(43)\n")
+        git("commit", "-q", "-am", "change", cwd=self.work)
+        git("push", "-q", "origin", "topic", cwd=self.work)
+        (self.work / ".git" / "body.md").write_text("b\n")
+        self.gh("pr", "create", "--base", "main", "--head", "topic", "--title", "t", "--body-file", ".git/body.md")
+        return git("rev-parse", "HEAD", cwd=self.work)
+
+    def test_each_merge_method_deliver_sends_squashes_onto_the_bare_remote_s_default_branch(self) -> None:
+        for method in ("--squash", "--merge", "--rebase"):
+            with self.subTest(method=method):
+                self.setUp()
+                head = self.open_pr()
+                merged = self.gh("pr", "merge", "1", method, "--match-head-commit", head)
+                self.assertEqual((merged.returncode, merged.stderr), (0, ""))
+                git = self.world.git
+                self.assertEqual(git("rev-list", "--parents", "-1", "main", cwd=self.origin).split()[1:],
+                                 [self.world.merged])
+                self.assertEqual(git("log", "-1", "--format=%s", "main", cwd=self.origin), "t (#1)")
+                self.assertEqual(git("show", "main:total.py", cwd=self.origin), "print(43)")
+
+    def test_a_merge_without_a_method_is_not_answered(self) -> None:
+        self.open_pr()
+        refused = self.gh("pr", "merge", "1")
+        self.assertEqual((refused.returncode, refused.stderr), (
+            1, "stand-in gh: no answer for gh pr merge 1 (not a call the stand-in answers)\n"))
+
+    def test_a_merge_moves_the_clone_s_default_branch_only_from_the_old_tip_and_not_checked_out(self) -> None:
+        git = self.world.git
+        head = self.open_pr()
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head).returncode, 0)
+        self.assertEqual(git("rev-parse", "main", cwd=self.work), git("rev-parse", "main", cwd=self.origin))
+        self.assertEqual(git("branch", "--show-current", cwd=self.work), "topic")
+        # Checked out: the branch stays where it is, and so does the working tree.
+        self.setUp()
+        head = self.open_pr()
+        git("switch", "-q", "main", cwd=self.work)
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head).returncode, 0)
+        self.assertEqual(git("rev-parse", "main", cwd=self.work), self.world.merged)
+        # Moved on since: the clone's own commit stays.
+        self.setUp()
+        head = self.open_pr()
+        git("branch", "-f", "main", head, cwd=self.work)
+        self.assertEqual(self.gh("pr", "merge", "1", "--squash", "--match-head-commit", head).returncode, 0)
+        self.assertEqual(git("rev-parse", "main", cwd=self.work), head)
+
+    def test_a_call_whose_body_file_cannot_be_read_is_recorded_and_answered_with_one_line(self) -> None:
+        refused = self.gh("pr", "edit", "1", "--body-file", "missing.md")
+        self.assertEqual(refused.returncode, 1)
+        self.assertEqual(refused.stderr.count("\n"), 1)
+        self.assertTrue(refused.stderr.startswith(
+            "stand-in gh: no answer for gh pr edit 1 --body-file missing.md (the --body-file cannot be read: "),
+            refused.stderr)
+        self.assertEqual(self.calls(), [{"args": ["pr", "edit", "1", "--body-file", "missing.md"],
+                                         "cwd": str(self.work)}])
+
+    def test_a_field_the_stand_in_lacks_or_another_jq_is_not_answered(self) -> None:
+        for args, why in ((("repo", "view", "--json", "nameWithOwner,visibility"), "no field visibility"),
+                          (("repo", "view", "--json", "defaultBranchRef", "--jq", "length"),
+                           "--jq length is not a path of plain keys")):
+            with self.subTest(args=args):
+                refused = self.gh(*args)
+                self.assertEqual((refused.returncode, refused.stdout, refused.stderr),
+                                 (1, "", f"stand-in gh: no answer for gh {' '.join(args)} ({why})\n"))
 
 
 if __name__ == "__main__":

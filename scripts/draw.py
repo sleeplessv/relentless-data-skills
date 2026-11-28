@@ -21,7 +21,8 @@ from urllib.parse import quote
 
 sys.dont_write_bytecode = True  # importing the sibling would otherwise write scripts/__pycache__/ into the checkout
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-import scan  # noqa: E402  (a sibling script, not an installed package)
+sys.path.insert(1, str(Path(__file__).resolve().parent.parent / "skills" / "deliver" / "scripts"))
+import scan  # noqa: E402  (deliver.py's scan, found from this repo's skills/deliver/scripts/)
 
 GENERATION_ONE = ("orchestrator-mode", "implement-ticket", "implement-feature", "implement-backlog")
 CRITERIA_HEADINGS = ("Acceptance criteria", "Acceptance", "Done when")

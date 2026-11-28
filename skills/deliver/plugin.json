@@ -1,0 +1,19 @@
+{
+  "name": "deliver",
+  "version": "0.1.0",
+  "description": "Take a change from request to pull request through one tested program, with preflight, guards and saved evidence.",
+  "author": {
+    "name": "sleeplessv"
+  },
+  "homepage": "https://github.com/sleeplessv/relentless-data-skills/tree/main/skills/deliver",
+  "repository": "https://github.com/sleeplessv/relentless-data-skills",
+  "license": "Apache-2.0",
+  "keywords": [
+    "git",
+    "github",
+    "pull-requests",
+    "workflow",
+    "automation",
+    "gh-cli"
+  ]
+}

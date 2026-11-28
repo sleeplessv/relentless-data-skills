@@ -104,7 +104,7 @@ def review(role: str, run: core.Run) -> None:
         raise core.Refused("save.bad-review", f"start the reviewer again with `Read {folder / brief['path']} and "
                            f"follow it.`, write its final message into {DROP}/review.md, then deliver.py save review "
                            f"{role}", number=e.number, line=e.line) from None
-    diff = git(run, "diff", "--unified=0", "--no-color", "--no-ext-diff", brief["fixed_point"], commit)
+    diff = git(run, "-c", "core.quotePath=false", "diff", "--src-prefix=a/", "--dst-prefix=b/", "--unified=0", "--no-color", "--no-ext-diff", brief["fixed_point"], commit)
     if diff.returncode != 0:
         raise RuntimeError(f"git diff failed ({diff.returncode}): {diff.stderr.strip()}")
     numbered = findings.number(found, records, role, findings.changed_lines(diff.stdout))

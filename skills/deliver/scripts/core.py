@@ -124,6 +124,8 @@ REFUSALS = {
     "save.bad-review": "line {number} of .deliver/review.md is outside the report's form: {line}",
     "save.no-brief": "no {role} brief is saved, so the report is tied to no reviewed commit",
     "save.tree-changed": "{why}, so the report did not read this tree",
+    "brief.unreadable": "the saved {kind}.md cannot be read: {why}",
+    "brief.bad-settings": "the stack settings cannot be read: {error}",
 }
 
 

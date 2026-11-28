@@ -5,8 +5,9 @@ The roles are `requirements` and `defect` (spec #479, Briefs; #231 rules 27 to 2
 
 1. `brief.no-pr` while the branch's records hold no `pr` record;
 2. `brief.not-pushed` when the PR's head commit on GitHub is not the local `HEAD`;
-3. `brief.no-pass` when a command proof of the saved plan, or a set `check_command`, has no
-   counted pass on `HEAD`, the rule of `ready.no-pass`;
+3. `brief.unreadable` when the plan is not saved or cannot be read, `brief.bad-settings` when the
+   stack settings cannot be read, and `brief.no-pass` when a command proof of the saved plan, or a
+   set `check_command`, has no counted pass on `HEAD`: `ready.passes_on_head`, which `ready` uses too;
 4. `brief.no-review-skill` when the role's review skill (`code-review` for requirements,
    `ponytail-review` for defect) is not installed where `deps.find` looks.
 
@@ -33,9 +34,8 @@ import checks_harness
 import core
 import deps
 import findings
-import plan
+import ready
 import render
-import settings
 
 DELIVER = Path(__file__).resolve().parent.parent
 SKILLS = {"requirements": "code-review", "defect": "ponytail-review"}
@@ -64,12 +64,7 @@ def main(args: list[str], run: core.Run) -> None:
     if pr["headRefOid"] != head:
         raise core.Refused("brief.not-pushed", "deliver.py pr", number=number, remote=pr["headRefOid"][:7] or "unknown",
                            commit=head[:7])
-    saved, stack = plan.read(run), settings.load(run.checkout)[0]
-    commands = [m.group(1) for r in (saved.requirements if saved else []) if (m := render.COMMAND.match(r.proof))]
-    for command in commands + ([stack["check_command"]] if stack["check_command"] else []):
-        if not any(render.counted(r, command) and r["commit"] == head for r in records):
-            raise core.Refused("brief.no-pass", f"deliver.py check -- {shlex.quote(command)}", command=command,
-                               commit=head[:7])
+    ready.passes_on_head(run, records, head, "brief", again)
     skill = deps.find(SKILLS[role], run.checkout)
     if skill is None:
         raise core.Refused("brief.no-review-skill", f"install {SKILLS[role]}, then {again}", skill=SKILLS[role])

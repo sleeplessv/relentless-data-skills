@@ -174,6 +174,20 @@ class SaveReview(unittest.TestCase):
         self.assertEqual(self.reviews(), [])
         self.assertTrue((self.checkout / ".deliver" / "review.md").exists())
 
+    def test_scope_reads_the_diff_whatever_the_diff_config(self):
+        """diff.noprefix drops the b/ prefix, and git quotes a non-ASCII path unless core.quotePath is off."""
+        self.world.git(self.checkout, "config", "diff.noprefix", "true")
+        self.addCleanup(self.world.git, self.checkout, "config", "--unset", "diff.noprefix")
+        head = self.world.commit(self.checkout, "café.py", "x = 1\n", "feat: café")
+        self.world.add_record(self.name, "brief", role="defect", round=0, model="sonnet", effort="high", commit=head,
+                              path="briefs/defect-0.md", fixed_point=self.base)
+        settle = "settle it: deliver.py settle {n} --check <command>, or deliver.py settle {n} --unsettled"
+        self.assert_ends(self.save("defect", "F1: calc.py:3: off by one. Evidence: none\n"
+                                             "F2: café.py:1: x is unused. Evidence: none\n"), 0,
+                         f"Saved the defect review of {head[:7]}.\n"
+                         f"F1 (in scope, not proven) calc.py:3: off by one. Next: {settle.format(n='F1')}.\n"
+                         f"F2 (in scope, not proven) café.py:1: x is unused. Next: {settle.format(n='F2')}.\n")
+
     def test_a_requirements_report_is_saved_numbered_scoped_and_proven(self):
         self.assert_ends(self.save("requirements", REQUIREMENTS_REPORT), 0,
                          SAVED_REQUIREMENTS.format(head=self.head[:7]))

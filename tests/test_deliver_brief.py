@@ -204,6 +204,35 @@ Do both of the skill's readings yourself, and start no helper for them.
                             f"REFUSED brief.no-pass: `echo ok` has no counted pass on the head commit {head[:7]}\n"
                             "Next: deliver.py check -- 'echo ok'\n")
 
+    def test_brief_unreadable(self):
+        for case, text in (("no table", "door: two-way, one function\n"), ("not saved", None)):
+            with self.subTest(case):
+                branch = f"feat/unreadable-{case.replace(' ', '-')}"
+                checkout, _ = self.branch(branch)
+                plan = self.folder(branch) / "plan.md"
+                if text is None:
+                    plan.unlink()
+                else:
+                    plan.write_text(text, encoding="utf-8")
+                result = self.brief(checkout, "requirements", "--model", "sonnet")
+                self.assertEqual(result.returncode, 10, result.stderr)
+                self.assertTrue(result.stdout.startswith("REFUSED brief.unreadable: the saved plan.md cannot be read: "))
+                self.assertTrue(result.stdout.endswith("\nNext: rewrite .deliver/plan.md, then deliver.py save plan\n"))
+                self.assertEqual(self.briefs(branch), [])
+                self.assertFalse((self.folder(branch) / "briefs").exists())
+
+    def test_brief_bad_settings(self):
+        checkout, _ = self.branch("feat/bad-settings")
+        (checkout / "docs" / "agents").mkdir(parents=True)
+        (checkout / "docs" / "agents" / "stack.toml").write_text("check_command = [\n", encoding="utf-8")
+        result = self.brief(checkout, "defect", "--model", "opus")
+        self.assertEqual(result.returncode, 10, result.stderr)
+        self.assertTrue(result.stdout.startswith(
+            "REFUSED brief.bad-settings: the stack settings cannot be read: docs/agents/stack.toml is not TOML: "))
+        self.assertTrue(result.stdout.endswith(
+            "\nNext: fix docs/agents/stack.toml, then deliver.py brief defect --model opus\n"))
+        self.assertEqual(self.briefs("feat/bad-settings"), [])
+
     def test_brief_no_review_skill(self):
         checkout, _ = self.branch("feat/no-skill")
         folder = self.skills["ponytail-review"]

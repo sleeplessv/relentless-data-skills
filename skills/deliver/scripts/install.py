@@ -4,9 +4,11 @@
 folder and merges the guard's registration into the harness's user hook file, leaving every other
 entry alone (spec #457, "Install"). On Cursor the reader's file goes into the checkout's
 `.cursor/agents/`, with one line in the shared git directory's `info/exclude`, so it is run once per
-checkout. A second run changes nothing and says so. `--remove` takes out exactly what `install`
-wrote: it puts back each file `install` changed and deletes each file and folder `install` made,
-from the ledger `install` keeps in the machine directory. Claude Code refuses, as the plugin supplies both.
+checkout. A second run changes nothing and says so. `--remove` takes out deliver's guard and deletes
+each reader file that still matches the skill's copy. From the ledger `install` keeps in the machine
+directory, a file it finds as `install` left it gets back the bytes it held before, and a file or
+folder `install` made is deleted; the ledger goes once nothing is installed. A reader file the owner
+edited stays, and so does its exclude line. Claude Code refuses, as the plugin supplies both.
 
 Each thing `install` writes is an item with a state (`ok`, `missing` or `differs`), an `apply` and
 an `undo`. `checks_install` reads the same items, so preflight stops on the state `install` fixes.
@@ -16,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import shlex
+import subprocess
 from pathlib import Path
 
 import core
@@ -53,11 +56,21 @@ def detect() -> str | None:
     return next((harness for var, harness in DETECTION if os.environ.get(var)), None)
 
 
+def _make_parents(path: Path) -> list[str]:
+    """Make the folders `path` needs, returning the ones that did not exist."""
+    missing = [folder for folder in (path.parent, *path.parent.parents) if not folder.exists()]
+    for folder in reversed(missing):
+        folder.mkdir()
+    return [str(folder) for folder in reversed(missing)]
+
+
 class Ledger:
     """What `install` created and what each file it changed held before, so `--remove` undoes only that.
 
     It lives in the machine directory as `install-ledger.json`: the folders `install` made, each
-    file's earlier bytes (None for a file it made), and the keys it added to each hook file.
+    file's earlier bytes (None for a file it made), the keys it added to each hook file, and the
+    folders it made for itself, which go with it once it records nothing. Without it, `--remove`
+    still takes out what it can tell is deliver's.
     """
 
     PATH = "install-ledger.json"
@@ -68,20 +81,27 @@ class Ledger:
         self.dirs: list[str] = data.get("dirs", [])
         self.files: dict[str, str | None] = data.get("files", {})
         self.keys: dict[str, list[list[str]]] = data.get("keys", {})
+        self.own: list[str] = data.get("own", [])
         self.changed = False
 
     def save(self) -> None:
-        if self.changed:
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            self.path.write_text(json.dumps({"dirs": self.dirs, "files": self.files, "keys": self.keys},
-                                            indent=2) + "\n", encoding="utf-8")
+        if not self.changed:
+            return
+        if self.files or self.keys:
+            self.own += _make_parents(self.path)
+            self.path.write_text(json.dumps({"dirs": self.dirs, "files": self.files, "keys": self.keys,
+                                             "own": self.own}, indent=2) + "\n", encoding="utf-8")
+            return
+        # Nothing is installed: the ledger goes, with the folders it made for itself.
+        self.path.unlink(missing_ok=True)
+        for folder in map(Path, sorted(self.own, key=len, reverse=True)):
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
+        self.own, self.dirs = [], []
 
     def before_write(self, path: Path) -> None:
         """Note the folders `path` needs that do not exist, make them, and note what `path` holds now."""
-        missing = [folder for folder in (path.parent, *path.parent.parents) if not folder.exists()]
-        for folder in reversed(missing):
-            folder.mkdir()
-            self.dirs.append(str(folder))
+        self.dirs += _make_parents(path)
         if str(path) not in self.files:
             self.files[str(path)] = path.read_bytes().decode("latin-1") if path.is_file() else None
         self.changed = True
@@ -127,9 +147,15 @@ class File:
         return f"wrote {self.path}"
 
     def undo(self, ledger: Ledger) -> str | None:
-        if str(self.path) not in ledger.files:
-            return None
-        ledger.restore(self.path)
+        state = self.state()
+        if state != "ok":
+            if str(self.path) in ledger.files:
+                ledger.forget(self.path)
+            return None if state == "missing" else f"kept {self.path}: it differs from deliver's copy"
+        if str(self.path) in ledger.files:
+            ledger.restore(self.path)
+        else:
+            self.path.unlink()
         return f"removed {self.path}"
 
 
@@ -223,15 +249,18 @@ class HookEntry:
         if not entries or not any(_ours(e) for e in entries):
             return None
         entries[:] = [e for e in entries if not _ours(e)]
+        recorded = str(self.path) in ledger.files
         # Take out what apply added, deepest first: a scalar, or a container that is empty again.
-        for key_path in sorted(ledger.keys.get(str(self.path), []), key=len, reverse=True):
+        # With no record, every container on deliver's path that is empty now.
+        added = ledger.keys.get(str(self.path), []) if recorded else [self.keys[:n] for n in range(1, len(self.keys) + 1)]
+        for key_path in sorted(added, key=len, reverse=True):
             parent = data
             for key in key_path[:-1]:
                 parent = parent.get(key) if isinstance(parent, dict) else None
             value = parent.get(key_path[-1], None) if isinstance(parent, dict) else None
             if isinstance(parent, dict) and key_path[-1] in parent and not (isinstance(value, (dict, list)) and value):
                 del parent[key_path[-1]]
-        if data == _parse(ledger.original(self.path)):
+        if recorded and data == _parse(ledger.original(self.path)):
             ledger.restore(self.path)
         else:
             self.path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
@@ -240,10 +269,10 @@ class HookEntry:
 
 
 class ExcludeLine:
-    """One line in a git `info/exclude` file."""
+    """One line in a git `info/exclude` file, for a reader file in each of the repo's checkouts."""
 
-    def __init__(self, path: Path, line: str):
-        self.path, self.line = path, line
+    def __init__(self, path: Path, line: str, readers: list[Path]):
+        self.path, self.line, self.readers = path, line, readers
 
     def _lines(self) -> list[str]:
         return self.path.read_text(encoding="utf-8").splitlines() if self.path.is_file() else []
@@ -262,6 +291,9 @@ class ExcludeLine:
         lines = self._lines()
         if self.line not in lines:
             return None
+        left = [reader for reader in self.readers if reader.exists()]
+        if left:
+            return f"kept {self.line} in {self.path}: {', '.join(map(str, left))} is still there"
         kept = [line for line in lines if line != self.line]
         before = ledger.original(self.path)
         if kept == (before or b"").decode("utf-8").splitlines():
@@ -282,12 +314,22 @@ def items(harness: str, run: core.Run | None) -> list:
         if run is None:
             raise core.Refused("install.not-a-checkout", harness=harness)
         found = [File(run.checkout / CURSOR_AGENTS / p.name, p.read_bytes()) for p in readers]
-        found += [ExcludeLine(run.common_dir / "info" / "exclude", f"/{CURSOR_AGENTS / p.name}") for p in readers]
+        checkouts = _checkouts(run)
+        found += [ExcludeLine(run.common_dir / "info" / "exclude", f"/{CURSOR_AGENTS / p.name}",
+                              [checkout / CURSOR_AGENTS / p.name for checkout in checkouts]) for p in readers]
     else:
         found = [File(home / folder / p.name, p.read_bytes()) for p in readers]
     text = (source / "hooks.json").read_text(encoding="utf-8")
     fragment = json.loads(text.replace(json.dumps(GUARD_SLOT)[1:-1], json.dumps(shlex.quote(str(GUARD)))[1:-1]))
     return [*found, HookEntry(home / hooks, fragment)]
+
+
+def _checkouts(run: core.Run) -> list[Path]:
+    """Every checkout of the repo, as the exclude line covers each of them."""
+    proc = subprocess.run(["git", "-C", str(run.checkout), "worktree", "list", "--porcelain"],
+                          capture_output=True, text=True)
+    found = [Path(line[len("worktree "):]) for line in proc.stdout.splitlines() if line.startswith("worktree ")]
+    return found if proc.returncode == 0 and found else [run.checkout]
 
 
 def check_harness(harness: str) -> None:
@@ -312,7 +354,8 @@ def main(args: list[str], run: core.Run | None) -> None:
     command = f"deliver.py install {'--remove ' if remove else ''}{harness}"
     ledger = Ledger()
     done = []
-    for item in reversed(todo) if remove else todo:
+    # On remove, each exclude line comes after the reader files it covers, so it sees whether they stayed.
+    for item in sorted(reversed(todo), key=lambda item: isinstance(item, ExcludeLine)) if remove else todo:
         try:
             if remove:
                 done.append((item, item.undo(ledger)))

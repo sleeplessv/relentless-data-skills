@@ -298,6 +298,70 @@ class Install(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout)
         self.assertEqual((tree(self.home), tree(self.world.work), tree(common / "info")), before)
 
+    def test_remove_with_no_ledger_takes_out_what_it_can_tell_is_deliver_s(self):
+        # The machine directory cleared between install and remove: no record of what install made.
+        other = {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [{"type": "command", "command": "echo other"}]}]}}
+        starts = {"cortex-code": [None, other], "codex": [None, other], "antigravity": [None, {"theme": "dark"}],
+                  "cursor": [None, {"version": 1}, {"version": 1, "hooks": {"stop": [{"command": "echo other"}]}}]}
+        common = Path(self.world.git(self.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        for harness, datas in starts.items():
+            path = self.home / HOOKS[harness]
+            for data in datas:
+                with self.subTest(harness=harness, start=data):
+                    path.unlink(missing_ok=True)
+                    if data is not None:
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(json.dumps(data))
+                    self.assertEqual(self.install(harness, cwd=self.world.work).returncode, 0)
+                    shutil.rmtree(self.world.state)
+                    result = self.install("--remove", harness, cwd=self.world.work)
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertFalse((self.world.work / CURSOR_READER if harness == "cursor"
+                                      else self.home / READER[harness]).exists())
+                    # No container is left that only deliver's entry needed.
+                    self.assertEqual(json.loads(path.read_text()), data or ({"version": 1} if harness == "cursor" else {}))
+                    if harness == "cursor":
+                        self.assertNotIn(EXCLUDE_LINE, (common / "info" / "exclude").read_text().splitlines())
+                        self.assertEqual(self.world.git(self.world.work, "status", "--porcelain",
+                                                        "--untracked-files=all"), "")
+
+    def test_remove_keeps_a_reader_file_the_owner_edited_and_says_so(self):
+        for harness in ("codex", "cursor"):
+            with self.subTest(harness):
+                reader = self.world.work / CURSOR_READER if harness == "cursor" else self.home / READER[harness]
+                self.assertEqual(self.install(harness, cwd=self.world.work).returncode, 0)
+                reader.write_text("edited\n")
+                result = self.install("--remove", harness, cwd=self.world.work)
+                self.assertEqual(result.returncode, 0, result.stdout)
+                self.assertIn(f"kept {reader}: it differs from deliver's copy\n", result.stdout)
+                self.assertEqual(reader.read_text(), "edited\n")
+                self.assertNotIn("deliver_guard=", (self.home / HOOKS[harness]).read_text()
+                                 if (self.home / HOOKS[harness]).exists() else "")
+                if harness == "cursor":
+                    # The reader stays excluded, so it shows as no untracked file.
+                    self.assertIn(f"kept {EXCLUDE_LINE}", result.stdout)
+                    self.assertEqual(self.world.git(self.world.work, "status", "--porcelain",
+                                                    "--untracked-files=all"), "")
+
+    def test_remove_cursor_keeps_the_exclude_line_while_another_checkout_holds_the_reader(self):
+        second = self.world.worktree("second", "second")
+        common = Path(self.world.git(self.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        exclude = common / "info" / "exclude"
+        self.install("cursor", cwd=self.world.work)
+        self.install("cursor", cwd=second)
+        self.assertEqual(self.install("--remove", "cursor", cwd=second).returncode, 0)
+        self.assertIn(EXCLUDE_LINE, exclude.read_text().splitlines())
+        self.assertEqual(self.world.git(self.world.work, "status", "--porcelain", "--untracked-files=all"), "")
+        self.assertEqual(self.install("--remove", "cursor", cwd=self.world.work).returncode, 0)
+        self.assertNotIn(EXCLUDE_LINE, exclude.read_text().splitlines())
+
+    def test_remove_leaves_no_machine_directory_when_deliver_state_dir_is_unset(self):
+        before = tree(self.home)
+        self.assertEqual(self.install("codex", DELIVER_STATE_DIR=None).returncode, 0)
+        self.assertTrue((self.home / ".local" / "state" / "deliver" / "install-ledger.json").is_file())
+        self.assertEqual(self.install("--remove", "codex", DELIVER_STATE_DIR=None).returncode, 0)
+        self.assertEqual(tree(self.home), before)
+
     def test_the_hook_slot_is_the_one_the_generator_writes(self):
         install = deliver_kit.load("install")
         spec = importlib.util.spec_from_file_location("gen_roles", deliver_kit.REPO_ROOT / "scripts" / "gen_roles.py")

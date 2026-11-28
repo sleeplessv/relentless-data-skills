@@ -25,8 +25,6 @@ deps = deliver_kit.load("deps")
 VERSION = json.loads((deliver_kit.SCRIPTS.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 URL = "https://github.com/owner/repo/pull/12"
 AT = "2026-11-27T19:00:00Z"
-# The skill's own version, which the measurement block names; a version bump changes it.
-VERSION = json.loads((deliver_kit.SCRIPTS.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 PLAN = """\
 | # | Requirement | Proof |
 |---|---|---|

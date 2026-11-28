@@ -40,7 +40,7 @@ COMMAND_NAMES = {"claude": "claude", "cortex": "cortex", "codex": "codex", "curs
 
 # Knobs, comma-separated in STANDIN: drop=<class>|<class> leaves those refusals out of the log;
 # no-control, oneway-ran, no-warning, no-finish, preflight-stop, no-agent-probe, harness=<name>;
-# agent starts an agent; no-small-test, merge-owner, not-merged, no-merge, denied, no-usage.
+# agent starts an agent, agent-event prints an event an agent made; no-small-test, merge-owner, not-merged, no-merge, denied, no-usage.
 HARNESS = (r'''#!{python}
 import json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -144,6 +144,8 @@ if name in ("claude", "cortex"):
     if starting:
         emit(type="assistant", message={"content": [{"type": "tool_use", "id": "toolu_1", "input": {},
                                                      "name": "task" if name == "cortex" else "Agent"}]})
+    if "agent-event" in knobs:  # an event an agent made, with no agent call in the output
+        agent_events.append({"type": "assistant", "parent_tool_use_id": "toolu_9", "message": {"content": []}})
     for event in agent_events:
         print(json.dumps(event))
     emit(type="result", session_id=SESSION, result="done in " + str(cwd), usage=usage)
@@ -440,6 +442,7 @@ class CrossHarnessTest(unittest.TestCase):
         cases = {
             ("claude", "agent"): "the session started an agent",
             ("cortex", "agent"): "the session started an agent",
+            ("cortex", "agent-event"): "the session started an agent",
             ("codex", "agent"): "the session started an agent",
             ("cursor", "agent"): "the session started an agent",
             ("antigravity", "agent"): "the session started an agent",

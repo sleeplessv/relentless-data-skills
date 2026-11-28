@@ -104,7 +104,7 @@ class Save(Base):
             with self.subTest(args):
                 result = self.world.deliver("save", *args)
                 self.assert_ends(result, 2, "", (
-                    "deliver.py: save takes one kind, one of request, requirements, plan, summary, or review and a "
+                    "deliver.py: save takes one kind, one of request, requirements, plan, summary, or review or callback and a "
                     "role, one of requirements, defect\n\n"
                     f"{deliver_kit.load('deliver').USAGE}\n"))
 

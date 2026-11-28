@@ -4,7 +4,8 @@
 Run it as `uv run --python 3.13 --no-project deliver.py <subcommand> [arguments]`, or with a
 `python3` of 3.13 or newer. Standard library only; it calls nothing but `git` and `gh`.
 
-Each subcommand is a module beside this file, named for it, whose `main(args, run)` takes the
+Each subcommand is a module beside this file, named for it with a hyphen as an underscore
+(`follow-up` is `follow_up.py`), whose `main(args, run)` takes the
 remaining arguments and the `core.Run` of the current folder (None outside a git working tree).
 Endings and refusal codes are in `core.py`. Every subcommand but those in `NO_MARK_NEEDED`
 refuses where the checkout has no run mark, before its module loads. A name in `SUBCOMMANDS`
@@ -28,7 +29,8 @@ sys.dont_write_bytecode = True  # importing the subcommands would otherwise writ
 import core  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-SUBCOMMANDS = ("start", "preflight", "check", "save", "pr", "ready", "merge", "finish", "deps", "scan", "report", "install", "brief")
+SUBCOMMANDS = ("start", "preflight", "check", "save", "pr", "ready", "merge", "finish", "deps", "scan", "report", "install", "brief",
+               "settle", "follow-up")
 NO_MARK_NEEDED = frozenset({"start", "finish", "deps", "scan", "report", "install"})
 USAGE = f"""\
 usage: deliver.py <subcommand> [arguments]
@@ -57,9 +59,10 @@ def main(argv: list[str]) -> int:
     try:
         if name not in NO_MARK_NEEDED and (run is None or run.mark is None):
             raise core.Refused(f"{name}.no-mark", "deliver.py start")
-        if not (HERE / f"{name}.py").is_file():
+        module = name.replace("-", "_")
+        if not (HERE / f"{module}.py").is_file():
             return usage_error(f"{name} is not built yet")
-        importlib.import_module(name).main(args, run)
+        importlib.import_module(module).main(args, run)
     except core.Refused as refusal:
         print("\n".join(refusal.lines()))
         return 10

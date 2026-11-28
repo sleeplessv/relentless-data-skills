@@ -21,7 +21,7 @@ TESTS = Path(__file__).resolve().parent
 USAGE = """\
 usage: deliver.py <subcommand> [arguments]
 
-Subcommands: start, preflight, check, save, pr, ready, merge, finish, deps, scan, report, install, brief.
+Subcommands: start, preflight, check, save, pr, ready, merge, finish, deps, scan, report, install, brief, settle, follow-up.
 start, deps, scan, report and install never need a run mark. finish needs none only to resume a run whose
 earlier finish left its PR waiting. Every other subcommand needs one.
 Exit codes: 0 done, 10 refused, 20 a question for the owner, any other a crash.
@@ -49,7 +49,7 @@ class Dispatch(unittest.TestCase):
 
     def test_subcommand_not_built_exits_2_with_usage(self):
         deliver = deliver_kit.load("deliver")
-        missing = [name for name in deliver.SUBCOMMANDS if not (deliver_kit.SCRIPTS / f"{name}.py").exists()]
+        missing = [name for name in deliver.SUBCOMMANDS if not (deliver_kit.SCRIPTS / f"{name.replace('-', '_')}.py").exists()]
         mark = self.world.write_mark()
         self.addCleanup(mark.unlink)
         for name in missing:
@@ -83,6 +83,12 @@ class Dispatch(unittest.TestCase):
 
     def test_finish_no_mark(self):
         self.assert_no_mark("finish")
+
+    def test_settle_no_mark(self):
+        self.assert_no_mark("settle")
+
+    def test_follow_up_no_mark(self):
+        self.assert_no_mark("follow-up")
 
     def test_start_deps_scan_report_and_install_never_need_a_mark_and_finish_only_to_resume_a_waiting_pr(self):
         deliver = deliver_kit.load("deliver")

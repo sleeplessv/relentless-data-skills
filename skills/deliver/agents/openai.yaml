@@ -1,0 +1,3 @@
+# Codex reads this file: deliver starts only when typed (#264 rule 7).
+policy:
+  allow_implicit_invocation: false

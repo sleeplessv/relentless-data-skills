@@ -204,6 +204,14 @@ class WhereSkillsAreFound(unittest.TestCase):
         (self.config / "skills" / "pr").symlink_to(real)
         self.assertEqual(self.world.deliver("deps").stdout, "Upstream skills match the contract.\n")
 
+    def test_off_claude_code_found_in_the_agents_folder_only(self):
+        """Off Claude Code the lookup is checks_harness.skill_roots; tests/test_deliver_checks_harness.py has each folder."""
+        result = self.world.deliver("deps", CODEX_THREAD_ID="t")
+        self.assertEqual((result.returncode, result.stdout.splitlines()[0]), (
+            10, "REFUSED deps.missing-skill: a required upstream skill is not installed: code-review, ponytail-review, pr"))
+        shutil.move(self.config / "skills", self.world.home / ".agents" / "skills")
+        self.assert_found(CODEX_THREAD_ID="t")
+
     def test_found_in_the_project_folder(self):
         self.move("code-review", self.world.work / ".claude")
         self.assertEqual(self.world.deliver("deps").stdout, "Upstream skills match the contract.\n")
@@ -405,7 +413,8 @@ class ReviewSkillHashes(unittest.TestCase):
         world = deliver_kit.World(self.addCleanup)
         folders = world.install_upstream(("code-review", "pr"))
         with mock.patch.dict(os.environ, {"HOME": str(world.home)}):
-            for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "CLAUDE_CODE_USE_COWORK_PLUGINS"):
+            for name in ("CLAUDE_CONFIG_DIR", "CLAUDE_CODE_PLUGIN_CACHE_DIR", "CLAUDE_CODE_USE_COWORK_PLUGINS",
+                         "CORTEX_SESSION_ID", "CODEX_THREAD_ID", "CURSOR_AGENT", "ANTIGRAVITY_AGENT"):
                 os.environ.pop(name, None)
             hashes = deps.review_skill_hashes(world.work)
         self.assertEqual(hashes, {"code-review": deps.folder_hash(folders["code-review"]), "ponytail-review": None})

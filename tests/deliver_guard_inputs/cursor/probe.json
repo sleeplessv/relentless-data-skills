@@ -1,0 +1,16 @@
+{
+  "conversation_id": "00000000-0000-4000-8000-000000000000",
+  "generation_id": "00000000-0000-4000-8000-000000000000",
+  "model": "<model>",
+  "command": "gh pr merge --deliver-guard-probe",
+  "cwd": "<cwd>",
+  "sandbox": false,
+  "tool_use_id": "00000000-0000-4000-8000-000000000001",
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "hook_event_name": "beforeShellExecution",
+  "cursor_version": "<version>",
+  "workspace_roots": [
+    "<cwd>"
+  ],
+  "transcript_path": "<transcript>"
+}

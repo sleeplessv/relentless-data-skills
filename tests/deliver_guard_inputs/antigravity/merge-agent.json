@@ -1,0 +1,22 @@
+{
+  "artifactDirectoryPath": "<brain>/00000000-0000-4000-8000-000000000001",
+  "conversationId": "00000000-0000-4000-8000-000000000001",
+  "cwd": "<cwd>",
+  "hookEventName": "PreToolUse",
+  "lastUserInput": "",
+  "modelName": "<model>",
+  "stepIdx": 4,
+  "toolCall": {
+    "args": {
+      "CommandLine": "uv run --python 3.13 --no-project /x/scripts/deliver.py merge",
+      "WaitMsBeforeAsync": 10000,
+      "toolSummary": "<summary>"
+    },
+    "id": "call_0",
+    "name": "run_command"
+  },
+  "transcriptPath": "<brain>/00000000-0000-4000-8000-000000000001/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "<cwd>"
+  ]
+}

@@ -43,7 +43,8 @@ COMMAND_NAMES = {"claude": "claude", "cortex": "cortex", "codex": "codex", "curs
 # no-control, oneway-ran, no-warning, no-finish, preflight-stop, no-agent-probe, harness=<name>;
 # agent starts an agent, agent-event prints an event an agent made, no-cached leaves Codex's cached count out; no-small-test, merge-owner, not-merged, no-merge, denied, no-usage.
 # T2: path=<path>, no-path, no-roles, roles-<knob> (ROLES below), no-findings, no-defect-review, no-brief=<role>,
-# brief-key=<key> puts the defect brief line under that key, save-first saves the first review before the defect brief,
+# brief-key=<key> puts the defect agent start's brief line under that key, no-agent-start prints the brief commands'
+# output and starts no agent, save-first saves the first review before the defect agent start,
 # two-blocks puts a stale measurement block before the run's own.
 HARNESS = (r'''#!{python}
 import json, os, re, subprocess, sys, time
@@ -169,16 +170,19 @@ else:  # T2, ticket A
     deliver = "uv run --python 3.13 --no-project " + str(cwd) + "/deliver.py"
     def call(**fields):
         return {"type": "assistant", "message": {"content": [{"type": "tool_use", "id": "toolu_2", **fields}]}}
-    said = {role: call(name="Agent", input={"prompt": f"Read {briefs}/{role}-0.md and follow it."})
-            for role in ("requirements", "defect") if knobs.get("no-brief") != role}
+    said = {role: [{"type": "user", "message": {"content": [{"type": "tool_result", "tool_use_id": "toolu_3",
+                                                              "content": f"Read {briefs}/{role}-0.md and follow it.\n"}]}},
+                   call(name="Agent", input={"prompt": f"Read {briefs}/{role}-0.md and follow it."})]
+            for role in ("requirements", "defect") if knobs.get("no-brief") != role}  # the brief command's output, the agent start
     if "brief-key" in knobs and "defect" in said:  # a key the driver does not know
-        said["defect"] = {"type": "item.completed", "item": {knobs["brief-key"]: f"Read {briefs}/defect-0.md and follow it."}}
+        said["defect"][1] = {"type": "item.completed", "item": {knobs["brief-key"]: f"Read {briefs}/defect-0.md and follow it."}}
+    if "no-agent-start" in knobs:
+        said = {role: pair[:1] for role, pair in said.items()}
     save = {role: call(name="Bash", input={"command": f"{deliver} save review {role}"}) for role in ("requirements", "defect")}
     order = (["requirements", "save requirements", "defect", "save defect"] if "save-first" in knobs
              else ["requirements", "defect", "save requirements", "save defect"])
     for step in order:
-        event = save[step.split()[1]] if step.startswith("save") else said.get(step)
-        if event:
+        for event in [save[step.split()[1]]] if step.startswith("save") else said.get(step, []):
             print(json.dumps(event), flush=True)
 starting = "agent" in knobs
 usage = None if "no-usage" in knobs else {"input_tokens": 12, "output_tokens": 340}
@@ -555,7 +559,7 @@ class CrossHarnessTest(unittest.TestCase):
     def t2_passed(self, harness: str, pr: int) -> str:
         return (f"T2 {harness} passed: the session merged PR {pr}; path: single ticket; roles: author; requirements "
                 "reviewer standin-opus/high; defect reviewer standin-sonnet/high, not applied; both reviews in the "
-                "findings line; both brief lines before the first save review; tokens: 12 in, 340 out")
+                "findings line; both brief lines in agent starts before the first save review; tokens: 12 in, 340 out")
 
     def test_t2_passes_on_each_harness_after_g_and_t1(self):
         for harness in HARNESSES:
@@ -598,7 +602,9 @@ class CrossHarnessTest(unittest.TestCase):
             "merge-owner": "the measurement block has no merge line by the session",
             "no-brief=requirements": "the output has no requirements brief line",
             "no-brief=defect": "the output has no defect brief line",
-            "save-first": "the first save review came before the defect brief line",
+            "save-first": "the first save review came before the agent start with the defect brief line",
+            "no-agent-start": ("no agent start carries the requirements brief line; no agent start carries the defect "
+                               "brief line"),
         }
         for knob, fact in cases.items():
             with self.subTest(knob=knob):

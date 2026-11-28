@@ -28,7 +28,8 @@ GitHub, because `deliver.py finish` removes the records after a merge. It reads 
 measurement block. On Antigravity it also reads the output's `denied_actions`. It judges T2 the
 same way, from the PR's state and its measurement block's path, roles, findings and merge lines, and
 from the two brief lines (`Read <path>/briefs/requirements-0.md and follow it.` and the defect one),
-which the output must hold, under any key, before the first `save review` command. It keeps the
+which agent starts in the output must carry, under any key, before the first `save review` command.
+The brief command prints each line once itself, so an agent start is a second event holding it. It keeps the
 harness's reply and never judges it.
 
 The driver prints one line per task, `<task> <harness> passed: <facts>; tokens: <in> in, <out> out`,
@@ -341,21 +342,30 @@ def role_facts(line: str) -> list[tuple[bool, str]]:
 
 
 def brief_facts(events: list[dict]) -> list[tuple[bool, str]]:
-    """Whether the output holds both brief lines, under any key, before the first `save review` command."""
+    """Whether an agent start carries each brief line, under any key, before the first `save review` command.
+
+    `deliver.py brief` prints the line itself, so the output holds it once with no agent. The agent start
+    is the line's second event: each role needs two events holding it.
+    """
     briefs = {r: re.compile(rf"Read \S*/briefs/{r}-0\.md and follow it\.") for r in BRIEF_ROLES}
-    first: dict[str, int] = {}
+    seen: dict[str, list[int]] = {r: [] for r in BRIEF_ROLES}
+    save = len(events)
     for at, event in enumerate(events):
-        for text in strings(event):
-            for role, pattern in briefs.items():
-                if role not in first and pattern.search(text):
-                    first[role] = at
-            if "save" not in first and "\n" not in text and SAVE_REVIEW.search(text):
-                first["save"] = at
-    facts = [(False, f"the output has no {r} brief line") for r in BRIEF_ROLES if r not in first]
-    if not facts:
-        late = [r for r in BRIEF_ROLES if first[r] >= first.get("save", len(events))]
-        facts = [(False, f"the first save review came before the {r} brief line") for r in late]
-    return facts or [(True, "both brief lines before the first save review")]
+        texts = strings(event)
+        for role, pattern in briefs.items():
+            if any(pattern.search(text) for text in texts):
+                seen[role].append(at)
+        if save == len(events) and any("\n" not in text and SAVE_REVIEW.search(text) for text in texts):
+            save = at
+    facts = []
+    for role, found in seen.items():
+        if not found:
+            facts.append((False, f"the output has no {role} brief line"))
+        elif len(found) < 2:
+            facts.append((False, f"no agent start carries the {role} brief line"))
+        elif found[1] >= save:
+            facts.append((False, f"the first save review came before the agent start with the {role} brief line"))
+    return facts or [(True, "both brief lines in agent starts before the first save review")]
 
 
 def strings(value: object) -> list[str]:

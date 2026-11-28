@@ -44,6 +44,8 @@ command refused.
 
 ## Reading
 
+When preflight prints an `adapter:` line, read that file before you start an agent.
+
 Start one `deliver:deliver-reader`, and give it the question, only for a search that would bring more
 than about 1,000 tokens of mostly irrelevant material.
 

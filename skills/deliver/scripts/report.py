@@ -32,8 +32,8 @@ SETS_TOGETHER = (f"the sign appears at a difference of at least {TOGETHER} of th
                  "not appear below that")
 TEXT, COUNT, FLAG = (str,), (int,), (bool,)  # JSON types by Python type; a bool is not a COUNT
 # Why a version of a ticket is left out of every figure, as the report counts it.
-NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not direct", "with no verdict",
-                                       "judged at a commit the version does not record")
+NOT_RUNNABLE, NOT_DIRECT, NO_VERDICT, OTHER_COMMIT = ("not runnable", "not direct", "with no verdict",
+                                                     "judged at a commit the version does not record")
 # Warning sign 2: generation one's steps and the words that name each, as named() reads them. A bare "fix" names no
 # step, since a ticket's own title may hold it. "Read" names none, since a brief opens its instructions with it, and
 # "findings" names no search, since a re-check's brief speaks of them.
@@ -125,15 +125,18 @@ two places, as scan.py rounds them. Tickets right first time out of fewer
 than {RATE_FLOOR} judged are printed as a count, such as 8 of 10; out of {RATE_FLOOR} or
 more judged, the count is followed by its rate, such as 20 of 30 (67%).
 
-Left out of every figure, and counted: a replay versions.jsonl marks not
-direct; a version with no verdict, a null verdict or no line at all; and a
-verdict on a commit other than the one the set or versions.jsonl records,
-or for {DIRECT} with no line in versions.jsonl, since replay.py writes that
-line and may mark the replay not direct. Left out of the token figures, and
-counted: a judged version whose session or scan row is missing or has a
-blank total_tokens. Active minutes are left out the same way. Lines in
-versions.jsonl or verdicts.jsonl for a ticket in no set are left out and
-counted.
+Left out of every figure, and counted: any version but {GENERATION_ONE} of a
+ticket whose set entry has "browser": true, which the chief of staff sets by
+hand and replay.py refuses to replay, counted as not runnable; a replay
+versions.jsonl marks not direct; a version with no verdict, a null verdict or
+no line at all; and a verdict on a commit other than the one the set or
+versions.jsonl records, or for {DIRECT} with no line in versions.jsonl, since
+replay.py writes that line and may mark the replay not direct. The figures of
+{GENERATION_ONE} keep a marked ticket: its result is the original session's.
+Left out of the token figures, and counted: a judged version whose session or
+scan row is missing or has a blank total_tokens. Active minutes are left out
+the same way. Lines in versions.jsonl or verdicts.jsonl for a ticket in no set
+are left out and counted.
 
 A nonblank line of scan-rows.jsonl is no row when the scan would not read it as a
 JSON object (json_object in scan.py says which) or when it is an object
@@ -166,7 +169,7 @@ tokens and counted.
     f"{SECOND_SET}. Over two sets or more, taken together, {SETS_TOGETHER}. One set of 30 tickets gives "
     f"{math.ceil(APPEARS * 30)} and {math.ceil(UNDECIDED * 30)}; 60 tickets over two sets give "
     f"{math.ceil(TOGETHER * 60)}. Sets that hold no "
-    "ticket give no verdict.", 78, break_on_hyphens=False)}
+    "ticket the replay can run give no verdict.", 78, break_on_hyphens=False)}
 
 Warning sign 2 is answered from the scan rows of {GENERATION_ONE}'s sessions,
 over every ticket of the sets. The extra cost is the total_tokens
@@ -174,6 +177,10 @@ over every ticket of the sets. The extra cost is the total_tokens
 sides, and counted, when it lacks either version judged or either version
 has a blank total_tokens. The figures cover the tickets left; the verdict
 waits, as for warning sign 1, until every ticket has both versions judged.
+
+Both warning signs leave a marked ticket out of their count of tickets, so it
+holds back neither verdict. Each sign prints how many tickets it left out as
+not runnable.
 
 The report reads each helper's description and the head of its brief, and
 puts the helper in a step of generation one or leaves it not sorted. How it
@@ -206,7 +213,8 @@ tokens. Each copied share is of the total printed beside it.
 Files read, all written by the other scripts:
 
   replay-set-<n>.json   label, ticket, bucket, session and ready_commit of
-                        each entry under "tickets" (scripts/draw.py).
+                        each entry under "tickets" (scripts/draw.py), and
+                        browser where an entry has it.
   versions.jsonl        label, ticket, version, commit, session and
                         not_direct of each line (scripts/replay.py).
   verdicts.jsonl        label, ticket, version, commit and right_first_time
@@ -326,7 +334,8 @@ def load_sets(state: Path) -> tuple[list[int], dict[tuple[str, int], dict]]:
             raise Unreadable(f"{path} cannot be read as JSON ({type(error).__name__}).")
         for at, entry in enumerate(checked(str(path), saved, tickets=(list,))["tickets"], 1):
             where = f"{path}: ticket entry {at}"
-            checked(where, entry, label=TEXT, ticket=COUNT, bucket=TEXT, session=TEXT, ready_commit=TEXT)
+            checked(where, entry, label=TEXT, ticket=COUNT, bucket=TEXT, session=TEXT, ready_commit=TEXT,
+                    **({"browser": FLAG} if "browser" in entry else {}))
             if not draw.LABEL.fullmatch(entry["label"]):  # an invalid label is never printed: it may name the project
                 raise Unreadable(f"{where}: label is not a label the draw gives.")
             if entry["bucket"] not in draw.BUCKETS:
@@ -393,6 +402,8 @@ def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: di
     """Why the version of the ticket is left out of every figure, or, judged, its result and its scan row's figures."""
     key = (ticket["label"], ticket["ticket"], version)
     replayed, verdict = versions.get(key), verdicts.get(key)
+    if ticket.get("browser") and version != GENERATION_ONE:  # replay.py refuses it; generation one's is the original
+        return NOT_RUNNABLE
     if replayed and replayed["not_direct"]:
         return NOT_DIRECT
     if verdict is None or verdict["right_first_time"] is None:
@@ -469,15 +480,18 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
                                                           if tickets[key]["bucket"] == bucket])
                               for bucket in draw.BUCKETS)]
         lines.append(f"  All: {figures(found)}")
-        lines.append("  Left out of every figure: "
-                     + ", ".join(f"{found.count(why)} {why}" for why in (NOT_DIRECT, NO_VERDICT, OTHER_COMMIT)) + ".")
+        lines.append("  Left out of every figure: " + ", ".join(
+            f"{found.count(why)} {why}" for why in (NOT_RUNNABLE, NOT_DIRECT, NO_VERDICT, OTHER_COMMIT)) + ".")
         lines.append(f"  Left out of the token figures: {sum(result['tokens'] is None for result in judged)} with a "
                      f"blank token count. Left out of the active minutes: "
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
         lines.append(copied_line([result for result in judged if result["tokens"] is not None]))
-    pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in results[GENERATION_ONE]]
+    runnable = [key for key, ticket in tickets.items() if not ticket.get("browser")]  # the signs count no other
+    pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in runnable]
     judged_pairs = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
-    return [*lines, "", *sign_one(judged_pairs, len(tickets), set_count=len(sets)), "", *sign_two(judged_pairs, len(tickets))]
+    one, not_runnable = sign_one(judged_pairs, len(runnable), set_count=len(sets)), len(tickets) - len(runnable)
+    return [*lines, "", one[0], f"  Left out: {not_runnable} {NOT_RUNNABLE}.", *one[1:], "",
+            *sign_two(judged_pairs, len(runnable), not_runnable)]
 
 
 def unjudged(judged: list[tuple[dict, dict]], total: int) -> str:
@@ -490,7 +504,7 @@ def sign_one(judged: list[tuple[dict, dict]], total: int, set_count: int) -> lis
     if len(judged) < total:
         return [f"Warning sign 1: no verdict. Tickets {unjudged(judged, total)}"]
     if not total:
-        return ["Warning sign 1: no verdict. The sets hold no ticket."]
+        return ["Warning sign 1: no verdict. The sets hold no ticket the replay can run."]
     first, second = (sum(pair[side]["right"] for pair in judged) for side in (0, 1))
     difference = first - second
     lines = [f"Warning sign 1: {GENERATION_ONE} was right first time on {count(first, total)} tickets, {DIRECT} on "
@@ -502,12 +516,12 @@ def sign_one(judged: list[tuple[dict, dict]], total: int, set_count: int) -> lis
             else f"Not decided: a second set is needed, {SECOND_SET}. Over both sets together, {SETS_TOGETHER}."]
 
 
-def sign_two(judged: list[tuple[dict, dict]], total: int) -> list[str]:
+def sign_two(judged: list[tuple[dict, dict]], total: int, not_runnable: int) -> list[str]:
     """Warning sign 2 over the tickets with both versions judged and both token counts; a verdict only when every
-    ticket has both versions judged."""
+    ticket has both versions judged. The `not_runnable` tickets are in none of these counts."""
     counted = [pair for pair in judged if pair[0]["tokens"] is not None and pair[1]["tokens"] is not None]
-    left = (f"  Left out of both sides: {total - len(judged)} without both versions judged, "
-            f"{len(judged) - len(counted)} with a blank token count.")
+    left = (f"  Left out of both sides: {not_runnable} {NOT_RUNNABLE}, {total - len(judged)} without both versions "
+            f"judged, {len(judged) - len(counted)} with a blank token count.")
     if not counted:
         return ["Warning sign 2: no verdict. No ticket has both versions judged and both token counts.", left]
     spend, ownless = dict.fromkeys([*(name for name, _ in STEPS), None], 0), 0

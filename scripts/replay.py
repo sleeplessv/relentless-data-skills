@@ -157,6 +157,13 @@ working tree as for {VERSION}: after deliver's cleanup switches the clone to
 its default branch it holds the merged change, and when ready refused it holds
 the branch.
 
+An entry with "browser": true is a ticket whose original session started a
+headless browser. The chief of staff sets that mark by hand. The confinement
+above does not let a browser start, so the replay refuses a marked entry for
+every version: before it makes anything, it exits 1 with one line on standard
+error, and it records nothing. deliver.py report --help says how the report
+counts such a ticket.
+
 Files, all in the machine directory:
 
   replays/<label>-<ticket>-<version>/
@@ -583,6 +590,9 @@ def replay(label: str, ticket: int, group: SetupGroup, version: str = VERSION) -
     drawer = draw.Draw(0)
     state = drawer.state
     found = entry(drawer, label, ticket)
+    if found.get("browser") is True:
+        raise ReplayError(f"the original session of project {label} ticket {ticket} started a headless browser, which "
+                          "the replay's sandbox does not let start, so the replay cannot run it.")
     config = scan.config_dir()
     if not config.is_absolute():  # the session runs in the clone, so a relative one would point elsewhere
         os.environ["CLAUDE_CONFIG_DIR"] = str(config.absolute())

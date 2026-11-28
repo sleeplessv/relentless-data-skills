@@ -22,6 +22,7 @@ from test_deliver_render import SUMMARY, TICKET_REQUEST  # noqa: E402
 
 render = deliver_kit.load("render")
 deps = deliver_kit.load("deps")
+VERSION = json.loads((deliver_kit.SCRIPTS.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 URL = "https://github.com/owner/repo/pull/12"
 AT = "2026-11-27T19:00:00Z"
 # The skill's own version, which the measurement block names; a version bump changes it.

@@ -411,7 +411,8 @@ class CrossHarnessTest(unittest.TestCase):
                 before = len(self.world.starts())
                 self.run_on(harness, "T1")
                 start, = self.world.starts()[before:]
-                self.assertEqual(start["prompt"], ("$deliver " if harness == "cortex" else "/deliver ") + text)
+                typed = "$deliver " if harness in ("cortex", "codex") else "/deliver "
+                self.assertEqual(start["prompt"], typed + text)
 
     def test_g_lists_the_commands_in_order(self):
         deliver = f"uv run --python 3.13 --no-project {self.world.tree}/skills/deliver/scripts/deliver.py"

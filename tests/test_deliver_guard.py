@@ -17,6 +17,7 @@ names and other private values are placeholders in angle brackets; the tests rep
 A shape no run has logged ends `_not_yet_seen`: an agent's call on Cortex Code, and the
 project's Claude Code hook as Cursor runs it. `cursor/empty-cwd.json` is Cursor's input when the
 model names no folder (#464): `cwd` is empty and the workspace is in `workspace_roots`.
+`cursor/wrapped-probe.json` is the probe as a model ran it inside its own shell line (#464).
 
     python3 -m unittest tests.test_deliver_guard
 """
@@ -229,6 +230,17 @@ class Guard(unittest.TestCase):
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
         imported |= {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         self.assertEqual(imported - sys.stdlib_module_names, {"__future__"} - sys.stdlib_module_names)
+
+    def test_the_probe_flag_makes_the_probe_only_on_its_own_gh_pr_merge(self):
+        wrapped = f'cd sub && {guard.PROBE} 2>&1; echo "exit=$?"'
+        commands = {guard.PROBE: "probe", wrapped: "probe", f"git status | {guard.PROBE}": "probe",
+                    "gh pr merge 12 --squash": "gh pr merge", f"gh pr merge 12 --squash; echo {guard.PROBE.split()[-1]}":
+                    "gh pr merge", f'echo "{guard.PROBE}"': None}
+        for command, cls in commands.items():
+            with self.subTest(command=command):
+                self.assertEqual(deny(self.world.guard(command)) is None, cls is None)
+        self.assertIn("guard probe", deny(self.world.guard(wrapped, "agent.json")))
+        self.assertEqual([r["class"] for r in self.refusals()], [c for c in commands.values() if c] + ["probe"])
 
 
 # The harness each input folder logs as.
@@ -449,6 +461,19 @@ class Harnesses(unittest.TestCase):
         self.run_guard(self.claude_form("gh pr ready 1"), CORTEX_SESSION_ID="x")
         self.assertEqual([r["harness"] for r in self.refusals()],
                          [h for _, _, h in cases] + ["cortex-code", "codex", "cursor"])
+
+    def test_a_probe_inside_a_shell_line_is_the_probe(self):
+        # #464: Cursor's model ran the probe inside its own shell line, and the refusal was logged as a raw merge.
+        command = self.command("cursor", "wrapped-probe")
+        codex = json.loads(self.text("codex", "probe"))
+        codex["tool_input"]["command"] = command
+        for form, text in (("cursor", self.text("cursor", "wrapped-probe")), ("claude", json.dumps(codex))):
+            with self.subTest(form=form):
+                decision, reason = answer(form, self.run_guard(text))
+                self.assertEqual(decision, "deny")
+                self.assertIn(f"\n{command}\n{guard.REASONS['probe']}\n", reason)
+        self.assertEqual([(r["guard"], r["class"], r["harness"]) for r in self.refusals()],
+                         [("raw-pr", "probe", "cursor"), ("raw-pr", "probe", "codex")])
 
 
 class Registration(unittest.TestCase):

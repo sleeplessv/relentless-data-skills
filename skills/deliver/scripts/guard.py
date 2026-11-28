@@ -21,7 +21,8 @@ process and imports nothing of the program, so a broken program never breaks it.
 
 With no mark it allows the command. With a mark it refuses:
 
-- a raw `gh pr merge` or `gh pr ready`, to every agent; `PROBE` is one such command;
+- a raw `gh pr merge` or `gh pr ready`, to every agent; `PROBE` is one such command, and a
+  `gh pr merge` with its flag is the probe wherever it stands in the shell line;
 - `deliver.py merge` to an agent the session started, so only the owner's session merges. An
   agent's call carries `agent_id` on Claude Code, Cortex Code and Codex; on Antigravity the
   session writes `<conversation>/.system_generated/subagents/<agent's conversationId>.json`
@@ -121,18 +122,22 @@ def words(command: str) -> list[str] | None:
 
 
 def verbs(command: str) -> set[str]:
-    """The guarded classes of `gh pr` and `deliver.py` the command runs: "gh pr merge", ..."""
+    """The guarded classes of `gh pr` and `deliver.py` the command runs: "gh pr merge", ...
+
+    A `gh pr merge` whose own words, up to the next shell punctuation, hold the probe's flag is
+    "probe" too."""
     found = set()
     ws = words(command)
     for i, word in enumerate(ws or []):
         name = word.rsplit("/", 1)[-1]
         rest = ws[i + 1:]
         if name == "gh":
-            for j, arg in enumerate(rest):
-                if arg and set(arg) <= PUNCTUATION:
-                    break
-                if arg == "pr" and rest[j + 1:j + 2] in (["merge"], ["ready"]):
-                    found.add(f"gh pr {rest[j + 1]}")
+            call = rest[:next((j for j, arg in enumerate(rest) if arg and set(arg) <= PUNCTUATION), len(rest))]
+            for j, arg in enumerate(call):
+                if arg == "pr" and call[j + 1:j + 2] in (["merge"], ["ready"]):
+                    found.add(f"gh pr {call[j + 1]}")
+                    if call[j + 1] == "merge" and PROBE.split()[-1] in call:
+                        found.add("probe")
                     break
         elif name == "deliver.py" and rest[:1] in (["merge"], ["accept"]):
             found.add(f"deliver.py {rest[0]}")
@@ -165,10 +170,8 @@ def one_way(command: str, checkout: Path) -> bool:
 
 def classify(command: str, agent: bool, checkout: Path) -> str | None:
     """The class of the first guard that refuses the command, or None."""
-    if command.strip() == PROBE:
-        return "probe"
     found = verbs(command)
-    for cls in ("gh pr merge", "gh pr ready"):
+    for cls in ("probe", "gh pr merge", "gh pr ready"):
         if cls in found:
             return cls
     if agent and "deliver.py merge" in found:

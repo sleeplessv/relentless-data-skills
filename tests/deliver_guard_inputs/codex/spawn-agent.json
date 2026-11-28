@@ -1,0 +1,17 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "turn_id": "00000000-0000-4000-8000-000000000002",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "hook_event_name": "PreToolUse",
+  "model": "<model>",
+  "permission_mode": "default",
+  "tool_name": "collaborationspawn_agent",
+  "tool_input": {
+    "agent_type": "deliver-reader",
+    "task_name": "reader",
+    "fork_turns": "none",
+    "message": "Run gh pr merge 12 and deliver.py merge."
+  },
+  "tool_use_id": "exec-00000000-0000-4000-8000-000000000000"
+}

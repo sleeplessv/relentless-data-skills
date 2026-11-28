@@ -1493,6 +1493,47 @@ class DeliverVersionTest(unittest.TestCase):
         self.assertEqual(deliver["cwd"], str(self.clone))
         self.assertTrue(deliver["setup_done"])
 
+    def install_review_skills(self) -> list[Path]:
+        """Made-up installed copies in Claude Code's folder: code-review a link to a folder elsewhere in the home
+        folder, ponytail-review a folder, router not installed. The folders the session may read, in order."""
+        skills, target = self.world.config / "skills", self.world.home / ".agents" / "skills" / "code-review"
+        for folder in (target, skills / "ponytail-review"):
+            folder.mkdir(parents=True)
+            (folder / "SKILL.md").write_text(f"---\nname: {folder.name}\n---\n")
+        (skills / "code-review").symlink_to(target)
+        return [skills / "code-review", target, skills / "ponytail-review"]
+
+    def test_the_session_and_its_agents_may_read_the_review_skills_and_router_and_not_write_them(self) -> None:
+        folders = [str(folder) for folder in self.install_review_skills()]
+        self.assertEqual(self.world.replay("A", "7").returncode, 0)
+        result = self.replay("A", "7")
+        direct, deliver = self.world.starts_made()
+        settings = json.loads(direct["args"][direct["args"].index("--settings") + 1])
+        settings["sandbox"]["filesystem"]["allowRead"][0] = str(self.clone)
+        settings["sandbox"]["filesystem"]["allowRead"] += [str(PLUGIN), *folders]
+        settings["sandbox"]["filesystem"]["denyWrite"] = [str(PLUGIN), *folders]
+        settings["permissions"]["deny"] += [f"Edit(/{folder}/**)" for folder in (str(PLUGIN), *folders)]
+        settings["disableAllHooks"] = False
+        args = deliver["args"]
+        self.assertEqual(json.loads(args[args.index("--settings") + 1]), settings)
+        self.assertEqual(args[args.index("--settings") + 2:], [
+            "--plugin-dir", str(PLUGIN), *(arg for folder in (str(PLUGIN), *folders) for arg in ("--add-dir", folder))])
+        self.assertIn("replay: router is not installed in Claude Code's folder, so the session cannot read it.\n",
+                      result.stderr)
+        self.assertNotIn("code-review", result.stderr)
+
+    def test_the_direct_version_s_settings_and_command_are_the_same_with_the_skills_installed_or_not(self) -> None:
+        bare = self.world.replay("A", "7")
+        self.world.clear()
+        self.install_review_skills()
+        installed = self.world.replay("A", "7")
+        self.assertEqual((bare.returncode, bare.stderr, installed.returncode, installed.stderr), (0, "", 0, ""))
+        before, after = self.world.starts_made()
+        for start in (before, after):
+            start["args"][start["args"].index("--session-id") + 1] = "<session>"
+        self.assertEqual(after["args"], before["args"])
+        self.assertNotIn("--add-dir", after["args"])
+
     def test_the_prompt_is_the_typed_deliver_command_with_the_ticket_s_number(self) -> None:
         self.replay("A", "7")
         [start] = self.world.starts_made()
@@ -1603,6 +1644,12 @@ class DeliverVersionTest(unittest.TestCase):
                 "and file tools may read the folder past the read block.",
                 "They may not write it: a permission deny rule, Edit(//<folder>/**), holds the file tools off it, "
                 "and sandbox.filesystem.denyWrite holds sandboxed commands off it.",
+                "The session and its agents reach the installed review skills code-review and ponytail-review, and "
+                "router, in the same way: the folder skills/<name> in Claude Code's folder ($CLAUDE_CONFIG_DIR, else "
+                "~/.claude), and the folder a link there leads to, are working directories too, each with its own "
+                "deny rule and denyWrite entry.",
+                "A skill with no folder there is left out, and the replay names it on standard error before the "
+                "session.",
                 "Its sandboxed commands may also read, through sandbox.filesystem.allowRead, each path under the "
                 "home folder, outside the folders above, that deliver's preflight opens, lists or stats, and the path "
                 "that a link among them leads to.",
@@ -1634,15 +1681,16 @@ class DeliverVersionTest(unittest.TestCase):
 # that does not exist, the call goes through, as macOS's sandbox answers a missing path with "no such file". An audit
 # hook polices opening and listing, and os.stat and os.lstat are wrapped, which the hook does not see. The checks run
 # once with every entry and once with each entry of replay.claude_reads() dropped. It prints JSON: the reads, the
-# deliver version's filesystem settings, and per run the results, the refused paths and the paths opened under home.
+# folders the session works in, the deliver version's filesystem settings, and per run the results, the refused paths
+# and the paths opened under home.
 PREFLIGHT_SANDBOXED = r'''
 import errno, json, os, sys, types
 from pathlib import Path
 sys.path[:0] = [sys.argv[1], sys.argv[2]]
 import replay, preflight
 home, clone = Path.home(), Path(sys.argv[3])
-filesystem = replay.settings(clone, "deliver")["sandbox"]["filesystem"]
-reads = filesystem["allowRead"][len(replay.CACHES) + 2:]  # after the clone, the caches and the plugin
+filesystem, folders = replay.settings(clone, "deliver")["sandbox"]["filesystem"], replay.worked_in("deliver")
+reads = filesystem["allowRead"][len(replay.CACHES) + 1 + len(folders):]  # after the clone, the caches and folders
 checks = [c for c in preflight.CHECKS if c.__module__ in ("checks_claude", "deps")]
 real_stat, real_lstat = os.stat, os.lstat
 allowed, refused, opened, busy = [], [], [], []
@@ -1694,7 +1742,7 @@ for dropped in [None, *reads]:
             result = types.SimpleNamespace(code=f"PermissionError {e.filename}")
         results.append(None if result is None else getattr(result, "code", "warn"))
     runs.append({"dropped": dropped, "results": results, "refused": sorted(set(refused)), "opened": sorted(set(opened))})
-print(json.dumps({"reads": reads, "filesystem": filesystem, "runs": runs}))
+print(json.dumps({"reads": reads, "folders": folders, "filesystem": filesystem, "runs": runs}))
 '''
 
 
@@ -1766,9 +1814,11 @@ class ClaudeReadsTest(unittest.TestCase):
     def test_the_reads_are_the_files_preflight_reads_and_the_real_place_of_each_link(self) -> None:
         config, install = self.config, self.install
         # deps.find opens SKILL.md in each skills folder it passes on the way to pr, and hashes the folder it finds.
+        # The review skills' folders are among the folders the session works in, so they are not listed again.
+        self.assertEqual(self.out["folders"], [str(PLUGIN), *(str(path) for path in (
+            config / "skills" / "code-review", self.target, config / "skills" / "ponytail-review"))])
         self.assertEqual(self.out["reads"], sorted(str(path) for path in (
             config / "settings.json", config / "agents", self.role,
-            config / "skills" / "code-review", self.target, config / "skills" / "ponytail-review",
             config / "plugins" / "installed_plugins.json", config / "plugins" / "known_marketplaces.json",
             self.market / ".claude-plugin" / "marketplace.json", install / "hooks" / "hooks.json",
             install / ".claude-plugin" / "plugin.json", install / "more-hooks.json", install / "skills" / "SKILL.md",
@@ -1787,8 +1837,7 @@ class ClaudeReadsTest(unittest.TestCase):
         (self.config / "skills" / "pr" / "SKILL.md").write_text("---\nname: pr\n---\n")
         out = self.sandboxed(self.home, self.clone)
         self.assertEqual(out["reads"], sorted(str(path) for path in (
-            settings, self.config / "agents", self.role, self.config / "skills" / "code-review", self.target,
-            self.config / "skills" / "ponytail-review", self.config / "skills" / "pr")))
+            settings, self.config / "agents", self.role, self.config / "skills" / "pr")))
         self.assertEqual(out["runs"][0]["refused"], [])
 
     def test_preflight_s_claude_code_checks_pass_reading_only_the_allowed_paths(self) -> None:
@@ -1825,7 +1874,7 @@ class ClaudeReadsTest(unittest.TestCase):
 
     def test_sandboxed_commands_may_not_write_what_they_may_read(self) -> None:
         reads = self.out["reads"]
-        self.assertEqual(self.out["filesystem"]["denyWrite"], [str(PLUGIN), *reads])
+        self.assertEqual(self.out["filesystem"]["denyWrite"], [*self.out["folders"], *reads])
         self.assertEqual(self.out["filesystem"]["allowRead"][-len(reads):], reads)
 
 

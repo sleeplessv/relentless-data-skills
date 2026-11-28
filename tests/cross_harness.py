@@ -245,8 +245,11 @@ def listed(items: list[str]) -> str:
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
 
-def heads(url: str, cwd: Path) -> dict[str, str]:
+def heads(url: str, cwd: Path) -> dict[str, str] | None:
+    """The fixture's branches and their commits, or None when git ls-remote fails."""
     done = run_quiet(["git", "ls-remote", "--heads", url], cwd)
+    if done.returncode != 0:
+        return None
     return {ref.removeprefix("refs/heads/"): sha for sha, ref in (line.split("\t") for line in done.stdout.splitlines())}
 
 
@@ -286,7 +289,10 @@ class Driver:
         base = run_quiet(["git", "rev-parse", f"refs/tags/{self.args.base_tag}^{{commit}}"], run.clone)
         if base.returncode != 0:
             return False, f"{task} {harness} failed: the fixture has no tag {self.args.base_tag}"
-        self.restore = (url, default, base.stdout.strip(), heads(url, run.clone))
+        before = heads(url, run.clone)
+        if before is None:
+            return False, f"{task} {harness} failed: git ls-remote of the fixture failed"
+        self.restore = (url, default, base.stdout.strip(), before)
         facts = self.session(run)
         passed = all(ok for ok, _ in facts)
         shown = "; ".join(fact for ok, fact in facts if ok == passed)
@@ -365,7 +371,10 @@ class Driver:
             closed = run_quiet(["gh", "pr", "close", str(pr["number"]), "--repo", fixture, "--delete-branch"])
             if closed.returncode != 0:
                 return f"gh pr close {pr['number']} exited {closed.returncode}"
-        pushed = [b for b in heads(url, run.clone) if b not in before and b != default]
+        after = heads(url, run.clone)
+        if after is None:
+            return "git ls-remote of the fixture failed"
+        pushed = [b for b in after if b not in before and b != default]
         if pushed:
             deleted = run_quiet(["git", "push", url, "--delete", *pushed], run.clone)
             if deleted.returncode != 0:

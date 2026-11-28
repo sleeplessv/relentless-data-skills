@@ -251,7 +251,8 @@ def sign_two_copied(first: Copied, second: Copied) -> str:
 
 def no_helpers(spent: int, copied: str, unjudged: int = 0) -> list[str]:
     """Warning sign 2's lines between its first line and its verdicts, for sessions with no helpers."""
-    return [f"  Left out of both sides: {unjudged} without both versions judged, 0 with a blank token count.",
+    return [f"  Left out of both sides: 0 not runnable, {unjudged} without both versions judged, 0 with a blank token "
+            "count.",
             "  generation-one's helpers by step: re-check 0, closing verification 0, fix 0, review 0, implement 0, "
             "publish 0, explore 0. 0 helpers have no tokens of their own.",
             "  The cut, closing verification, fix and re-check: 0 tokens, 0.0% of generation-one's.",
@@ -305,8 +306,8 @@ class TestReport(unittest.TestCase):
             "  51-300: 2 judged, 1 of 2 right first time, median total tokens 3500, median active minutes 35.",
             "  301-1500: 2 judged, 2 of 2 right first time, median total tokens 4500, median active minutes 45.",
             "  All: 6 judged, 5 of 6 right first time, median total tokens 3500, median active minutes 35.",
-            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 0 not direct, 0 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank.",
             copied_tokens(0, 21000, "0.0%", 0),
             "",
@@ -315,13 +316,14 @@ class TestReport(unittest.TestCase):
             "  51-300: 2 judged, 0 of 2 right first time, median total tokens 350, median active minutes 4.375.",
             "  301-1500: 2 judged, 1 of 2 right first time, median total tokens 450, median active minutes 5.625.",
             "  All: 6 judged, 2 of 6 right first time, median total tokens 350, median active minutes 4.375.",
-            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 0 not direct, 0 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank.",
             copied_tokens(0, 2100, "0.0%", 0),
             "",
             "Warning sign 1: generation-one was right first time on 5 of 6 tickets, direct on 2 of 6, a difference "
             "of 3.",
+            "  Left out: 0 not runnable.",
             "The sign appears.",
             "",
             "Warning sign 2: on 6 of 6 tickets, generation-one spent 21000 tokens and direct 2100, an extra cost of "
@@ -344,7 +346,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(self.two(EVERY_STEP, 2277, 1000), [
             "Warning sign 2: on 30 of 30 tickets, generation-one spent 68310 tokens and direct 30000, an extra cost of "
             "38310.",
-            "  Left out of both sides: 0 without both versions judged, 0 with a blank token count.",
+            "  Left out of both sides: 0 not runnable, 0 without both versions judged, 0 with a blank token count.",
             "  generation-one's helpers by step: re-check 300, closing verification 630, fix 1200, review 2400, "
             "implement 4860, publish 9600, explore 19200. 30 helpers have no tokens of their own.",
             "  The cut, closing verification, fix and re-check: 2130 tokens, 3.1% of generation-one's.",
@@ -531,7 +533,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(section(self.lines(), 2), [
             "Warning sign 2: on 28 of 30 tickets, generation-one spent 28000 tokens and direct 22400, an extra cost of "
             "5600.",
-            "  Left out of both sides: 0 without both versions judged, 2 with a blank token count.",
+            "  Left out of both sides: 0 not runnable, 0 without both versions judged, 2 with a blank token count.",
             "  generation-one's helpers by step: re-check 0, closing verification 2700, fix 0, review 0, implement 0, "
             "publish 0, explore 0. 0 helpers have no tokens of their own.",
             "  The cut, closing verification, fix and re-check: 2700 tokens, 9.6% of generation-one's.",
@@ -559,7 +561,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(section(lines, 2), [
             "Warning sign 2: on 29 of 30 tickets, generation-one spent 29000 tokens and direct 23200, an extra cost of "
             "5800.",
-            "  Left out of both sides: 0 without both versions judged, 1 with a blank token count.",
+            "  Left out of both sides: 0 not runnable, 0 without both versions judged, 1 with a blank token count.",
             *no_helpers(29000, sign_two_copied((2800, 28000, "10.0%", 1), (1080, 21600, "5.0%", 2)))[1:],
             "Without the spend not sorted, the cut is 0 tokens against half the extra cost, 2900. The sign does not "
             "appear.",
@@ -646,7 +648,7 @@ class TestReport(unittest.TestCase):
             self.world.run("direct", ticket, True, tokens=None)
         self.assertEqual(section(self.lines(), 2), [
             "Warning sign 2: no verdict. No ticket has both versions judged and both token counts.",
-            "  Left out of both sides: 0 without both versions judged, 30 with a blank token count."])
+            "  Left out of both sides: 0 not runnable, 0 without both versions judged, 30 with a blank token count."])
 
     def test_a_count_out_of_fewer_than_20_is_never_a_rate(self) -> None:
         self.world.baseline(17, 14)
@@ -681,8 +683,8 @@ class TestReport(unittest.TestCase):
             "  301-1500: 1 judged, 0 of 1 right first time, median total tokens none, median active minutes "
             "none.",
             "  All: 3 judged, 2 of 3 right first time, median total tokens 300, median active minutes none.",
-            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 0 not direct, 0 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 2 with a blank token count. Left out of the active minutes: 3 blank."])
 
     def test_blank_rows_of_every_harness_are_left_out_of_the_token_figures_and_counted(self) -> None:
@@ -698,8 +700,8 @@ class TestReport(unittest.TestCase):
         lines = self.lines()
         self.assertEqual(lines[6:9], [
             "  All: 6 judged, 6 of 6 right first time, median total tokens 300, median active minutes none.",
-            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 0 not direct, 0 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 5 with a blank token count. Left out of the active minutes: 6 blank."])
 
     def test_a_replay_not_direct_and_a_version_with_no_verdict_are_left_out_of_every_figure(self) -> None:
@@ -716,9 +718,54 @@ class TestReport(unittest.TestCase):
         start = lines.index("direct")
         self.assertEqual(lines[start + 4:start + 7], [
             "  All: 2 judged, 1 of 2 right first time, median total tokens 200, median active minutes 10.",
-            "  Left out of every figure: 1 not direct, 3 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 1 not direct, 3 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank."])
+
+    def test_a_ticket_marked_browser_is_not_runnable_for_every_version_but_generation_one(self) -> None:
+        tickets = self.world.draw(per_bucket=2)  # tickets 2 and 5 are in 301-1500
+        for ticket in (tickets[2], tickets[5]):
+            ticket["browser"] = True
+        path = self.world.state / "replay-set-1.json"
+        saved = json.loads(path.read_text())
+        saved["tickets"] = tickets
+        path.write_text(json.dumps(saved))
+        for at, ticket in enumerate(tickets):
+            self.world.run("generation-one", ticket, True, tokens=1000)
+            if at != 5:  # ticket 5 has no direct replay: it holds back no verdict
+                self.world.run("direct", ticket, at in (0, 2))
+        self.world.run("deliver", tickets[2], True)
+        lines = self.lines()
+        for version, all_line, left_out in (
+                ("generation-one", "6 judged, 6 of 6 right first time, median total tokens 1000", "0 not runnable, 0"),
+                ("direct", "4 judged, 1 of 4 right first time, median total tokens 100", "2 not runnable, 0"),
+                ("deliver", "0 judged, 0 of 0 right first time, median total tokens none", "2 not runnable, 0")):
+            start = lines.index(version)
+            self.assertEqual(lines[start + 3], "  301-1500: " + (
+                "2 judged, 2 of 2 right first time, median total tokens 1000, median active minutes 10."
+                if version == "generation-one" else
+                "0 judged, 0 of 0 right first time, median total tokens none, median active minutes none."))
+            self.assertTrue(lines[start + 4].startswith(f"  All: {all_line},"), lines[start + 4])
+            self.assertTrue(lines[start + 5].startswith(f"  Left out of every figure: {left_out} not direct, "),
+                            lines[start + 5])
+        self.assertEqual(section(lines, 1), [
+            "Warning sign 1: generation-one was right first time on 4 of 4 tickets, direct on 1 of 4, a difference "
+            "of 3.",
+            "  Left out: 2 not runnable.",
+            "The sign appears."])
+        self.assertEqual(section(lines, 2)[:2], [
+            "Warning sign 2: on 4 of 4 tickets, generation-one spent 4000 tokens and direct 400, an extra cost of "
+            "3600.",
+            "  Left out of both sides: 2 not runnable, 0 without both versions judged, 0 with a blank token count."])
+        self.assertEqual(section(lines, 2)[-1], "The two verdicts differ: the spend not sorted decides the sign.")
+        text = " ".join(self.world.report("--help", save=False).stdout.split())
+        for fact in ('any version but generation-one of a ticket whose set entry has "browser": true, which the chief '
+                     "of staff sets by hand and replay.py refuses to replay, counted as not runnable;",
+                     "The figures of generation-one keep a marked ticket: its result is the original session's.",
+                     "Both warning signs leave a marked ticket out of their count of tickets, so it holds back neither "
+                     "verdict. Each sign prints how many tickets it left out as not runnable."):
+            with self.subTest(fact=fact[:40]):
+                self.assertIn(fact, text)
 
     def test_a_verdict_on_another_commit_than_the_one_recorded_is_left_out_of_every_figure(self) -> None:
         tickets = self.world.draw(per_bucket=1)  # tickets[2] has neither version judged
@@ -734,8 +781,8 @@ class TestReport(unittest.TestCase):
             self.assertEqual(lines[start + 4:start + 7], [
                 f"  All: {judged} judged, {judged} of {judged} right first time, median total tokens {tokens}, "
                 f"median active minutes {minutes}.",
-                f"  Left out of every figure: 0 not direct, 1 with no verdict, {2 - judged} judged at a commit the "
-                "version does not record.",
+                f"  Left out of every figure: 0 not runnable, 0 not direct, 1 with no verdict, {2 - judged} judged at a "
+                "commit the version does not record.",
                 "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 "
                 "blank."])
 
@@ -747,8 +794,8 @@ class TestReport(unittest.TestCase):
         start = lines.index("squad")
         self.assertEqual(lines[start + 4:start + 7], [
             "  All: 3 judged, 2 of 3 right first time, median total tokens none, median active minutes none.",
-            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 0 not direct, 0 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 3 with a blank token count. Left out of the active minutes: 3 blank."])
 
     def test_the_medians_keep_their_fractions(self) -> None:
@@ -792,8 +839,8 @@ class TestReport(unittest.TestCase):
                 self.world.run("generation-one", ticket, at % 2 == 0, tokens=100 + at, minutes=1.0 + at)
                 self.world.run("direct", ticket, at % 3 == 0, tokens=50 + at, minutes=0.5 + at)
         tail = [
-            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
-            "record.",
+            "  Left out of every figure: 0 not runnable, 0 not direct, 0 with no verdict, 0 judged at a commit the "
+            "version does not record.",
             "  Left out of the token figures: 0 with a blank token count. Left out of the active minutes: 0 blank."]
         self.assertEqual(self.lines(), [  # the whole report: no line beyond these may name or count a project
             "Replay sets 1 and 2: 60 tickets, of projects A, C and AB.",
@@ -822,6 +869,7 @@ class TestReport(unittest.TestCase):
             "",
             "Warning sign 1: generation-one was right first time on 30 of 60 (50%) tickets, direct on 20 of 60 "
             "(33%), a difference of 10.",
+            "  Left out: 0 not runnable.",
             "The sign appears.",
             "",
             "Warning sign 2: on 60 of 60 tickets, generation-one spent 6870 tokens and direct 3870, an extra cost of "
@@ -851,6 +899,7 @@ class TestReport(unittest.TestCase):
         self.assertEqual(self.sign(20, 15), [
             "Warning sign 1: generation-one was right first time on 20 of 30 (67%) tickets, direct on 15 of 30 (50%), "
             "a difference of 5.",
+            "  Left out: 0 not runnable.",
             "The sign appears."])
 
     def test_on_30_tickets_4_or_3_a_second_set_is_needed(self) -> None:
@@ -860,7 +909,7 @@ class TestReport(unittest.TestCase):
                 self.assertEqual(self.sign(first, second), [
                     f"Warning sign 1: generation-one was right first time on {first} of 30 ({first / 30:.0%}) "
                     f"tickets, direct on {second} of 30 ({second / 30:.0%}), a difference of {first - second}.",
-                    NOT_DECIDED])
+                    "  Left out: 0 not runnable.", NOT_DECIDED])
 
     def test_on_30_tickets_2_or_fewer_the_sign_does_not_appear(self) -> None:
         for first, second in ((20, 18), (15, 20)):
@@ -869,14 +918,14 @@ class TestReport(unittest.TestCase):
                 self.assertEqual(self.sign(first, second), [
                     f"Warning sign 1: generation-one was right first time on {first} of 30 ({first / 30:.0%}) "
                     f"tickets, direct on {second} of 30 ({second / 30:.0%}), a difference of {first - second}.",
-                    "The sign does not appear."])
+                    "  Left out: 0 not runnable.", "The sign does not appear."])
 
     def test_on_60_tickets_8_or_more_the_sign_appears_and_7_or_fewer_it_does_not(self) -> None:
         for second, verdict in ((32, "The sign appears."), (33, "The sign does not appear.")):
             with self.subTest(difference=40 - second):
                 self.setUp()
                 lines = self.sign(40, second, 30, 30)
-                self.assertEqual(lines[1], verdict)
+                self.assertEqual(lines[1:], ["  Left out: 0 not runnable.", verdict])
                 self.assertEqual(self.world.report().stdout.splitlines()[0],
                                  "Replay sets 1 and 2: 60 tickets, of project A.")
 
@@ -886,16 +935,17 @@ class TestReport(unittest.TestCase):
                 self.setUp()
                 self.assertEqual(self.sign(10, second, 14), [
                     f"Warning sign 1: generation-one was right first time on 10 of 14 tickets, direct on {second} of "
-                    f"14, a difference of {10 - second}.", verdict])
+                    f"14, a difference of {10 - second}.", "  Left out: 0 not runnable.", verdict])
 
     def verdicts(self, first: int, *sizes: int) -> Callable[[int], str]:
         """The verdict line of warning sign 1 at each difference, over the sets of the sizes given, with generation
-        one right on `first` tickets; the section holds the counts' line and that line only."""
+        one right on `first` tickets; the section holds the counts'
+        line, the not-runnable line and that line only."""
         def verdict(difference: int) -> str:
             self.setUp()
             lines = self.sign(first, first - difference, *sizes)
-            self.assertEqual(len(lines), 2)
-            return lines[1]
+            self.assertEqual(lines[1:-1], ["  Left out: 0 not runnable."])
+            return lines[2]
         return verdict
 
     def test_on_one_set_of_29_tickets_5_or_more_appears_3_to_4_is_not_decided_and_2_or_fewer_does_not(self) -> None:
@@ -932,7 +982,8 @@ class TestReport(unittest.TestCase):
 
     def test_a_set_with_no_ticket_gives_no_verdict(self) -> None:
         self.world.draw(count=0)
-        self.assertEqual(section(self.lines(), 1), ["Warning sign 1: no verdict. The sets hold no ticket."])
+        self.assertEqual(section(self.lines(), 1), [
+            "Warning sign 1: no verdict. The sets hold no ticket the replay can run.", "  Left out: 0 not runnable."])
 
     def test_the_verdict_waits_for_both_versions_on_every_ticket(self) -> None:
         self.world.baseline(20, 10)
@@ -944,7 +995,7 @@ class TestReport(unittest.TestCase):
         self.world.versions.reverse()  # the replays' ledger in another order than the draw's
         lines = self.lines()
         self.assertEqual(section(lines, 1), ["Warning sign 1: no verdict. Tickets without both generation-one and "
-                                             "direct judged: 3 of 30."])
+                                             "direct judged: 3 of 30.", "  Left out: 0 not runnable."])
         self.assertEqual(section(lines, 2), [  # tickets 3 to 29
             "Warning sign 2: on 27 of 30 tickets, generation-one spent 31050 tokens and direct 3105, an extra cost of "
             "27945.",
@@ -956,7 +1007,7 @@ class TestReport(unittest.TestCase):
         self.world.draw()
         self.assertEqual(section(self.lines(), 1),
                          ["Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of "
-                          "60."])
+                          "60.", "  Left out: 0 not runnable."])
 
     def test_lines_for_a_ticket_in_no_set_are_left_out_and_counted(self) -> None:
         self.world.baseline(20, 15)
@@ -1013,7 +1064,7 @@ class TestReport(unittest.TestCase):
         self.world.draw()
         result = self.world.report(save=False)
         self.assertEqual(result.returncode, 0)
-        self.assertEqual(section(result.stdout.splitlines(), 1)[-1],
+        self.assertEqual(section(result.stdout.splitlines(), 1)[0],
                          "Warning sign 1: no verdict. Tickets without both generation-one and direct judged: 30 of 30.")
 
     def test_input_it_cannot_read_with_certainty_stops_it_with_nothing_printed(self) -> None:
@@ -1046,6 +1097,8 @@ class TestReport(unittest.TestCase):
             ("replay-set-1.json", entry("session", None), "replay-set-1.json: ticket entry 2: session is missing or of "
                                                           "the wrong type."),
             ("replay-set-1.json", "{", "replay-set-1.json cannot be read as JSON (JSONDecodeError)."),
+            ("replay-set-1.json", entry("browser", "yes"), "replay-set-1.json: ticket entry 2: browser is missing or of "
+                                                           "the wrong type."),
             ("replay-set-1.json", entry("label", REPO), "replay-set-1.json: ticket entry 2: label is not a label the "
                                                         "draw gives."),
             ("verdicts.jsonl", field("version", REPO), "verdicts.jsonl:2: version is not a version name."),
@@ -1269,7 +1322,7 @@ class TestReport(unittest.TestCase):
                      "remaining pool ticket whose check passes, with no limit per bucket.",
                      f"Over two sets or more, taken together, {SETS_TOGETHER}",
                      "One set of 30 tickets gives 5 and 3; 60 tickets over two sets give 8.",
-                     "Sets that hold no ticket give no verdict."):
+                     "Sets that hold no ticket the replay can run give no verdict."):
             with self.subTest(fact=fact):
                 self.assertIn(fact, text)
         self.assertNotIn("Any other number of tickets", text)

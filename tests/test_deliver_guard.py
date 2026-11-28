@@ -233,9 +233,9 @@ class Guard(unittest.TestCase):
 
     def test_the_probe_flag_makes_the_probe_only_on_its_own_gh_pr_merge(self):
         wrapped = f'cd sub && {guard.PROBE} 2>&1; echo "exit=$?"'
+        flag_after = f"gh pr merge 12 --squash; echo {guard.PROBE.split()[-1]}"
         commands = {guard.PROBE: "probe", wrapped: "probe", f"git status | {guard.PROBE}": "probe",
-                    "gh pr merge 12 --squash": "gh pr merge", f"gh pr merge 12 --squash; echo {guard.PROBE.split()[-1]}":
-                    "gh pr merge", f'echo "{guard.PROBE}"': None}
+                    "gh pr merge 12 --squash": "gh pr merge", flag_after: "gh pr merge", f'echo "{guard.PROBE}"': None}
         for command, cls in commands.items():
             with self.subTest(command=command):
                 self.assertEqual(deny(self.world.guard(command)) is None, cls is None)

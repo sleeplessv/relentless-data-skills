@@ -1452,14 +1452,23 @@ class DeliverVersionTest(unittest.TestCase):
         self.replay("A", "7")
         direct, deliver = self.world.starts_made()
         settings = json.loads(direct["args"][direct["args"].index("--settings") + 1])
+
+        def start(args: list[str], settings: dict) -> list[str]:
+            session = args[args.index("--session-id") + 1]
+            return ["-p", "--model", MODEL, "--session-id", session, "--permission-mode", "bypassPermissions",
+                    "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
+                    "--settings", json.dumps(settings)]
+        # The direct command ends at its settings, which assert_confined pins whole: no plugin, no added directory.
+        self.assertEqual(direct["args"], start(direct["args"], settings))
         settings["sandbox"]["filesystem"]["allowRead"][0] = str(self.clone)
         settings["sandbox"]["filesystem"]["allowRead"].append(str(PLUGIN))
+        # The plugin folder is a working directory, so the read block lets its commands through; the deny rule and
+        # denyWrite take writes back from the file tools and from sandboxed commands.
+        settings["sandbox"]["filesystem"]["denyWrite"] = [str(PLUGIN)]
+        settings["permissions"]["deny"].append(f"Edit(/{PLUGIN}/**)")
         settings["disableAllHooks"] = False
-        session = deliver["args"][deliver["args"].index("--session-id") + 1]
-        self.assertEqual(deliver["args"], [
-            "-p", "--model", MODEL, "--session-id", session, "--permission-mode", "bypassPermissions",
-            "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
-            "--settings", json.dumps(settings), "--plugin-dir", str(PLUGIN)])
+        self.assertEqual(deliver["args"], [*start(deliver["args"], settings), "--plugin-dir", str(PLUGIN),
+                                           "--add-dir", str(PLUGIN)])
         self.assertEqual(deliver["cwd"], str(self.clone))
         self.assertTrue(deliver["setup_done"])
 
@@ -1567,8 +1576,12 @@ class DeliverVersionTest(unittest.TestCase):
                 "With no --version, the replay is the direct version.",
                 "The deliver version differs from direct in these ways and no other.",
                 "Its session loads the plugin in this tree's skills/deliver/ for that session only, with "
-                "--plugin-dir, may read that folder from the sandbox, and runs with hooks on: deliver's own hook, "
-                "and any hook in the clone's project settings.",
+                "--plugin-dir, and runs with hooks on: deliver's own hook, and any hook in the clone's project "
+                "settings.",
+                "That folder is also a working directory of the session, through --add-dir, so the session's commands "
+                "and file tools may read the folder past the read block.",
+                "They may not write it: a permission deny rule, Edit(//<folder>/**), holds the file tools off it, "
+                "and sandbox.filesystem.denyWrite holds sandboxed commands off it.",
                 "Its prompt is the typed command /deliver:deliver TICKET.",
                 "Its environment also leaves out every variable whose name, in any case, starts with GH_ or holds "
                 "GITHUB.",

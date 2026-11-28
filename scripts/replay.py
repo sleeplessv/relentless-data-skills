@@ -122,8 +122,12 @@ The {VERSION} version pushes nothing and opens no PR.
 
 The deliver version differs from {VERSION} in these ways and no other. Its
 session loads the plugin in this tree's skills/deliver/ for that session only,
-with --plugin-dir, may read that folder from the sandbox, and runs with hooks
-on: deliver's own hook, and any hook in the clone's project settings. Its prompt
+with --plugin-dir, and runs with hooks on: deliver's own hook, and any hook in
+the clone's project settings. That folder is also a working directory of the
+session, through --add-dir, so the session's commands and file tools may read
+the folder past the read block. They may not write it: a permission deny rule,
+Edit(//<folder>/**), holds the file tools off it, and
+sandbox.filesystem.denyWrite holds sandboxed commands off it. Its prompt
 is the typed command /deliver:deliver TICKET. Its environment also leaves out
 every variable whose name, in any case, starts with GH_ or holds GITHUB.
 Before setup, the replay copies the stand-in gh, scripts/replay_gh.py, to
@@ -221,8 +225,9 @@ def repo(drawer: draw.Draw, label: str) -> dict:
 
 
 def settings(clone: Path, version: str = VERSION) -> dict:
-    """The confinement every session starts with; the deliver version's also reads its plugin and runs its hook."""
-    home = Path.home()
+    """The confinement every session starts with; the deliver version's also reads its plugin, may not write it, and
+    runs its hook."""
+    home, deliver = Path.home(), version == "deliver"
     caches = [str(home / cache) for cache in CACHES]
     return {
         "sandbox": {
@@ -231,16 +236,18 @@ def settings(clone: Path, version: str = VERSION) -> dict:
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
             "filesystem": {"denyRead": [str(home)],
-                           "allowRead": [str(clone), *caches, *([str(PLUGIN)] if version == "deliver" else [])],
-                           "allowWrite": caches},
+                           "allowRead": [str(clone), *caches, *([str(PLUGIN)] if deliver else [])],
+                           "allowWrite": caches,
+                           # --add-dir makes the plugin folder writable to sandboxed commands; this takes it back.
+                           **({"denyWrite": [str(PLUGIN)]} if deliver else {})},
             "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True, "allowLocalBinding": True,
                         "allowUnixSockets": list(SOCKETS)},
         },
         # The sandbox binds commands only, not the web tools; a deny holds with prompts switched off.
         "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True,
-                        "deny": ["WebFetch", "WebSearch"]},
+                        "deny": ["WebFetch", "WebSearch", *([f"Edit(/{PLUGIN}/**)"] if deliver else [])]},
         "disableClaudeAiConnectors": True,
-        "disableAllHooks": version != "deliver",
+        "disableAllHooks": not deliver,
     }
 
 
@@ -248,7 +255,8 @@ def command(clone: Path, model: str, session: str, version: str = VERSION) -> li
     return ["claude", "-p", "--model", model, "--session-id", session, "--permission-mode", "bypassPermissions",
             "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
             "--settings", json.dumps(settings(clone, version)),
-            *(["--plugin-dir", str(PLUGIN)] if version == "deliver" else [])]
+            # A working directory is the one way past the read block; settings() takes writes back.
+            *(["--plugin-dir", str(PLUGIN), "--add-dir", str(PLUGIN)] if version == "deliver" else [])]
 
 
 def environment(clone: Path, version: str = VERSION) -> dict[str, str]:

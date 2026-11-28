@@ -7,6 +7,16 @@ carries `agent_id`, and `session-bypass.json` a session call in bypass mode. Ids
 replaced; each test sets `cwd` and the command. `one-way-commands.json` holds the commands
 #409's reviewers probed the one-way list with, each with the verdict of the 31ea0e2 list.
 
+The folders `cortex/`, `codex/`, `cursor/` and `antigravity/` hold one input per case, each in
+the shape the stage 2 probe kit's stand-in guard logged from that harness on a real run
+(Cortex Code X1; Codex D2 and D6; Cursor X1; Antigravity A6, with the agent file its session
+wrote), with ids zeroed, `user_email` dropped, and the command of the case. Paths, model
+names and other private values are placeholders in angle brackets; the tests replace `<cwd>` and
+`<brain>`, and the rest (`<transcript>`, `<home>`, `<model>`, `<version>`, `<summary>`,
+`<description>`) stay as literal text.
+A shape no run has logged ends `_not_yet_seen`: an agent's call on Cortex Code, and the
+project's Claude Code hook as Cursor runs it.
+
     python3 -m unittest tests.test_deliver_guard
 """
 from __future__ import annotations
@@ -29,7 +39,7 @@ HOOKS = deliver_kit.REPO_ROOT / "skills" / "deliver" / "hooks" / "hooks.json"
 guard = deliver_kit.load("guard")
 FINISH = f"uv run --python 3.13 --no-project {deliver_kit.SCRIPTS / 'deliver.py'} finish"
 OWNER = "Ask the owner to run it."
-LOG_KEYS = ["at", "guard", "class", "permission_mode", "run"]
+LOG_KEYS = ["at", "guard", "class", "permission_mode", "run", "harness"]
 
 # One command of each class the guard refuses, with the guard that refuses it.
 REFUSED = {
@@ -218,6 +228,178 @@ class Guard(unittest.TestCase):
         imported = {alias.name for node in ast.walk(tree) if isinstance(node, ast.Import) for alias in node.names}
         imported |= {node.module for node in ast.walk(tree) if isinstance(node, ast.ImportFrom)}
         self.assertEqual(imported - sys.stdlib_module_names, {"__future__"} - sys.stdlib_module_names)
+
+
+FORMS = {"cortex": "claude", "codex": "claude", "cursor": "cursor", "antigravity": "antigravity"}
+# Each case's answer and logged class; a missing class is an allow.
+CASES = {"probe": "probe", "raw-merge": "gh pr merge", "raw-ready": "gh pr ready", "one-way": "one-way",
+         "control": None, "merge-session": None, "merge-agent": "deliver.py merge",
+         "merge-agent_not_yet_seen": "deliver.py merge"}
+SESSION, AGENT = "00000000-0000-4000-8000-000000000000", "00000000-0000-4000-8000-000000000001"
+
+
+def answer(form: str, result: subprocess.CompletedProcess) -> tuple[str, str]:
+    """The decision and reason of an answer, which must be in the given form."""
+    assert (result.returncode, result.stderr) == (0, ""), result
+    if form == "claude":
+        if result.stdout == "":
+            return "allow", ""
+        output = json.loads(result.stdout)["hookSpecificOutput"]
+        assert (output["hookEventName"], output["permissionDecision"]) == ("PreToolUse", "deny"), output
+        return "deny", output["permissionDecisionReason"]
+    output = json.loads(result.stdout)
+    if form == "cursor":
+        assert list(output) == ["permission", "user_message", "agent_message"], output
+        assert output["user_message"] == output["agent_message"], output
+        return output["permission"], output["user_message"]
+    assert list(output) == ["decision", "reason"], output
+    return output["decision"], output["reason"]
+
+
+class Harnesses(unittest.TestCase):
+    """The saved inputs of Cortex Code, Codex, Cursor and Antigravity, each run as the harness runs the hook."""
+
+    def setUp(self):
+        self.world = deliver_kit.World(self.addCleanup)
+        self.mark = self.world.write_mark(run="run-7")
+        self.brain = self.world.root / "brain"
+        self.agent_file = self.brain / SESSION / ".system_generated" / "subagents" / f"{AGENT}.json"
+        self.agent_file.parent.mkdir(parents=True)
+        shutil.copy(INPUTS / "antigravity" / "agent-file.json", self.agent_file)
+
+    def text(self, harness: str, name: str) -> str:
+        text = (INPUTS / harness / f"{name}.json").read_text(encoding="utf-8")
+        return text.replace("<cwd>", str(self.world.work)).replace("<brain>", str(self.brain))
+
+    def run_guard(self, text: str, **env: str | None) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(deliver_kit.GUARD)], input=text, cwd=self.world.root,
+                              env=self.world.env(**env), capture_output=True, text=True)
+
+    def saved(self, harness: str, name: str, **env: str | None) -> tuple[str, str]:
+        return answer(FORMS[harness], self.run_guard(self.text(harness, name), **env))
+
+    def command(self, harness: str, name: str) -> str:
+        data = json.loads(self.text(harness, name))
+        if harness == "antigravity":
+            return data["toolCall"]["args"]["CommandLine"]
+        return data["command"] if harness == "cursor" else data["tool_input"]["command"]
+
+    def cases(self, harness: str) -> list[str]:
+        return [name for name in CASES if (INPUTS / harness / f"{name}.json").is_file()]
+
+    def test_each_case_gives_its_answer_in_the_harness_form(self):
+        for harness in FORMS:
+            names = self.cases(harness)
+            self.assertTrue({"probe", "raw-merge", "raw-ready", "one-way", "control", "merge-session"} <= set(names))
+            for name in names:
+                with self.subTest(harness=harness, case=name):
+                    decision, reason = self.saved(harness, name)
+                    self.assertEqual(decision, "deny" if CASES[name] else "allow")
+                    if CASES[name]:
+                        self.assertIn(f"\n{self.command(harness, name)}\n", reason)
+                        self.assertIn(str(self.mark), reason)
+                        self.assertIn(FINISH, reason)
+            refused = [n for n in names if CASES[n]]
+            lines = [r for r in self.refusals() if r["harness"] == harness]
+            self.assertEqual([(r["class"], r["run"]) for r in lines], [(CASES[n], "run-7") for n in refused])
+        self.assertEqual({r["harness"] for r in self.refusals()}, set(FORMS))
+
+    def test_the_merge_script_from_an_agent_is_a_case_on_each_harness_that_marks_agents(self):
+        names = {harness: [n for n in self.cases(harness) if n.startswith("merge-agent")] for harness in FORMS}
+        self.assertEqual(names, {"cortex": ["merge-agent_not_yet_seen"], "codex": ["merge-agent"], "cursor": [],
+                                 "antigravity": ["merge-agent"]})
+
+    def test_no_mark_allows_every_case_in_the_harness_form(self):
+        self.mark.unlink()
+        for harness in FORMS:
+            for name in self.cases(harness):
+                with self.subTest(harness=harness, case=name):
+                    result = self.run_guard(self.text(harness, name))
+                    self.assertEqual(answer(FORMS[harness], result), ("allow", ""))
+                    self.assertEqual(result.stdout == "", FORMS[harness] == "claude")
+        self.assertEqual(self.refusals(), [])
+
+    def refusals(self) -> list[dict]:
+        return self.world.state_lines(guard.LOG)
+
+    def test_codex_tools_other_than_the_shell_are_not_judged(self):
+        # D2: the agent-start tool reaches the hook as collaborationspawn_agent; apply_patch's input has a
+        # `command` that is the patch. Each text here holds a raw `gh pr merge`.
+        for name in ("spawn-agent", "apply-patch"):
+            with self.subTest(case=name):
+                self.assertIn("gh pr merge", self.text("codex", name))
+                self.assertEqual(self.saved("codex", name), ("allow", ""))
+        self.assertEqual(self.refusals(), [])
+
+    def test_antigravity_marks_the_agent_by_its_sessions_agent_file(self):
+        self.assertEqual(self.saved("antigravity", "merge-agent")[0], "deny")
+        self.agent_file.unlink()
+        self.assertEqual(self.saved("antigravity", "merge-agent"), ("allow", ""))
+        self.assertEqual(self.saved("antigravity", "raw-merge")[0], "deny")
+        self.assertEqual([r["class"] for r in self.refusals()], ["deliver.py merge", "gh pr merge"])
+
+    def test_antigravity_an_agent_file_under_another_name_is_not_this_agents(self):
+        self.agent_file.rename(self.agent_file.with_name(f"{SESSION}.json"))
+        self.assertEqual(self.saved("antigravity", "merge-agent"), ("allow", ""))
+        text = self.text("antigravity", "merge-agent").replace(f'"conversationId": "{AGENT}"', '"conversationId": "../x"')
+        self.assertEqual(answer("antigravity", self.run_guard(text)), ("allow", ""))
+
+    def test_antigravity_another_tool_gets_an_explicit_allow(self):
+        self.assertIn("gh pr merge", self.text("antigravity", "read-file"))
+        self.assertEqual(self.saved("antigravity", "read-file"), ("allow", ""))
+
+    def claude_form(self, command: str) -> str:
+        data = json.loads(self.text("cursor", "claude-form_not_yet_seen"))
+        data["tool_input"]["command"] = command
+        return json.dumps(data)
+
+    def test_cursor_both_hooks_give_one_answer_and_one_log_line(self):
+        refused = [n for n in self.cases("cursor") if CASES[n]]
+        for name in self.cases("cursor"):
+            with self.subTest(case=name):
+                own = self.saved("cursor", name)
+                claude = answer("claude", self.run_guard(self.claude_form(self.command("cursor", name))))
+                self.assertEqual(claude, own)
+                self.assertEqual(self.saved("cursor", name), own)
+        self.assertEqual([(r["class"], r["harness"]) for r in self.refusals()], [(CASES[n], "cursor") for n in refused])
+
+    def test_cursor_logs_one_line_whatever_harness_the_claude_form_input_is_read_as(self):
+        # A Claude-form input from Cursor without `cursor_version` is read as Claude Code's; it still
+        # carries Cursor's conversation_id, and the command is logged once.
+        data = json.loads(self.claude_form(guard.PROBE))
+        del data["cursor_version"]
+        self.assertEqual(self.saved("cursor", "probe")[0], "deny")
+        self.assertEqual(answer("claude", self.run_guard(json.dumps(data)))[0], "deny")
+        self.assertEqual([(r["class"], r["harness"]) for r in self.refusals()], [("probe", "cursor")])
+
+    def test_cursor_logs_a_command_again_in_another_run_or_conversation(self):
+        self.saved("cursor", "probe")
+        self.world.write_mark(run="run-8")
+        self.saved("cursor", "probe")
+        other = self.text("cursor", "probe").replace(SESSION, "00000000-0000-4000-8000-000000000009")
+        answer("cursor", self.run_guard(other))
+        self.assertEqual([r["run"] for r in self.refusals()], ["run-7", "run-8", "run-8"])
+
+    def test_no_log_line_holds_a_session_or_conversation_id(self):
+        for harness in FORMS:
+            for name in self.cases(harness):
+                self.saved(harness, name)
+        self.assertEqual([list(line) for line in self.refusals()], [LOG_KEYS] * len(self.refusals()))
+        text = (self.world.state / guard.LOG).read_text(encoding="utf-8")
+        for value in (SESSION, AGENT, "00000000-0000-4000-8000-000000000002"):
+            self.assertNotIn(value, text)
+        self.assertNotIn(SESSION, " ".join(p.name for p in self.world.state.rglob("*")))
+
+    def test_the_harness_of_a_claude_form_input(self):
+        cases = [("session.json", {}, "claude-code"), ("session.json", {"CORTEX_SESSION_ID": "x"}, "cortex"),
+                 ("session.json", {"CODEX_THREAD_ID": "x"}, "codex"), ("session.json", {"CURSOR_AGENT": "1"}, "cursor")]
+        for recorded, env, _ in cases:
+            self.world.guard("gh pr merge 1", recorded, **env)
+        self.saved("cortex", "raw-merge", CODEX_THREAD_ID="x")
+        self.saved("codex", "raw-merge", CORTEX_SESSION_ID="x")
+        self.run_guard(self.claude_form("gh pr ready 1"), CORTEX_SESSION_ID="x")
+        self.assertEqual([r["harness"] for r in self.refusals()],
+                         [h for _, _, h in cases] + ["cortex", "codex", "cursor"])
 
 
 class Registration(unittest.TestCase):

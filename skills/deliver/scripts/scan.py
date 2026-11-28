@@ -368,7 +368,7 @@ def owners(main: list[dict], helpers: list[tuple[Path, list[dict]]], metas: dict
 
 
 def scan(session: str, log: Path) -> dict:
-    row: dict = {"session": session, "harness": "claude-code"}
+    row: dict = {"session": session, "harness": CLAUDE_CODE}
     blank = {**blank_tokens(), "copied_tokens": None, "active_minutes": None, "auto_compactions": None,
              "typed_compactions": None, "model": None, "skills": None, "helpers": None}
     if not log.is_file():

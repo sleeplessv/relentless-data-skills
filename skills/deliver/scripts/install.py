@@ -6,10 +6,11 @@ file, leaving every other entry alone (spec #457, "Install"; spec #479). On Curs
 into the checkout's `.cursor/agents/`, with one line each in the shared git directory's `info/exclude`,
 so it is run once per checkout. A second run changes nothing and says so. `--remove` takes out
 deliver's guard and deletes each role file that still matches the skill's copy. From the ledger
-`install` keeps in the machine directory, a file it finds as `install` left it gets back the bytes it held before, or is deleted if
-`install` made it; a file the owner changed since keeps those changes, a folder `install` made is
-deleted if nothing else is in it, and the ledger goes once nothing is installed. A role file the
-owner edited stays, and so does its exclude line. Claude Code refuses, as the plugin supplies both.
+`install` keeps in the machine directory, a file it finds as `install` left it gets back the bytes it
+held before, or is deleted if `install` made it; a file the owner changed since keeps those changes,
+a folder `install` made is deleted if nothing else is in it, and the ledger goes once nothing is
+installed. A role file the owner edited stays, and so does its exclude line. Claude Code refuses, as
+the plugin supplies both.
 
 Each thing `install` writes is an item with a state (`ok`, `missing` or `differs`), an `apply` and
 an `undo`. `checks_install` reads the same items, so preflight stops on the state `install` fixes.
@@ -269,7 +270,7 @@ class HookEntry:
 
 
 class ExcludeLine:
-    """One line in a git `info/exclude` file, for a reader file in each of the repo's checkouts.
+    """One line in a git `info/exclude` file, for a role file in each of the repo's checkouts.
 
     `ours` is every line `install` writes to that file, so the last one out can give back its earlier bytes.
     """

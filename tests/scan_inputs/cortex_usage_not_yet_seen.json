@@ -1,0 +1,78 @@
+{
+  "version": 1,
+  "daily": {
+    "2026-11-28": {
+      "models": {
+        "claude-sonnet-test": {
+          "inputTokens": 590,
+          "outputTokens": 138,
+          "cacheReadTokens": 4100,
+          "cacheWriteTokens": 300
+        }
+      }
+    }
+  },
+  "sessions": {
+    "cortex-session-1": {
+      "date": "2026-11-28",
+      "startTime": 1795860000000,
+      "durationMs": 600000,
+      "recentRequestIds": [
+        "r1",
+        "r2"
+      ],
+      "models": {
+        "claude-sonnet-test": {
+          "inputTokens": 500,
+          "outputTokens": 120,
+          "cacheReadTokens": 4000,
+          "cacheWriteTokens": 300
+        },
+        "claude-haiku-test": {
+          "inputTokens": 50,
+          "outputTokens": 10,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0
+        }
+      }
+    },
+    "cortex-helper-1": {
+      "date": "2026-11-28",
+      "startTime": 1795860100000,
+      "durationMs": 60000,
+      "recentRequestIds": [
+        "r3"
+      ],
+      "rootSessionId": "cortex-session-1",
+      "models": {
+        "claude-haiku-test": {
+          "inputTokens": 40,
+          "outputTokens": 8,
+          "cacheReadTokens": 100,
+          "cacheWriteTokens": 0
+        }
+      }
+    },
+    "cortex-other-session": {
+      "date": "2026-11-28",
+      "startTime": 1795800000000,
+      "durationMs": 1000,
+      "recentRequestIds": [],
+      "models": {
+        "claude-sonnet-test": {
+          "inputTokens": 7,
+          "outputTokens": 7,
+          "cacheReadTokens": 7,
+          "cacheWriteTokens": 7
+        }
+      }
+    },
+    "cortex-session-no-models": {
+      "date": "2026-11-28",
+      "startTime": 1795800000000,
+      "durationMs": 1000,
+      "recentRequestIds": [],
+      "models": {}
+    }
+  }
+}

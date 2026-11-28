@@ -110,6 +110,12 @@ REFUSALS = {
     "merge.no-history": "the history of origin/{base} cannot be read: {error}",
     "finish.no-mark": NO_MARK,
     "deps.missing-skill": "a required upstream skill is not installed: {skills}",
+    "install.claude-code": "on Claude Code the plugin supplies the reader and the guard, so install it with the plugin",
+    "install.wrong-harness": "this session runs on {detected}, not {harness}. Run install for {harness} from a plain shell",
+    "install.bad-hook-file": "{path} cannot be read as a hook file: {error}",
+    "install.not-a-checkout": "{harness} loads the reader only from a checkout's .cursor/agents/, so run install inside the checkout",
+    "preflight.install-missing": "deliver is not installed on {harness}: {path} lacks what install writes",
+    "preflight.install-differs": "deliver's files on {harness} differ from the skill's copy: {path}",
 }
 
 

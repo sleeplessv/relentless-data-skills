@@ -164,8 +164,9 @@ reach for outside Cursor too, so it is worth symlinking into `~/.claude/skills`.
 ## Install
 
 Every skill but `deliver` installs the same three ways. Substitute `<skill>` with a skill
-directory name from the table above (e.g. `prefect`). `deliver` installs as a Claude Code
-plugin only, as [its own section](#deliver) says.
+directory name from the table above (e.g. `prefect`). `deliver` installs as a plugin on
+Claude Code, and with `npx skills` and `deliver.py install` on Cortex Code, Codex, Cursor and
+Antigravity, as [its own section](#deliver) says.
 
 ### `npx skills` (cross-agent: Claude Code, Cursor, Codex, OpenCode, …)
 
@@ -196,8 +197,11 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
 
 ### `deliver`
 
-`deliver` installs as a Claude Code plugin, which brings its skill, its guard hook
-(`hooks/hooks.json`) and its reader agent (`agents/`).
+On Claude Code, `deliver` installs as a plugin, which brings its skill, its guard hook
+(`hooks/hooks.json`) and its reader agent (`agents/`). On Cortex Code, Codex, Cursor and
+Antigravity, it installs with `npx skills`, and `deliver.py install` adds the reader and the guard.
+
+#### Install on Claude Code
 
 1. Add this repo as a marketplace and install the plugin:
 
@@ -220,6 +224,66 @@ ln -s "$(pwd)/relentless-data-skills/skills/<skill>" ~/.claude/skills/<skill>
    npx skills add DietrichGebert/ponytail -g -y -s ponytail-review
    ```
 
+#### Install on Cortex Code, Codex, Cursor or Antigravity
+
+Run these steps from a plain shell, not inside a session. Without `uv`, use `python3` in place
+of `uv run --python 3.13 --no-project`, with a `python3` of 3.13 or newer.
+
+1. Install the skill:
+
+   ```bash
+   npx skills add sleeplessv/relentless-data-skills -g -y -s deliver
+   ```
+
+2. Install `code-review`, `ponytail-review` and `pr`. They are required, and preflight stops
+   when any of them is missing.
+
+   ```bash
+   npx skills add mattpocock/skills -g -y -s code-review -s pr
+   npx skills add DietrichGebert/ponytail -g -y -s ponytail-review
+   ```
+
+3. Add the reader and the guard. Put `cortex-code`, `codex`, `cursor` or `antigravity` in place of
+   `<harness>`.
+
+   ```bash
+   uv run --python 3.13 --no-project ~/.agents/skills/deliver/scripts/deliver.py install <harness>
+   ```
+
+   `install` writes the reader's file and adds the guard to the harness's user hook file. It
+   leaves the hook file's other entries alone, and a second run changes nothing. Preflight
+   stops when a file that `install` writes is missing or differs, and names this command.
+4. On Codex, trust the hook. Codex runs no hook that you have not trusted, and asks again
+   after each change to the hook file. Start `codex`, type `/hooks`, trust deliver's guard,
+   then quit. `install codex` prints this step each time it changes the hook file.
+5. On Cursor, run step 3 once in each checkout where you use `deliver`, from inside that
+   checkout. Cursor loads the reader only from the checkout's `.cursor/agents/` folder.
+   `install cursor` writes the reader there and adds one line for it to the repo's
+   `.git/info/exclude`, which all the repo's worktrees share. It adds the guard to
+   `~/.cursor/hooks.json` once.
+
+#### Remove `deliver`
+
+On Claude Code, run `claude plugin uninstall deliver@relentless-data-skills`.
+
+On the other four, run `install --remove` before you remove the skill, because the skill holds
+`deliver.py`:
+
+```bash
+uv run --python 3.13 --no-project ~/.agents/skills/deliver/scripts/deliver.py install --remove <harness>
+npx skills remove -g deliver
+```
+
+`install --remove` takes out deliver's guard and each reader file that still matches the
+skill's copy. From the record `install` keeps in deliver's machine folder, a file that is as
+`install` left it gets back the bytes it held before, or is deleted if `install` made it. A file
+you changed since keeps your changes, and a folder that `install` made is deleted if nothing else
+is in it. A reader file you edited stays, and `--remove` says so.
+On Cursor, run it in each checkout where you ran `install cursor`. The exclude line, which the
+checkouts share, comes out once no checkout holds the reader file.
+
+#### Settings
+
 `deliver` reads a repo's settings from `docs/agents/stack.toml` in that repo, and a
 missing file gives every default. Set `check_command` to the command that runs the repo's
 checks. When you set `[small_edit] dependents_command`, `ready` runs it in the checkout
@@ -233,7 +297,7 @@ on the first tracked path, or on no path in an empty repo, and warns when it fai
 ## Repo layout
 
 - `skills/<skill>/`: each skill has `SKILL.md`, a `plugin.json`, a `README.md`, and any `references/`. Workflow skills can depend on companion skills.
-- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `gate_check.py`, the CI check that a PR into the default branch that changes `skills/deliver/` carries the evidence its `## Change kind` needs, checked only when the PR's base already holds `skills/deliver/`, `gen_roles.py`, which writes `deliver`'s role files in `skills/deliver/agents/` and checks them, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`. `deliver.py report` imports `draw.py`, `judge.py` and `replay.py` from the `scripts/` folder of the repo that holds its own copy. The plugin does not ship them, so run `deliver.py report` from a clone of this repo.
+- `scripts/`: repo tooling, not installed with any skill: `check.sh` and the checks it and CI run, `draw.py`, which draws the replay set, `replay.py`, which reruns one ticket of it with one agent, `judge.py`, which judges one version of a replay ticket, `gate_check.py`, the CI check that a PR into the default branch that changes `skills/deliver/` carries the evidence its `## Change kind` needs, checked only when the PR's base already holds `skills/deliver/`, `gen_roles.py`, which writes `deliver`'s role files in `skills/deliver/agents/` and its files for the other harnesses in `skills/deliver/harness/`, and checks them, and `statusline_screenshots.py`, which renders the statusline README's screenshots. The scan of a Claude Code session's log and the report on the replay set are `deliver.py scan` and `deliver.py report`, in `skills/deliver/scripts/`. `deliver.py report` imports `draw.py`, `judge.py` and `replay.py` from the `scripts/` folder of the repo that holds its own copy. The plugin does not ship them, so run `deliver.py report` from a clone of this repo.
 - `.claude-plugin/marketplace.json`: declares the repo as a Claude Code marketplace, one plugin entry per skill. The `plugins` array is generated from each skill's `plugin.json` by `scripts/sync_registry.py`.
 
 ## Maintenance and CI

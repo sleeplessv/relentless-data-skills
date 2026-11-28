@@ -27,12 +27,20 @@ CURSOR_WARNING = ("warning: on Cursor the guard cannot tell an agent from the se
                   "keeps an agent from running deliver.py merge\n")
 
 
+def install_everywhere(world) -> None:
+    """Run `deliver.py install` for each harness, so preflight's install check (#459) passes."""
+    for name in VARS:
+        result = world.deliver("install", name, cwd=world.work)
+        assert result.returncode == 0, result.stdout + result.stderr
+
+
 class Harness(unittest.TestCase):
     def setUp(self):
         self.world = deliver_kit.World(self.addCleanup)
         self.world.write_mark(run="run-5")
         self.world.probe()
         self.world.install_upstream()
+        install_everywhere(self.world)
         deliver_kit.github_ok(self.world)
         (self.world.work / "docs" / "agents").mkdir(parents=True)
         (self.world.work / "docs" / "agents" / "stack.toml").write_text('check_command = "make check"\n',
@@ -125,6 +133,7 @@ class RequiredSkillsOffClaudeCode(unittest.TestCase):
         world.write_mark(run="run-6")
         world.probe()
         world.install_upstream()
+        install_everywhere(world)
         deliver_kit.github_ok(world)
         (world.work / "docs" / "agents").mkdir(parents=True)
         (world.work / "docs" / "agents" / "stack.toml").write_text('check_command = "make check"\n', encoding="utf-8")

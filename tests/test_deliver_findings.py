@@ -109,7 +109,7 @@ CALC = "".join(f"line {n}\n" for n in range(1, 11))
 REQUIREMENTS_REPORT = """\
 R1: met: `echo ok`
 
-R2: not met: calc.py:3 still says line 3
+R2: not met: calc.py:3 still says line 3.
 F1: calc.py:3: the new line is wrong. Evidence: `echo ok` prints the wrong line
 F2: calc.py:3: the new line may be slow. Evidence: none
 F3: calc.py:8: an old line is odd. Evidence: none
@@ -188,7 +188,7 @@ class SaveReview(unittest.TestCase):
         self.assertEqual(self.reviews(), [{
             "event": "review", "role": "requirements", "round": 0, "commit": self.head,
             "file": "reviews/requirements-0.md", "answers": {"R1": "met", "R2": "not met"}, "findings": [
-                finding("F1", "R2", "not met: calc.py:3 still says line 3", "R2 not met", "in", True),
+                finding("F1", "R2", "not met: calc.py:3 still says line 3.", "R2 not met", "in", True),
                 finding("F2", "calc.py:3", "the new line is wrong", "`echo ok` prints the wrong line", "in", True),
                 finding("F3", "calc.py:3", "the new line may be slow", "none", "in", False),
                 finding("F4", "calc.py:8", "an old line is odd", "none", "out", False),

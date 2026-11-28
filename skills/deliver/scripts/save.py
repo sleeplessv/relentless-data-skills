@@ -116,6 +116,6 @@ def review(role: str, run: core.Run) -> None:
     for f in numbered:
         scope = "in scope" if f["scope"] == "in" else "out of scope"
         print(f"{f['number']} ({scope}, {'proven' if f['proven'] else 'not proven'}) {f['where']}: "
-              f"{f['text']}. Next: {findings.next_step(f)}.")
+              f"{f['text'].rstrip('.')}. Next: {findings.next_step(f)}.")
     if not numbered:
         print("No findings.")

@@ -206,7 +206,7 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
     if found:
         out += ["| # | From | Finding | Scope | State |", "|---|---|---|---|---|"]
         for f in found:
-            text = f"`{f['where']}`: {f['text']}" + (f"; {f['evidence']}" if f["proven"] else "")
+            text = f"`{f['where']}`: {f['text'].rstrip('.')}" + (f"; {f['evidence']}" if f["proven"] else "")
             out.append(f"| {f['number']} | {findings.REPORTERS[f['reviewer']]} | {_cell(shown(text))} | {f['scope']} "
                        f"| {findings.state(f)} |")
     else:

@@ -91,12 +91,18 @@ def state_line(run: core.Run, branch: str, recs: list[dict], pr: cleanup.Pr | No
         return STATE["none"].format(who=who)
     if pr.state in ("MERGED", "CLOSED"):
         return STATE[pr.state.lower()].format(who=who, number=pr.number)
-    decision = [r for r in recs if r["event"] in ("ready", "merge") and r.get("commit") == pr.head]
+    form, why = open_state(recs, pr.head)
+    return STATE[form].format(who=who, why=why, number=pr.number)
+
+
+def open_state(recs: list[dict], head: str) -> tuple[str, str]:
+    """The `STATE` form of an open PR at `head`, from the run's records, and why a ready PR waits ("" when it does
+    not say): the newest `ready` or `merge` record on the head commit decides."""
+    decision = [r for r in recs if r["event"] in ("ready", "merge") and r.get("commit") == head]
     newest = decision[-1] if decision else None
     if newest and newest["event"] == "merge":
-        why = f" ({newest['merge_line'].removeprefix('merge: ')})"
-        return STATE["ready"].format(who=who, why=why, number=pr.number)
+        return "ready", f" ({newest['merge_line'].removeprefix('merge: ')})"
     result = newest.get("result") if newest else None
     if result == "small edit":
-        return STATE["ready"].format(who=who, why="", number=pr.number)
-    return STATE["review" if result == "needs review" else "draft"].format(who=who, number=pr.number)
+        return "ready", ""
+    return ("review" if result == "needs review" else "draft"), ""

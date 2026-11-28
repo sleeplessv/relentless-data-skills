@@ -140,12 +140,24 @@ class World:
             self.run("generation-one", ticket, at < first)
             self.run("direct", ticket, at < second)
 
-    def ended(self, ticket: dict, prs: list[dict] | None, records: list[dict] = ()) -> None:
+    def ended(self, ticket: dict, prs: list[dict] | None, records: Sequence[dict] = ()) -> None:
         """A deliver replay of the ticket whose clone holds what the stand-in gh and deliver left: prs.json with
-        these PRs (none at all for None, as when the session called no gh) and the records of the branch
-        deliver/ticket-<n>, as `deliver.py` appends them."""
+        these PRs (none at all for None, as when the session called no gh), the branch deliver/ticket-<n> pushed to
+        the clone's bare remote at one commit, and that branch's records, as `deliver.py` appends them. A record's
+        commit of HEAD stands for the pushed commit."""
         git = self.state / self.replay(ticket, "deliver")["clone"] / ".git"
         git.mkdir(parents=True)
+        branch = f"deliver/ticket-{ticket['ticket']}"
+        origin = git / "replay-origin.git"
+        env = {**os.environ, "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_AUTHOR_NAME": "t",
+               "GIT_AUTHOR_EMAIL": "t@example.invalid", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@example.invalid"}
+        def run(*args: str) -> str:
+            return subprocess.run(["git", "--git-dir", str(origin), *args], env=env, check=True, capture_output=True,
+                                  text=True, input="").stdout.strip()
+        subprocess.run(["git", "init", "-q", "--bare", str(origin)], env=env, check=True)
+        head = run("commit-tree", run("mktree"), "-m", "the change")
+        run("update-ref", f"refs/heads/{branch}", head)
         if prs is not None:
             (git / "replay-deliver").mkdir()
             (git / "replay-deliver" / "prs.json").write_text(json.dumps(prs))
@@ -153,7 +165,9 @@ class World:
             folder = git / "deliver" / "branches" / "deliver" / f"ticket-{ticket['ticket']}"
             folder.mkdir(parents=True)
             (folder / "records.jsonl").write_text("".join(
-                json.dumps({"at": "2026-11-28T10:00:00Z", **record}) + "\n" for record in records))
+                json.dumps({"at": "2026-11-28T10:00:00Z", **record, **({"commit": head}
+                                                                         if record.get("commit") == "HEAD" else {})})
+                + "\n" for record in records))
 
     def save(self) -> None:
         for name, lines in (("versions", self.versions), ("verdicts", self.verdicts), ("scan-rows", self.rows)):
@@ -896,39 +910,45 @@ class TestReport(unittest.TestCase):
             "The two verdicts differ: the spend not sorted decides the sign."])
 
     def test_the_deliver_lines_count_where_each_replay_ended_per_bucket(self) -> None:
-        tickets = self.world.draw(per_bucket=3)  # buckets in turn: 0-50, 51-300, 301-1500, three times
+        tickets = self.world.draw(per_bucket=4)  # buckets in turn: 0-50, 51-300, 301-1500, four times
 
         def pr(ticket: dict, state: str = "OPEN", draft: bool = False) -> dict:
             return {"number": 1, "url": "https://github.invalid/replay/A/pull/1",
                     "headRefName": f"deliver/ticket-{ticket['ticket']}", "baseRefName": "main", "title": "t",
                     "body": "b", "state": state, "isDraft": draft}
-        ready, review = {"event": "ready", "commit": commit(1), "result": "small edit"}, {
-            "event": "ready", "commit": commit(1), "result": "needs review"}
-        handed = {"event": "merge", "commit": commit(1), "method": None,
+
+        def ready(result: str, at: str = "HEAD") -> dict:
+            return {"event": "ready", "commit": at, "result": result}
+        start = {"event": "start", "run": "r1"}
+        handed = {"event": "merge", "commit": "HEAD", "method": None,
                   "merge_line": "merge: left to the owner, one-way door"}
         self.world.ended(tickets[0], [pr(tickets[0], "MERGED")])  # its records removed by cleanup after the merge
-        self.world.ended(tickets[1], [pr(tickets[1])], [ready])
-        self.world.ended(tickets[2], [pr(tickets[2])], [ready, handed])
-        self.world.ended(tickets[3], [pr(tickets[3], draft=True)], [review])
+        self.world.ended(tickets[1], [pr(tickets[1])], [start, ready("small edit")])
+        self.world.ended(tickets[2], [pr(tickets[2])], [start, ready("small edit"), handed])
+        self.world.ended(tickets[3], [pr(tickets[3], draft=True)], [start, ready("needs review")])
         self.world.ended(tickets[4], [])  # gh was called, and no PR was opened
         self.world.ended(tickets[5], None)  # gh was never called
-        self.world.ended(tickets[6], [pr(tickets[6], draft=True)])  # a draft that ready did not send to review
+        self.world.ended(tickets[6], [pr(tickets[6], draft=True)])  # a draft with no ready record
         self.world.replay(tickets[7], "deliver")  # a clone that is gone
-        lines = self.lines()  # tickets[8] has no deliver replay
-        start = lines.index("deliver")
-        self.assertEqual(lines[start + 8:], [
+        self.world.ended(tickets[8], [pr(tickets[8])], [start, ready("small edit", commit(1))])  # ready at an older head
+        self.world.ended(tickets[9], [pr(tickets[9])])  # not a draft, with no records
+        self.world.ended(tickets[10], [pr(tickets[10], draft=True)], [start, ready("needs review", commit(1))])
+        # tickets[11] has no deliver replay
+        lines = self.lines()
+        start_at = lines.index("deliver")
+        self.assertEqual(lines[start_at + 8:], [
             "  Where the replays ended, 0-50: 1 merged, 0 ready, 0 handed to the owner, 1 draft needing a review, "
-            "0 stopped before the PR, 1 other or not read.",
+            "0 stopped before the PR, 2 other or not read.",
             "  Where the replays ended, 51-300: 0 merged, 1 ready, 0 handed to the owner, 0 draft needing a review, "
-            "1 stopped before the PR, 1 other or not read.",
+            "1 stopped before the PR, 2 other or not read.",
             "  Where the replays ended, 301-1500: 0 merged, 0 ready, 1 handed to the owner, 0 draft needing a review, "
-            "1 stopped before the PR, 0 other or not read.",
+            "1 stopped before the PR, 1 other or not read.",
             "  Where the replays ended, All: 1 merged, 1 ready, 1 handed to the owner, 1 draft needing a review, "
-            "2 stopped before the PR, 2 other or not read.",
+            "2 stopped before the PR, 5 other or not read.",
             "",
             *lines[lines.index("Warning sign 1: no verdict. Tickets without both generation-one and direct judged: "
-                               "9 of 9."):]])
-        self.assertFalse([line for line in lines[:start] if "ended" in line])
+                               "12 of 12."):]])
+        self.assertFalse([line for line in lines[:start_at] if "ended" in line])
 
     def test_a_third_version_is_printed_beside_the_other_two(self) -> None:
         tickets = self.world.draw(per_bucket=1)

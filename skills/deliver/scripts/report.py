@@ -17,8 +17,10 @@ sys.dont_write_bytecode = True  # importing the siblings would otherwise write _
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # The replay scripts stay in this repo's scripts/, so the report runs from this repo's tree only.
 sys.path.insert(1, str(Path(__file__).resolve().parents[3] / "scripts"))
+import cleanup  # noqa: E402
 import core  # noqa: E402
 import draw  # noqa: E402  (a replay script, not an installed package)
+import finish  # noqa: E402
 import judge  # noqa: E402
 import replay  # noqa: E402
 import scan  # noqa: E402
@@ -165,13 +167,15 @@ tokens and counted.
 
 The {DELIVER} block then counts, per size bucket and over the sets, where each
 {DELIVER} replay of a ticket in the sets ended, read from its clone as the
-replay left it. The last PR the stand-in gh holds says it: merged; open and
-not a draft, which is ready, or handed to the owner when the newest ready or
-merge record of the PR's branch is a merge record; a draft whose newest such
-record is a ready record with result "needs review", a draft needing a review.
-A replay with no PR stopped before the PR. A clone that is gone, a clone file
-that cannot be read, a closed PR, and any other draft count as other or not
-read, and do not stop the report.
+replay left it. A replay with no PR stopped before the PR; one whose last PR
+the stand-in gh holds is merged counts as merged. An open PR takes the form
+deliver.py finish gives it, from the records of the newest run on the PR's
+branch and the head the clone's bare remote holds for that branch: the newest
+ready or merge record on that head decides. A merge record is handed to the
+owner, a ready record with result "small edit" is ready, and one with result
+"needs review" is a draft needing a review. A clone that is gone, a file or
+head that cannot be read, a closed PR, and an open PR with no such record on
+its head count as other or not read, and do not stop the report.
 
 
 {textwrap.fill(
@@ -233,10 +237,13 @@ Files read, all written by the other scripts:
                         not_direct of each line, and clone of each {DELIVER}
                         line (scripts/replay.py).
   <clone>/.git/{replay.STAND_IN}/prs.json
-                        state, isDraft and headRefName of the last PR
+                        state and headRefName of the last PR
                         (scripts/replay_gh.py).
+  <clone>/.git/{replay.ORIGIN}
+                        the commit refs/heads/<branch> names.
   <clone>/.git/deliver/branches/<branch>/{core.RECORDS}
-                        event and result of each record (deliver.py).
+                        event, run, commit, result and merge_line of each
+                        record (deliver.py).
   verdicts.jsonl        label, ticket, version, commit and right_first_time
                         of each line (scripts/judge.py).
   scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes
@@ -442,8 +449,10 @@ def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: di
 
 
 def ending(clone: Path) -> str:
-    """Where the deliver replay in `clone` ended: from the stand-in gh's PRs, then the records of the last PR's branch,
-    read as `deliver.py finish` reads its state line. A clone or file that cannot be read is OTHER."""
+    """Where the deliver replay in `clone` ended. The last PR the stand-in gh holds gives merged, closed or open. An
+    open PR takes the form `deliver.py finish` gives its state line (`finish.open_state`), from the records of the
+    newest run on the PR's branch, at the head the clone's bare remote holds for that branch. A clone, file or ref
+    that cannot be read is OTHER."""
     try:
         if not clone.is_dir():
             return OTHER
@@ -454,13 +463,13 @@ def ending(clone: Path) -> str:
         pr = prs[-1]
         if pr["state"] != "OPEN":
             return MERGED if pr["state"] == "MERGED" else OTHER
-        log = core.records_dir(clone / ".git", pr["headRefName"]) / core.RECORDS
-        records = [json.loads(line) for line in log.read_text().splitlines() if line.strip()] if log.is_file() else []
-        newest = ([record for record in records if record.get("event") in ("ready", "merge")] or [{}])[-1]
-        if not pr["isDraft"]:  # merge writes its record when it leaves the PR to the owner
-            return HANDED if newest.get("event") == "merge" else READY
-        return REVIEW if newest.get("result") == "needs review" else OTHER
-    except (OSError, ValueError, LookupError, TypeError, AttributeError):
+        head = replay.git(clone / ".git" / replay.ORIGIN, "rev-parse", "--verify", "-q",
+                          f"refs/heads/{pr['headRefName']}")
+        log = cleanup.read_records(clone / ".git", pr["headRefName"])
+        newest = cleanup.latest(log, "start")
+        form, why = finish.open_state(cleanup.run_records(log, newest.get("run")) if newest else log, head)
+        return {"ready": HANDED if why else READY, "review": REVIEW}.get(form, OTHER)
+    except (OSError, ValueError, LookupError, TypeError, AttributeError, replay.ReplayError):
         return OTHER
 
 

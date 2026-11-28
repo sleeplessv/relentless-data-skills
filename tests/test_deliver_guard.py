@@ -15,7 +15,8 @@ names and other private values are placeholders in angle brackets; the tests rep
 `<brain>`, and the rest (`<transcript>`, `<home>`, `<model>`, `<version>`, `<summary>`,
 `<description>`) stay as literal text.
 A shape no run has logged ends `_not_yet_seen`: an agent's call on Cortex Code, and the
-project's Claude Code hook as Cursor runs it.
+project's Claude Code hook as Cursor runs it. `cursor/empty-cwd.json` is Cursor's input when the
+model names no folder (#464): `cwd` is empty and the workspace is in `workspace_roots`.
 
     python3 -m unittest tests.test_deliver_guard
 """
@@ -381,6 +382,52 @@ class Harnesses(unittest.TestCase):
         other = self.text("cursor", "probe").replace(SESSION, "00000000-0000-4000-8000-000000000009")
         answer("cursor", self.run_guard(other))
         self.assertEqual([r["run"] for r in self.refusals()], ["run-7", "run-8", "run-8"])
+
+    def empty_cwd(self, command: str, **changes: object) -> str:
+        data = json.loads(self.text("cursor", "empty-cwd"))
+        data.update(command=command, **changes)
+        return json.dumps(data)
+
+    def test_cursor_with_an_empty_cwd_finds_the_mark_from_workspace_roots(self):
+        # #464: Cursor sends `"cwd": ""` when the model names no folder, and runs the hook from
+        # a folder outside the workspace; run_guard runs it from the world's root, outside the checkout.
+        refused = {guard.PROBE: "probe", "gh pr merge 12 --squash": "gh pr merge", "gh pr ready 12": "gh pr ready",
+                   "git push --force origin feat/x": "one-way"}
+        for command in refused:
+            with self.subTest(command=command):
+                decision, reason = answer("cursor", self.run_guard(self.empty_cwd(command)))
+                self.assertEqual(decision, "deny")
+                self.assertIn(f"\n{command}\n", reason)
+                self.assertIn(str(self.mark), reason)
+        self.assertEqual(answer("cursor", self.run_guard(self.empty_cwd("git status --short"))), ("allow", ""))
+        self.assertEqual([(r["class"], r["harness"]) for r in self.refusals()],
+                         [(cls, "cursor") for cls in refused.values()])
+
+    def test_cursor_a_non_empty_cwd_is_searched_before_workspace_roots(self):
+        outside = str(self.world.root)
+        self.assertEqual(answer("cursor", self.run_guard(self.empty_cwd(guard.PROBE, cwd=str(self.world.work),
+                                                                        workspace_roots=[outside])))[0], "deny")
+        # Both checkouts are marked: the answer names the mark of the one `cwd` names.
+        tree = self.world.worktree("tree", "feat/x")
+        tree_mark = self.world.write_mark(tree, branch="feat/x")
+        reason = answer("cursor", self.run_guard(self.empty_cwd(guard.PROBE, cwd=str(tree),
+                                                                workspace_roots=[str(self.world.work)])))[1]
+        self.assertIn(str(tree_mark), reason)
+        self.assertNotIn(str(self.mark), reason)
+
+    def test_cursor_workspace_roots_missing_not_a_list_or_not_strings_is_ignored(self):
+        work = str(self.world.work)
+        for roots in (None, work, {"0": work}, [5, None, {}, ["x"]], [""]):
+            with self.subTest(roots=roots):
+                data = json.loads(self.empty_cwd(guard.PROBE))
+                if roots is None:
+                    del data["workspace_roots"]
+                else:
+                    data["workspace_roots"] = roots
+                self.assertEqual(answer("cursor", self.run_guard(json.dumps(data))), ("allow", ""))
+        self.assertEqual(answer("cursor", self.run_guard(self.empty_cwd(guard.PROBE, workspace_roots=[5, work])))[0],
+                         "deny")
+        self.assertEqual([r["class"] for r in self.refusals()], ["probe"])
 
     def test_no_log_line_holds_a_session_or_conversation_id(self):
         for harness in FORMS:

@@ -54,6 +54,7 @@ held = sorted(str(p) for p in [*cwd.rglob("*"), *home.rglob("*")]
 with open(os.environ["STANDIN_STARTS"], "a") as starts:
     starts.write(json.dumps({"name": name, "args": args, "prompt": prompt, "cwd": str(cwd),
                              "state_dir": str(state), "cursor_agents": (cwd / ".cursor/agents").is_dir(),
+                             "request": (cwd / ".deliver/request.md").read_text() if (cwd / ".deliver/request.md").exists() else None,
                              "allow_rule_files": held}) + "\n")
 print("stand-in " + SESSION + " in " + str(cwd) + " started with " + " ".join(args), file=sys.stderr, flush=True)
 time.sleep(float(os.environ.get("STANDIN_SLEEP", "0")))
@@ -192,6 +193,8 @@ GIT = r'''#!{python}
 import json, os, sys
 with open(os.environ["STANDIN_GIT_LOG"], "a") as log:
     log.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
+if os.environ.get("STANDIN_GIT_REFUSE_FORCE") and "--force" in sys.argv:
+    sys.exit(1)
 os.execv({git!r}, ["git", *sys.argv[1:]])
 '''
 
@@ -263,7 +266,7 @@ class World:
 
     def drive(self, *args: str, **env: str) -> tuple[int, str, str]:
         """Run the driver once, its output sent to files, and return its exit code, stdout and stderr."""
-        if args[:1] == ("run",):
+        if args[:1] == ("run",) and "--fixture" not in args:
             args += ("--fixture", FIXTURE, "--poll", "0.05")
         out, err = self.root / "driver.out", self.root / "driver.err"
         with open(out, "w") as stdout, open(err, "w") as stderr:
@@ -294,17 +297,209 @@ class CrossHarnessTest(unittest.TestCase):
             self.assertNotIn(str(self.world.root), text)
         return code, out.splitlines()
 
-    def test_g_and_t1_pass_on_claude_code(self):
-        code, out = self.drive("run", "claude", "G", "T1")
-        self.assertEqual(out, [
-            "G claude passed: preflight passed as claude-code; the guard refused the probe, a raw gh pr merge, "
-            "a raw gh pr ready, the one-way command, the agent's deliver.py merge and the agent's probe; "
-            "the control command ran; tokens: 12 in, 340 out",
-            "T1 claude passed: one session and no agent; the small test passed; the session merged PR 7; "
-            "tokens: 12 in, 340 out",
-        ])
+    def run_on(self, harness: str, *tasks: str, **env: str) -> tuple[int, list[str]]:
+        connection = ("--connection", CONNECTION) if harness == "cortex" else ()
+        return self.drive("run", harness, *(tasks or ("G", "T1")), *connection, **env)
+
+    def test_g_and_t1_pass_on_each_harness(self):
+        refused = "the probe, a raw gh pr merge, a raw gh pr ready, the one-way command and the agent's deliver.py merge"
+        g_facts = {
+            "claude": ("preflight passed as claude-code; the guard refused the probe, a raw gh pr merge, a raw gh pr "
+                       "ready, the one-way command, the agent's deliver.py merge and the agent's probe; "
+                       "the control command ran"),
+            "cortex": f"preflight passed as cortex-code; the guard refused {refused}; the control command ran",
+            "codex": f"preflight passed as codex; the guard refused {refused}; the control command ran",
+            "cursor": ("preflight passed as cursor; preflight warned that the guard cannot tell an agent from the "
+                       "session; the guard refused the probe, a raw gh pr merge, a raw gh pr ready and the one-way "
+                       "command; the control command ran"),
+            "antigravity": (f"preflight passed as antigravity; the guard refused {refused}; the control command ran; "
+                            "denied_actions: none"),
+        }
+        for harness in HARNESSES:
+            with self.subTest(harness=harness):
+                code, out = self.run_on(harness)
+                self.assertEqual(out, [
+                    f"G {harness} passed: {g_facts[harness]}; tokens: 12 in, 340 out",
+                    f"T1 {harness} passed: one session and no agent; the small test passed; the session merged PR 7; "
+                    "tokens: 12 in, 340 out",
+                ])
+                self.assertEqual(code, 0)
+
+    def test_each_harness_gets_its_headless_command(self):
+        plugin = str(self.world.tree / "skills" / "deliver")
+        expected = {
+            "claude": ["-p", "{prompt}", "--output-format", "stream-json", "--verbose", "--setting-sources", "project",
+                       "--no-session-persistence", "--permission-mode", "acceptEdits", "--allowedTools",
+                       "Agent,Read,Write,Edit,Bash,Glob,Grep", "--plugin-dir", plugin],
+            "cortex": ["-p", "{prompt}", "--output-format", "stream-json", "--bypass", "-c", CONNECTION],
+            "codex": ["exec", "--json", "--sandbox", "workspace-write", "--skip-git-repo-check", "{prompt}"],
+            "cursor": ["-p", "--output-format", "stream-json", "--force", "{prompt}"],
+            "antigravity": ["-p", "{prompt}", "--output-format", "stream-json", "--mode", "accept-edits",
+                            "--settings", '{"permissions": {"allow": ["command(*)"]}}'],
+        }
+        for harness in HARNESSES:
+            with self.subTest(harness=harness):
+                before = len(self.world.starts())
+                self.run_on(harness, "T1")
+                start, = self.world.starts()[before:]
+                self.assertEqual(start["name"], COMMAND_NAMES[harness])
+                self.assertEqual([part if part != start["prompt"] else "{prompt}" for part in start["args"]],
+                                 expected[harness])
+                self.assertEqual(start["allow_rule_files"], [])  # the allow rule is on the command line only
+                self.assertEqual(Path(start["state_dir"]).name, "state")  # the run's own machine directory
+                self.assertNotEqual(start["state_dir"], str(self.world.state))
+
+    def test_cursor_runs_install_in_the_clone_before_the_session(self):
+        self.run_on("cursor", "T1")
+        install, = lines(self.world.root / "deliver.jsonl")
+        start, = self.world.starts()
+        self.assertEqual(install, {"args": ["install", "cursor"], "cwd": start["cwd"]})
+        self.assertTrue(start["cursor_agents"])
+
+    def test_t1_types_the_skill_with_the_small_edit_text(self):
+        text = ("Reword the docstring of `add` in `calc.py` so it says what the function returns. "
+                "Change one line and nothing else.")
+        for harness in HARNESSES:
+            with self.subTest(harness=harness):
+                before = len(self.world.starts())
+                self.run_on(harness, "T1")
+                start, = self.world.starts()[before:]
+                self.assertEqual(start["prompt"], ("$deliver " if harness == "cortex" else "/deliver ") + text)
+
+    def test_g_lists_the_commands_in_order(self):
+        deliver = f"uv run --python 3.13 --no-project {self.world.tree}/skills/deliver/scripts/deliver.py"
+        commands = [f"{deliver} start request", PROBE, f"{deliver} preflight", "gh pr merge", "gh pr ready",
+                    "./.cross-harness/deploy.sh production", "./.cross-harness/control.sh"]
+        for harness, agent in (("codex", [f"{deliver} merge"]), ("claude", [PROBE, f"{deliver} merge"])):
+            with self.subTest(harness=harness):
+                before = len(self.world.starts())
+                self.run_on(harness, "G")
+                start, = self.world.starts()[before:]
+                prompt = start["prompt"]
+                self.assertEqual(re.findall(r"`([^`]+)`", prompt), [*commands, *agent, f"{deliver} finish"])
+                self.assertIn("\n8. Start one agent of your default kind, give it this task and wait for it to "
+                              "finish: ", prompt)
+                self.assertEqual(start["request"], "Run the guard commands of the cross-harness task G. Change no file.\n")
+                clone = Path(start["cwd"])
+                self.assertFalse((clone / ".cross-harness").exists())  # the clone is gone after the run
+
+
+    def test_each_g_failure_names_its_fact_and_stops_the_harness(self):
+        cases = {
+            "drop=probe": "the guard did not refuse the probe; the guard did not refuse the agent's probe",
+            "drop=gh pr merge": "the guard did not refuse a raw gh pr merge",
+            "drop=gh pr ready": "the guard did not refuse a raw gh pr ready",
+            "drop=one-way": "the guard did not refuse the one-way command",
+            "drop=deliver.py merge": "the guard did not refuse the agent's deliver.py merge",
+            "no-agent-probe": "the guard did not refuse the agent's probe",
+            "oneway-ran": "the one-way command ran",
+            "no-control": "the control command did not run",
+            "preflight-stop": "preflight stopped: preflight.no-gh",
+            "harness=codex": "preflight named the harness codex, not claude-code",
+            "no-finish": "no finish record",
+        }
+        for knob, fact in cases.items():
+            with self.subTest(knob=knob):
+                code, out = self.run_on("claude", STANDIN=knob)
+                self.assertEqual(out, [f"G claude failed: {fact}; tokens: 12 in, 340 out", "T1 claude not run: G failed"])
+                self.assertEqual(code, 1)
+
+    def test_g_fails_on_cursor_without_the_warning_and_on_a_nonzero_exit(self):
+        code, out = self.run_on("cursor", "G", STANDIN="no-warning")
+        self.assertEqual(out, ["G cursor failed: preflight did not warn that the guard cannot tell an agent from the "
+                               "session; tokens: 12 in, 340 out"])
+        code, out = self.run_on("codex", "G", STANDIN_EXIT="3")
+        self.assertEqual(out, ["G codex failed: the harness exited 3; tokens: 12 in, 340 out"])
+        self.assertEqual(code, 1)
+
+    def test_each_t1_failure_names_its_fact(self):
+        cases = {
+            ("claude", "agent"): "the session started an agent",
+            ("codex", "agent"): "the session started an agent",
+            ("cursor", "agent"): "the session started an agent",
+            ("antigravity", "agent"): "the session started an agent",
+            ("claude", "no-small-test"): "the measurement block has no small test line",
+            ("claude", "merge-owner"): "the measurement block has no merge line by the session",
+            ("claude", "not-merged"): "PR 7 is not merged",
+            ("claude", "no-merge"): "the measurement block has no merge line by the session; no merge record",
+            ("antigravity", "denied"): "denied_actions holds 1",
+        }
+        for (harness, knob), fact in cases.items():
+            with self.subTest(harness=harness, knob=knob):
+                code, out = self.run_on(harness, "T1", STANDIN=knob)
+                self.assertEqual(out, [f"T1 {harness} failed: {fact}; tokens: 12 in, 340 out"])
+                self.assertEqual(code, 1)
+
+    def test_tokens_print_blank_where_the_output_has_none(self):
+        code, out = self.run_on("codex", "T1", STANDIN="no-usage")
+        self.assertEqual(out, ["T1 codex passed: one session and no agent; the small test passed; the session merged "
+                               "PR 7; tokens: blank in, blank out"])
         self.assertEqual(code, 0)
 
+    def test_a_run_past_its_limit_fails_its_terminal_is_ended_and_the_fixture_reset(self):
+        code, out = self.run_on("claude", "G", "T1", "--time-limit", "1", STANDIN_SLEEP="30")
+        self.assertEqual(out, ["G claude failed: no finish within 1 seconds, terminal ended; tokens: blank in, blank out",
+                               "T1 claude not run: G failed"])
+        self.assertEqual(code, 1)
+        calls = lines(self.world.root / "hc" / "calls.jsonl")
+        self.assertEqual([call[0] for call in calls if call[0] != "get"], ["run", "kill"])
+        self.assertEqual(self.world.remote("rev-parse", "main"), self.world.base)
+
+    def test_the_reset_closes_the_open_prs_and_forces_only_the_base_tag_onto_the_default_branch(self):
+        code, out = self.run_on("claude", "T1")
+        self.assertEqual(code, 0)
+        self.assertEqual(self.world.remote("for-each-ref", "--format=%(refname)"), "refs/heads/main\nrefs/tags/base")
+        self.assertEqual(self.world.remote("rev-parse", "main"), self.world.base)
+        gh = lines(self.world.root / "gh" / "calls.jsonl")
+        self.assertIn(["pr", "close", "8", "--repo", FIXTURE, "--delete-branch"], gh)
+        self.assertEqual([call for call in gh if call[:2] == ["pr", "close"]], [["pr", "close", "8", "--repo", FIXTURE,
+                                                                               "--delete-branch"]])
+        pushes = [call["args"] for call in lines(self.world.root / "git.jsonl") if "push" in call["args"]]
+        forced = [args for args in pushes if any(a in ("--force", "-f") or a.startswith(("+", "--force")) for a in args)]
+        remote = str(self.world.root / "fixture.git")
+        self.assertEqual(forced, [["push", "--force", remote, f"{self.world.base}:refs/heads/main"]])
+        self.assertIn(["push", remote, "--delete", "deliver/run-1"], pushes)
+
+    def test_a_failed_reset_prints_its_line_and_stops_the_harness(self):
+        code, out = self.run_on("codex", STANDIN_GIT_REFUSE_FORCE="1")
+        self.assertEqual(out, [
+            "G codex passed: preflight passed as codex; the guard refused the probe, a raw gh pr merge, a raw gh pr "
+            "ready, the one-way command and the agent's deliver.py merge; the control command ran; tokens: 12 in, 340 out",
+            "G codex reset failed: the forced push exited 1",
+            "T1 codex not run: the reset failed",
+        ])
+        self.assertEqual(code, 1)
+
+    def test_the_driver_holds_one_forced_push(self):
+        tree = ast.parse(DRIVER.read_text())
+        texts = [node.value for node in ast.walk(tree) if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+        forcing = ("--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror")
+        self.assertEqual([text for text in texts if text in forcing or re.fullmatch(r"\+\S+", text)], ["--force"])
+
+    def test_a_wrong_command_line_exits_2_with_one_line(self):
+        cases = [
+            (("run", "cortex", "G", "--fixture", FIXTURE), "cross_harness: cortex needs --connection, the Snowflake "
+                                                            "connection its runs spend"),
+            (("run", "codex", "G", "--fixture", "not-a-repo"), "cross_harness: --fixture takes OWNER/REPO, not "
+                                                               "'not-a-repo'"),
+        ]
+        for args, line in cases:
+            with self.subTest(args=args):
+                code, out, err = self.world.drive(*args)
+                self.assertEqual((code, out, err), (2, "", line + "\n"))
+        (self.world.bin / "agy").unlink()
+        code, out, err = self.world.drive("run", "antigravity", "G", "--fixture", FIXTURE)
+        self.assertEqual((code, out, err), (2, "", "cross_harness: agy is not on PATH\n"))
+        self.assertEqual(self.world.starts(), [])
+
+    def test_the_raw_output_is_kept_in_the_machine_directory(self):
+        code, out, err = self.world.drive("run", "codex", "G", "--fixture", FIXTURE)
+        self.assertRegex(err, r"\Across_harness: raw output kept in cross-harness/[0-9TZ]+-[0-9]+/ of the machine "
+                              r"directory\n\Z")
+        kept, = (self.world.state / "cross-harness").iterdir()
+        self.assertEqual(sorted(p.name for p in kept.iterdir()),
+                         ["G-codex.err.txt", "G-codex.jsonl", "G-codex.records.jsonl", "G-codex.refusals.jsonl"])
+        self.assertIn(SESSION, (kept / "G-codex.jsonl").read_text())  # kept as evidence, never printed
 
 if __name__ == "__main__":
     unittest.main()

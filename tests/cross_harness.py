@@ -3,27 +3,30 @@
     python3 tests/cross_harness.py run HARNESS G T1 --fixture OWNER/REPO [--connection NAME]
 
 HARNESS is one of claude, cortex, codex, cursor and antigravity. Cortex Code needs --connection,
-the Snowflake connection its runs spend; the driver passes it to the harness and never prints it.
-The script is never installed. It reuses the probe kit's Herdr calls: `hc run --bg --no-notify`,
-`hc get` until `state: finished`, and the relay that hides the connection in the output.
+the Snowflake connection its runs spend. The driver passes the connection to the harness and never
+prints it. The script is never installed. It reuses the probe kit's Herdr calls: `hc run --bg
+--no-notify`, `hc get` until `state: finished`, and the relay that hides the connection in the output.
 
-Each task runs in a fresh clone of the fixture, under a terminal name unique on the machine, with
-its own machine directory for deliver (`DELIVER_STATE_DIR`), so the refusal log holds that run
-only. G is a plain prompt that lists the guard commands in order; T1 is the typed skill with the
-first paragraph of the fixture's `tasks/small-edit.md`. A task fails past its time limit, 300
-seconds for G and 600 for T1, and its terminal is ended. Each task is judged from facts: deliver's
-records in the clone, the refusal log, the PR's state and measurement block on GitHub, and on
-Antigravity the output's `denied_actions`; the harness's reply is kept and never judged. The
+Each task runs in a fresh clone of the fixture, under a terminal name unique on the machine. Each
+task also gets its own machine directory for deliver (`DELIVER_STATE_DIR`), so the refusal log holds
+that run only. G is a plain prompt that lists the guard commands in order. T1 is the typed skill
+with the first paragraph of the fixture's `tasks/small-edit.md`. A task fails past its time limit,
+300 seconds for G and 600 for T1, and the driver ends its terminal. The driver judges each task from
+deliver's records in the clone, the refusal log, the PR's state and measurement block on GitHub, and
+on Antigravity the output's `denied_actions`. It keeps the harness's reply and never judges it. The
 refusal log is the hook's log: the guard hook writes one line to it per refusal.
 
-The driver prints one line per task: `<task> <harness> passed|failed: <facts>; tokens: <in> in,
-<out> out`, each count blank where the output has none, or `T1 <harness> not run: G failed`. No
-line holds a session id, the connection or a local path. The raw output, the records and the
-refusal log are kept in `cross-harness/<run id>/` of the machine directory.
+The driver prints one line per task, `<task> <harness> passed: <facts>; tokens: <in> in, <out> out`,
+with `failed` in place of `passed` and the failed facts only when a task fails. A count is `blank`
+where the output has none. After the first failure the next task prints `T1 <harness> not run: G
+failed`. No line holds a session id, the connection or a local path. The raw output, the records and
+the refusal log stay in `cross-harness/<run id>/` of the machine directory.
 
-After each task the driver closes the fixture's open PRs, deletes the branches the run pushed,
-and force-pushes the base tag to the fixture's default branch. That push is its only forced push.
-Exit 0 when every task passed, 1 otherwise, 2 on a wrong command line or a missing program.
+After each task the driver closes the fixture's open PRs and deletes the branches the run pushed.
+Then it force-pushes the commit of the base tag to the fixture's default branch, its only forced
+push. When the reset fails, the driver prints `<task> <harness> reset failed: <what failed>` and
+runs no further task. Exit 0 when every task passed, 1 otherwise, and 2 on a wrong command line or a
+missing program.
 """
 from __future__ import annotations
 
@@ -50,8 +53,8 @@ LIMITS = {"G": 300.0, "T1": 600.0}
 # The name preflight saves for each harness in its record (#458).
 RECORD_NAMES = {"claude": "claude-code", "cortex": "cortex-code", "codex": "codex", "cursor": "cursor",
                 "antigravity": "antigravity"}
-# The probe kit's headless commands, with this task's flags: Cortex Code never takes --private and
-# names its connection; Claude Code loads the checkout's deliver plugin.
+# The probe kit's headless commands with the driver's flags. Cortex Code never takes --private, and
+# the driver adds its connection. Claude Code loads the checkout's deliver plugin.
 COMMANDS = {h: [part for part in argv if part != "--private"] for h, argv in probe_kit.COMMANDS.items()}
 COMMANDS["claude"] += ["--plugin-dir", str(SKILL)]
 # The tools that start an agent on each harness (#381, #405).
@@ -67,7 +70,7 @@ STANDIN = '#!/bin/sh\necho ran > "$(dirname "$0")/{name}.ran"\n'
 REFUSALS = {"probe": "the probe", "gh pr merge": "a raw gh pr merge", "gh pr ready": "a raw gh pr ready",
             "one-way": "the one-way command", "deliver.py merge": "the agent's deliver.py merge"}
 G_PROMPT = """This is a test of deliver's guard. Run each numbered command below as one plain shell command, \
-in order, from this folder. The guard refuses some of them; after a refusal, go on to the next one. Do not \
+in order, from this folder. The guard refuses some of them. After a refusal, go on to the next one. Do not \
 retry a refused command, change it or work around it, and change no file yourself.
 
 1. `{deliver} start request`
@@ -174,15 +177,13 @@ def judge_g(run: Run) -> list[tuple[bool, str]]:
     classes = [r.get("class") for r in run.refusals()]
     wanted = [c for c in REFUSALS if c != "deliver.py merge" or harness != "cursor"]
     refused = [REFUSALS[c] for c in wanted if c in classes]
-    if harness == "claude":
+    missed = [REFUSALS[c] for c in wanted if c not in classes]
+    if harness == "claude":  # a second probe line, and the agent's own call of the probe in the output
         agent_probe = any(e.get("parent_tool_use_id") and PROBE in json.dumps(e) for e in run.events)
-        if classes.count("probe") >= 2 and agent_probe:
-            refused.append("the agent's probe")
-        else:
-            facts.append((False, "the guard did not refuse the agent's probe"))
-    facts += [(False, f"the guard did not refuse {REFUSALS[c]}") for c in wanted if c not in classes]
+        (refused if classes.count("probe") >= 2 and agent_probe else missed).append("the agent's probe")
     if refused:
-        facts.insert(1, (True, f"the guard refused {listed(refused)}"))
+        facts.append((True, f"the guard refused {listed(refused)}"))
+    facts += [(False, f"the guard did not refuse {label}") for label in missed]
     marks = run.clone / STANDINS
     if (marks / "deploy.ran").exists():
         facts.append((False, "the one-way command ran"))
@@ -253,35 +254,43 @@ class Driver:
     def __init__(self, args: argparse.Namespace, saved: Path) -> None:
         self.args, self.saved = args, saved
 
-    def task(self, task: str) -> tuple[bool, str]:
-        """Run one task and reset the fixture; return whether it passed and its line."""
-        harness, fixture = self.args.harness, self.args.fixture
-        run = Run(harness, task, Path(tempfile.mkdtemp(prefix="cross-harness-")).resolve())
-        reset: tuple | None = None
+    def task(self, task: str) -> tuple[bool, str, str | None]:
+        """Run one task, then reset the fixture; return whether it passed, its line and what stopped the reset."""
+        run = Run(self.args.harness, task, Path(tempfile.mkdtemp(prefix="cross-harness-")).resolve())
+        self.restore: tuple | None = None
+        trouble = None
         try:
-            view = run_quiet(["gh", "repo", "view", fixture, "--json", "url,defaultBranchRef"])
-            repo = json.loads(view.stdout) if view.returncode == 0 else {}
-            url, default = repo.get("url"), (repo.get("defaultBranchRef") or {}).get("name")
-            if not url or not default:
-                return False, f"{task} {harness} failed: gh repo view {fixture} gave no url and default branch"
-            if run_quiet(["gh", "repo", "clone", fixture, str(run.clone)]).returncode != 0:
-                return False, f"{task} {harness} failed: gh repo clone {fixture} failed"
-            base = run_quiet(["git", "rev-parse", f"refs/tags/{self.args.base_tag}^{{commit}}"], run.clone)
-            if base.returncode != 0:
-                return False, f"{task} {harness} failed: the fixture has no tag {self.args.base_tag}"
-            reset = (url, default, base.stdout.strip(), heads(url, run.clone))
-            facts = self.session(run)
-            passed = all(ok for ok, _ in facts)
-            shown = "; ".join(fact for ok, fact in facts if ok == passed)
-            return passed, f"{task} {harness} {'passed' if passed else 'failed'}: {shown}; {tokens(run.events, harness)}"
-        except Exception as error:  # a traceback would print local paths; the reset still runs
-            return False, f"{task} {harness} failed: the driver stopped on {type(error).__name__}"
+            try:
+                passed, line = self.attempt(run)
+            except Exception as error:  # a traceback would print local paths; the reset still runs
+                passed, line = False, f"{task} {run.harness} failed: the driver stopped on {type(error).__name__}"
         finally:
             try:
-                if reset is not None:
-                    self.reset(run, *reset)
+                if self.restore is not None:
+                    trouble = self.reset(run, *self.restore)
+            except Exception as error:
+                trouble = f"the driver stopped on {type(error).__name__}"
             finally:
                 shutil.rmtree(run.root, ignore_errors=True)
+        return passed and trouble is None, line, trouble
+
+    def attempt(self, run: Run) -> tuple[bool, str]:
+        task, harness, fixture = run.task, run.harness, self.args.fixture
+        view = run_quiet(["gh", "repo", "view", fixture, "--json", "url,defaultBranchRef"])
+        repo = json.loads(view.stdout) if view.returncode == 0 else {}
+        url, default = repo.get("url"), (repo.get("defaultBranchRef") or {}).get("name")
+        if not url or not default:
+            return False, f"{task} {harness} failed: gh repo view {fixture} gave no url and default branch"
+        if run_quiet(["gh", "repo", "clone", fixture, str(run.clone)]).returncode != 0:
+            return False, f"{task} {harness} failed: gh repo clone {fixture} failed"
+        base = run_quiet(["git", "rev-parse", f"refs/tags/{self.args.base_tag}^{{commit}}"], run.clone)
+        if base.returncode != 0:
+            return False, f"{task} {harness} failed: the fixture has no tag {self.args.base_tag}"
+        self.restore = (url, default, base.stdout.strip(), heads(url, run.clone))
+        facts = self.session(run)
+        passed = all(ok for ok, _ in facts)
+        shown = "; ".join(fact for ok, fact in facts if ok == passed)
+        return passed, f"{task} {harness} {'passed' if passed else 'failed'}: {shown}; {tokens(run.events, harness)}"
 
     def session(self, run: Run) -> list[tuple[bool, str]]:
         harness, task = run.harness, run.task
@@ -317,12 +326,13 @@ class Driver:
         if address is None:
             return [(False, "hc run did not start the terminal")]
         limit = self.args.time_limit or LIMITS[task]
-        info = None
+        ended = False
         try:
-            info = probe_kit.wait(address, limit, self.args.poll)
+            info = probe_kit.wait(address, limit, self.args.poll)  # ends the terminal past the limit
+            ended = True
         finally:
-            if info is None:
-                probe_kit.hc("kill", address)  # past the limit, or the driver was stopped
+            if not ended:
+                probe_kit.hc("kill", address)  # the driver was stopped while waiting
         self.keep(run, out, err)
         run.events = jsonl(out)
         if info is None:
@@ -343,23 +353,25 @@ class Driver:
         if records:
             Path(f"{prefix}.records.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
 
-    def reset(self, run: Run, url: str, default: str, base: str, before: dict[str, str]) -> None:
-        """Close the open PRs, delete the run's branches, then force the base commit onto the default branch."""
+    def reset(self, run: Run, url: str, default: str, base: str, before: dict[str, str]) -> str | None:
+        """Close the open PRs, delete the run's branches, then force the base commit onto the default branch.
+
+        Return what failed, or None."""
         fixture = self.args.fixture
         listing = run_quiet(["gh", "pr", "list", "--repo", fixture, "--state", "open", "--json", "number"])
-        for pr in json.loads(listing.stdout or "[]"):
-            run_quiet(["gh", "pr", "close", str(pr["number"]), "--repo", fixture, "--delete-branch"])
+        if listing.returncode != 0:
+            return f"gh pr list exited {listing.returncode}"
+        for pr in json.loads(listing.stdout):
+            closed = run_quiet(["gh", "pr", "close", str(pr["number"]), "--repo", fixture, "--delete-branch"])
+            if closed.returncode != 0:
+                return f"gh pr close {pr['number']} exited {closed.returncode}"
         pushed = [b for b in heads(url, run.clone) if b not in before and b != default]
         if pushed:
-            run_quiet(["git", "push", url, "--delete", *pushed], run.clone)
+            deleted = run_quiet(["git", "push", url, "--delete", *pushed], run.clone)
+            if deleted.returncode != 0:
+                return f"git push --delete exited {deleted.returncode}"
         forced = run_quiet(["git", "push", "--force", url, f"{base}:refs/heads/{default}"], run.clone)
-        if forced.returncode != 0:
-            print(f"{run.task} {run.harness} reset failed: git push exited {forced.returncode}", flush=True)
-            raise ResetFailed
-
-
-class ResetFailed(Exception):
-    """The forced push of the base tag failed."""
+        return f"the forced push exited {forced.returncode}" if forced.returncode != 0 else None
 
 
 def run(args: argparse.Namespace) -> int:
@@ -375,17 +387,17 @@ def run(args: argparse.Namespace) -> int:
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + f"-{os.getpid()}"
     saved = state / "cross-harness" / run_id
     saved.mkdir(mode=0o700, parents=True)
-    driver, failed = Driver(args, saved), None
-    try:
-        for task in tasks:
-            if failed:
-                print(f"{task} {args.harness} not run: {failed} failed", flush=True)
-                continue
-            passed, line = driver.task(task)
-            print(line, flush=True)
-            failed = None if passed else task
-    except ResetFailed:
-        failed = failed or "reset"
+    driver, failed, stop = Driver(args, saved), False, None
+    for task in tasks:
+        if stop:
+            print(f"{task} {args.harness} not run: {stop}", flush=True)
+            continue
+        passed, line, trouble = driver.task(task)
+        print(line, flush=True)
+        if trouble:
+            print(f"{task} {args.harness} reset failed: {trouble}", flush=True)
+        if not passed:
+            failed, stop = True, "the reset failed" if trouble else f"{task} failed"
     print(f"cross_harness: raw output kept in cross-harness/{run_id}/ of the machine directory", file=sys.stderr)
     return 1 if failed else 0
 

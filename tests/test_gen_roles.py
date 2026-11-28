@@ -106,7 +106,7 @@ class GenRolesTest(unittest.TestCase):
         for harness, command in commands.items():
             with self.subTest(harness):
                 self.assertTrue(command.startswith('deliver_guard=@GUARD@; [ -f "$deliver_guard" ] || exit 0; '))
-                self.assertTrue(command.endswith(f'exec python3 "$deliver_guard" {harness}'))
+                self.assertTrue(command.endswith('exec python3 "$deliver_guard"'))
 
     def test_check_fails_on_a_hand_edit_to_any_file(self) -> None:
         self.run_script("--write")

@@ -30,18 +30,19 @@ PLUGIN_LINE = "claude plugin install deliver@relentless-data-skills"
 TRUST_STEP = "Codex runs no hook you have not trusted: start codex, type /hooks, trust deliver's guard, then quit."
 # Spec #457, "Harness detection": the first variable set names the harness.
 DETECTION = (
-    ("CORTEX_SESSION_ID", "cortex"),
+    ("CORTEX_SESSION_ID", "cortex-code"),
     ("CODEX_THREAD_ID", "codex"),
     ("CURSOR_AGENT", "cursor"),
     ("ANTIGRAVITY_AGENT", "antigravity"),
     ("CLAUDECODE", "claude-code"),
 )
-# Per harness: the reader's folder under HOME (None: the checkout's `.cursor/agents/`) and the user hook file (#189).
+# Per harness, named as checks_harness names it: its folder in `harness/` (named as its adapter is), the reader's
+# folder under HOME (None: the checkout's `.cursor/agents/`) and the user hook file (#189).
 TARGETS = {
-    "cortex": (".snowflake/cortex/agents", ".snowflake/cortex/hooks.json"),
-    "codex": (".codex/agents", ".codex/hooks.json"),
-    "cursor": (None, ".cursor/hooks.json"),
-    "antigravity": (".gemini/config/agents", ".gemini/config/hooks.json"),
+    "cortex-code": ("cortex", ".snowflake/cortex/agents", ".snowflake/cortex/hooks.json"),
+    "codex": ("codex", ".codex/agents", ".codex/hooks.json"),
+    "cursor": ("cursor", None, ".cursor/hooks.json"),
+    "antigravity": ("antigravity", ".gemini/config/agents", ".gemini/config/hooks.json"),
 }
 CURSOR_AGENTS = Path(".cursor/agents")
 
@@ -214,8 +215,8 @@ class ExcludeLine:
 def items(harness: str, run: core.Run | None) -> list:
     """What `install` writes on `harness`, in the order it writes it."""
     home = Path.home()
-    folder, hooks = TARGETS[harness]
-    source = HARNESS_DIR / harness
+    name, folder, hooks = TARGETS[harness]
+    source = HARNESS_DIR / name
     readers = sorted(p for p in source.iterdir() if p.name != "hooks.json")
     if folder is None:
         if run is None:
@@ -236,7 +237,8 @@ def check_harness(harness: str) -> None:
         raise core.Refused("install.claude-code", PLUGIN_LINE)
     detected = detect()
     if detected and detected != harness:
-        raise core.Refused("install.wrong-harness", PLUGIN_LINE if detected == "claude-code"
+        # On Claude Code, `install claude-code` is no fix, so the refusal names no command.
+        raise core.Refused("install.wrong-harness", None if detected == "claude-code"
                            else f"deliver.py install {detected}", harness=harness, detected=detected)
 
 

@@ -20,9 +20,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import deliver_kit  # noqa: E402
 
 HARNESS = deliver_kit.SCRIPTS.parent / "harness"
-READER = {"cortex": ".snowflake/cortex/agents/deliver-reader.md", "codex": ".codex/agents/deliver-reader.toml",
+# The folder of each harness's files in the skill, named as its adapter is.
+FOLDER = {"cortex-code": "cortex", "codex": "codex", "cursor": "cursor", "antigravity": "antigravity"}
+READER = {"cortex-code": ".snowflake/cortex/agents/deliver-reader.md", "codex": ".codex/agents/deliver-reader.toml",
           "antigravity": ".gemini/config/agents/deliver-reader.md"}
-HOOKS = {"cortex": ".snowflake/cortex/hooks.json", "codex": ".codex/hooks.json", "cursor": ".cursor/hooks.json",
+HOOKS = {"cortex-code": ".snowflake/cortex/hooks.json", "codex": ".codex/hooks.json", "cursor": ".cursor/hooks.json",
          "antigravity": ".gemini/config/hooks.json"}
 CURSOR_READER = ".cursor/agents/deliver-reader.md"
 EXCLUDE_LINE = "/.cursor/agents/deliver-reader.md"
@@ -54,20 +56,20 @@ class Install(unittest.TestCase):
         return group["PreToolUse"][-1]["hooks"][0]["command"]
 
     def test_install_writes_the_reader_file_and_the_hook(self):
-        for harness in ("cortex", "codex", "antigravity"):
+        for harness in ("cortex-code", "codex", "antigravity"):
             with self.subTest(harness):
                 result = self.install(harness)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                 suffix = ".toml" if harness == "codex" else ".md"
                 self.assertEqual((self.home / READER[harness]).read_bytes(),
-                                 (HARNESS / harness / f"deliver-reader{suffix}").read_bytes())
+                                 (HARNESS / FOLDER[harness] / f"deliver-reader{suffix}").read_bytes())
                 guard = shlex.quote(str(self.skill / "scripts" / "guard.py"))
-                committed = (HARNESS / harness / "hooks.json").read_text().replace("@GUARD@", guard)
+                committed = (HARNESS / FOLDER[harness] / "hooks.json").read_text().replace("@GUARD@", guard)
                 self.assertEqual(json.loads((self.home / HOOKS[harness]).read_text()), json.loads(committed))
                 self.assertIn(f"deliver_guard={guard}; ", self.registered(harness))
 
     def test_a_second_run_writes_nothing_and_says_so(self):
-        for harness in ("cortex", "codex", "cursor", "antigravity"):
+        for harness in ("cortex-code", "codex", "cursor", "antigravity"):
             with self.subTest(harness):
                 self.assertEqual(self.install(harness, cwd=self.world.work).returncode, 0)
                 before = tree(self.world.root)
@@ -79,7 +81,7 @@ class Install(unittest.TestCase):
     def test_install_keeps_every_other_entry_and_file(self):
         other = {"type": "command", "command": "echo other"}
         files = {
-            "cortex": {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [other]}], "Stop": [{"hooks": [other]}]},
+            "cortex-code": {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [other]}], "Stop": [{"hooks": [other]}]},
                        "theme": "dark"},
             "codex": {"hooks": {"PreToolUse": [{"matcher": "", "hooks": [other]}]}},
             "cursor": {"version": 1, "hooks": {"beforeShellExecution": [{"command": "echo other"}]}},
@@ -108,18 +110,18 @@ class Install(unittest.TestCase):
                 self.assertEqual((agents / "mine.md").read_text(), "mine\n")
 
     def test_install_replaces_an_older_entry_of_its_own(self):
-        self.install("cortex")
-        path = self.home / HOOKS["cortex"]
+        self.install("cortex-code")
+        path = self.home / HOOKS["cortex-code"]
         data = json.loads(path.read_text())
         data["hooks"]["PreToolUse"][0]["hooks"][0]["command"] = "deliver_guard=/old/guard.py; exit 0"
         path.write_text(json.dumps(data))
-        result = self.install("cortex")
+        result = self.install("cortex-code")
         self.assertEqual(result.stdout, f"added deliver's guard to {path}\n")
         self.assertEqual(len(json.loads(path.read_text())["hooks"]["PreToolUse"]), 1)
 
     def test_the_registered_command_runs_the_guard_and_exits_0_when_it_is_gone(self):
-        self.install("cortex")
-        command = self.registered("cortex")
+        self.install("cortex-code")
+        command = self.registered("cortex-code")
         guard = self.skill / "scripts" / "guard.py"
         bare = self.world.root / "bare"
         bare.mkdir()
@@ -127,7 +129,7 @@ class Install(unittest.TestCase):
         env = {"PATH": f"{bare}:/usr/bin:/bin", "HOME": str(self.home)}
         guard.write_text("import sys\nprint('guard ran', sys.argv[1:])\n")
         ran = subprocess.run(["/bin/sh", "-c", command], env=env, capture_output=True, text=True)
-        self.assertEqual((ran.returncode, ran.stdout), (0, "guard ran ['cortex']\n"), ran.stderr)
+        self.assertEqual((ran.returncode, ran.stdout), (0, "guard ran []\n"), ran.stderr)
         guard.unlink()
         gone = subprocess.run(["/bin/sh", "-c", command], env=env, capture_output=True, text=True)
         self.assertEqual((gone.returncode, gone.stdout, gone.stderr), (0, "", ""))
@@ -142,14 +144,13 @@ class Install(unittest.TestCase):
         self.assertEqual(tree(self.home), self.home_before)
 
     def test_install_wrong_harness(self):
-        for var, detected, next_command in (
-                ("CORTEX_SESSION_ID", "cortex", "deliver.py install cortex"),
-                ("CLAUDECODE", "claude-code", "claude plugin install deliver@relentless-data-skills")):
+        for var, detected, next_line in (("CORTEX_SESSION_ID", "cortex-code", "Next: deliver.py install cortex-code\n"),
+                                         ("CLAUDECODE", "claude-code", "")):
             with self.subTest(detected):
                 result = self.install("codex", **{var: "1"})
                 self.assertEqual((result.returncode, result.stdout), (10, (
                     f"REFUSED install.wrong-harness: this session runs on {detected}, not codex. "
-                    f"Run install for codex from a plain shell\nNext: {next_command}\n")))
+                    f"Run install for codex from a plain shell\n{next_line}")))
         self.assertEqual(self.install("codex", CODEX_THREAD_ID="t-1").returncode, 0)
 
     def test_an_unknown_harness_is_a_usage_error(self):
@@ -157,7 +158,7 @@ class Install(unittest.TestCase):
             with self.subTest(args):
                 result = self.install(*args)
                 self.assertEqual(result.returncode, 2)
-                self.assertIn("install takes one of cortex, codex, cursor, antigravity, claude-code", result.stderr)
+                self.assertIn("install takes one of cortex-code, codex, cursor, antigravity, claude-code", result.stderr)
 
     def test_install_bad_hook_file(self):
         path = self.home / HOOKS["codex"]
@@ -185,7 +186,7 @@ class Install(unittest.TestCase):
         self.assertEqual(self.install("codex").stdout, f"wrote {self.home / READER['codex']}\n")
         (self.home / HOOKS["codex"]).unlink()
         self.assertTrue(self.install("codex").stdout.endswith(trust))
-        for harness in ("cortex", "antigravity"):
+        for harness in ("cortex-code", "antigravity"):
             self.assertNotIn("trust", self.install(harness).stdout)
 
     def test_install_cursor_writes_the_checkout_file_and_one_exclude_line(self):
@@ -218,7 +219,7 @@ class Install(unittest.TestCase):
     def test_remove_leaves_the_home_folder_as_it_was(self):
         other = {"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [{"type": "command", "command": "echo other"}]}]}}
         for start in ("empty", "with other entries"):
-            for harness in ("cortex", "codex", "antigravity"):
+            for harness in ("cortex-code", "codex", "antigravity"):
                 with self.subTest(start=start, harness=harness):
                     if start != "empty":
                         (self.home / HOOKS[harness]).parent.mkdir(parents=True, exist_ok=True)
@@ -250,7 +251,7 @@ class Install(unittest.TestCase):
         gen_roles = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(gen_roles)
         self.assertTrue(gen_roles.GUARD_COMMAND.startswith(f"{install.MARKER}{install.GUARD_SLOT}; "))
-        self.assertEqual(sorted(install.TARGETS), sorted(gen_roles.HARNESSES))
+        self.assertEqual(sorted(folder for folder, _, _ in install.TARGETS.values()), sorted(gen_roles.HARNESSES))
 
 
 class Preflight(unittest.TestCase):
@@ -269,10 +270,10 @@ class Preflight(unittest.TestCase):
         return self.world.deliver("preflight", **env)
 
     def test_preflight_install_missing(self):
-        for harness, var in (("cortex", "CORTEX_SESSION_ID"), ("cursor", "CURSOR_AGENT")):
+        for harness, var in (("cortex-code", "CORTEX_SESSION_ID"), ("cursor", "CURSOR_AGENT")):
             with self.subTest(harness):
                 result = self.preflight(**{var: "1"})
-                path = self.world.home / READER["cortex"] if harness == "cortex" else self.world.work / CURSOR_READER
+                path = self.world.home / READER["cortex-code"] if harness == "cortex-code" else self.world.work / CURSOR_READER
                 self.assertEqual((result.returncode, result.stdout), (10, (
                     f"REFUSED preflight.install-missing: deliver is not installed on {harness}: "
                     f"{path} lacks what install writes\nNext: deliver.py install {harness}\n")))

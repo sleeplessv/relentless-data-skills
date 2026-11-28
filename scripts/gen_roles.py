@@ -51,12 +51,13 @@ ROLES = {
 ANTIGRAVITY_TOOLS = {"Read": "view_file", "Grep": None, "Glob": None}
 # The registered hook command. `deliver.py install` puts the guard's path, shell-quoted, in place of
 # @GUARD@ (install.GUARD_SLOT). Like the plugin's command, it exits 0 silently when the guard file is
-# gone or no Python 3.13 is found. The marker `deliver_guard=` is how install finds its own entry.
+# gone or no Python 3.13 is found. It passes no argument: the guard tells the harness from its input.
+# The marker `deliver_guard=` is how install finds its own entry.
 GUARD_COMMAND = (
     'deliver_guard=@GUARD@; [ -f "$deliver_guard" ] || exit 0; if command -v uv >/dev/null 2>&1; then '
-    'exec uv run --python 3.13 --no-project --quiet "$deliver_guard" {harness}; fi; '
+    'exec uv run --python 3.13 --no-project --quiet "$deliver_guard"; fi; '
     "python3 -c 'import sys; sys.exit(sys.version_info < (3, 13))' 2>/dev/null || exit 0; "
-    'exec python3 "$deliver_guard" {harness}'
+    'exec python3 "$deliver_guard"'
 )
 
 
@@ -98,19 +99,19 @@ def render_antigravity(name: str, role: dict) -> str:
     return markdown(name, role, f"tools: [{', '.join(tools)}]", "model: inherit")
 
 
-def hook_entry(harness: str, matcher: str, **extra: object) -> dict:
-    command = {"type": "command", "command": GUARD_COMMAND.format(harness=harness), **extra}
+def hook_entry(matcher: str, **extra: object) -> dict:
+    command = {"type": "command", "command": GUARD_COMMAND, **extra}
     return {"matcher": matcher, "hooks": [command]}
 
 
 # Per harness: the role file's suffix, its renderer, and the guard's registration in its hook-file form.
 HARNESSES = {
-    "cortex": (".md", render_cortex, {"hooks": {"PreToolUse": [hook_entry("cortex", "bash")]}}),
-    "codex": (".toml", render_codex, {"hooks": {"PreToolUse": [hook_entry("codex", "", timeout=20)]}}),
+    "cortex": (".md", render_cortex, {"hooks": {"PreToolUse": [hook_entry("bash")]}}),
+    "codex": (".toml", render_codex, {"hooks": {"PreToolUse": [hook_entry("", timeout=20)]}}),
     "cursor": (".md", render_cursor, {"version": 1, "hooks": {
-        "beforeShellExecution": [{"command": GUARD_COMMAND.format(harness="cursor")}]}}),
+        "beforeShellExecution": [{"command": GUARD_COMMAND}]}}),
     "antigravity": (".md", render_antigravity,
-                    {"deliver-guard": {"PreToolUse": [hook_entry("antigravity", "", timeout=20)]}}),
+                    {"deliver-guard": {"PreToolUse": [hook_entry("", timeout=20)]}}),
 }
 
 

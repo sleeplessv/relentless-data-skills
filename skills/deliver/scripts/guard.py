@@ -80,7 +80,8 @@ GUARDS = {"probe": "raw-pr", "gh pr merge": "raw-pr", "gh pr ready": "raw-pr", "
 PUNCTUATION = frozenset("();<>|&")
 SHELL_TOOLS = ("Bash", "Shell")
 # Each harness's variable, to tell apart Claude-form inputs that carry no mark of their own.
-HARNESS_VARS = (("CORTEX_SESSION_ID", "cortex"), ("CODEX_THREAD_ID", "codex"), ("CURSOR_AGENT", "cursor"))
+# Keep the names in step with checks_harness.DETECTION, which preflight uses.
+HARNESS_VARS = (("CORTEX_SESSION_ID", "cortex-code"), ("CODEX_THREAD_ID", "codex"), ("CURSOR_AGENT", "cursor"))
 # Searched in the raw text when the words are in doubt.
 RAW = {
     "gh pr": re.compile(r"\bgh\b[^;&|\n]*?\spr\s+(merge|ready)\b"),
@@ -195,7 +196,7 @@ def read_call(data: dict) -> tuple[str, str, object]:
     elif "turn_id" in data:
         harness = "codex"
     elif "/.snowflake/cortex/" in str(data.get("transcript_path")):
-        harness = "cortex"
+        harness = "cortex-code"
     else:
         harness = next((name for var, name in HARNESS_VARS if os.environ.get(var)), "claude-code")
     return harness, "claude", command

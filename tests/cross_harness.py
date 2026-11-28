@@ -11,10 +11,12 @@ Each task runs in a fresh clone of the fixture, under a terminal name unique on 
 task also gets its own machine directory for deliver (`DELIVER_STATE_DIR`), so the refusal log holds
 that run only. G is a plain prompt that lists the guard commands in order. T1 is the typed skill
 with the first paragraph of the fixture's `tasks/small-edit.md`. A task fails past its time limit,
-300 seconds for G and 600 for T1, and the driver ends its terminal. The driver judges each task from
-deliver's records in the clone, the refusal log, the PR's state and measurement block on GitHub, and
-on Antigravity the output's `denied_actions`. It keeps the harness's reply and never judges it. The
-refusal log is the hook's log: the guard hook writes one line to it per refusal.
+300 seconds for G and 600 for T1, and the driver ends its terminal. The driver judges G from
+deliver's records in the clone and the refusal log. The refusal log is the hook's log: the guard
+hook writes one line to it per refusal. The driver judges T1 from the PR the run opened, found on
+GitHub, because `deliver.py finish` removes the records after a merge. It reads that PR's state and
+measurement block. On Antigravity it also reads the output's `denied_actions`. It keeps the
+harness's reply and never judges it.
 
 The driver prints one line per task, `<task> <harness> passed: <facts>; tokens: <in> in, <out> out`,
 with `failed` in place of `passed` and the failed facts only when a task fails. A count is `blank`
@@ -22,7 +24,8 @@ where the output has none. After the first failure the next task prints `T1 <har
 failed`. No line holds a session id, the connection or a local path. The raw output, the records and
 the refusal log stay in `cross-harness/<run id>/` of the machine directory.
 
-After each task the driver closes the fixture's open PRs and deletes the branches the run pushed.
+After each task the driver closes the open PRs the run opened and deletes the branches the run
+pushed. PRs and branches that were there before the run stay.
 Then it force-pushes the commit of the base tag to the fixture's default branch, its only forced
 push. When the reset fails, the driver prints `<task> <harness> reset failed: <what failed>` and
 runs no further task. Exit 0 when every task passed, 1 otherwise, and 2 on a wrong command line or a
@@ -57,10 +60,16 @@ RECORD_NAMES = {"claude": "claude-code", "cortex": "cortex-code", "codex": "code
 # the driver adds its connection. Claude Code loads the checkout's deliver plugin.
 COMMANDS = {h: [part for part in argv if part != "--private"] for h, argv in probe_kit.COMMANDS.items()}
 COMMANDS["claude"] += ["--plugin-dir", str(SKILL)]
-# The tools that start an agent on each harness (#381, #405).
+# The tools that start an agent on each harness (#381, #405), as a tool event names them: a
+# tool_use item's `name` on Claude Code and Cortex Code, the item's `tool` on Codex.
 AGENT_TOOLS = {"claude": ("Agent", "Task"), "cortex": ("task", "agent"),
                "codex": ("spawn_agent", "collaborationspawn_agent"), "cursor": ("Task",),
                "antigravity": ("invoke_subagent",)}
+# Cursor's stream names a tool call by one key per tool kind, such as readToolCall, and no name. No
+# recorded output shows the key of an agent call, so a key with task or agent in it counts as one.
+# No recorded output shows Antigravity's agent call either. The probe kit sees invoke_subagent only
+# in its hook log.
+CURSOR_AGENT_KIND = re.compile(r"(?i).*(task|agent).*ToolCall")
 DENIED = probe_kit.Place("event", "result", ("result", "denied_actions"))
 PROBE = "gh pr merge --deliver-guard-probe"  # guard.PROBE, which the guard always refuses
 CURSOR_WARNING = "the guard cannot tell an agent from the session"
@@ -116,8 +125,15 @@ def jsonl(path: Path) -> list[dict]:
 
 
 def started_agent(events: list[dict], harness: str) -> bool:
-    """Whether a tool event names one of the harness's agent tools as its name or tool."""
+    """Whether the output shows an agent: a tool event that names an agent tool, an event an agent made on
+    Claude Code and Cortex Code, or on Cursor a tool call of a task or agent kind."""
     tools = AGENT_TOOLS[harness]
+    for event in events:
+        if harness in ("claude", "cortex") and event.get("parent_tool_use_id"):
+            return True
+        call = event.get("tool_call") if event.get("type") == "tool_call" else None
+        if harness == "cursor" and isinstance(call, dict) and any(CURSOR_AGENT_KIND.fullmatch(k) for k in call):
+            return True
 
     def walk(value: object) -> bool:
         if isinstance(value, list):
@@ -145,6 +161,7 @@ class Run:
         self.harness, self.task, self.root = harness, task, root
         self.clone, self.state = root / "clone", root / "state"
         self.events: list[dict] = []
+        self.prs_before: set[int] = set()  # the fixture's PR numbers when the run started
         self.exit_code: int | None = None
 
     def records(self) -> list[dict]:
@@ -204,41 +221,46 @@ def measurement(body: str) -> list[str]:
 
 
 def judge_t1(run: Run, fixture: str) -> list[tuple[bool, str]]:
-    records = run.records()
     agent = started_agent(run.events, run.harness)
     facts = [(not agent, "the session started an agent" if agent else "one session and no agent")]
-    pr = next((r for r in reversed(records) if r.get("event") == "pr" and type(r.get("number")) is int), None)
-    if pr is None:
-        return [*facts, (False, "no pr record")]
-    view = run_quiet(["gh", "pr", "view", str(pr["number"]), "--repo", fixture, "--json", "state,body"])
-    try:
-        got = json.loads(view.stdout)
-    except ValueError:
-        return [*facts, (False, f"gh pr view {pr['number']} gave no answer")]
-    block = measurement(str(got.get("body") or ""))
+    found = prs(fixture)
+    if found is None:
+        return [*facts, (False, "gh pr list of the fixture failed")]
+    opened = sorted((pr for pr in found if pr.get("number") not in run.prs_before), key=lambda pr: pr["number"])
+    if not opened:
+        return [*facts, (False, "the run opened no PR")]
+    pr = opened[0]
+    block = measurement(str(pr.get("body") or ""))
     small = next((line for line in block if line.startswith("small test:")), None)
     if small is None:
         facts.append((False, "the measurement block has no small test line"))
     else:
         passed = small.startswith("small test: pass")
         facts.append((passed, "the small test passed" if passed else "the small test did not pass"))
-    merged = got.get("state") == "MERGED"
-    by_session = any(line.startswith("merge: by the session") for line in block)
-    merge_record = any(r.get("event") == "merge" for r in records)
-    if merged and by_session and merge_record:
+    merged = pr.get("state") == "MERGED"
+    by_session = any(line.startswith("merge: by the session") for line in block)  # merge.py writes it
+    if merged and by_session:
         facts.append((True, f"the session merged PR {pr['number']}"))
-    else:
-        if not merged:
-            facts.append((False, f"PR {pr['number']} is not merged"))
-        if not by_session:
-            facts.append((False, "the measurement block has no merge line by the session"))
-        if not merge_record:
-            facts.append((False, "no merge record"))
+    if not merged:
+        facts.append((False, f"PR {pr['number']} is not merged"))
+    if not by_session:
+        facts.append((False, "the measurement block has no merge line by the session"))
     if run.harness == "antigravity":
         denied = probe_kit.last_at(run.events, DENIED, False)
         if denied:
             facts.append((False, f"denied_actions holds {len(denied)}"))
     return facts
+
+
+def prs(fixture: str) -> list[dict] | None:
+    """The fixture's PRs, up to the newest 200, or None when gh pr list fails."""
+    done = run_quiet(["gh", "pr", "list", "--repo", fixture, "--state", "all", "--limit", "200",
+                      "--json", "number,state,body"])
+    try:
+        got = json.loads(done.stdout) if done.returncode == 0 else None
+    except ValueError:
+        return None
+    return got if isinstance(got, list) else None
 
 
 def listed(items: list[str]) -> str:
@@ -289,9 +311,12 @@ class Driver:
         base = run_quiet(["git", "rev-parse", f"refs/tags/{self.args.base_tag}^{{commit}}"], run.clone)
         if base.returncode != 0:
             return False, f"{task} {harness} failed: the fixture has no tag {self.args.base_tag}"
-        before = heads(url, run.clone)
+        before, listed_prs = heads(url, run.clone), prs(fixture)
         if before is None:
             return False, f"{task} {harness} failed: git ls-remote of the fixture failed"
+        if listed_prs is None:
+            return False, f"{task} {harness} failed: gh pr list of the fixture failed"
+        run.prs_before = {pr.get("number") for pr in listed_prs}
         self.restore = (url, default, base.stdout.strip(), before)
         facts = self.session(run)
         passed = all(ok for ok, _ in facts)
@@ -315,7 +340,7 @@ class Driver:
         else:
             prompt = t1_prompt(harness, run.clone)
         if harness == "cursor":
-            install = run_quiet([sys.executable, str(SKILL / "scripts" / "deliver.py"), "install", "cursor"], run.clone)
+            install = run_quiet([*shlex.split(DELIVER), "install", "cursor"], run.clone)
             if install.returncode != 0:
                 return [(False, f"deliver.py install cursor exited {install.returncode}")]
         argv = [part.replace("{prompt}", prompt) for part in COMMANDS[harness]]
@@ -360,15 +385,16 @@ class Driver:
             Path(f"{prefix}.records.jsonl").write_text("".join(json.dumps(r) + "\n" for r in records))
 
     def reset(self, run: Run, url: str, default: str, base: str, before: dict[str, str]) -> str | None:
-        """Close the open PRs, delete the run's branches, then force the base commit onto the default branch.
-
-        Return what failed, or None."""
+        """Close the open PRs the run opened, delete the branches it pushed, then force the base commit onto the
+        default branch. Return what failed, or None."""
         fixture = self.args.fixture
-        listing = run_quiet(["gh", "pr", "list", "--repo", fixture, "--state", "open", "--json", "number"])
-        if listing.returncode != 0:
-            return f"gh pr list exited {listing.returncode}"
-        for pr in json.loads(listing.stdout):
-            closed = run_quiet(["gh", "pr", "close", str(pr["number"]), "--repo", fixture, "--delete-branch"])
+        found = prs(fixture)
+        if found is None:
+            return "gh pr list of the fixture failed"
+        for pr in found:
+            if pr.get("state") != "OPEN" or pr.get("number") in run.prs_before:
+                continue
+            closed = run_quiet(["gh", "pr", "close", str(pr["number"]), "--repo", fixture])
             if closed.returncode != 0:
                 return f"gh pr close {pr['number']} exited {closed.returncode}"
         after = heads(url, run.clone)
@@ -385,7 +411,7 @@ class Driver:
 
 def run(args: argparse.Namespace) -> int:
     if not re.fullmatch(r"[\w.-]+/[\w.-]+", args.fixture):
-        raise DriverError(f"--fixture takes OWNER/REPO, not {args.fixture!r}")
+        raise DriverError("--fixture takes OWNER/REPO")
     if args.harness == "cortex" and not args.connection:
         raise DriverError("cortex needs --connection, the Snowflake connection its runs spend")
     for program in ("hc", "gh", "git", COMMANDS[args.harness][0]):

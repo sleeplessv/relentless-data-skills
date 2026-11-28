@@ -4,8 +4,8 @@ Each test builds its own world in a temporary folder: a copy of the driver and t
 beside a stand-in skills/deliver/scripts/deliver.py, the probe kit tests' stand-in `hc`, one
 stand-in harness installed as all five harness commands, a stand-in `gh`, a `git` that logs each
 call before it runs the real one, and a local bare repo as the fixture, its base commit tagged
-`base`. The stand-in harness writes what a real run of G or T1 leaves: deliver's records, refusal
-log lines, the stand-in commands' markers, a PR the stand-in `gh` answers for, a merge pushed to
+`base`. The stand-in harness writes what a real run of G or T1 leaves: deliver's records, which T1
+removes after its merge as `deliver.py finish` does, refusal log lines, the stand-in commands' markers, a PR the stand-in `gh` answers for, a merge pushed to
 the fixture, and output with a session id and local paths in it. PATH holds only the stand-ins
 and the system folders, and HOME and the machine directory point inside the world, so no test
 starts a real session, touches the network or reads the real machine directory.
@@ -111,7 +111,10 @@ else:  # T1
     (cwd / "calc.py").write_text((cwd / "calc.py").read_text().replace("Return a + b.", "Return the sum of a and b."))
     git("commit", "-q", "-am", "docs: reword add")
     git("push", "-q", "origin", "HEAD:refs/heads/deliver/run-1")
-    record("pr", number=7, url="https://github.example/pr/7")
+    saved = Path(os.environ["STANDIN_GH_DIR"]) / "prs.json"
+    prs = json.loads(saved.read_text())
+    number = max(map(int, prs)) + 1  # the run's PR, and after it one more the run leaves open
+    record("pr", number=number, url=f"https://github.example/pr/{number}")
     record("ready", commit="abc", result="small edit")
     small = "" if "no-small-test" in knobs else "small test: pass, 1 line, no critical path, no dependents command\n"
     merged = "merge: left to the owner, one-way door" if "merge-owner" in knobs else "merge: by the session, squash"
@@ -121,10 +124,11 @@ else:  # T1
         record("merge", commit="abc", method="squash", merge_line=merged)
     body = ("Reword add.\n\n<details><summary>Measurement</summary>\n\n```text\nversion: 0.1.0\npath: small edit\n"
             + small + "door: two-way\n" + ("" if "no-merge" in knobs else merged + "\n") + "```\n\n</details>\n")
-    gh = Path(os.environ["STANDIN_GH_DIR"])
-    (gh / "prs.json").write_text(json.dumps({
-        "7": {"state": "OPEN" if "not-merged" in knobs else "MERGED", "body": body},
-        "8": {"state": "OPEN", "body": "left open by the run"}}))
+    prs[str(number)] = {"state": "OPEN" if "not-merged" in knobs else "MERGED", "body": body}
+    prs[str(number + 1)] = {"state": "OPEN", "body": "left open by the run"}
+    saved.write_text(json.dumps(prs))
+    if "not-merged" not in knobs:  # deliver.py finish removes the records after a merge
+        records.unlink()
     if "denied" in knobs:
         result["denied_actions"] = [{"tool": "run_command"}]
 starting = "agent" in knobs
@@ -138,7 +142,8 @@ def emit(**event):
 if name in ("claude", "cortex"):
     emit(type="system", subtype="init", session_id=SESSION, cwd=str(cwd), model="standin-model")
     if starting:
-        emit(type="assistant", message={"content": [{"type": "tool_use", "id": "toolu_1", "name": "Agent", "input": {}}]})
+        emit(type="assistant", message={"content": [{"type": "tool_use", "id": "toolu_1", "input": {},
+                                                     "name": "task" if name == "cortex" else "Agent"}]})
     for event in agent_events:
         print(json.dumps(event))
     emit(type="result", session_id=SESSION, result="done in " + str(cwd), usage=usage)
@@ -156,7 +161,7 @@ elif name == "agy":
 else:  # cursor-agent
     emit(type="system", subtype="init", session_id=SESSION, cwd=str(cwd), model="standin-model")
     if starting:
-        emit(type="tool_call", subtype="started", tool_call={"name": "Task"})
+        emit(type="tool_call", subtype="started", tool_call={"taskToolCall": {"args": {"prompt": "go"}}})
     emit(type="result", session_id=SESSION, result="done",
          usage=usage and {"inputTokens": 12, "outputTokens": 340})
 sys.exit(int(os.environ.get("STANDIN_EXIT", "0")))
@@ -176,7 +181,9 @@ prs = json.loads(saved.read_text()) if saved.exists() else {}
 if args[:2] == ["repo", "clone"]:
     subprocess.run(["git", "clone", "-q", os.environ["STANDIN_REMOTE"], args[3]], check=True)
 elif args[:2] == ["pr", "list"]:
-    print(json.dumps([{"number": int(n)} for n, pr in prs.items() if pr["state"] == "OPEN"]))
+    state = args[args.index("--state") + 1]
+    print(json.dumps([{"number": int(n), **pr} for n, pr in sorted(prs.items(), key=lambda p: -int(p[0]))
+                      if state == "all" or pr["state"] == state.upper()]))
 elif args[:2] == ["pr", "close"]:
     prs[args[2]]["state"] = "CLOSED"
     saved.write_text(json.dumps(prs))
@@ -198,11 +205,19 @@ if os.environ.get("STANDIN_GIT_REFUSE_FORCE") and "--force" in sys.argv:
 os.execv({git!r}, ["git", *sys.argv[1:]])
 '''
 
+# The stand-in uv: runs `uv run --python V --no-project SCRIPT ARGS` with this Python and passes on its options.
+UV = r'''#!{python}
+import os, sys
+assert sys.argv[1] == "run" and sys.argv[4] == "--no-project", sys.argv
+os.environ["STANDIN_UV"] = " ".join(sys.argv[1:5])
+os.execv(sys.executable, [sys.executable, *sys.argv[5:]])
+'''
+
 # The stand-in deliver.py the driver runs for `install cursor`.
 DELIVER = r'''import json, os, sys
 from pathlib import Path
 with open(os.environ["STANDIN_DELIVER_LOG"], "a") as log:
-    log.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd()}) + "\n")
+    log.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "uv": os.environ.get("STANDIN_UV")}) + "\n")
 if sys.argv[1:] == ["install", "cursor"]:
     (Path.cwd() / ".cursor/agents").mkdir(parents=True)
     (Path.cwd() / ".cursor/agents/deliver-reader.md").write_text("reader\n")
@@ -229,7 +244,7 @@ class World:
             shutil.copy(TESTS / name, self.tree / "tests" / name)
         (self.tree / "skills/deliver/scripts/deliver.py").write_text(DELIVER)
         real_git = shutil.which("git")
-        stand_ins = {"hc": HC, "standin-harness": HARNESS, "gh": GH, "git": GIT.replace("{git!r}", repr(real_git))}
+        stand_ins = {"hc": HC, "standin-harness": HARNESS, "gh": GH, "uv": UV, "git": GIT.replace("{git!r}", repr(real_git))}
         for name, text in stand_ins.items():
             (self.bin / name).write_text(text.replace("{python}", sys.executable))
             (self.bin / name).chmod(0o755)
@@ -246,6 +261,8 @@ class World:
                     "GIT_CONFIG_GLOBAL": str(self.root / "gitconfig"), "GIT_CONFIG_NOSYSTEM": "1",
                     "GIT_CONFIG_SYSTEM": os.devnull, "LANG": "C.UTF-8"}
         self.base = self.make_fixture(real_git)
+        # A PR and its branch from before the run, which the reset leaves alone.
+        (self.root / "gh" / "prs.json").write_text(json.dumps({"5": {"state": "OPEN", "body": "an owner's PR"}}))
 
     def make_fixture(self, real_git: str) -> str:
         """The bare fixture repo: tests/fixture-repo committed on main and tagged base. Returns the base commit."""
@@ -261,7 +278,7 @@ class World:
         git("add", "-A")
         git("commit", "-q", "-m", "base")
         git("tag", "base")
-        git("push", "-q", str(self.root / "fixture.git"), "main", "base")
+        git("push", "-q", str(self.root / "fixture.git"), "main", "base", "main:refs/heads/owner/keep")
         return git("rev-parse", "HEAD")
 
     def drive(self, *args: str, **env: str) -> tuple[int, str, str]:
@@ -297,6 +314,10 @@ class CrossHarnessTest(unittest.TestCase):
             self.assertNotIn(str(self.world.root), text)
         return code, out.splitlines()
 
+    def next_pr(self) -> int:
+        """The number of the PR the next T1 opens."""
+        return max(map(int, json.loads((self.world.root / "gh" / "prs.json").read_text()))) + 1
+
     def run_on(self, harness: str, *tasks: str, **env: str) -> tuple[int, list[str]]:
         connection = ("--connection", CONNECTION) if harness == "cortex" else ()
         return self.drive("run", harness, *(tasks or ("G", "T1")), *connection, **env)
@@ -317,10 +338,12 @@ class CrossHarnessTest(unittest.TestCase):
         }
         for harness in HARNESSES:
             with self.subTest(harness=harness):
+                pr = self.next_pr()
                 code, out = self.run_on(harness)
                 self.assertEqual(out, [
                     f"G {harness} passed: {g_facts[harness]}; tokens: 12 in, 340 out",
-                    f"T1 {harness} passed: one session and no agent; the small test passed; the session merged PR 7; "
+                    f"T1 {harness} passed: one session and no agent; the small test passed; the session merged "
+                    f"PR {pr}; "
                     "tokens: 12 in, 340 out",
                 ])
                 self.assertEqual(code, 0)
@@ -353,7 +376,8 @@ class CrossHarnessTest(unittest.TestCase):
         self.run_on("cursor", "T1")
         install, = lines(self.world.root / "deliver.jsonl")
         start, = self.world.starts()
-        self.assertEqual(install, {"args": ["install", "cursor"], "cwd": start["cwd"]})
+        self.assertEqual(install, {"args": ["install", "cursor"], "cwd": start["cwd"],
+                                   "uv": "run --python 3.13 --no-project"})
         self.assertTrue(start["cursor_agents"])
 
     def test_t1_types_the_skill_with_the_small_edit_text(self):
@@ -415,25 +439,27 @@ class CrossHarnessTest(unittest.TestCase):
     def test_each_t1_failure_names_its_fact(self):
         cases = {
             ("claude", "agent"): "the session started an agent",
+            ("cortex", "agent"): "the session started an agent",
             ("codex", "agent"): "the session started an agent",
             ("cursor", "agent"): "the session started an agent",
             ("antigravity", "agent"): "the session started an agent",
             ("claude", "no-small-test"): "the measurement block has no small test line",
             ("claude", "merge-owner"): "the measurement block has no merge line by the session",
-            ("claude", "not-merged"): "PR 7 is not merged",
-            ("claude", "no-merge"): "the measurement block has no merge line by the session; no merge record",
+            ("claude", "not-merged"): "PR {pr} is not merged",
+            ("claude", "no-merge"): "the measurement block has no merge line by the session",
             ("antigravity", "denied"): "denied_actions holds 1",
         }
         for (harness, knob), fact in cases.items():
             with self.subTest(harness=harness, knob=knob):
+                pr = self.next_pr()
                 code, out = self.run_on(harness, "T1", STANDIN=knob)
-                self.assertEqual(out, [f"T1 {harness} failed: {fact}; tokens: 12 in, 340 out"])
+                self.assertEqual(out, [f"T1 {harness} failed: {fact.format(pr=pr)}; tokens: 12 in, 340 out"])
                 self.assertEqual(code, 1)
 
     def test_tokens_print_blank_where_the_output_has_none(self):
         code, out = self.run_on("codex", "T1", STANDIN="no-usage")
         self.assertEqual(out, ["T1 codex passed: one session and no agent; the small test passed; the session merged "
-                               "PR 7; tokens: blank in, blank out"])
+                               "PR 6; tokens: blank in, blank out"])
         self.assertEqual(code, 0)
 
     def test_a_run_past_its_limit_fails_its_terminal_is_ended_and_the_fixture_reset(self):
@@ -445,15 +471,15 @@ class CrossHarnessTest(unittest.TestCase):
         self.assertEqual([call[0] for call in calls if call[0] != "get"], ["run", "kill"])
         self.assertEqual(self.world.remote("rev-parse", "main"), self.world.base)
 
-    def test_the_reset_closes_the_open_prs_and_forces_only_the_base_tag_onto_the_default_branch(self):
+    def test_the_reset_closes_the_run_s_prs_and_forces_only_the_base_tag_onto_the_default_branch(self):
         code, out = self.run_on("claude", "T1")
         self.assertEqual(code, 0)
-        self.assertEqual(self.world.remote("for-each-ref", "--format=%(refname)"), "refs/heads/main\nrefs/tags/base")
+        self.assertEqual(self.world.remote("for-each-ref", "--format=%(refname)"),
+                         "refs/heads/main\nrefs/heads/owner/keep\nrefs/tags/base")  # owner/keep was there before
         self.assertEqual(self.world.remote("rev-parse", "main"), self.world.base)
         gh = lines(self.world.root / "gh" / "calls.jsonl")
-        self.assertIn(["pr", "close", "8", "--repo", FIXTURE, "--delete-branch"], gh)
-        self.assertEqual([call for call in gh if call[:2] == ["pr", "close"]], [["pr", "close", "8", "--repo", FIXTURE,
-                                                                               "--delete-branch"]])
+        self.assertEqual([call for call in gh if call[:2] == ["pr", "close"]], [["pr", "close", "7", "--repo", FIXTURE]])
+        self.assertEqual(json.loads((self.world.root / "gh" / "prs.json").read_text())["5"]["state"], "OPEN")
         pushes = [call["args"] for call in lines(self.world.root / "git.jsonl") if "push" in call["args"]]
         forced = [args for args in pushes if any(a in ("--force", "-f") or a.startswith(("+", "--force")) for a in args)]
         remote = str(self.world.root / "fixture.git")
@@ -480,8 +506,7 @@ class CrossHarnessTest(unittest.TestCase):
         cases = [
             (("run", "cortex", "G", "--fixture", FIXTURE), "cross_harness: cortex needs --connection, the Snowflake "
                                                             "connection its runs spend"),
-            (("run", "codex", "G", "--fixture", "not-a-repo"), "cross_harness: --fixture takes OWNER/REPO, not "
-                                                               "'not-a-repo'"),
+            (("run", "codex", "G", "--fixture", "not-a-repo"), "cross_harness: --fixture takes OWNER/REPO"),
         ]
         for args, line in cases:
             with self.subTest(args=args):

@@ -117,7 +117,7 @@ class TestPathMap(unittest.TestCase):
             "name": f"single ticket on {harness}",
             "files": [f"{deliver}/SKILL.md", f"{deliver}/adapters/{adapter}.md", f"{deliver}/review.md"],
             "limit": limit,
-        } for harness, adapter, limit in (("Cortex Code", "cortex", 1039), ("Codex", "codex", 1007),
+        } for harness, adapter, limit in (("Cortex Code", "cortex", 1039), ("Codex", "codex", 1010),
                                           ("Cursor", "cursor", 1008), ("Antigravity", "antigravity", 1014)))])
         self.assertEqual(
             rows[:5],

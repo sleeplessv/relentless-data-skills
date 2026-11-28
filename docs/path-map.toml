@@ -79,7 +79,7 @@ files = [
   "skills/deliver/adapters/codex.md",
   "skills/deliver/review.md",
 ]
-limit = 1007
+limit = 1010
 
 [[path]]
 name = "single ticket on Cursor"

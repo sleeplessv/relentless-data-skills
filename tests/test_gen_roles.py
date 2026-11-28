@@ -49,8 +49,39 @@ HARNESS_READERS = {
     "skills/deliver/harness/antigravity/deliver-reader.md":
         f"---\nname: deliver-reader\ndescription: {DESCRIPTION}\ntools: [view_file]\nmodel: inherit\n---\n\n{BRIEF}",
 }
-HOOK_FILES = [f"skills/deliver/harness/{h}/hooks.json" for h in ("cortex", "codex", "cursor", "antigravity")]
-ALL_FILES = [READER, *HARNESS_READERS, *HOOK_FILES]
+REVIEWER_BRIEF = ("Your prompt names a brief file. Read it and follow it. "
+                  "Edit no file, start no agent, and never run `deliver.py merge`.\n")
+REVIEWERS = {
+    "deliver-requirements-reviewer": ("standard", "Checks a deliver change against its requirements, as its brief file asks."),
+    "deliver-defect-reviewer": ("strong", "Looks for defects in a deliver change, as its brief file asks."),
+}
+
+
+def reviewer_files(name: str, kind: str, description: str) -> dict[str, str]:
+    """A reviewer's file on each of the five harnesses: the reader's form with the shell added (spec #479)."""
+    head = f"---\nname: {name}\ndescription: {description}\n"
+    return {
+        f"skills/deliver/agents/{name}.md":
+            f"{head}tools: Read, Grep, Glob, Bash\nclass: {kind}\neffort: high\n---\n\n{REVIEWER_BRIEF}",
+        f"skills/deliver/harness/cortex/{name}.md": f"{head}tools: [read, grep, glob, bash]\n---\n\n{REVIEWER_BRIEF}",
+        f"skills/deliver/harness/codex/{name}.toml":
+            f'name = "{name}"\ndescription = "{description}"\nmodel_reasoning_effort = "high"\n'
+            f'developer_instructions = """\n{REVIEWER_BRIEF}"""\n',
+        f"skills/deliver/harness/cursor/{name}.md": f"{head}---\n\n{REVIEWER_BRIEF}",
+        f"skills/deliver/harness/antigravity/{name}.md":
+            f"{head}tools: [view_file, run_command]\nmodel: inherit\n---\n\n{REVIEWER_BRIEF}",
+    }
+
+
+REVIEWER_FILES = {path: text for name, (kind, description) in REVIEWERS.items()
+                  for path, text in reviewer_files(name, kind, description).items()}
+SUFFIX = {"cortex": ".md", "codex": ".toml", "cursor": ".md", "antigravity": ".md"}
+HOOK_FILES = [f"skills/deliver/harness/{h}/hooks.json" for h in SUFFIX]
+ROLE_NAMES = ("deliver-reader", *REVIEWERS)
+# In the order --write writes them: Claude Code's role files, each harness's role files, then the hook files.
+ALL_FILES = [*(f"skills/deliver/agents/{name}.md" for name in ROLE_NAMES),
+             *(f"skills/deliver/harness/{h}/{name}{suffix}" for h, suffix in SUFFIX.items() for name in ROLE_NAMES),
+             *HOOK_FILES]
 
 
 def failed(path: str) -> str:
@@ -83,6 +114,13 @@ class GenRolesTest(unittest.TestCase):
     def test_write_creates_each_harness_reader_file_in_its_form(self) -> None:
         self.run_script("--write")
         for path, text in HARNESS_READERS.items():
+            with self.subTest(path):
+                self.assertEqual((self.root / path).read_text(), text)
+
+    def test_write_creates_each_reviewer_file_in_its_harness_form(self) -> None:
+        """No model; effort on Claude Code and Codex only; the shell kept on all five (spec #479)."""
+        self.run_script("--write")
+        for path, text in REVIEWER_FILES.items():
             with self.subTest(path):
                 self.assertEqual((self.root / path).read_text(), text)
 

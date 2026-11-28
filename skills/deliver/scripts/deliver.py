@@ -28,7 +28,7 @@ sys.dont_write_bytecode = True  # importing the subcommands would otherwise writ
 import core  # noqa: E402
 
 HERE = Path(__file__).resolve().parent
-SUBCOMMANDS = ("start", "preflight", "check", "save", "pr", "ready", "merge", "finish", "deps", "scan", "report", "install")
+SUBCOMMANDS = ("start", "preflight", "check", "save", "pr", "ready", "merge", "finish", "deps", "scan", "report", "install", "brief")
 NO_MARK_NEEDED = frozenset({"start", "finish", "deps", "scan", "report", "install"})
 USAGE = f"""\
 usage: deliver.py <subcommand> [arguments]

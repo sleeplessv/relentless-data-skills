@@ -116,6 +116,16 @@ REFUSALS = {
     "install.not-a-checkout": "{harness} loads the reader only from a checkout's .cursor/agents/, so run install inside the checkout",
     "preflight.install-missing": "deliver is not installed on {harness}: {path} lacks what install writes",
     "preflight.install-differs": "deliver's files on {harness} differ from the skill's copy: {path}",
+    "brief.no-mark": NO_MARK,
+    "brief.no-pr": "the records of {branch} hold no PR",
+    "brief.not-pushed": "PR #{number}'s head on GitHub is {remote}, not the local HEAD {commit}",
+    "brief.no-pass": "`{command}` has no counted pass on the head commit {commit}",
+    "brief.no-review-skill": "the review skill {skill} is not installed, so the brief cannot name its path",
+    "save.bad-review": "line {number} of .deliver/review.md is outside the report's form: {line}",
+    "save.no-brief": "no {role} brief is saved, so the report is tied to no reviewed commit",
+    "save.tree-changed": "{why}, so the report did not read this tree",
+    "brief.unreadable": "the saved {kind}.md cannot be read: {why}",
+    "brief.bad-settings": "the stack settings cannot be read: {error}",
 }
 
 

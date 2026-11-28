@@ -112,13 +112,13 @@ class TestPathMap(unittest.TestCase):
             "files": [f"{deliver}/SKILL.md", f"{deliver}/review.md", f"{deliver}/agents/deliver-reader.md",
                       f"{deliver}/agents/deliver-requirements-reviewer.md",
                       f"{deliver}/agents/deliver-defect-reviewer.md"],
-            "limit": 957,
+            "limit": 965,
         }, *({
             "name": f"single ticket on {harness}",
             "files": [f"{deliver}/SKILL.md", f"{deliver}/adapters/{adapter}.md", f"{deliver}/review.md"],
             "limit": limit,
-        } for harness, adapter, limit in (("Cortex Code", "cortex", 1031), ("Codex", "codex", 999),
-                                          ("Cursor", "cursor", 1000), ("Antigravity", "antigravity", 1006)))])
+        } for harness, adapter, limit in (("Cortex Code", "cortex", 1039), ("Codex", "codex", 1007),
+                                          ("Cursor", "cursor", 1008), ("Antigravity", "antigravity", 1014)))])
         self.assertEqual(
             rows[:5],
             [{

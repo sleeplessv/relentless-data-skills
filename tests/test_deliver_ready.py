@@ -34,7 +34,6 @@ PLAN = """\
 door: two-way, a new flag; nothing deploys on merge
 """
 QUERY_PLAN = PLAN.replace("| R2 |", "| R2 | Rows drop by two | query `echo rows`: 120 before, 118 after |\n| R3 |")
-VERSION = json.loads((deliver_kit.SCRIPTS.parent / "plugin.json").read_text(encoding="utf-8"))["version"]
 WARNING = "no docs/agents/stack.toml: every stack setting has its default"
 SCAN_STUB = """\
 import os

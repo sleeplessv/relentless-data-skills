@@ -140,6 +140,21 @@ class World:
             self.run("generation-one", ticket, at < first)
             self.run("direct", ticket, at < second)
 
+    def ended(self, ticket: dict, prs: list[dict] | None, records: list[dict] = ()) -> None:
+        """A deliver replay of the ticket whose clone holds what the stand-in gh and deliver left: prs.json with
+        these PRs (none at all for None, as when the session called no gh) and the records of the branch
+        deliver/ticket-<n>, as `deliver.py` appends them."""
+        git = self.state / self.replay(ticket, "deliver")["clone"] / ".git"
+        git.mkdir(parents=True)
+        if prs is not None:
+            (git / "replay-deliver").mkdir()
+            (git / "replay-deliver" / "prs.json").write_text(json.dumps(prs))
+        if records:
+            folder = git / "deliver" / "branches" / "deliver" / f"ticket-{ticket['ticket']}"
+            folder.mkdir(parents=True)
+            (folder / "records.jsonl").write_text("".join(
+                json.dumps({"at": "2026-11-28T10:00:00Z", **record}) + "\n" for record in records))
+
     def save(self) -> None:
         for name, lines in (("versions", self.versions), ("verdicts", self.verdicts), ("scan-rows", self.rows)):
             (self.state / f"{name}.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
@@ -879,6 +894,41 @@ class TestReport(unittest.TestCase):
             "appear.",
             "With it counted as cut, the cut is 6870 tokens. The sign appears.",
             "The two verdicts differ: the spend not sorted decides the sign."])
+
+    def test_the_deliver_lines_count_where_each_replay_ended_per_bucket(self) -> None:
+        tickets = self.world.draw(per_bucket=3)  # buckets in turn: 0-50, 51-300, 301-1500, three times
+
+        def pr(ticket: dict, state: str = "OPEN", draft: bool = False) -> dict:
+            return {"number": 1, "url": "https://github.invalid/replay/A/pull/1",
+                    "headRefName": f"deliver/ticket-{ticket['ticket']}", "baseRefName": "main", "title": "t",
+                    "body": "b", "state": state, "isDraft": draft}
+        ready, review = {"event": "ready", "commit": commit(1), "result": "small edit"}, {
+            "event": "ready", "commit": commit(1), "result": "needs review"}
+        handed = {"event": "merge", "commit": commit(1), "method": None,
+                  "merge_line": "merge: left to the owner, one-way door"}
+        self.world.ended(tickets[0], [pr(tickets[0], "MERGED")])  # its records removed by cleanup after the merge
+        self.world.ended(tickets[1], [pr(tickets[1])], [ready])
+        self.world.ended(tickets[2], [pr(tickets[2])], [ready, handed])
+        self.world.ended(tickets[3], [pr(tickets[3], draft=True)], [review])
+        self.world.ended(tickets[4], [])  # gh was called, and no PR was opened
+        self.world.ended(tickets[5], None)  # gh was never called
+        self.world.ended(tickets[6], [pr(tickets[6], draft=True)])  # a draft that ready did not send to review
+        self.world.replay(tickets[7], "deliver")  # a clone that is gone
+        lines = self.lines()  # tickets[8] has no deliver replay
+        start = lines.index("deliver")
+        self.assertEqual(lines[start + 8:], [
+            "  Where the replays ended, 0-50: 1 merged, 0 ready, 0 handed to the owner, 1 draft needing a review, "
+            "0 stopped before the PR, 1 other or not read.",
+            "  Where the replays ended, 51-300: 0 merged, 1 ready, 0 handed to the owner, 0 draft needing a review, "
+            "1 stopped before the PR, 1 other or not read.",
+            "  Where the replays ended, 301-1500: 0 merged, 0 ready, 1 handed to the owner, 0 draft needing a review, "
+            "1 stopped before the PR, 0 other or not read.",
+            "  Where the replays ended, All: 1 merged, 1 ready, 1 handed to the owner, 1 draft needing a review, "
+            "2 stopped before the PR, 2 other or not read.",
+            "",
+            *lines[lines.index("Warning sign 1: no verdict. Tickets without both generation-one and direct judged: "
+                               "9 of 9."):]])
+        self.assertFalse([line for line in lines[:start] if "ended" in line])
 
     def test_a_third_version_is_printed_beside_the_other_two(self) -> None:
         tickets = self.world.draw(per_bucket=1)

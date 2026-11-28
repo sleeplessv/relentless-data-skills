@@ -1582,6 +1582,16 @@ class DeliverVersionTest(unittest.TestCase):
                 "and file tools may read the folder past the read block.",
                 "They may not write it: a permission deny rule, Edit(//<folder>/**), holds the file tools off it, "
                 "and sandbox.filesystem.denyWrite holds sandboxed commands off it.",
+                "Its sandboxed commands may also read, through sandbox.filesystem.allowRead, the paths in Claude "
+                "Code's folder ($CLAUDE_CONFIG_DIR, else ~/.claude) that deliver's preflight reads, where they exist: "
+                "settings.json, agents/, skills/deliver, skills/code-review, skills/ponytail-review and skills/pr, "
+                "plugins/installed_plugins.json and plugins/known_marketplaces.json, and, for each plugin install "
+                "that applies to the clone, its hooks/hooks.json, its manifests and the hook files they name, its "
+                "skills folders and its marketplace's manifest.",
+                "Where one of these paths, or a role file in agents/, is a link, the path it leads to may be read "
+                "too.",
+                "Each of them is also in sandbox.filesystem.denyWrite, which holds sandboxed commands off it.",
+                "Nothing else in Claude Code's folder opens, and the trust record, ~/.claude.json, stays closed.",
                 "Its prompt is the typed command /deliver:deliver TICKET.",
                 "Its environment also leaves out every variable whose name, in any case, starts with GH_ or holds "
                 "GITHUB.",
@@ -1595,6 +1605,176 @@ class DeliverVersionTest(unittest.TestCase):
                 "the replay's own records stay in the machine directory."):
             with self.subTest(rule=rule[:40]):
                 self.assertIn(rule, text if rule.startswith(("Usage", "With no")) else sentences)
+
+
+# deliver's preflight checks of Claude Code (the checks_claude and deps entries of preflight.CHECKS), run on a made-up
+# home folder as the deliver session's sandbox lets its commands read it: under the home folder, a path that exists
+# opens only when it and its real place are inside an allowRead entry of replay.settings(); elsewhere, and for a path
+# that does not exist, the call goes through, as macOS's sandbox answers a missing path with "no such file". An audit
+# hook polices opening and listing, and os.stat and os.lstat are wrapped, which the hook does not see. The checks run
+# once with every entry and once with each entry of replay.claude_reads() dropped. It prints JSON: the reads, the
+# deliver version's filesystem settings, and per run the results, the refused paths and the paths opened under home.
+PREFLIGHT_SANDBOXED = r'''
+import errno, json, os, sys, types
+from pathlib import Path
+sys.path[:0] = [sys.argv[1], sys.argv[2]]
+import replay, preflight
+home, clone = Path.home(), Path(sys.argv[3])
+reads = replay.claude_reads(clone)
+filesystem = replay.settings(clone, "deliver")["sandbox"]["filesystem"]
+checks = [c for c in preflight.CHECKS if c.__module__ in ("checks_claude", "deps")]
+real_stat, real_lstat = os.stat, os.lstat
+allowed, refused, opened, busy = [], [], [], []
+
+
+def inside(path, folders):
+    return any(path == folder or path.startswith(folder + os.sep) for folder in folders)
+
+
+def police(path, follow=True):
+    if isinstance(path, int) or path is None or busy:  # busy: this function's own lstat calls
+        return
+    busy.append(True)
+    try:
+        path = os.path.abspath(os.fsdecode(path))
+        if not inside(path, [str(home)]) or not os.path.lexists(path):
+            return
+        where = os.path.realpath(path) if follow else os.path.join(os.path.realpath(os.path.dirname(path)),
+                                                                     os.path.basename(path))
+        if inside(path, allowed) and inside(where, allowed):
+            opened.append(path)
+            return
+    finally:
+        busy.clear()
+    refused.append(path)
+    raise PermissionError(errno.EPERM, "Operation not permitted", path)
+
+
+def hook(event, args):
+    if event in ("open", "os.scandir", "os.listdir") and args:
+        police(args[0])
+
+
+sys.addaudithook(hook)
+os.stat = lambda path, *a, **k: (police(path, k.get("follow_symlinks", True)), real_stat(path, *a, **k))[1]
+os.lstat = lambda path, *a, **k: (police(path, False), real_lstat(path, *a, **k))[1]
+runs = []
+for dropped in [None, *reads]:
+    allowed[:] = [entry for entry in filesystem["allowRead"] if entry != dropped]
+    del refused[:], opened[:]
+    ctx = preflight.Context(types.SimpleNamespace(checkout=clone))
+    results = []
+    for check in checks:
+        try:
+            result = check(ctx)
+        except PermissionError as e:
+            result = types.SimpleNamespace(code=f"PermissionError {e.filename}")
+        results.append(None if result is None else getattr(result, "code", "warn"))
+    runs.append({"dropped": dropped, "results": results, "refused": sorted(set(refused)), "opened": sorted(set(opened))})
+print(json.dumps({"reads": reads, "filesystem": filesystem, "runs": runs}))
+'''
+
+
+class ClaudeReadsTest(unittest.TestCase):
+    """The deliver version reads what preflight reads in Claude Code's folder, and nothing wider."""
+
+    def setUp(self) -> None:
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        root = Path(temp.name).resolve()
+        self.home = root / "home"
+        self.clone = self.home / ".local" / "state" / "deliver" / "replays" / "A-7-deliver"
+        self.config = self.home / ".claude"
+        self.install = install = self.config / "plugins" / "cache" / "market" / "helper" / "1.0"
+        self.market = market = self.config / "plugins" / "marketplaces" / "market"
+        self.target = self.home / ".agents" / "skills" / "code-review"
+        self.role = self.home / "dotfiles" / "linked-role.md"
+        objects = {
+            self.config / "settings.json": {"enabledPlugins": {"helper@market": True}},
+            self.config / "plugins" / "installed_plugins.json":
+                {"plugins": {"helper@market": [{"scope": "user", "installPath": str(install)}]}},
+            self.config / "plugins" / "known_marketplaces.json": {"market": {"installLocation": str(market)}},
+            market / ".claude-plugin" / "marketplace.json": {"plugins": [{"name": "helper", "skills": ["listed"]}]},
+            install / "hooks" / "hooks.json": {"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": []}]}},
+            install / ".claude-plugin" / "plugin.json": {"name": "helper", "hooks": "more-hooks.json", "skills": "more"},
+            install / "more-hooks.json": {"hooks": {}},
+            # Decoys: the trust record and a credential store.
+            self.home / ".claude.json": {"projects": {str(self.clone): {"hasTrustDialogAccepted": True}}},
+            self.config / ".credentials.json": {"token": "made-up"},
+        }
+        texts = {
+            self.target / "SKILL.md": "---\nname: code-review\n---\n",
+            self.config / "skills" / "ponytail-review" / "SKILL.md": "---\nname: ponytail-review\n---\n",
+            install / "skills" / "SKILL.md": "---\nname: helper-skill\n---\n",
+            install / "more" / "SKILL.md": "---\nname: other-skill\n---\n",
+            install / "listed" / "pr" / "SKILL.md": "---\nname: pr\n---\n",
+            self.config / "agents" / "helper-role.md": "---\nname: helper-role\n---\n",
+            self.role: "---\nname: linked-role\n---\n",
+            # Decoys: history, a transcript, a key elsewhere in the home folder.
+            self.config / "history.jsonl": "{}\n",
+            self.config / "projects" / "-made-up" / "session.jsonl": "{}\n",
+            self.home / ".ssh" / "id_made_up": "made-up\n",
+            self.clone / "README.md": "A report.\n",
+        }
+        for path, text in [*((path, json.dumps(data)) for path, data in objects.items()), *texts.items()]:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+        (self.config / "skills" / "code-review").symlink_to(self.target)
+        (self.config / "agents" / "linked-role.md").symlink_to(self.role)
+        env = {key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")}
+        env.update(HOME=str(self.home), CLAUDE_CODE_ENTRYPOINT="sdk-cli", CLAUDE_CODE_EFFORT_LEVEL="medium",
+                   DELIVER_STATE_DIR=str(root / "state"))
+        result = subprocess.run([sys.executable, "-c", PREFLIGHT_SANDBOXED, str(SCRIPTS), str(PLUGIN / "scripts"),
+                                 str(self.clone)], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.out = json.loads(result.stdout)
+
+    def test_the_reads_are_the_files_preflight_reads_and_the_real_place_of_each_link(self) -> None:
+        config, install = self.config, self.install
+        self.assertEqual(self.out["reads"], sorted(str(path) for path in (
+            config / "settings.json", config / "agents", self.role,
+            config / "skills" / "code-review", self.target, config / "skills" / "ponytail-review",
+            config / "plugins" / "installed_plugins.json", config / "plugins" / "known_marketplaces.json",
+            self.market / ".claude-plugin" / "marketplace.json", install / "hooks" / "hooks.json",
+            install / ".claude-plugin" / "plugin.json", install / "more-hooks.json", install / "skills",
+            install / "more", install / "listed")))
+
+    def test_preflight_s_claude_code_checks_pass_reading_only_the_allowed_paths(self) -> None:
+        full = self.out["runs"][0]
+        # check_skill_hashes warns: the made-up skills' hashes are not the contract's.
+        self.assertEqual([result for result in full["results"] if result], ["warn"])
+        self.assertEqual(full["refused"], [])
+        for path in (self.config / "settings.json", self.config / "plugins" / "installed_plugins.json",
+                     self.install / "hooks" / "hooks.json", self.install / "more-hooks.json",
+                     self.market / ".claude-plugin" / "marketplace.json", self.config / "skills" / "code-review" / "SKILL.md",
+                     self.install / "listed" / "pr" / "SKILL.md", self.config / "agents" / "linked-role.md"):
+            self.assertIn(str(path), full["opened"])
+
+    def test_each_read_dropped_leaves_preflight_refused_a_path_it_reads(self) -> None:
+        self.assertEqual([run["dropped"] for run in self.out["runs"][1:]], self.out["reads"])
+        for run in self.out["runs"][1:]:
+            with self.subTest(dropped=run["dropped"]):
+                self.assertNotEqual(run["refused"], [])
+
+    def assert_narrow(self, allowed: list[str]) -> None:
+        """No entry is the home folder, Claude Code's folder or a folder above them, and none holds a decoy."""
+        for entry in allowed:
+            for kept in (self.home, self.config, self.home / ".claude.json", self.config / ".credentials.json",
+                         self.config / "history.jsonl", self.config / "projects", self.home / ".ssh"):
+                self.assertFalse(str(kept) == entry or str(kept).startswith(entry + os.sep), (entry, kept))
+
+    def test_neither_the_trust_record_nor_a_wider_folder_is_readable(self) -> None:
+        allowed = self.out["filesystem"]["allowRead"]
+        self.assert_narrow(allowed)
+        self.assertEqual(self.out["filesystem"]["denyRead"], [str(self.home)])
+        for wider in (self.home, self.config, self.home / ".claude.json", self.config / "projects"):
+            with self.subTest(wider=wider), self.assertRaises(AssertionError):
+                self.assert_narrow([*allowed, str(wider)])
+
+    def test_sandboxed_commands_may_not_write_what_they_may_read(self) -> None:
+        reads = self.out["reads"]
+        self.assertEqual(self.out["filesystem"]["denyWrite"], [str(PLUGIN), *reads])
+        self.assertEqual(self.out["filesystem"]["allowRead"][-len(reads):], reads)
 
 
 class StandInGhTest(unittest.TestCase):

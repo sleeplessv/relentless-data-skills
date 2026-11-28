@@ -35,7 +35,7 @@ GUARD_SLOT = "@GUARD@"
 MARKER = "deliver_guard="
 PLUGIN_LINE = "claude plugin install deliver@relentless-data-skills"
 TRUST_STEP = "Codex runs no hook you have not trusted: start codex, type /hooks, trust deliver's guard, then quit."
-# Per harness, named as checks_harness names it: its folder in `harness/` (named as its adapter is), the reader's
+# Per harness, named as checks_harness names it: its folder in `harness/` (named as its adapter is), the role files'
 # folder under HOME (None: the checkout's `.cursor/agents/`) and the user hook file (#189).
 TARGETS = {
     "cortex-code": ("cortex", ".snowflake/cortex/agents", ".snowflake/cortex/hooks.json"),
@@ -361,7 +361,7 @@ def main(args: list[str], run: core.Run | None) -> None:
     command = f"deliver.py install {'--remove ' if remove else ''}{harness}"
     ledger = Ledger()
     done = []
-    # On remove, each exclude line comes after the reader files it covers, so it sees whether they stayed.
+    # On remove, each exclude line comes after the role files it covers, so it sees whether they stayed.
     for item in sorted(reversed(todo), key=lambda item: isinstance(item, ExcludeLine)) if remove else todo:
         try:
             if remove:

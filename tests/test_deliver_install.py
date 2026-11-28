@@ -28,6 +28,14 @@ HOOKS = {"cortex-code": ".snowflake/cortex/hooks.json", "codex": ".codex/hooks.j
          "antigravity": ".gemini/config/hooks.json"}
 CURSOR_READER = ".cursor/agents/deliver-reader.md"
 EXCLUDE_LINE = "/.cursor/agents/deliver-reader.md"
+# Every role file, in the order install writes them: the reader and the two reviewers (spec #479).
+ROLES = ("deliver-defect-reviewer", "deliver-reader", "deliver-requirements-reviewer")
+CURSOR_ROLES = [f".cursor/agents/{role}.md" for role in ROLES]
+
+
+def role_files(harness: str) -> list[str]:
+    """Each role file's path under the home folder, in the order install writes them."""
+    return [str(Path(READER[harness]).with_stem(role)) for role in ROLES]
 
 
 def tree(root: Path) -> dict[str, bytes | None]:
@@ -55,14 +63,13 @@ class Install(unittest.TestCase):
         group = data["deliver-guard"] if harness == "antigravity" else data["hooks"]
         return group["PreToolUse"][-1]["hooks"][0]["command"]
 
-    def test_install_writes_the_reader_file_and_the_hook(self):
+    def test_install_writes_each_role_file_and_the_hook(self):
         for harness in ("cortex-code", "codex", "antigravity"):
             with self.subTest(harness):
                 result = self.install(harness)
                 self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-                suffix = ".toml" if harness == "codex" else ".md"
-                self.assertEqual((self.home / READER[harness]).read_bytes(),
-                                 (HARNESS / FOLDER[harness] / f"deliver-reader{suffix}").read_bytes())
+                for path in role_files(harness):
+                    self.assertEqual((self.home / path).read_bytes(), (HARNESS / FOLDER[harness] / Path(path).name).read_bytes())
                 guard = shlex.quote(str(self.skill / "scripts" / "guard.py"))
                 committed = (HARNESS / FOLDER[harness] / "hooks.json").read_text().replace("@GUARD@", guard)
                 self.assertEqual(json.loads((self.home / HOOKS[harness]).read_text()), json.loads(committed))
@@ -179,7 +186,7 @@ class Install(unittest.TestCase):
     def test_install_codex_prints_the_trust_step_only_when_it_changed_the_hook_file(self):
         trust = "Codex runs no hook you have not trusted: start codex, type /hooks, trust deliver's guard, then quit.\n"
         first = self.install("codex")
-        self.assertEqual(first.stdout, f"wrote {self.home / READER['codex']}\n"
+        self.assertEqual(first.stdout, "".join(f"wrote {self.home / path}\n" for path in role_files("codex")) +
                                        f"added deliver's guard to {self.home / HOOKS['codex']}\n{trust}")
         self.assertNotIn(trust, self.install("codex").stdout)
         (self.home / READER["codex"]).unlink()
@@ -189,19 +196,20 @@ class Install(unittest.TestCase):
         for harness in ("cortex-code", "antigravity"):
             self.assertNotIn("trust", self.install(harness).stdout)
 
-    def test_install_cursor_writes_the_checkout_file_and_one_exclude_line(self):
+    def test_install_cursor_writes_the_checkout_files_and_one_exclude_line_each(self):
         common = Path(self.world.git(self.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
         exclude = common / "info" / "exclude"
         first = self.install("cursor", cwd=self.world.work)
         self.assertEqual(first.returncode, 0, first.stdout)
-        self.assertEqual((self.world.work / CURSOR_READER).read_bytes(),
-                         (HARNESS / "cursor" / "deliver-reader.md").read_bytes())
+        for path in CURSOR_ROLES:
+            self.assertEqual((self.world.work / path).read_bytes(), (HARNESS / "cursor" / Path(path).name).read_bytes())
         self.assertIn("beforeShellExecution", json.loads((self.home / HOOKS["cursor"]).read_text())["hooks"])
         self.assertEqual(self.world.git(self.world.work, "status", "--porcelain", "--untracked-files=all"), "")
         second = self.world.worktree("second", "second")
         result = self.install("cursor", cwd=second)
-        self.assertEqual((result.returncode, result.stdout), (0, f"wrote {second / CURSOR_READER}\n"))
-        self.assertEqual(exclude.read_text().splitlines().count(EXCLUDE_LINE), 1)
+        self.assertEqual((result.returncode, result.stdout), (0, "".join(f"wrote {second / path}\n" for path in CURSOR_ROLES)))
+        for path in CURSOR_ROLES:
+            self.assertEqual(exclude.read_text().splitlines().count(f"/{path}"), 1)
         self.assertEqual(len(json.loads((self.home / HOOKS["cursor"]).read_text())["hooks"]["beforeShellExecution"]), 1)
         self.assertEqual(self.world.git(second, "status", "--porcelain", "--untracked-files=all"), "")
 
@@ -231,8 +239,8 @@ class Install(unittest.TestCase):
                     self.assertNotEqual(tree(self.home), before)
                     result = self.install("--remove", harness)
                     self.assertEqual(result.returncode, 0, result.stdout)
-                    self.assertEqual(result.stdout, f"took deliver's guard out of {self.home / HOOKS[harness]}\n"
-                                                    f"removed {self.home / READER[harness]}\n")
+                    self.assertEqual(result.stdout, f"took deliver's guard out of {self.home / HOOKS[harness]}\n" +
+                                     "".join(f"removed {self.home / path}\n" for path in reversed(role_files(harness))))
                     self.assertEqual(tree(self.home), before)
                     again = self.install("--remove", harness)
                     self.assertEqual(again.stdout, f"nothing to remove: deliver is not installed on {harness}.\n")
@@ -316,12 +324,13 @@ class Install(unittest.TestCase):
                     shutil.rmtree(self.world.state)
                     result = self.install("--remove", harness, cwd=self.world.work)
                     self.assertEqual(result.returncode, 0, result.stdout)
-                    self.assertFalse((self.world.work / CURSOR_READER if harness == "cursor"
-                                      else self.home / READER[harness]).exists())
+                    for role in (CURSOR_ROLES if harness == "cursor" else role_files(harness)):
+                        self.assertFalse((self.world.work if harness == "cursor" else self.home).joinpath(role).exists())
                     # No container is left that only deliver's entry needed.
                     self.assertEqual(json.loads(path.read_text()), data or ({"version": 1} if harness == "cursor" else {}))
                     if harness == "cursor":
-                        self.assertNotIn(EXCLUDE_LINE, (common / "info" / "exclude").read_text().splitlines())
+                        for role in CURSOR_ROLES:
+                            self.assertNotIn(f"/{role}", (common / "info" / "exclude").read_text().splitlines())
                         self.assertEqual(self.world.git(self.world.work, "status", "--porcelain",
                                                         "--untracked-files=all"), "")
 
@@ -396,7 +405,8 @@ class Preflight(unittest.TestCase):
         for harness, var in (("cortex-code", "CORTEX_SESSION_ID"), ("cursor", "CURSOR_AGENT")):
             with self.subTest(harness):
                 result = self.preflight(**{var: "1"})
-                path = self.world.home / READER["cortex-code"] if harness == "cortex-code" else self.world.work / CURSOR_READER
+                path = (self.world.home / role_files("cortex-code")[0] if harness == "cortex-code"
+                        else self.world.work / CURSOR_ROLES[0])
                 self.assertEqual((result.returncode, result.stdout), (10, (
                     f"REFUSED preflight.install-missing: deliver is not installed on {harness}: "
                     f"{path} lacks what install writes\nNext: deliver.py install {harness}\n")))
@@ -416,6 +426,21 @@ class Preflight(unittest.TestCase):
                     f"REFUSED preflight.install-differs: deliver's files on codex differ from the skill's copy: "
                     f"{path}\nNext: deliver.py install codex\n")))
                 path.write_bytes(saved)
+
+    def test_preflight_stops_on_a_reviewer_file_missing_or_differing(self):
+        self.assertEqual(self.world.deliver("install", "codex", CODEX_THREAD_ID="t-1").returncode, 0)
+        for role in ("deliver-requirements-reviewer", "deliver-defect-reviewer"):
+            path = self.world.home / ".codex" / "agents" / f"{role}.toml"
+            saved = path.read_bytes()
+            for state, change in (("missing", path.unlink), ("differs", lambda: path.write_text("edited\n"))):
+                with self.subTest(role=role, state=state):
+                    change()
+                    result = self.preflight(CODEX_THREAD_ID="t-1")
+                    reason = (f"deliver is not installed on codex: {path} lacks what install writes" if state == "missing"
+                              else f"deliver's files on codex differ from the skill's copy: {path}")
+                    self.assertEqual((result.returncode, result.stdout),
+                                     (10, f"REFUSED preflight.install-{state}: {reason}\nNext: deliver.py install codex\n"))
+                    path.write_bytes(saved)
 
     def test_claude_code_and_a_plain_shell_skip_the_install_checks(self):
         for env in ({}, {"CLAUDECODE": "1"}):

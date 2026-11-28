@@ -2,7 +2,7 @@
 
 It reads the same items `deliver.py install` writes (spec #457, "Install"), so the stop it gives
 is the state that `install` fixes. Claude Code and a plain shell skip it: the plugin supplies the
-reader and the guard there.
+role files and the guard there.
 """
 from __future__ import annotations
 

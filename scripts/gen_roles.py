@@ -35,6 +35,8 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 AGENTS_DIR = Path("skills/deliver/agents")
 HARNESS_DIR = Path("skills/deliver/harness")
 
+REVIEWER_BRIEF = ("Your prompt names a brief file. Read it and follow it. "
+                  "Edit no file, start no agent, and never run `deliver.py merge`.")
 # One entry per role. Add a role by adding an entry.
 ROLES = {
     "deliver-reader": {
@@ -45,10 +47,26 @@ ROLES = {
         "brief": "Your brief is the prompt that started you. "
                  "Read only what it asks for and return only what it asks for.",
     },
+    # The reviewers keep the shell on every harness: a reviewer proves a finding by running a check (spec #479).
+    "deliver-requirements-reviewer": {
+        "description": "Checks a deliver change against its requirements, as its brief file asks.",
+        "tools": ("Read", "Grep", "Glob", "Bash"),
+        "class": "standard",
+        "effort": "high",
+        "brief": REVIEWER_BRIEF,
+    },
+    "deliver-defect-reviewer": {
+        "description": "Looks for defects in a deliver change, as its brief file asks.",
+        "tools": ("Read", "Grep", "Glob", "Bash"),
+        "class": "strong",
+        "effort": "high",
+        "brief": REVIEWER_BRIEF,
+    },
 }
 # Antigravity's name for each tool a role may hold, or None where no name was seen on a real run:
 # a misspelled name in `tools` can hang the agent, as Antigravity's documentation says (#248's research).
-ANTIGRAVITY_TOOLS = {"Read": "view_file", "Grep": None, "Glob": None}
+# `run_command` is the shell's name in the recorded hook inputs (tests/deliver_guard_inputs/antigravity/).
+ANTIGRAVITY_TOOLS = {"Read": "view_file", "Grep": None, "Glob": None, "Bash": "run_command"}
 # The registered hook command. `deliver.py install` puts the guard's path, shell-quoted, in place of
 # @GUARD@ (install.GUARD_SLOT). Like the plugin's command, it exits 0 silently when the guard file is
 # gone or no Python 3.13 is found. It passes no argument: the guard tells the harness from its input.

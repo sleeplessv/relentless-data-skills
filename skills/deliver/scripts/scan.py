@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
-"""Read one Claude Code session from its log and write one row about it.
+"""Read one session from its harness's files and write one row about it.
 
-Usage: deliver.py scan SESSION
+Usage: deliver.py scan [--harness HARNESS] SESSION
        deliver.py scan --refresh
        deliver.py scan --background
+
+HARNESS is claude-code (the default), codex, cortex-code, cursor or
+antigravity, and every row names it in its harness column. The sections up to
+"Other harnesses" are about Claude Code.
 
 SESSION is a session id or the path of its .jsonl log. An id is looked up as
 $CLAUDE_CONFIG_DIR/projects/*/<id>.jsonl (default ~/.claude). An argument that
@@ -90,6 +94,35 @@ A PR has one record. A later session that also called ready for it gets a
 final record of pr, ready_at, record_of (the session holding the record) and a
 note that says so.
 
+Other harnesses. A session on Codex, Cortex Code, Cursor or Antigravity gets
+a row of the same columns, plus effort. Only the token columns, total_tokens,
+model, effort and helpers can be read, and every other figure is blank. The
+scan only reads local files: it starts no process and opens no connection.
+
+- codex: SESSION is the thread id (CODEX_THREAD_ID). The log is
+  $CODEX_HOME/sessions/**/rollout-*<id>.jsonl (default ~/.codex). The token
+  columns come from the last token_count event's total_token_usage, its cached
+  input as cache_read_tokens and the rest of its input as input_tokens. model
+  and effort are the ones most turn_context lines name.
+- cortex-code: SESSION is the session id (CORTEX_SESSION_ID). The figures come
+  from the local stats file, ~/.snowflake/cortex/stats/usage.json, never from
+  Snowflake's usage view: the session's entry under "sessions", summed over
+  its models, and each entry whose rootSessionId names it, listed as a helper.
+- cursor: SESSION is the run's id, as Cursor gives a command no session id.
+  Cursor keeps no token count on disk, so every figure is blank.
+- antigravity: SESSION is the conversation id (ANTIGRAVITY_CONVERSATION_ID).
+  The figures come from the PLANNER_RESPONSE lines of
+  <app data dir>/brain/<id>/.system_generated/logs/transcript.jsonl, and of
+  each agent's, listed as a helper. An agent is named by a file in
+  .system_generated/subagents/ of the session or of another agent. The app
+  data dir is $ANTIGRAVITY_APP_DATA_DIR (default ~/.gemini/antigravity-cli).
+
+A helper's tokens count in total_tokens. A session with no figures, or with a
+helper whose figures are missing, gets blank token columns: a blank is never
+a zero, and the report leaves the row out of its token figures and counts it.
+A ready call on one of these harnesses gets the same deliver record, without
+agents, when deliver.py ready hands its run to the refresh it starts.
+
 --refresh refreshes every record that is not final, and makes a record for
 each session log with a ready call. A log whose session is gone keeps its
 row's figures. --background starts --refresh as a detached process and
@@ -112,6 +145,8 @@ import sys
 from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import scan_harness
 
 KINDS = {  # row column: usage field in the log
     "input_tokens": "input_tokens",
@@ -333,7 +368,7 @@ def owners(main: list[dict], helpers: list[tuple[Path, list[dict]]], metas: dict
 
 
 def scan(session: str, log: Path) -> dict:
-    row: dict = {"session": session}
+    row: dict = {"session": session, "harness": "claude-code"}
     blank = {**blank_tokens(), "copied_tokens": None, "active_minutes": None, "auto_compactions": None,
              "typed_compactions": None, "model": None, "skills": None, "helpers": None}
     if not log.is_file():
@@ -453,6 +488,8 @@ MISS_LABEL = "miss"  # the stack settings' default name for the owner's miss lab
 PR_FIELDS = "number,url,state,isDraft,mergedAt,closedAt,body,labels,reviews,baseRefName,headRefName"
 REFRESH_LOCK = "scan-refresh.lock"
 LOCK_FD = "DELIVER_SCAN_LOCK_FD"  # the lock a background start hands to the refresh it starts
+RUN = "DELIVER_SCAN_RUN"  # the ready call of a run on another harness, which a background start hands to the refresh
+CLAUDE_CODE = "claude-code"
 
 
 class GhFailed(Exception):
@@ -680,20 +717,27 @@ def read_rows() -> dict[str, dict]:
     return {row["session"]: row for row in found if row and isinstance(row.get("session"), str)}
 
 
-def deliver_row(session: str, log: Path, rows: dict[str, dict]) -> dict | None:
-    """The session's row, with the record of its PR when it called ready; None when its record is final."""
+def deliver_row(session: str, log: Path | None, rows: dict[str, dict], harness: str = CLAUDE_CODE,
+                call: dict | None = None) -> dict | None:
+    """The session's row, with the record of its PR when it called ready; None when its record is final. A session on
+    another harness has no log for the scan to find its ready call in: `call` gives it, or its earlier record does."""
     old = (rows.get(session) or {}).get("deliver")
     if isinstance(old, dict) and old.get("final"):
         return None
     if not isinstance(old, dict):
         old = None
-    row = scan(session, log)
-    if not log.is_file():
-        if old is None:
+    if harness != CLAUDE_CODE:
+        row = {"session": session, "harness": harness, **scan_harness.read(harness, session)}
+        if call is None and old is None:
             return row
+        call = call or {"ready_at": old.get("ready_at"), "branch": old.get("branch"), "cwd": None}
+    elif not log.is_file():
+        if old is None:
+            return scan(session, log)
         row = {**rows[session]}  # the log is gone: its figures stay as the last scan found them
         call = {"ready_at": old.get("ready_at"), "branch": old.get("branch"), "cwd": None}
     else:
+        row = scan(session, log)
         main = read_lines(log)
         call = ready_call(main, row["session"])
         if call is None:
@@ -754,20 +798,24 @@ def refresh() -> int:
         return 0
     try:
         rows = read_rows()
-        targets: dict[str, Path] = {}
+        targets: dict[str, tuple[Path | None, str, dict | None]] = {}  # each session's log, harness and ready call
+        handed = json_object(os.environ.pop(RUN, "").encode())
+        if handed:
+            targets[handed["session"]] = (None, handed["harness"], handed)
         for log in sorted((config_dir() / "projects").glob("*/*.jsonl")):
             try:
                 text = log.read_bytes().decode(errors="replace")
             except OSError:
                 continue
             if READY_WORDS.search(text):
-                targets.setdefault(log.stem, log)
+                targets.setdefault(log.stem, (log, CLAUDE_CODE, None))
         for session, row in rows.items():
             if isinstance(row.get("deliver"), dict) and not row["deliver"].get("final"):
-                targets.setdefault(session, resolve(session)[1])
-        for session, log in targets.items():
+                harness = row.get("harness") if row.get("harness") in scan_harness.READERS else CLAUDE_CODE
+                targets.setdefault(session, (resolve(session)[1] if harness == CLAUDE_CODE else None, harness, None))
+        for session, (log, harness, call) in targets.items():
             try:
-                row = deliver_row(session, log, rows)
+                row = deliver_row(session, log, rows, harness, call)
             except SystemExit as error:  # a log the first half cannot read: the other records go on
                 print(f"scan: {session}: {error.code}", file=sys.stderr)
                 continue
@@ -779,8 +827,10 @@ def refresh() -> int:
         os.close(lock)
 
 
-def start_background() -> bool:
-    """Start a refresh in the background and return at once; False, starting nothing, while one runs."""
+def start_background(harness: str | None = CLAUDE_CODE, run: object = None) -> bool:
+    """Start a refresh in the background and return at once; False, starting nothing, while one runs. `run`, the
+    core.Run of a ready call made now on `harness`, is handed to the refresh when that harness keeps no log the
+    refresh can find the call in: its session id is the harness's own, or the run's id when it gives none."""
     state = state_dir()
     descriptor = os.open(state / REFRESH_LOCK, os.O_WRONLY | os.O_CREAT, 0o600)
     try:
@@ -788,12 +838,18 @@ def start_background() -> bool:
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return False
+        env = {**os.environ, LOCK_FD: str(descriptor)}
+        if harness in scan_harness.READERS and run is not None:
+            variable = scan_harness.SESSION_VARIABLES[harness]
+            env[RUN] = json.dumps({"session": variable and os.environ.get(variable) or run.mark["run"],
+                                   "harness": harness, "ready_at": datetime.now(timezone.utc).isoformat(),
+                                   "branch": run.mark["branch"], "cwd": str(run.checkout)})
         with open(state / "scan-refresh.log", "a") as log:
             os.chmod(log.name, 0o600)
             # The refresh shares this lock, so it is held from now until the refresh ends.
             subprocess.Popen([sys.executable, str(Path(__file__).with_name("deliver.py")), "scan", "--refresh"],
                              stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=state, start_new_session=True,
-                             pass_fds=(descriptor,), env={**os.environ, LOCK_FD: str(descriptor)})
+                             pass_fds=(descriptor,), env=env)
         return True
     finally:
         os.close(descriptor)
@@ -809,6 +865,12 @@ def cli(argv: list[str]) -> int:
         if not start_background():
             print("a scan is already running; nothing started")
         return 0
+    if argv[:1] == ["--harness"] and len(argv) == 3 and argv[1] in scan_harness.READERS:
+        row = deliver_row(argv[2], None, read_rows(), argv[1])
+        print(write_row(row) if row is not None else state_dir() / "scan-rows.jsonl")
+        return 0
+    if argv[:2] == ["--harness", CLAUDE_CODE]:
+        argv = argv[2:]
     # A path may start with "-": Claude Code names each project folder "-<path>".
     if len(argv) != 1 or (argv[0].startswith("-") and not argv[0].endswith(".jsonl")):
         print(__doc__.strip(), file=sys.stderr)

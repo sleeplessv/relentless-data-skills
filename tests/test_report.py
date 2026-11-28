@@ -685,6 +685,23 @@ class TestReport(unittest.TestCase):
             "record.",
             "  Left out of the token figures: 2 with a blank token count. Left out of the active minutes: 3 blank."])
 
+    def test_blank_rows_of_every_harness_are_left_out_of_the_token_figures_and_counted(self) -> None:
+        tickets = self.world.draw(per_bucket=2)
+        # As the scan writes each harness's row with no token count: a Claude Code log that is gone, a Codex log
+        # with no usage, a Cortex Code session the stats file lacks, any Cursor run, and an Antigravity session whose
+        # agent has no transcript. The last row is a Codex row with a count.
+        for ticket, harness, tokens in zip(tickets, ("claude-code", "codex", "cortex-code", "cursor", "antigravity",
+                                                     "codex"), (None, None, None, None, None, 300)):
+            self.world.run("generation-one", ticket, True, tokens=tokens, minutes=None)
+            self.world.rows[-1].update(harness=harness, effort=None)
+        self.world.rows[-2]["helpers"] = [helper(None, None, None)]
+        lines = self.lines()
+        self.assertEqual(lines[6:9], [
+            "  All: 6 judged, 6 of 6 right first time, median total tokens 300, median active minutes none.",
+            "  Left out of every figure: 0 not direct, 0 with no verdict, 0 judged at a commit the version does not "
+            "record.",
+            "  Left out of the token figures: 5 with a blank token count. Left out of the active minutes: 6 blank."])
+
     def test_a_replay_not_direct_and_a_version_with_no_verdict_are_left_out_of_every_figure(self) -> None:
         tickets = self.world.draw(per_bucket=2)
         self.world.run("direct", tickets[0], True, tokens=100)

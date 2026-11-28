@@ -1,0 +1,4 @@
+{"timestamp": "2026-11-28T10:00:00.000Z", "type": "session_meta", "payload": {"id": "thread", "timestamp": "2026-11-28T10:00:00.000Z", "cwd": "/work", "originator": "codex_exec", "cli_version": "0.0.0"}}
+{"timestamp": "2026-11-28T10:01:00.000Z", "type": "turn_context", "payload": {"cwd": "/work", "approval_policy": "never", "sandbox_policy": {"mode": "workspace-write"}, "model": "gpt-test-model", "effort": "low", "summary": "auto"}}
+{"timestamp": "2026-11-28T10:02:00.000Z", "type": "event_msg", "payload": {"type": "token_count", "info": null, "rate_limits": null}}
+{"timestamp": "2026-11-28T10:02:00.000Z", "type": "response_item", "payload": {"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done."}]}}

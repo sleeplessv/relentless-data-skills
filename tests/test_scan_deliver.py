@@ -1,20 +1,29 @@
-"""Exercise the second half of `deliver.py scan`: the record of a `deliver` PR.
+"""Exercise the second half of `deliver.py scan`, the record of a `deliver` PR, and its readers for the other harnesses.
 
-Each test builds Claude Code session logs in a throwaway config folder, answers `gh` with the
-shared stand-in, and runs `deliver.py scan` at its command line with a scratch machine directory.
+Each test builds Claude Code session logs in a throwaway config folder, or another harness's files
+from tests/scan_inputs/ in the world's own home, answers `gh` with the shared stand-in, and runs
+`deliver.py scan` at its command line with a scratch machine directory. No test reads a real home folder.
 """
 from __future__ import annotations
 
 import fcntl
 import json
 import os
+import shutil
+import socket
+import subprocess
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deliver_kit  # noqa: E402
 from deliver_kit import World  # noqa: E402
+
+INPUTS = Path(__file__).resolve().parent / "scan_inputs"
 
 URL = "https://github.com/o/r/pull/7"
 BRANCH = "feat/ticket-7"
@@ -511,6 +520,193 @@ class TestBackgroundStart(ScanTest):
         self.assertEqual((refresh.returncode, refresh.stdout), (0, "a scan is already running; nothing done\n"))
         self.assertEqual(self.world.gh_calls(), [])
         self.assertFalse((self.world.state / "scan-rows.jsonl").exists())
+
+
+THREAD = "019a0000-0000-7000-8000-000000000001"  # a made-up Codex thread id
+NOT_READ = ("copied_tokens", "active_minutes", "auto_compactions", "typed_compactions", "skills")
+
+
+def other_row(session: str, harness: str, tokens: tuple | None, model: str | None = None, effort: str | None = None,
+              helpers: list | None = None) -> dict:
+    """A row of another harness: the four token columns and their total, blank when `tokens` is None."""
+    counts = dict.fromkeys(("input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens",
+                            "total_tokens"))
+    if tokens is not None:
+        counts.update(zip(counts, tokens))
+        counts["total_tokens"] = sum(value for value in tokens if value is not None)
+    return {"session": session, "harness": harness, **counts, **dict.fromkeys(NOT_READ[:4]), "model": model,
+            "effort": effort, "skills": None, "helpers": helpers}
+
+
+def helper_of(agent: str, tokens: tuple | None) -> dict:
+    row = other_row(agent, "", tokens)
+    return {"id": agent, "description": None, "brief_head": None,
+            **{key: row[key] for key in ("input_tokens", "output_tokens", "cache_write_tokens", "cache_read_tokens",
+                                         "total_tokens")}}
+
+
+class OtherHarnessTest(ScanTest):
+    def codex_log(self, name: str = "codex_rollout_not_yet_seen.jsonl") -> None:
+        folder = self.world.home / ".codex" / "sessions" / "2026" / "11" / "28"
+        folder.mkdir(parents=True)
+        shutil.copy(INPUTS / name, folder / f"rollout-2026-11-28T10-00-00-{THREAD}.jsonl")
+
+    def cortex_stats(self) -> None:
+        folder = self.world.home / ".snowflake" / "cortex" / "stats"
+        folder.mkdir(parents=True)
+        shutil.copy(INPUTS / "cortex_usage_not_yet_seen.json", folder / "usage.json")
+
+    def antigravity_brain(self) -> Path:
+        brain = self.world.home / ".gemini" / "antigravity-cli" / "brain"
+        shutil.copytree(INPUTS / "antigravity_brain_not_yet_seen", brain)
+        return brain
+
+    def row_of(self, harness: str, session: str) -> dict:
+        result = self.scan("--harness", harness, session)
+        self.assertEqual((result.returncode, result.stderr), (0, ""))
+        return self.rows()[session]
+
+
+class TestOtherHarnesses(OtherHarnessTest):
+    def test_a_codex_session_log_gives_the_rows_tokens_model_and_effort(self) -> None:
+        self.codex_log()
+        # The last token_count holds the thread's totals: 3000 input, 2000 of it cached, and 400 output.
+        self.assertEqual(self.row_of("codex", THREAD),
+                         other_row(THREAD, "codex", (1000, 400, None, 2000), "gpt-test-model", "high"))
+
+    def test_a_codex_log_with_no_usage_gives_blank_tokens(self) -> None:
+        self.codex_log("codex_rollout_no_usage_not_yet_seen.jsonl")
+        self.assertEqual(self.row_of("codex", THREAD), other_row(THREAD, "codex", None, "gpt-test-model", "low"))
+
+    def test_a_codex_thread_with_no_log_gives_a_blank_row(self) -> None:
+        self.assertEqual(self.row_of("codex", THREAD), other_row(THREAD, "codex", None))
+
+    def test_the_codex_log_is_found_under_codex_home(self) -> None:
+        self.codex_log()
+        (self.world.home / ".codex").rename(self.world.root / "codex-home")
+        result = self.scan("--harness", "codex", THREAD, CODEX_HOME=str(self.world.root / "codex-home"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows()[THREAD]["total_tokens"], 3400)
+
+    def test_the_cortex_code_stats_file_gives_the_rows_tokens_and_its_agents(self) -> None:
+        self.cortex_stats()
+        self.assertEqual(self.row_of("cortex-code", "cortex-session-1"), other_row(
+            "cortex-session-1", "cortex-code", (590, 138, 300, 4100), "claude-sonnet-test",
+            helpers=[helper_of("cortex-helper-1", (40, 8, 0, 100))]))
+
+    def test_a_cortex_code_session_with_no_counts_or_no_entry_gives_blank_tokens(self) -> None:
+        self.cortex_stats()
+        for session in ("cortex-session-no-models", "cortex-session-absent"):
+            with self.subTest(session=session):
+                self.assertEqual(self.row_of("cortex-code", session), other_row(session, "cortex-code", None))
+
+    def test_a_cursor_runs_row_is_blank_never_zero(self) -> None:
+        self.assertEqual(self.row_of("cursor", "run-1"), other_row("run-1", "cursor", None))
+
+    def test_an_antigravity_session_and_its_agents_transcripts_give_session_and_agent_tokens(self) -> None:
+        self.antigravity_brain()
+        # The session's own 2000 input, 450 output, 1000 cache read, and its agents' in their own transcripts.
+        self.assertEqual(self.row_of("antigravity", "ag-session-1"), other_row(
+            "ag-session-1", "antigravity", (2460, 550, None, 1010), "gemini-test-model",
+            helpers=[helper_of("ag-agent-1", (400, 80, None, 0)), helper_of("ag-agent-2", (60, 20, None, 10))]))
+
+    def test_a_missing_agent_transcript_gives_that_agent_blank_and_the_row_blank(self) -> None:
+        brain = self.antigravity_brain()
+        shutil.rmtree(brain / "ag-agent-2" / ".system_generated" / "logs")
+        self.assertEqual(self.row_of("antigravity", "ag-session-1"), other_row(
+            "ag-session-1", "antigravity", None, "gemini-test-model",
+            helpers=[helper_of("ag-agent-1", (400, 80, None, 0)), helper_of("ag-agent-2", None)]))
+
+    def test_the_antigravity_brain_is_found_under_its_app_data_dir(self) -> None:
+        brain = self.antigravity_brain()
+        brain.parent.rename(self.world.root / "app-data")
+        result = self.scan("--harness", "antigravity", "ag-session-1",
+                           ANTIGRAVITY_APP_DATA_DIR=str(self.world.root / "app-data"))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows()["ag-session-1"]["total_tokens"], 4020)
+
+    def test_a_claude_code_row_names_its_harness(self) -> None:
+        self.logs.ready_session()
+        for args in (("s1",), ("--harness", "claude-code", "s1")):
+            with self.subTest(args=args):
+                self.assertEqual(self.scan(*args).returncode, 0)
+                self.assertEqual((self.rows()["s1"]["harness"], self.rows()["s1"]["total_tokens"]),
+                                 ("claude-code", 20))
+
+    def test_a_harness_the_scan_does_not_know_is_bad_usage(self) -> None:
+        result = self.scan("--harness", "other", "s1")
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Usage: deliver.py scan [--harness HARNESS] SESSION", result.stderr)
+
+    def test_no_reader_starts_a_process_or_opens_a_connection(self) -> None:
+        self.codex_log()
+        self.cortex_stats()
+        self.antigravity_brain()
+        readers = deliver_kit.load("scan").scan_harness
+        refused = AssertionError("a reader started a process or opened a connection")
+        with mock.patch.dict(os.environ, {"HOME": str(self.world.home)}), \
+                mock.patch.object(Path, "home", return_value=self.world.home), \
+                mock.patch.object(subprocess, "Popen", side_effect=refused), \
+                mock.patch.object(socket, "socket", side_effect=refused), \
+                mock.patch.object(socket, "create_connection", side_effect=refused):
+            totals = {harness: readers.read(harness, session)["total_tokens"] for harness, session in (
+                ("codex", THREAD), ("cortex-code", "cortex-session-1"), ("cursor", "run-1"),
+                ("antigravity", "ag-session-1"))}
+        self.assertEqual(totals, {"codex": 3400, "cortex-code": 5128, "cursor": None, "antigravity": 4020})
+
+    def test_the_help_says_where_each_harness_is_read_from(self) -> None:
+        help_text = self.scan("--help").stdout
+        for sentence in (
+                "HARNESS is claude-code (the default), codex, cortex-code, cursor or\nantigravity, and every row "
+                "names it in its harness column.",
+                "The figures come\n  from the local stats file, ~/.snowflake/cortex/stats/usage.json, never from\n"
+                "  Snowflake's usage view",
+                "Cursor keeps no token count on disk, so every figure is blank.",
+                "The scan only reads local files: it starts no process and opens no connection.",
+                "a blank is never\na zero, and the report leaves the row out of its token figures and counts it."):
+            self.assertIn(" ".join(sentence.split()), " ".join(help_text.split()))
+
+
+class TestOtherHarnessRecords(OtherHarnessTest):
+    def handed(self, harness: str, session: str) -> str:
+        return json.dumps({"session": session, "harness": harness, "ready_at": stamp(READY_AT), "branch": BRANCH,
+                           "cwd": str(self.world.work)})
+
+    def test_a_ready_call_on_codex_handed_to_the_refresh_gets_its_record_and_later_refreshes(self) -> None:
+        self.codex_log()
+        result = self.scan("--refresh", DELIVER_SCAN_RUN=self.handed("codex", THREAD))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        row = self.rows()[THREAD]
+        self.assertEqual((row["harness"], row["total_tokens"], row["deliver"]["pr"], row["deliver"]["ready_at"]),
+                         ("codex", 3400, URL, stamp(READY_AT)))
+        self.assertNotIn("agents", row["deliver"])
+        self.answer_pr(pr(labels=[{"name": "miss"}]))
+        self.assertEqual(self.scan("--refresh").returncode, 0)  # nothing handed: the row's harness says how
+        row = self.rows()[THREAD]
+        self.assertEqual((row["total_tokens"], row["deliver"]["miss"]), (3400, True))
+
+    def test_a_cursor_run_handed_to_the_refresh_keeps_its_time_and_miss_with_blank_tokens(self) -> None:
+        self.answer_pr(pr(labels=[{"name": "miss"}]))
+        self.assertEqual(self.scan("--refresh", DELIVER_SCAN_RUN=self.handed("cursor", "run-1")).returncode, 0)
+        row = self.rows()["run-1"]
+        self.assertEqual((row["total_tokens"], row["deliver"]["ready_at"], row["deliver"]["miss"]),
+                         (None, stamp(READY_AT), True))
+
+    def test_a_background_start_hands_the_run_on_another_harness_to_the_refresh(self) -> None:
+        scan = deliver_kit.load("scan")
+        run = SimpleNamespace(mark={"run": "run-1", "branch": BRANCH}, checkout=self.world.work)
+        handed = {}
+        for harness, variables in (("codex", {"CODEX_THREAD_ID": THREAD}), ("cursor", {}), ("claude-code", {}),
+                                   (None, {})):
+            with self.subTest(harness=harness), \
+                    mock.patch.dict(os.environ, {"DELIVER_STATE_DIR": str(self.world.state), **variables}), \
+                    mock.patch.object(scan.subprocess, "Popen") as popen:
+                self.assertTrue(scan.start_background(harness, run))
+                handed[harness] = json.loads(popen.call_args.kwargs["env"].get("DELIVER_SCAN_RUN", "null"))
+        self.assertEqual({harness: found and (found["session"], found["harness"], found["branch"], found["cwd"])
+                          for harness, found in handed.items()},
+                         {"codex": (THREAD, "codex", BRANCH, str(self.world.work)),
+                          "cursor": ("run-1", "cursor", BRANCH, str(self.world.work)), "claude-code": None, None: None})
 
 
 if __name__ == "__main__":

@@ -44,7 +44,7 @@ EXPECTED_FILES = {
 
 def check_command(root: Path) -> str:
     with open(root / "docs/agents/stack.toml", "rb") as f:
-        return tomllib.load(f)["check"]
+        return tomllib.load(f)["check_command"]
 
 
 def run_check(root: Path) -> subprocess.CompletedProcess:
@@ -115,7 +115,7 @@ class FixtureRepoTest(unittest.TestCase):
 
     def test_stack_toml_holds_only_the_check_command(self):
         with open(self.copy / "docs/agents/stack.toml", "rb") as f:
-            self.assertEqual(tomllib.load(f), {"check": "python3 -m unittest -v"})
+            self.assertEqual(tomllib.load(f), {"check_command": "python3 -m unittest -v"})
 
     def test_ci_workflow_has_one_job_that_runs_the_check_command(self):
         job = workflow_job((self.copy / ".github/workflows/check.yml").read_text())

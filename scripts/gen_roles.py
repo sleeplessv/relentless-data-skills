@@ -47,7 +47,7 @@ ROLES = {
     },
 }
 # Antigravity's name for each tool a role may hold, or None where no name was seen on a real run:
-# a misspelled name in `tools` can hang the agent (research/antigravity-harness).
+# a misspelled name in `tools` can hang the agent, as Antigravity's documentation says (#248's research).
 ANTIGRAVITY_TOOLS = {"Read": "view_file", "Grep": None, "Glob": None}
 # The registered hook command. `deliver.py install` puts the guard's path, shell-quoted, in place of
 # @GUARD@ (install.GUARD_SLOT). Like the plugin's command, it exits 0 silently when the guard file is

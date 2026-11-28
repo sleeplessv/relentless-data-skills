@@ -226,8 +226,8 @@ Antigravity, it installs with `npx skills`, and `deliver.py install` adds the re
 
 #### Install on Cortex Code, Codex, Cursor or Antigravity
 
-Run these steps from a plain shell, not inside a session. `deliver.py` needs Python 3.13 or
-newer. With `uv` on your PATH, use `uv run --python 3.13 --no-project` in place of `python3`.
+Run these steps from a plain shell, not inside a session. Without `uv`, use `python3` in place
+of `uv run --python 3.13 --no-project`, with a `python3` of 3.13 or newer.
 
 1. Install the skill:
 
@@ -247,7 +247,7 @@ newer. With `uv` on your PATH, use `uv run --python 3.13 --no-project` in place 
    `<harness>`.
 
    ```bash
-   python3 ~/.agents/skills/deliver/scripts/deliver.py install <harness>
+   uv run --python 3.13 --no-project ~/.agents/skills/deliver/scripts/deliver.py install <harness>
    ```
 
    `install` writes the reader's file and adds the guard to the harness's user hook file. It
@@ -270,12 +270,12 @@ On the other four, run `install --remove` before you remove the skill, because t
 `deliver.py`:
 
 ```bash
-python3 ~/.agents/skills/deliver/scripts/deliver.py install --remove <harness>
+uv run --python 3.13 --no-project ~/.agents/skills/deliver/scripts/deliver.py install --remove <harness>
 npx skills remove -g deliver
 ```
 
-`install --remove` deletes the reader's file and takes the guard out of the hook file. It
-deletes a folder or hook file that it leaves empty. On Cursor, run it in each checkout where
+`install --remove` takes out what `install` wrote. It puts back each file that `install`
+changed, and deletes only the files and folders that `install` made. On Cursor, run it in each checkout where
 you ran `install cursor`. It also takes out the exclude line and the guard, which the
 checkouts share.
 

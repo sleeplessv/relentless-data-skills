@@ -237,6 +237,59 @@ class Install(unittest.TestCase):
                     again = self.install("--remove", harness)
                     self.assertEqual(again.stdout, f"nothing to remove: deliver is not installed on {harness}.\n")
 
+    def test_remove_gives_back_each_hook_file_shape_it_started_from(self):
+        # Every key `install` may add: Cursor's `version`, each harness's top-level group (`hooks` or
+        # Antigravity's `deliver-guard`) and the event list under it.
+        other = {"type": "command", "command": "echo other"}
+        shapes = {
+            "cortex-code": ["", "{}", '{"hooks": {}}', '{"hooks": {"PreToolUse": []}}', '{"theme":"dark"}',
+                            json.dumps({"hooks": {"PreToolUse": [{"matcher": "bash", "hooks": [other]}]}})],
+            "codex": ["", "{}\n", '{"hooks": {}}', '{"hooks": {"Stop": []}}',
+                      json.dumps({"hooks": {"PreToolUse": [{"matcher": "", "hooks": [other]}]}}, indent=4)],
+            "cursor": ["", "{}", '{"version": 1}', '{"version": 2}', '{"hooks": {"beforeShellExecution": []}}',
+                       '{"version": 1, "hooks": {}}', json.dumps({"hooks": {"stop": [{"command": "echo other"}]}})],
+            "antigravity": ["", "{}", '{"deliver-guard": {}}', '{"deliver-guard": {"PreToolUse": []}}',
+                            json.dumps({"mine": {"PreToolUse": [{"matcher": "", "hooks": [other]}]}})],
+        }
+        for harness, texts in shapes.items():
+            path = self.home / HOOKS[harness]
+            for text in texts:
+                with self.subTest(harness=harness, text=text):
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_text(text)
+                    before = tree(self.home)
+                    self.assertEqual(self.install(harness, cwd=self.world.work).returncode, 0)
+                    self.assertNotEqual(path.read_text(), text)
+                    result = self.install("--remove", harness, cwd=self.world.work)
+                    self.assertEqual(result.returncode, 0, result.stdout)
+                    self.assertEqual(path.read_text(), text)
+                    self.assertEqual(tree(self.home), before)
+
+    def test_remove_keeps_what_existed_before_install_even_when_empty(self):
+        codex = self.home / ".codex"
+        (codex / "agents").mkdir(parents=True)
+        (codex / "hooks.json").write_text("")
+        before = tree(self.home)
+        self.assertEqual(self.install("codex").returncode, 0)
+        self.assertEqual(self.install("--remove", "codex").returncode, 0)
+        self.assertEqual(tree(self.home), before)
+        # A reader file of the same name that was there before comes back as it was.
+        (codex / "agents" / "deliver-reader.toml").write_text("mine\n")
+        before = tree(self.home)
+        self.install("codex")
+        self.install("--remove", "codex")
+        self.assertEqual(tree(self.home), before)
+
+    def test_remove_cursor_keeps_an_empty_agents_folder_and_the_exclude_file_as_it_was(self):
+        common = Path(self.world.git(self.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        (self.world.work / ".cursor" / "agents").mkdir(parents=True)
+        (common / "info").mkdir(exist_ok=True)
+        (common / "info" / "exclude").write_text("# mine, with no newline at the end")
+        before = (tree(self.home), tree(self.world.work), tree(common / "info"))
+        self.assertEqual(self.install("cursor", cwd=self.world.work).returncode, 0)
+        self.assertEqual(self.install("--remove", "cursor", cwd=self.world.work).returncode, 0)
+        self.assertEqual((tree(self.home), tree(self.world.work), tree(common / "info")), before)
+
     def test_remove_cursor_leaves_the_home_folder_and_the_checkout_as_they_were(self):
         common = Path(self.world.git(self.world.work, "rev-parse", "--path-format=absolute", "--git-common-dir"))
         before = (tree(self.home), tree(self.world.work), tree(common / "info"))

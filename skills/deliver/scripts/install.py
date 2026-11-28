@@ -5,7 +5,8 @@ folder and merges the guard's registration into the harness's user hook file, le
 entry alone (spec #457, "Install"). On Cursor the reader's file goes into the checkout's
 `.cursor/agents/`, with one line in the shared git directory's `info/exclude`, so it is run once per
 checkout. A second run changes nothing and says so. `--remove` takes out exactly what `install`
-writes, and removes folders it leaves empty. Claude Code refuses, as the plugin supplies both.
+wrote: it puts back each file `install` changed and deletes each file and folder `install` made,
+from the ledger `install` keeps in the machine directory. Claude Code refuses, as the plugin supplies both.
 
 Each thing `install` writes is an item with a state (`ok`, `missing` or `differs`), an `apply` and
 an `undo`. `checks_install` reads the same items, so preflight stops on the state `install` fixes.
@@ -52,34 +53,83 @@ def detect() -> str | None:
     return next((harness for var, harness in DETECTION if os.environ.get(var)), None)
 
 
-def _prune(folder: Path, stop: Path) -> None:
-    """Remove `folder` and its parents while they are empty, up to but not including `stop`."""
-    while folder != stop and stop in folder.parents and folder.is_dir() and not any(folder.iterdir()):
-        folder.rmdir()
-        folder = folder.parent
+class Ledger:
+    """What `install` created and what each file it changed held before, so `--remove` undoes only that.
+
+    It lives in the machine directory as `install-ledger.json`: the folders `install` made, each
+    file's earlier bytes (None for a file it made), and the keys it added to each hook file.
+    """
+
+    PATH = "install-ledger.json"
+
+    def __init__(self):
+        self.path = core.state_dir() / self.PATH
+        data = json.loads(self.path.read_text(encoding="utf-8")) if self.path.is_file() else {}
+        self.dirs: list[str] = data.get("dirs", [])
+        self.files: dict[str, str | None] = data.get("files", {})
+        self.keys: dict[str, list[list[str]]] = data.get("keys", {})
+        self.changed = False
+
+    def save(self) -> None:
+        if self.changed:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            self.path.write_text(json.dumps({"dirs": self.dirs, "files": self.files, "keys": self.keys},
+                                            indent=2) + "\n", encoding="utf-8")
+
+    def before_write(self, path: Path) -> None:
+        """Note the folders `path` needs that do not exist, make them, and note what `path` holds now."""
+        missing = [folder for folder in (path.parent, *path.parent.parents) if not folder.exists()]
+        for folder in reversed(missing):
+            folder.mkdir()
+            self.dirs.append(str(folder))
+        if str(path) not in self.files:
+            self.files[str(path)] = path.read_bytes().decode("latin-1") if path.is_file() else None
+        self.changed = True
+
+    def original(self, path: Path) -> bytes | None:
+        text = self.files.get(str(path))
+        return None if text is None else text.encode("latin-1")
+
+    def restore(self, path: Path) -> None:
+        """Put back what `path` held before `install`, deleting it and the folders `install` made if it held nothing."""
+        before = self.original(path)
+        if before is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.write_bytes(before)
+        self.forget(path)
+        folder = path.parent
+        while str(folder) in self.dirs and folder.is_dir() and not any(folder.iterdir()):
+            folder.rmdir()
+            self.dirs.remove(str(folder))
+            folder = folder.parent
+
+    def forget(self, path: Path) -> None:
+        self.files.pop(str(path), None)
+        self.keys.pop(str(path), None)
+        self.changed = True
 
 
 class File:
     """A file copied whole from the skill."""
 
-    def __init__(self, path: Path, data: bytes, stop: Path):
-        self.path, self.data, self.stop = path, data, stop
+    def __init__(self, path: Path, data: bytes):
+        self.path, self.data = path, data
 
     def state(self) -> str:
         if not self.path.is_file():
             return "missing"
         return "ok" if self.path.read_bytes() == self.data else "differs"
 
-    def apply(self) -> str:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+    def apply(self, ledger: Ledger) -> str:
+        ledger.before_write(self.path)
         self.path.write_bytes(self.data)
         return f"wrote {self.path}"
 
-    def undo(self) -> str | None:
-        if not self.path.is_file():
+    def undo(self, ledger: Ledger) -> str | None:
+        if str(self.path) not in ledger.files:
             return None
-        self.path.unlink()
-        _prune(self.path.parent, self.stop)
+        ledger.restore(self.path)
         return f"removed {self.path}"
 
 
@@ -91,6 +141,19 @@ def _ours(entry: object) -> bool:
     return MARKER in json.dumps(entry)
 
 
+def _parse(text: bytes | str | None) -> dict:
+    """A hook file's object; a missing or blank file is an empty one."""
+    if text is None or not text.strip():
+        return {}
+    try:
+        data = json.loads(text)
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        raise BadHookFile(str(e)) from None
+    if not isinstance(data, dict):
+        raise BadHookFile("it does not hold a JSON object")
+    return data
+
+
 class HookEntry:
     """Deliver's one entry in a list inside a JSON hook file, with the scalars its form needs.
 
@@ -98,8 +161,8 @@ class HookEntry:
     entry, with scalars beside them (Cursor's `version`).
     """
 
-    def __init__(self, path: Path, fragment: dict, stop: Path):
-        self.path, self.stop = path, stop
+    def __init__(self, path: Path, fragment: dict):
+        self.path = path
         self.scalars = {k: v for k, v in fragment.items() if not isinstance(v, dict)}
         self.keys, node = [], fragment
         while isinstance(node, dict):
@@ -109,25 +172,19 @@ class HookEntry:
         self.entry = node[0]
 
     def _load(self) -> dict | None:
-        if not self.path.is_file():
-            return None
-        try:
-            data = json.loads(self.path.read_text(encoding="utf-8"))
-        except (UnicodeDecodeError, json.JSONDecodeError) as e:
-            raise BadHookFile(str(e)) from None
-        if not isinstance(data, dict):
-            raise BadHookFile("it does not hold a JSON object")
-        return data
+        return _parse(self.path.read_bytes()) if self.path.is_file() else None
 
-    def _walk(self, data: dict, make: bool) -> list | None:
-        """The list deliver's entry goes in, made when `make`, or None when it is absent."""
+    def _walk(self, data: dict, added: list | None = None) -> list | None:
+        """The list deliver's entry goes in, or None when it is absent. With `added`, make what is
+        missing and append each key path it made to `added`."""
         node = data
         for depth, key in enumerate(self.keys):
             last = depth == len(self.keys) - 1
             if key not in node:
-                if not make:
+                if added is None:
                     return None
                 node[key] = [] if last else {}
+                added.append(self.keys[:depth + 1])
             node = node[key]
             if not isinstance(node, list if last else dict):
                 kind = "a list" if last else "an object"
@@ -138,53 +195,55 @@ class HookEntry:
         """`ok`, `missing` or `differs`; an unreadable file differs."""
         try:
             data = self._load()
-            entries = [] if data is None else [e for e in (self._walk(data, make=False) or []) if _ours(e)]
+            entries = [] if data is None else [e for e in (self._walk(data) or []) if _ours(e)]
         except BadHookFile:
             return "differs"
         if not entries:
             return "missing"
         return "ok" if entries == [self.entry] else "differs"
 
-    def _save(self, data: dict) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
-
-    def apply(self) -> str:
+    def apply(self, ledger: Ledger) -> str:
         data = self._load() or {}
+        added = []
         for key, value in self.scalars.items():
-            data.setdefault(key, value)
-        entries = self._walk(data, make=True)
+            if key not in data:
+                data[key] = value
+                added.append([key])
+        entries = self._walk(data, added)
         entries[:] = [e for e in entries if not _ours(e)] + [self.entry]
-        self._save(data)
+        ledger.before_write(self.path)
+        known = ledger.keys.setdefault(str(self.path), [])
+        known += [key for key in added if key not in known]
+        self.path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
         return f"added deliver's guard to {self.path}"
 
-    def undo(self) -> str | None:
+    def undo(self, ledger: Ledger) -> str | None:
         data = self._load()
-        entries = None if data is None else self._walk(data, make=False)
+        entries = None if data is None else self._walk(data)
         if not entries or not any(_ours(e) for e in entries):
             return None
         entries[:] = [e for e in entries if not _ours(e)]
-        # Take out each container left empty, from the list up.
-        for depth in range(len(self.keys), 0, -1):
+        # Take out what apply added, deepest first: a scalar, or a container that is empty again.
+        for key_path in sorted(ledger.keys.get(str(self.path), []), key=len, reverse=True):
             parent = data
-            for key in self.keys[:depth - 1]:
-                parent = parent[key]
-            if parent[self.keys[depth - 1]]:
-                break
-            del parent[self.keys[depth - 1]]
-        if all(key in self.scalars and data[key] == self.scalars[key] for key in data):
-            self.path.unlink()
-            _prune(self.path.parent, self.stop)
+            for key in key_path[:-1]:
+                parent = parent.get(key) if isinstance(parent, dict) else None
+            value = parent.get(key_path[-1], None) if isinstance(parent, dict) else None
+            if isinstance(parent, dict) and key_path[-1] in parent and not (isinstance(value, (dict, list)) and value):
+                del parent[key_path[-1]]
+        if data == _parse(ledger.original(self.path)):
+            ledger.restore(self.path)
         else:
-            self._save(data)
+            self.path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+            ledger.forget(self.path)
         return f"took deliver's guard out of {self.path}"
 
 
 class ExcludeLine:
     """One line in a git `info/exclude` file."""
 
-    def __init__(self, path: Path, line: str, stop: Path):
-        self.path, self.line, self.stop = path, line, stop
+    def __init__(self, path: Path, line: str):
+        self.path, self.line = path, line
 
     def _lines(self) -> list[str]:
         return self.path.read_text(encoding="utf-8").splitlines() if self.path.is_file() else []
@@ -192,23 +251,24 @@ class ExcludeLine:
     def state(self) -> str:
         return "ok" if self.line in self._lines() else "missing"
 
-    def apply(self) -> str:
+    def apply(self, ledger: Ledger) -> str:
         text = self.path.read_text(encoding="utf-8") if self.path.is_file() else ""
-        self.path.parent.mkdir(parents=True, exist_ok=True)
+        ledger.before_write(self.path)
         self.path.write_text(text + ("\n" if text and not text.endswith("\n") else "") + self.line + "\n",
                              encoding="utf-8")
         return f"added {self.line} to {self.path}"
 
-    def undo(self) -> str | None:
+    def undo(self, ledger: Ledger) -> str | None:
         lines = self._lines()
         if self.line not in lines:
             return None
         kept = [line for line in lines if line != self.line]
-        if kept:
-            self.path.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+        before = ledger.original(self.path)
+        if kept == (before or b"").decode("utf-8").splitlines():
+            ledger.restore(self.path)
         else:
-            self.path.unlink()
-            _prune(self.path.parent, self.stop)
+            self.path.write_text("".join(f"{line}\n" for line in kept), encoding="utf-8")
+            ledger.forget(self.path)
         return f"took {self.line} out of {self.path}"
 
 
@@ -221,14 +281,13 @@ def items(harness: str, run: core.Run | None) -> list:
     if folder is None:
         if run is None:
             raise core.Refused("install.not-a-checkout", harness=harness)
-        found = [File(run.checkout / CURSOR_AGENTS / p.name, p.read_bytes(), run.checkout) for p in readers]
-        found += [ExcludeLine(run.common_dir / "info" / "exclude", f"/{CURSOR_AGENTS / p.name}", run.common_dir)
-                  for p in readers]
+        found = [File(run.checkout / CURSOR_AGENTS / p.name, p.read_bytes()) for p in readers]
+        found += [ExcludeLine(run.common_dir / "info" / "exclude", f"/{CURSOR_AGENTS / p.name}") for p in readers]
     else:
-        found = [File(home / folder / p.name, p.read_bytes(), home) for p in readers]
+        found = [File(home / folder / p.name, p.read_bytes()) for p in readers]
     text = (source / "hooks.json").read_text(encoding="utf-8")
     fragment = json.loads(text.replace(json.dumps(GUARD_SLOT)[1:-1], json.dumps(shlex.quote(str(GUARD)))[1:-1]))
-    return [*found, HookEntry(home / hooks, fragment, home)]
+    return [*found, HookEntry(home / hooks, fragment)]
 
 
 def check_harness(harness: str) -> None:
@@ -251,16 +310,19 @@ def main(args: list[str], run: core.Run | None) -> None:
     check_harness(harness)
     todo = items(harness, run)
     command = f"deliver.py install {'--remove ' if remove else ''}{harness}"
+    ledger = Ledger()
     done = []
     for item in reversed(todo) if remove else todo:
         try:
             if remove:
-                done.append((item, item.undo()))
+                done.append((item, item.undo(ledger)))
             elif item.state() != "ok":
-                done.append((item, item.apply()))
+                done.append((item, item.apply(ledger)))
         except BadHookFile as e:
             raise core.Refused("install.bad-hook-file", f"fix {item.path}, then run {command}",
                                path=str(item.path), error=str(e)) from None
+        finally:
+            ledger.save()
     changed = [(item, line) for item, line in done if line]
     if remove:
         print("\n".join(line for _, line in changed) if changed

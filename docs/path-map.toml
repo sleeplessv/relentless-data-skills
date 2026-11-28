@@ -23,7 +23,7 @@ files = [
   "skills/deliver/SKILL.md",
   "skills/deliver/adapters/cortex.md",
 ]
-limit = 706
+limit = 714
 
 [[path]]
 name = "small edit on Codex"
@@ -47,4 +47,4 @@ files = [
   "skills/deliver/SKILL.md",
   "skills/deliver/adapters/antigravity.md",
 ]
-limit = 654
+limit = 676

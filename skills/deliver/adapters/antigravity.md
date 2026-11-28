@@ -4,8 +4,9 @@ Read this before you start an agent. Where the skill names a Claude Code step, d
 
 - Start the reader with `invoke_subagent`. Call an agent back with `send_message` to its
   conversation id.
-- Typed-only is asked, not enforced. Antigravity has no switch that keeps the model from starting
-  `deliver`; the description asks that it start only when typed.
+- Typed-only is not enforced, and the skill's description does not ask for it. Antigravity has no
+  switch that keeps the model from starting `deliver` from its description. A run the model
+  started goes through the same preflight, guard and merge script as a typed one.
 - The reader's file withholds the edit and agent-start tools in its `tools` list, in
   Antigravity's tool names.
 - The reader's file names no effort, and its model tier is `inherit`: the agent runs on the

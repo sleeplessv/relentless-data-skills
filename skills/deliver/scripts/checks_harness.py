@@ -20,7 +20,8 @@ from pathlib import Path
 
 CLAUDE_CODE = "claude-code"
 ADAPTERS = Path(__file__).resolve().parent.parent / "adapters"
-# (variable, harness, adapter file), in the order they are tested.
+# (variable, harness, adapter file), in the order they are tested. Keep the names in step with
+# guard.HARNESS_VARS, which the guard uses.
 DETECTION = (
     ("CORTEX_SESSION_ID", "cortex-code", "cortex.md"),
     ("CODEX_THREAD_ID", "codex", "codex.md"),

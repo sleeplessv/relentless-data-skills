@@ -7,8 +7,8 @@ Read this before you start an agent. Where the skill names a Claude Code step, d
   foreground, or call `agent_output` with wait set.
 - Call an agent back with `task` and `resume: <agent id>`. Under `--private` that fails with
   "Agent session '<id>' not found"; start a fresh agent and give it the earlier report.
-- Typed-only is asked, not enforced. Cortex Code has no switch that keeps the model from starting
-  `deliver` from its description. A run the model started goes through the same preflight, guard
+- Typed-only is not enforced, and the skill's description does not ask for it. Cortex Code has no
+  switch that keeps the model from starting `deliver` from its description. A run the model started goes through the same preflight, guard
   and merge script as a typed one.
 - The reader's file withholds the edit and agent-start tools in its lowercase `tools` list.
 - The reader's file names no effort: Cortex Code takes one effort per process, so the agent runs

@@ -116,8 +116,8 @@ class TestPathMap(unittest.TestCase):
                 "name": f"small edit on {harness}",
                 "files": ["skills/deliver/SKILL.md", f"skills/deliver/adapters/{adapter}.md"],
                 "limit": limit,
-            } for harness, adapter, limit in (("Cortex Code", "cortex", 706), ("Codex", "codex", 670),
-                                              ("Cursor", "cursor", 674), ("Antigravity", "antigravity", 654)))],
+            } for harness, adapter, limit in (("Cortex Code", "cortex", 714), ("Codex", "codex", 670),
+                                              ("Cursor", "cursor", 674), ("Antigravity", "antigravity", 676)))],
         )
 
 

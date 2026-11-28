@@ -41,6 +41,8 @@ ORIGIN = "replay-origin.git"  # the clone's remote, inside its .git/
 # and gh-calls.jsonl, and state/, the session's DELIVER_STATE_DIR. Under .git/, none of it is in the version's commit.
 PLUGIN = Path(__file__).resolve().parent.parent / "skills" / "deliver"
 STAND_IN = "replay-deliver"
+# The skills a deliver session and its reviewers read as the plugin folder is read: the two review skills and router.
+READ_SKILLS = ("code-review", "ponytail-review", "router")
 
 HELP = f"""\
 Rerun one ticket of the replay set with one agent, as its `{VERSION}` version or
@@ -127,7 +129,13 @@ the clone's project settings. That folder is also a working directory of the
 session, through --add-dir, so the session's commands and file tools may read
 the folder past the read block. They may not write it: a permission deny rule,
 Edit(//<folder>/**), holds the file tools off it, and
-sandbox.filesystem.denyWrite holds sandboxed commands off it. Its sandboxed
+sandbox.filesystem.denyWrite holds sandboxed commands off it. The session and
+its agents reach the installed review skills code-review and ponytail-review,
+and router, in the same way: the folder skills/<name> in Claude Code's folder
+($CLAUDE_CONFIG_DIR, else ~/.claude), and the folder a link there leads to,
+are working directories too, each with its own deny rule and denyWrite entry.
+A skill with no folder there is left out, and the replay names it on standard
+error before the session. Its sandboxed
 commands may also read, through sandbox.filesystem.allowRead, each path under
 the home folder, outside the folders above, that deliver's preflight opens,
 lists or stats, and the path that a link among them leads to. To find them, the
@@ -298,12 +306,32 @@ def claude_reads(clone: Path, open_already: list[str]) -> list[str]:
     return sorted(path for path in found if not any(path.startswith(other + os.sep) for other in found))
 
 
+def skill_folders() -> tuple[list[str], list[str]]:
+    """The folder of each of READ_SKILLS in Claude Code's folder, then the folder its link leads to, each once; and
+    the names of those with no folder there."""
+    folders, missing = {}, []
+    for name in READ_SKILLS:
+        folder = scan.config_dir().absolute() / "skills" / name
+        if folder.is_dir():
+            folders.update(dict.fromkeys((str(folder), os.path.realpath(folder))))
+        else:
+            missing.append(name)
+    return list(folders), missing
+
+
+def worked_in(version: str) -> list[str]:
+    """The folders the version's session works in beside the clone, which its file tools may read and not write: none
+    for direct; for deliver, the plugin and the folders of READ_SKILLS."""
+    return [str(PLUGIN), *skill_folders()[0]] if version == "deliver" else []
+
+
 def settings(clone: Path, version: str = VERSION) -> dict:
-    """The confinement every session starts with; the deliver version's also reads its plugin, may not write it, and
-    runs its hook, and its commands may read what preflight reads in Claude Code's folder and may not write it."""
-    home, deliver = Path.home(), version == "deliver"
+    """The confinement every session starts with; the deliver version's also reads its plugin and the folders of
+    READ_SKILLS, may not write them, and runs its hook, and its commands may read what preflight reads in Claude
+    Code's folder and may not write it."""
+    home, deliver, folders = Path.home(), version == "deliver", worked_in(version)
     caches = [str(home / cache) for cache in CACHES]
-    opened = [str(clone), *caches, *([str(PLUGIN)] if deliver else [])]
+    opened = [str(clone), *caches, *folders]
     claude = claude_reads(clone, opened) if deliver else []
     return {
         "sandbox": {
@@ -314,15 +342,15 @@ def settings(clone: Path, version: str = VERSION) -> dict:
             "filesystem": {"denyRead": [str(home)],
                            "allowRead": [*opened, *claude],
                            "allowWrite": caches,
-                           # --add-dir makes the plugin folder writable to sandboxed commands; this takes it back.
+                           # --add-dir makes its folders writable to sandboxed commands; this takes them back.
                            # Nothing grants a write in Claude Code's folder: its entries are a second hold.
-                           **({"denyWrite": [str(PLUGIN), *claude]} if deliver else {})},
+                           **({"denyWrite": [*folders, *claude]} if deliver else {})},
             "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True, "allowLocalBinding": True,
                         "allowUnixSockets": list(SOCKETS)},
         },
         # The sandbox binds commands only, not the web tools; a deny holds with prompts switched off.
         "permissions": {"blockReadsOutsideWorkingDirectories": True, "blockWritesOutsideWorkingDirectories": True,
-                        "deny": ["WebFetch", "WebSearch", *([f"Edit(/{PLUGIN}/**)"] if deliver else [])]},
+                        "deny": ["WebFetch", "WebSearch", *(f"Edit(/{folder}/**)" for folder in folders)]},
         "disableClaudeAiConnectors": True,
         "disableAllHooks": not deliver,
     }
@@ -332,8 +360,9 @@ def command(clone: Path, model: str, session: str, version: str = VERSION) -> li
     return ["claude", "-p", "--model", model, "--session-id", session, "--permission-mode", "bypassPermissions",
             "--setting-sources", "project,local", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}',
             "--settings", json.dumps(settings(clone, version)),
+            *(["--plugin-dir", str(PLUGIN)] if version == "deliver" else []),
             # A working directory is the one way past the read block; settings() takes writes back.
-            *(["--plugin-dir", str(PLUGIN), "--add-dir", str(PLUGIN)] if version == "deliver" else [])]
+            *(arg for folder in worked_in(version) for arg in ("--add-dir", folder))]
 
 
 def environment(clone: Path, version: str = VERSION) -> dict[str, str]:
@@ -615,6 +644,9 @@ def replay(label: str, ticket: int, group: SetupGroup, version: str = VERSION) -
             cut(listed["repo"], label, found, clone, store)
             if version == "deliver":
                 stand_in(clone, label, found)
+                for name in skill_folders()[1]:
+                    print(f"replay: {name} is not installed in Claude Code's folder, so the session cannot read it.",
+                          file=sys.stderr)
             setup = listed.get("setup")
             if setup:
                 code = group.run(setup, clone)

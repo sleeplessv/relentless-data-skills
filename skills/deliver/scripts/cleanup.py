@@ -190,7 +190,12 @@ def remove_records_of(run: core.Run, branch: str) -> None:
 
 def records(run: core.Run, branch: str) -> list[dict]:
     """The branch's events from `records.jsonl`, oldest first; none when the file is missing."""
-    path = core.records_dir(run.common_dir, branch) / core.RECORDS
+    return read_records(run.common_dir, branch)
+
+
+def read_records(common_dir: Path, branch: str) -> list[dict]:
+    """`records` for the repo whose common git folder is `common_dir`."""
+    path = core.records_dir(common_dir, branch) / core.RECORDS
     if not branch or not path.is_file():
         return []
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]

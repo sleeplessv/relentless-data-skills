@@ -17,12 +17,18 @@ sys.dont_write_bytecode = True  # importing the siblings would otherwise write _
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 # The replay scripts stay in this repo's scripts/, so the report runs from this repo's tree only.
 sys.path.insert(1, str(Path(__file__).resolve().parents[3] / "scripts"))
+import cleanup  # noqa: E402
+import core  # noqa: E402
 import draw  # noqa: E402  (a replay script, not an installed package)
+import finish  # noqa: E402
 import judge  # noqa: E402
 import replay  # noqa: E402
 import scan  # noqa: E402
 
-GENERATION_ONE, DIRECT = judge.GENERATION_ONE, replay.VERSION
+GENERATION_ONE, DIRECT, DELIVER = judge.GENERATION_ONE, replay.VERSION, replay.VERSIONS[1]
+# Where a deliver replay ended, as ending() reads it from the clone.
+MERGED, READY, HANDED, REVIEW, NO_PR, OTHER = ("merged", "ready", "handed to the owner", "draft needing a review",
+                                              "stopped before the PR", "other or not read")
 RATE_FLOOR = 20  # a count out of fewer tickets than this is never given as a rate
 # Warning sign 1: the shares of the tickets judged that the difference is held against, each rounded up, and the
 # words both the help and the verdict take from them; the help states the rule.
@@ -159,6 +165,18 @@ share is printed. A copied_tokens that is null, or absent from a row the scan
 wrote before it had that column, is blank: its ticket is left out of the copied
 tokens and counted.
 
+The {DELIVER} block then counts, per size bucket and over the sets, where each
+{DELIVER} replay of a ticket in the sets ended, read from its clone as the
+replay left it. A replay with no PR stopped before the PR; one whose last PR
+the stand-in gh holds is merged counts as merged. An open PR takes the form
+deliver.py finish gives it, from the records of the newest run on the PR's
+branch and the head the clone's bare remote holds for that branch: the newest
+ready or merge record on that head decides. A merge record is handed to the
+owner, a ready record with result "small edit" is ready, and one with result
+"needs review" is a draft needing a review. A clone that is gone, a file or
+head that cannot be read, a closed PR, and an open PR with no such record on
+its head count as other or not read, and do not stop the report.
+
 
 {textwrap.fill(
     f"Warning sign 1 is {GENERATION_ONE}'s right-first-time count minus {DIRECT}'s, over every ticket of the sets. "
@@ -216,7 +234,16 @@ Files read, all written by the other scripts:
                         each entry under "tickets" (scripts/draw.py), and
                         browser where an entry has it.
   versions.jsonl        label, ticket, version, commit, session and
-                        not_direct of each line (scripts/replay.py).
+                        not_direct of each line, and clone of each {DELIVER}
+                        line (scripts/replay.py).
+  <clone>/.git/{replay.STAND_IN}/prs.json
+                        state and headRefName of the last PR
+                        (scripts/replay_gh.py).
+  <clone>/.git/{replay.ORIGIN}
+                        the commit refs/heads/<branch> names.
+  <clone>/.git/deliver/branches/<branch>/{core.RECORDS}
+                        event, run, commit, result and merge_line of each
+                        record (deliver.py).
   verdicts.jsonl        label, ticket, version, commit and right_first_time
                         of each line (scripts/judge.py).
   scan-rows.jsonl       session, total_tokens, copied_tokens, active_minutes
@@ -421,6 +448,36 @@ def outcome(ticket: dict, version: str, versions: dict, verdicts: dict, rows: di
             "minutes": row.get("active_minutes"), "helpers": row.get("helpers")}
 
 
+def ending(clone: Path) -> str:
+    """Where the deliver replay in `clone` ended. The last PR the stand-in gh holds gives merged, closed or open. An
+    open PR takes the form `deliver.py finish` gives its state line (`finish.open_state`), from the records of the
+    newest run on the PR's branch, at the head the clone's bare remote holds for that branch. A clone, file or ref
+    that cannot be read is OTHER."""
+    try:
+        if not clone.is_dir():
+            return OTHER
+        path = clone / ".git" / replay.STAND_IN / "prs.json"  # the stand-in writes it on every call
+        prs = json.loads(path.read_text()) if path.is_file() else []
+        if not prs:
+            return NO_PR
+        pr = prs[-1]
+        if pr["state"] != "OPEN":
+            return MERGED if pr["state"] == "MERGED" else OTHER
+        head = replay.git(clone / ".git" / replay.ORIGIN, "rev-parse", "--verify", "-q",
+                          f"refs/heads/{pr['headRefName']}")
+        log = cleanup.read_records(clone / ".git", pr["headRefName"])
+        newest = cleanup.latest(log, "start")
+        form, why = finish.open_state(cleanup.run_records(log, newest.get("run")) if newest else log, head)
+        return {"ready": HANDED if why else READY, "review": REVIEW}.get(form, OTHER)
+    except (OSError, ValueError, LookupError, TypeError, AttributeError, replay.ReplayError):
+        return OTHER
+
+
+def endings_line(bucket: str, found: list[str]) -> str:
+    return (f"  Where the replays ended, {bucket}: "
+            + ", ".join(f"{found.count(end)} {end}" for end in (MERGED, READY, HANDED, REVIEW, NO_PR, OTHER)) + ".")
+
+
 def count(part: int, whole: int) -> str:
     return f"{part} of {whole}" + (f" ({part / whole:.0%})" if whole >= RATE_FLOOR else "")
 
@@ -460,7 +517,10 @@ def copied_line(counted: list[dict]) -> str:
     return f"  Copied tokens: {copied_of_total}. Left out of the copied tokens: {blank} with a blank copied count."
 
 
-def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict, skipped_scan_lines: int = 0) -> list[str]:
+def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows: dict, skipped_scan_lines: int = 0,
+           ended: dict[tuple, str] | None = None) -> list[str]:
+    """The report's lines; `ended` holds where each deliver replay of a ticket in the sets ended, by its key."""
+    ended = ended or {}
     names = [GENERATION_ONE, DIRECT, *sorted({key[2] for key in [*versions, *verdicts] if key[:2] in tickets}
                                             - {GENERATION_ONE, DIRECT})]
     results = {name: {key: outcome(ticket, name, versions, verdicts, rows) for key, ticket in tickets.items()}
@@ -486,6 +546,10 @@ def report(sets: list[int], tickets: dict, versions: dict, verdicts: dict, rows:
                      f"blank token count. Left out of the active minutes: "
                      f"{sum(result['minutes'] is None for result in judged)} blank.")
         lines.append(copied_line([result for result in judged if result["tokens"] is not None]))
+        if name == DELIVER:
+            lines += [endings_line(bucket, [end for key, end in ended.items() if bucket in ("All",
+                                                                                           tickets[key[:2]]["bucket"])])
+                      for bucket in (*draw.BUCKETS, "All")]
     runnable = [key for key, ticket in tickets.items() if not ticket.get("browser")]  # the signs count no other
     pairs = [(results[GENERATION_ONE][key], results[DIRECT][key]) for key in runnable]
     judged_pairs = [pair for pair in pairs if all(isinstance(side, dict) for side in pair)]
@@ -579,7 +643,9 @@ def cli(argv: list[str]) -> int:
         verdicts = load_verdicts(state)
         versions = load_versions(state)
         rows, skipped = load_rows(state)
-        lines = report(sets, tickets, versions, verdicts, rows, skipped)
+        ended = {key: ending(state / line["clone"]) if isinstance(line.get("clone"), str) else OTHER
+                 for key, line in versions.items() if key[2] == DELIVER and key[:2] in tickets}
+        lines = report(sets, tickets, versions, verdicts, rows, skipped, ended)
     except Unreadable as error:
         print(f"report: {error}", file=sys.stderr)
         return 1

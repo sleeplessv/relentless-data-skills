@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import core
+import findings
 import mask
 
 SOURCES = ("conversation", "working tree, requirements written from the diff")
@@ -168,9 +169,14 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
              **{f"measurement value {key}": value for key, value in (measurement or {}).items()}}
     for name, text in given.items():
         refuse_secret(f"The {name} given to the renderer", name, text)
+    records = _records(folder)
+    found = findings.all_findings(records)
+    for finding in found:
+        refuse_secret(f"Finding {finding['number']}", "finding",
+                      "\n".join((finding["where"], finding["text"], finding["evidence"])))
     source, ticket, quote = read_source(texts["request"])
     plan = read_plan(texts["plan"])
-    evidence = evidence_lines(plan.requirements, _records(folder))
+    evidence = evidence_lines(plan.requirements, records)
     kinds: list[str] = []
 
     def shown(text: str) -> str:
@@ -196,7 +202,15 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
     out += ["", "## Requirements and check plan", "", "| # | Requirement | Proof |", "|---|---|---|"] + table
     if assumptions:
         out += ["", "Assumptions", ""] + assumptions
-    out += ["", "## Findings", "", "No review: small edit."]
+    out += ["", "## Findings", ""]
+    if found:
+        out += ["| # | From | Finding | Scope | State |", "|---|---|---|---|---|"]
+        for f in found:
+            text = f"`{f['where']}`: {f['text']}" + (f"; {f['evidence']}" if f["proven"] else "")
+            out.append(f"| {f['number']} | {findings.REPORTERS[f['reviewer']]} | {_cell(shown(text))} | {f['scope']} "
+                       f"| {findings.state(f)} |")
+    else:
+        out.append("No review: small edit.")
     if block:
         out += ["", *MEASUREMENT_OPEN, *block, *MEASUREMENT_CLOSE]
     return "\n".join(out) + "\n"

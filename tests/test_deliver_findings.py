@@ -172,11 +172,12 @@ class States(unittest.TestCase):
                 self.assertEqual(findings.state(finding, records), state)
                 self.assertEqual(findings.next_step(finding, records), step or f"nothing; it is {state}")
 
-    def test_fix_rounds_are_the_distinct_commits_callback_briefs_target(self):
-        records = [{"event": "brief", "round": 0, "commit": READ}, {"event": "brief", "round": 1, "commit": FIX},
-                   {"event": "brief", "round": 1, "commit": FIX}, {"event": "brief", "round": 2, "commit": LATER}]
+    def test_fix_rounds_are_the_distinct_commits_saved_callbacks_read(self):
+        records = [{"event": "review", "round": 0, "commit": READ}, {"event": "brief", "round": 1, "commit": READ},
+                   {"event": "review", "round": 1, "commit": FIX}, {"event": "review", "round": 1, "commit": FIX},
+                   {"event": "brief", "round": 2, "commit": "c" * 40}, {"event": "review", "round": 2, "commit": LATER}]
         self.assertEqual(findings.fix_rounds(records), [FIX, LATER])
-        self.assertEqual(findings.fix_rounds(records[:1]), [])
+        self.assertEqual(findings.fix_rounds(records[:2]), [])
 
 
 CALC = "".join(f"line {n}\n" for n in range(1, 11))

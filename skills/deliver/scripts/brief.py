@@ -26,7 +26,8 @@ session` is recorded as given. `brief` writes nothing in the checkout and starts
 `brief callback <role>` writes the call-back brief of a role whose findings a fix answers (#231
 rule 30). After `brief.no-pr` it refuses `brief.no-review` when no review of that role is saved
 and `brief.no-fix` when `HEAD` is the commit that role's newest saved report read. Its round is
-the place of `HEAD` among `findings.fix_rounds`, or the next one; a third round ends in
+the place of `HEAD` among `findings.fix_rounds`, the commits saved call-backs read, or the next
+one, so a brief whose report was never saved uses up no round; a third round ends in
 `core.Question` before anything is written, handing the PR to the owner. Then come the review
 brief's other refusals. The brief is the review brief's, with the commits since the role's last
 read and the role's findings before the call-back report form, saved as `briefs/<role>-<round>.md`.

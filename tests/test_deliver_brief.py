@@ -331,9 +331,13 @@ Judge whether the commits above fix each of your findings, and read only the lin
         checkout, _, fix = self.reviewed("feat/third")
         self.add("feat/third", "brief", role="defect", round=1, model="opus", effort="high", commit=fix,
                  path="briefs/defect-1.md", fixed_point=self.base)
+        self.add("feat/third", "review", role="defect", round=1, commit=fix, file="reviews/defect-1.md",
+                 resolutions={"F1": "not resolved"}, findings=[])
         second = self.world.commit(checkout, "calc.py", "def add(a, b):\n    return a + b + 0\n", "fix: again")
         self.add("feat/third", "brief", role="requirements", round=2, model="sonnet", effort="high", commit=second,
                  path="briefs/requirements-2.md", fixed_point=self.base)
+        self.add("feat/third", "review", role="requirements", round=2, commit=second, file="reviews/requirements-2.md",
+                 resolutions={"F2": "not resolved"}, findings=[])
         self.world.commit(checkout, "calc.py", "def add(a, b):\n    return sum((a, b))\n", "fix: once more")
         before = self.world.records("feat/third")
         deliver_kit.reset_gh(self.world)
@@ -343,6 +347,16 @@ Judge whether the commits above fix each of your findings, and read only the lin
         self.assertEqual(self.world.records("feat/third"), before)
         self.assertFalse((self.folder("feat/third") / "briefs").exists())
         self.assertEqual(self.world.gh_calls(), [])
+
+    def test_a_callback_brief_whose_report_was_never_saved_uses_up_no_round(self):
+        checkout, _, fix = self.reviewed("feat/unsaved")
+        self.assertEqual(self.brief(checkout, "callback", "defect").returncode, 0)
+        again = self.world.commit(checkout, "calc.py", "def add(a, b):\n    return a + b + 0\n", "fix: again")
+        self.check("feat/unsaved", "echo ok", again)
+        self.on_github(again)
+        self.assert_ends(self.brief(checkout, "callback", "defect"), 0,
+                         f"Read {self.folder('feat/unsaved')}/briefs/defect-1.md and follow it.\n")
+        self.assertEqual([(r["round"], r["commit"]) for r in self.briefs("feat/unsaved")[2:]], [(1, fix), (1, again)])
 
     def test_brief_no_review(self):
         checkout, _ = self.branch("feat/no-review")

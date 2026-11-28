@@ -24,7 +24,8 @@ added or changed; otherwise it is out of scope. A finding is proven when its Evi
 anything but `none` (#256 rule 37).
 
 Call-backs (#231 rule 30; spec #479, The review steps, step 5). A fix round is a distinct commit
-that one or more call-back briefs target; `fix_rounds` lists them in order. A call-back report
+that one or more saved call-backs read; `fix_rounds` lists them in order. A call-back brief whose
+report is never saved uses up no round. A call-back report
 holds a resolution line per earlier finding of its reviewer, and new finding lines:
 
     F1: resolved | not resolved
@@ -167,8 +168,8 @@ def named_command(evidence: str) -> str | None:
 
 
 def fix_rounds(records: list[dict]) -> list[str]:
-    """The fix rounds' commits in order: each distinct commit a call-back brief targets."""
-    return list(dict.fromkeys(r["commit"] for r in records if r.get("event") == "brief" and r.get("round", 0) > 0))
+    """The fix rounds' commits in order: each distinct commit a saved call-back read."""
+    return list(dict.fromkeys(r["commit"] for r in records if r.get("event") == "review" and r.get("round", 0) > 0))
 
 
 def _decided(finding: dict, records: list[dict]) -> tuple[dict | None, str | None]:

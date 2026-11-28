@@ -46,8 +46,6 @@ from __future__ import annotations
 import re
 import shlex
 
-import render
-
 REPORTERS = {"requirements": "requirements review", "defect": "defect review"}
 FINDING_FORM = ("F1: <file:line or R<n>>: <what is wrong>. Evidence: "
                 "<failing command and output | rule or requirement broken | none>")
@@ -156,6 +154,14 @@ def number(found: list[dict], records: list[dict], role: str, changed: dict[str,
              "proven": proven(finding["evidence"])} for i, finding in enumerate(found)]
 
 
+def counted(record: dict, command: str) -> bool:
+    """Whether a record is a counted pass of `command`: a check of that exact text that exited 0,
+    is tied to a commit and selected something (#256 rules 29, 30). `ready` also wants the commit
+    to be `HEAD`."""
+    return (record.get("event") == "check" and record.get("command") == command and record.get("exit") == 0
+            and bool(record.get("commit")) and not record.get("selected_nothing"))
+
+
 def report_line(finding: dict) -> str:
     """A saved finding as a report line, under its saved number."""
     return f"{finding['number']}: {finding['where']}: {finding['text'].rstrip('.')}. Evidence: {finding['evidence']}"
@@ -192,7 +198,7 @@ def _waits_for_pass(finding: dict, records: list[dict], decider: dict | None) ->
     if not decider or decider["event"] != "review" or decider["resolutions"][finding["number"]] != "resolved":
         return None
     command = named_command(finding["evidence"])
-    if command and not any(render.counted(r, command) and r["commit"] == decider["commit"] for r in records):
+    if command and not any(counted(r, command) and r["commit"] == decider["commit"] for r in records):
         return command
     return None
 

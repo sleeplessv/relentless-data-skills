@@ -2,7 +2,7 @@
 
 `settle` refuses `settle.unknown-finding` for a number no saved finding has, and
 `settle.out-of-scope` for a finding out of scope. `--check <command>` marks the finding
-disproven only when that exact command text has a counted pass on `HEAD` (`render.counted`), and
+disproven only when that exact command text has a counted pass on `HEAD` (`findings.counted`), and
 refuses `settle.no-pass` otherwise; it may settle a proven finding too. `--unsettled` refuses
 `settle.proven` for a proven finding, which only a fix or a check settles (#172 rule 15; #176
 rules 7, 8). It appends a `settle` record: `finding`, `state` (`disproven` or `unsettled`), and for
@@ -39,7 +39,7 @@ def main(args: list[str], run: core.Run) -> None:
     command = args[2]
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=run.checkout, capture_output=True, text=True,
                           check=True).stdout.strip()
-    if not any(render.counted(r, command) and r["commit"] == head for r in records):
+    if not any(findings.counted(r, command) and r["commit"] == head for r in records):
         raise core.Refused("settle.no-pass", f"deliver.py check -- {shlex.quote(command)}, then deliver.py settle "
                            f"{number} --check {shlex.quote(command)}", command=command, commit=head[:7])
     run.record("settle", finding=number, state="disproven", command=command, commit=head)

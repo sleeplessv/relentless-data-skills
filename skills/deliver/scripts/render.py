@@ -145,12 +145,8 @@ def evidence_lines(requirements: list[Requirement], records: list[dict]) -> list
     return lines
 
 
-def counted(record: dict, command: str) -> bool:
-    """Whether a record is a counted pass of `command`: a check of that exact text that exited 0,
-    is tied to a commit and selected something (#256 rules 29, 30). `ready` also wants the commit
-    to be `HEAD`."""
-    return (record.get("event") == "check" and record.get("command") == command and record.get("exit") == 0
-            and bool(record.get("commit")) and not record.get("selected_nothing"))
+# A counted pass lives in `findings`, which imports no other deliver module; `ready` reads it here.
+counted = findings.counted
 
 
 def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tuple[str, str] | None = None,

@@ -10,6 +10,9 @@ the folder tests/fixture-repo. The folder has no __init__.py, so this repo's
 
 A test that runs the check command first copies the folder to a temporary directory and runs the
 command there, with PYTHONDONTWRITEBYTECODE=1, so nothing is written into the source folder.
+
+The small test's case runs deliver's own `small_test.measure` and `settings.load` on a throwaway
+repo seeded with the fixture, as `ready` would on the finished branch.
 """
 from __future__ import annotations
 
@@ -19,10 +22,14 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import deliver_kit  # noqa: E402
 
 FIXTURE = Path(__file__).resolve().parent / "fixture-repo"
 TIMEOUT = 120  # seconds for one run of the check command
@@ -113,9 +120,37 @@ class FixtureRepoTest(unittest.TestCase):
         files = {p.relative_to(self.copy).as_posix() for p in self.copy.rglob("*") if p.is_file()}
         self.assertEqual(files, EXPECTED_FILES)
 
-    def test_stack_toml_holds_only_the_check_command(self):
+    def test_stack_toml_holds_the_check_command_and_one_critical_path(self):
         with open(self.copy / "docs/agents/stack.toml", "rb") as f:
-            self.assertEqual(tomllib.load(f), {"check_command": "python3 -m unittest -v"})
+            self.assertEqual(tomllib.load(f), {"check_command": "python3 -m unittest -v",
+                                               "small_edit": {"critical_paths": ["test_calc.py"]}})
+
+    def test_ticket_a_fails_the_small_test_and_the_small_edit_passes_it(self):
+        small_test, settings = deliver_kit.load("small_test"), deliver_kit.load("settings")
+        world = deliver_kit.World(self.addCleanup)
+        for path in sorted(p for p in self.copy.rglob("*") if p.is_file()):
+            world.commit(world.work, path.relative_to(self.copy).as_posix(), path.read_text(), "chore: seed")
+
+        def measure(branch: str, changes: dict[str, str]) -> dict:
+            tree = world.worktree(branch, branch)
+            for name, text in changes.items():
+                (tree / name).write_text(text)
+            world.git(tree, "commit", "-q", "-am", "feat: change")
+            return small_test.measure(tree, "main", settings.load(tree)[0], "two-way", {})
+
+        calc, tests = (self.copy / "calc.py").read_text(), (self.copy / "test_calc.py").read_text()
+        ticket_a = measure("ticket-a", {  # a made-up change that does ticket A
+            "calc.py": calc + '\n\ndef multiply(a, b):\n    """Return a * b."""\n    return a * b\n',
+            "test_calc.py": tests.replace("from calc import add, subtract", "from calc import add, multiply, subtract")
+            .replace("    def test_subtract(self):", "    def test_multiply(self):\n"
+                     "        self.assertEqual(multiply(4, 3), 12)\n\n    def test_subtract(self):"),
+        })
+        self.assertFalse(ticket_a["passed"])
+        self.assertEqual(ticket_a["small_test"]["critical_paths"], ["test_calc.py"])
+        self.assertIn("critical paths changed: test_calc.py", ticket_a["reason"])
+        text = (self.copy / "tasks/small-edit.md").read_text()
+        small = measure("small-edit", {"calc.py": calc.replace(edit_line(text, "Before"), edit_line(text, "After"))})
+        self.assertTrue(small["passed"], small["reason"])
 
     def test_ci_workflow_has_one_job_that_runs_the_check_command(self):
         job = workflow_job((self.copy / ".github/workflows/check.yml").read_text())

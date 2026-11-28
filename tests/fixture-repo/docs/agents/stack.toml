@@ -1,1 +1,4 @@
 check_command = "python3 -m unittest -v"
+
+[small_edit]
+critical_paths = ["test_calc.py"]

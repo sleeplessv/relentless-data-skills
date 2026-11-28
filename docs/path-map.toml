@@ -48,3 +48,53 @@ files = [
   "skills/deliver/adapters/antigravity.md",
 ]
 limit = 676
+
+# The single-ticket rows count deliver's own files. A review also loads the router skill and the two
+# review skills, code-review and ponytail-review; their size is not deliver's to choose, so no row counts them.
+
+[[path]]
+name = "single ticket"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/review.md",
+  "skills/deliver/agents/deliver-reader.md",
+  "skills/deliver/agents/deliver-requirements-reviewer.md",
+  "skills/deliver/agents/deliver-defect-reviewer.md",
+]
+limit = 957
+
+[[path]]
+name = "single ticket on Cortex Code"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/cortex.md",
+  "skills/deliver/review.md",
+]
+limit = 1031
+
+[[path]]
+name = "single ticket on Codex"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/codex.md",
+  "skills/deliver/review.md",
+]
+limit = 999
+
+[[path]]
+name = "single ticket on Cursor"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/cursor.md",
+  "skills/deliver/review.md",
+]
+limit = 1000
+
+[[path]]
+name = "single ticket on Antigravity"
+files = [
+  "skills/deliver/SKILL.md",
+  "skills/deliver/adapters/antigravity.md",
+  "skills/deliver/review.md",
+]
+limit = 1006

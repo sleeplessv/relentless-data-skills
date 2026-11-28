@@ -103,11 +103,24 @@ class TestWordCount(unittest.TestCase):
 
 
 class TestPathMap(unittest.TestCase):
-    def test_small_edit_rows_list_their_two_files_and_their_limits(self) -> None:
+    def test_rows_list_their_files_and_their_limits(self) -> None:
         with (REPO_ROOT / "docs" / "path-map.toml").open("rb") as path_map:
             rows = tomllib.load(path_map)["path"]
+        deliver = "skills/deliver"
+        self.assertEqual(rows[5:], [{
+            "name": "single ticket",
+            "files": [f"{deliver}/SKILL.md", f"{deliver}/review.md", f"{deliver}/agents/deliver-reader.md",
+                      f"{deliver}/agents/deliver-requirements-reviewer.md",
+                      f"{deliver}/agents/deliver-defect-reviewer.md"],
+            "limit": 957,
+        }, *({
+            "name": f"single ticket on {harness}",
+            "files": [f"{deliver}/SKILL.md", f"{deliver}/adapters/{adapter}.md", f"{deliver}/review.md"],
+            "limit": limit,
+        } for harness, adapter, limit in (("Cortex Code", "cortex", 1031), ("Codex", "codex", 999),
+                                          ("Cursor", "cursor", 1000), ("Antigravity", "antigravity", 1006)))])
         self.assertEqual(
-            rows,
+            rows[:5],
             [{
                 "name": "small edit",
                 "files": ["skills/deliver/SKILL.md", "skills/deliver/agents/deliver-reader.md"],

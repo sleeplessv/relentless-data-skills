@@ -2,8 +2,10 @@
 
 Read this before you start an agent. Where the skill names a Claude Code step, do this instead.
 
-- Start the reader with `invoke_subagent`. Call an agent back with `send_message` to its
-  conversation id.
+- Start the reader with `invoke_subagent`. Start the two reviewers in one step with two
+  `invoke_subagent` calls in one turn, then wait for both.
+- A call-back is a fresh agent started with `invoke_subagent`, never a `send_message` to an earlier
+  one.
 - Typed-only is not enforced, and the skill's description does not ask for it. Antigravity has no
   switch that keeps the model from starting `deliver` from its description. A run the model
   started goes through the same preflight, guard and merge script as a typed one.

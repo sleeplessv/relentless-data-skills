@@ -2,7 +2,9 @@
 
 Read this before you start an agent. Where the skill names a Claude Code step, do this instead.
 
-- Start the reader with `Task`. Call an agent back with `Task` and `resume: <agent id>`.
+- Start the reader with `Task`. Start the two reviewers in one step with two `Task` calls in one
+  message, then wait for both.
+- A call-back is a fresh agent started with `Task`, never a resumed one.
 - Typed-only is enforced: `disable-model-invocation: true` in the skill's front matter keeps the
   model from starting `deliver`.
 - Cursor's agent file cannot withhold a tool: `readonly: true` would refuse every shell command,

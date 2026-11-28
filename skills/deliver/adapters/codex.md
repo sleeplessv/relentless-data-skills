@@ -3,7 +3,9 @@
 Read this before you start an agent. Where the skill names a Claude Code step, do this instead.
 
 - Start the reader with `spawn_agent` and `fork_turns: "none"`, so that it starts with a fresh
-  context, then wait for it with `wait_agent`. Call an agent back with `followup_task`.
+  context, then wait for it with `wait_agent`. Start the two reviewers in one step with two such
+  `spawn_agent` calls, then wait for both with `wait_agent`.
+- A call-back is a fresh agent started with `spawn_agent`, never `followup_task`.
 - Typed-only is enforced: `allow_implicit_invocation: false` in the skill's `agents/openai.yaml`
   keeps the model from starting `deliver`.
 - Codex's agent file cannot withhold a tool, so the reader could edit. Its brief holds the rule:

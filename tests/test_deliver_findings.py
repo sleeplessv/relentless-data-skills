@@ -54,6 +54,20 @@ class Parse(unittest.TestCase):
                     findings.parse(text, role)
                 self.assertEqual(caught.exception.number, number)
 
+    def test_a_callback_report_gives_its_resolutions_and_new_findings(self):
+        answers, found = findings.parse("F2: resolved\n\nF5: not resolved\nF1: calc.py:9: a new slip. Evidence: none\n",
+                                        "requirements", callback=True)
+        self.assertEqual(answers, {"F2": "resolved", "F5": "not resolved"})
+        self.assertEqual(found, [{"where": "calc.py:9", "text": "a new slip", "evidence": "none"}])
+        for role, text, number in (("requirements", "F1: resolved\nR1: met\n", 2), ("defect", "F1: fixed\n", 1),
+                                   ("defect", "F1: resolved.\n", 1)):
+            with self.subTest(text):
+                with self.assertRaises(findings.BadLine) as caught:
+                    findings.parse(text, role, callback=True)
+                self.assertEqual(caught.exception.number, number)
+        with self.assertRaises(findings.BadLine):
+            findings.parse("F1: resolved\n", "defect")
+
     def test_a_location_in_a_code_span_and_a_line_range_are_read(self):
         _, found = findings.parse("F1: `src/a.py:3`: x. Evidence: none\nF2: lib/x.py:3-5: y. Evidence: none\n",
                                   "defect")
@@ -103,6 +117,66 @@ class ScopeAndProof(unittest.TestCase):
                                  ("`make test` fails: 1 error", True), ("breaks R2", True), ("R2 not met", True)):
             with self.subTest(evidence):
                 self.assertEqual(findings.proven(evidence), proven)
+
+
+READ, FIX, LATER = "a" * 40, "b" * 40, "c" * 40
+
+
+def found(number: str, evidence: str = "none", scope: str = "in", where: str = "calc.py:3") -> dict:
+    return {"number": number, "reviewer": "defect", "where": where, "text": "wrong", "evidence": evidence,
+            "scope": scope, "proven": findings.proven(evidence)}
+
+
+def check(command: str, commit: str, exit: int = 0) -> dict:
+    return {"event": "check", "command": command, "exit": exit, "commit": commit, "selected_nothing": False}
+
+
+class States(unittest.TestCase):
+    """Each state and next step, from made-up records: one review of READ, call-backs of FIX and LATER."""
+
+    def test_each_state_and_what_the_finding_needs_next(self):
+        table = (
+            (found("F1", "`make a` fails"), "fixed in bbbbbbb: `make a` fails before, passes after", "nothing; it is "
+             "fixed in bbbbbbb: `make a` fails before, passes after"),
+            (found("F2", "`make b` fails"),
+             "fixed in bbbbbbb: `make b` passes after; the failing run before the fix was not saved", None),
+            (found("F3", "`make c x` fails"), "open", "deliver.py check -- 'make c x' on bbbbbbb, the call-back's commit"),
+            (found("F4", "breaks R2"), "fixed in bbbbbbb", None),
+            (found("F5", "breaks R2"), "open", "fix it in a commit"),
+            (found("F6"), "disproven: `make d` passes", None),
+            (found("F7"), "unsettled", "nothing; it is unsettled"),
+            (found("F8", "breaks R1", "out"), "follow-up #31", None),
+            (found("F9", "breaks R1", "out"), "follow-up not filed (follow_ups = false in docs/agents/stack.toml)", None),
+            (found("F10", scope="out"), "listed, not proven", "nothing; it is listed, not proven"),
+            (found("F11", "breaks R3"), "open", "fix it in a commit"),
+            (found("F12"), "open", "settle it: deliver.py settle F12 --check <command>, or deliver.py settle F12 --unsettled"),
+            (found("F13", "breaks R1", "out"), "open", "file a follow-up: deliver.py follow-up F13"),
+        )
+        records = [
+            check("make a", READ, exit=1), check("make b", READ, exit=0), check("make a", FIX), check("make b", FIX),
+            check("make c x", LATER),
+            {"event": "review", "role": "defect", "round": 0, "commit": READ, "findings": [f for f, _, _ in table]},
+            {"event": "review", "role": "defect", "round": 1, "commit": FIX, "findings": [], "resolutions": {
+                "F1": "resolved", "F2": "resolved", "F3": "resolved", "F4": "resolved", "F5": "not resolved",
+                "F11": "resolved"}},
+            {"event": "settle", "finding": "F6", "state": "disproven", "command": "make d", "commit": FIX},
+            {"event": "settle", "finding": "F7", "state": "unsettled"},
+            {"event": "follow-up", "finding": "F8", "state": "filed", "issue": 31},
+            {"event": "follow-up", "finding": "F9", "state": "not filed",
+             "reason": "follow_ups = false in docs/agents/stack.toml"},
+            {"event": "review", "role": "defect", "round": 2, "commit": LATER, "findings": [],
+             "resolutions": {"F11": "not resolved"}},
+        ]
+        for finding, state, step in table:
+            with self.subTest(finding["number"]):
+                self.assertEqual(findings.state(finding, records), state)
+                self.assertEqual(findings.next_step(finding, records), step or f"nothing; it is {state}")
+
+    def test_fix_rounds_are_the_distinct_commits_callback_briefs_target(self):
+        records = [{"event": "brief", "round": 0, "commit": READ}, {"event": "brief", "round": 1, "commit": FIX},
+                   {"event": "brief", "round": 1, "commit": FIX}, {"event": "brief", "round": 2, "commit": LATER}]
+        self.assertEqual(findings.fix_rounds(records), [FIX, LATER])
+        self.assertEqual(findings.fix_rounds(records[:1]), [])
 
 
 CALC = "".join(f"line {n}\n" for n in range(1, 11))
@@ -280,6 +354,82 @@ class SaveReview(unittest.TestCase):
         self.assertIn("Finding F1 looks like it holds a secret", result.stdout)
         self.assertNotIn("ghp_", result.stdout)
         self.assertEqual([c["args"][:2] for c in self.world.gh_calls()], [])
+
+    def callback(self, role: str, text: str, line: str = "line four") -> tuple[object, str]:
+        """Commit a fix of line 4, record a call-back brief of it, and save `text` as its call-back."""
+        fix = self.world.commit(self.checkout, "calc.py", CALC.replace("line 3\n", "line three\n")
+                                .replace("line 4\n", f"{line}\n"), "fix: line 4")
+        self.world.add_record(self.name, "brief", role=role, round=1, model="sonnet", effort="high", commit=fix,
+                              path=f"briefs/{role}-1.md", fixed_point=self.base)
+        path = self.checkout / ".deliver" / "callback.md"
+        path.write_text(text, encoding="utf-8")
+        return self.world.deliver("save", "callback", role, cwd=self.checkout), fix
+
+    def test_save_callback_fixes_resolved_findings_and_numbers_new_ones_on(self):
+        self.save("requirements", REQUIREMENTS_REPORT)
+        self.save("defect", "F1: calc.py:3: off by one. Evidence: none\n")
+        result, fix = self.callback("requirements", "F1: resolved\nF2: resolved\n\nF3: not resolved\n"
+                                                    "F9: calc.py:4: line four is new. Evidence: none\n")
+        self.assert_ends(result, 0, (
+            f"Saved the requirements review call-back of {fix[:7]}.\n"
+            f"F1 (in scope, proven) R2: not met: calc.py:3 still says line 3. Next: nothing; it is fixed in {fix[:7]}.\n"
+            "F2 (in scope, proven) calc.py:3: the new line is wrong. Next: deliver.py check -- 'echo ok' on "
+            f"{fix[:7]}, the call-back's commit.\n"
+            "F3 (in scope, not proven) calc.py:3: the new line may be slow. Next: settle it: deliver.py settle F3 "
+            "--check <command>, or deliver.py settle F3 --unsettled.\n"
+            "F7 (in scope, not proven) calc.py:4: line four is new. Next: settle it: deliver.py settle F7 --check "
+            "<command>, or deliver.py settle F7 --unsettled.\n"))
+        self.assertFalse((self.checkout / ".deliver" / "callback.md").exists())
+        self.assertEqual((self.folder / "reviews" / "requirements-1.md").read_text(encoding="utf-8"),
+                         "F1: resolved\nF2: resolved\n\nF3: not resolved\nF9: calc.py:4: line four is new. Evidence: none\n")
+        self.assertEqual(self.reviews()[-1], {
+            "event": "review", "role": "requirements", "round": 1, "commit": fix, "file": "reviews/requirements-1.md",
+            "resolutions": {"F1": "resolved", "F2": "resolved", "F3": "not resolved"}, "findings": [
+                {"number": "F7", "reviewer": "requirements", "where": "calc.py:4", "text": "line four is new",
+                 "evidence": "none", "scope": "in", "proven": False}]})
+        self.world.add_record(self.name, "check", command="echo ok", exit=0, output="checks/1.txt", commit=fix,
+                              selected_nothing=False)
+        self.assertIn(f"| F2 | requirements review | `calc.py:3`: the new line is wrong; `echo ok` prints the wrong line | in "
+                      f"| fixed in {fix[:7]}: `echo ok` passes after; the failing run before the fix was not saved |\n"
+                      "| F3 | requirements review | `calc.py:3`: the new line may be slow | in | open |\n", self.pr())
+
+    def test_save_unknown_finding(self):
+        self.save("requirements", REQUIREMENTS_REPORT)
+        self.save("defect", "F1: calc.py:3: off by one. Evidence: none\n")
+        result, _ = self.callback("defect", "F6: resolved\nF1: resolved\n")
+        self.assert_ends(result, 10, (
+            "REFUSED save.unknown-finding: F1 is not a finding of the defect review, so its call-back cannot resolve "
+            f"it\nNext: start the reviewer again with `Read {self.folder}/briefs/defect-1.md and follow it.`, write its "
+            "final message into .deliver/callback.md, then deliver.py save callback defect\n"))
+        self.assertEqual([r["round"] for r in self.reviews()], [0, 0])
+        self.assertTrue((self.checkout / ".deliver" / "callback.md").exists())
+
+    def test_save_bad_review_in_a_callback(self):
+        self.save("defect", "F1: calc.py:3: off by one. Evidence: none\n")
+        result, _ = self.callback("defect", "F1: resolved\nR1: met\n")
+        self.assert_ends(result, 10, (
+            "REFUSED save.bad-review: line 2 of .deliver/callback.md is outside the report's form: R1: met\n"
+            f"Next: start the reviewer again with `Read {self.folder}/briefs/defect-1.md and follow it.`, write its "
+            "final message into .deliver/callback.md, then deliver.py save callback defect\n"))
+
+    def test_save_no_brief_once_the_newest_brief_has_its_report(self):
+        report = "F1: calc.py:3: off by one. Evidence: none\n"
+        self.save("defect", report)
+        self.assert_ends(self.save("defect", report), 10, (
+            "REFUSED save.no-brief: the newest defect brief, briefs/defect-0.md, already has its saved report, so the "
+            "report is tied to no reviewed commit\nNext: deliver.py brief defect --model <id>\n"))
+        path = self.checkout / ".deliver" / "callback.md"
+        path.write_text("F1: resolved\n", encoding="utf-8")
+        self.assert_ends(self.world.deliver("save", "callback", "defect", cwd=self.checkout), 10, (
+            "REFUSED save.no-brief: the newest defect brief, briefs/defect-0.md, is for a review, so the report is "
+            "tied to no reviewed commit\nNext: deliver.py brief callback defect\n"))
+        path.unlink()
+        result, _ = self.callback("defect", "F1: resolved\n")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assert_ends(self.save("defect", report), 10, (
+            "REFUSED save.no-brief: the newest defect brief, briefs/defect-1.md, is for a call-back, so the report is "
+            "tied to no reviewed commit\nNext: deliver.py brief defect --model <id>\n"))
+        self.assertEqual([[f["number"] for f in r["findings"]] for r in self.reviews()], [["F1"], []])
 
     def save_texts(self) -> None:
         for kind, text in (("request", "Source: ticket #7\n\nFix line 3.\n"), ("summary", "Fixes line 3.\n"),

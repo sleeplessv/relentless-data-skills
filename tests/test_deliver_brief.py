@@ -92,8 +92,9 @@ class Brief(unittest.TestCase):
     def briefs(self, branch: str) -> list[dict]:
         return [{k: v for k, v in r.items() if k != "at"} for r in self.world.records(branch) if r["event"] == "brief"]
 
-    def assert_refused(self, checkout: Path, branch: str, stdout: str, role: str = "requirements"):
-        self.assert_ends(self.brief(checkout, role, "--model", "sonnet"), 10, stdout)
+    def assert_refused(self, checkout: Path, branch: str, stdout: str, role: str = "requirements",
+                       args: tuple[str, ...] = ()):
+        self.assert_ends(self.brief(checkout, *(args or (role, "--model", "sonnet"))), 10, stdout)
         self.assertEqual(self.briefs(branch), [])
         self.assertFalse((self.folder(branch) / "briefs").exists())
 
@@ -174,11 +175,12 @@ Do both of the skill's readings yourself, and start no helper for them.
     def test_a_usage_error_names_the_roles(self):
         checkout, _ = self.branch("feat/usage")
         for args in ((), ("requirements",), ("callback", "--model", "x"), ("defect", "--modle", "x"),
-                     ("defect", "--model", "")):
+                     ("defect", "--model", ""), ("callback",), ("callback", "author"), ("callback", "defect", "x")):
             with self.subTest(args):
                 result = self.brief(checkout, *args)
                 self.assertEqual(result.returncode, 2)
-                self.assertIn("brief takes a role, one of requirements, defect, and --model <id>", result.stderr)
+                self.assertIn("brief takes a role, one of requirements, defect, and --model <id>, or callback and a "
+                              "role", result.stderr)
 
     def test_brief_no_mark(self):
         result = self.world.deliver("brief", "requirements", "--model", "sonnet")
@@ -243,6 +245,120 @@ Do both of the skill's readings yourself, and start no helper for them.
                             "REFUSED brief.no-review-skill: the review skill ponytail-review is not installed, so "
                             "the brief cannot name its path\n"
                             "Next: install ponytail-review, then deliver.py brief defect --model sonnet\n", role="defect")
+
+
+    def reviewed(self, name: str) -> tuple[Path, str, str]:
+        """A branch whose defect review of its first commit is saved, then a fix commit with a pass, pushed."""
+        checkout, read = self.branch(name)
+        for role, model, finding in (
+                ("defect", "opus", {"where": "calc.py:2", "text": "add ignores b", "evidence": "`echo ok` fails"}),
+                ("requirements", "sonnet", {"where": "R1", "text": "not met", "evidence": "R1 not met"})):
+            self.add(name, "brief", role=role, round=0, model=model, effort="high", commit=read,
+                     path=f"briefs/{role}-0.md", fixed_point=self.base)
+            number = f"F{len([r for r in self.world.records(name) if r['event'] == 'review']) + 1}"
+            self.add(name, "review", role=role, round=0, commit=read, file=f"reviews/{role}-0.md", answers={},
+                     findings=[{"number": number, "reviewer": role, **finding, "scope": "in", "proven": True}])
+        fix = self.world.commit(checkout, "calc.py", "def add(a, b):\n    return b + a\n", "fix: add uses b")
+        self.check(name, "echo ok", fix)
+        self.on_github(fix)
+        return checkout, read, fix
+
+    def test_writes_the_callback_brief_with_the_fix_and_the_findings_on_the_review_model(self):
+        checkout, read, fix = self.reviewed("feat/callback")
+        folder = self.folder("feat/callback")
+        result = self.brief(checkout, "callback", "defect")
+        path = folder / "briefs" / "defect-1.md"
+        self.assert_ends(result, 0, f"Read {path} and follow it.\n")
+        deliver = self.plugin / "scripts" / "deliver.py"
+        self.assertEqual(path.read_text(encoding="utf-8"), f"""\
+role: deliver-defect-reviewer, defined in {self.plugin}/agents/deliver-defect-reviewer.md
+review skill: {self.skills["ponytail-review"]}/SKILL.md
+deliver folder: {self.plugin}
+fixed point: {self.base}
+review target: {fix}, pushed
+saved check output: {folder}/checks/3.txt
+requirements source: the text below and nothing else
+
+## Request
+
+{REQUEST.rstrip()}
+
+## Requirements
+
+{REQUIREMENTS.rstrip()}
+
+## Check plan
+
+{PLAN.rstrip()}
+
+## Commits since your last read
+
+{fix} fix: add uses b
+
+## Your findings
+
+F1: calc.py:2: add ignores b. Evidence: `echo ok` fails
+
+## Report
+
+Your final message is the report: one line for each of your findings above, then one line per new finding on a line the commits above changed, and nothing else. Blank lines are allowed.
+
+F1: resolved | not resolved
+F1: <file:line or R<n>>: <what is wrong>. Evidence: <failing command and output | rule or requirement broken | none>
+
+Run any command that proves a finding as `uv run --python 3.13 --no-project {deliver} check -- <command>`, or with python3 when uv is missing, so that its output is saved.
+Write no file.
+Start no agent.
+Never run `deliver.py merge`.
+Judge whether the commits above fix each of your findings, and read only the lines they changed.
+""")
+        self.assertEqual(self.briefs("feat/callback")[-1], {
+            "event": "brief", "role": "defect", "round": 1, "model": "opus", "effort": "high", "commit": fix,
+            "path": "briefs/defect-1.md", "fixed_point": self.base})
+        self.assertEqual(self.world.git(checkout, "status", "--porcelain"), "")
+
+    def test_a_callback_of_another_role_on_the_same_fix_joins_its_round(self):
+        checkout, _, fix = self.reviewed("feat/join")
+        self.assertEqual(self.brief(checkout, "callback", "defect").returncode, 0)
+        result = self.brief(checkout, "callback", "requirements")
+        self.assert_ends(result, 0, f"Read {self.folder('feat/join')}/briefs/requirements-1.md and follow it.\n")
+        self.assertEqual([(r["role"], r["round"], r["model"]) for r in self.briefs("feat/join")[2:]],
+                         [("defect", 1, "opus"), ("requirements", 1, "sonnet")])
+        text = (self.folder("feat/join") / "briefs" / "requirements-1.md").read_text(encoding="utf-8")
+        self.assertIn("\n## Your findings\n\nF2: R1: not met. Evidence: R1 not met\n\n## Report\n", text)
+
+    def test_a_callback_for_a_third_fix_round_is_handed_to_the_owner_and_writes_nothing(self):
+        checkout, _, fix = self.reviewed("feat/third")
+        self.add("feat/third", "brief", role="defect", round=1, model="opus", effort="high", commit=fix,
+                 path="briefs/defect-1.md", fixed_point=self.base)
+        second = self.world.commit(checkout, "calc.py", "def add(a, b):\n    return a + b + 0\n", "fix: again")
+        self.add("feat/third", "brief", role="requirements", round=2, model="sonnet", effort="high", commit=second,
+                 path="briefs/requirements-2.md", fixed_point=self.base)
+        self.world.commit(checkout, "calc.py", "def add(a, b):\n    return sum((a, b))\n", "fix: once more")
+        before = self.world.records("feat/third")
+        deliver_kit.reset_gh(self.world)
+        self.assert_ends(self.brief(checkout, "callback", "defect"), 20, (
+            "This call-back would start a third fix round, and a run takes two at most. The PR stays draft and goes "
+            "to the owner with its open findings: run deliver.py ready, then deliver.py finish.\n"))
+        self.assertEqual(self.world.records("feat/third"), before)
+        self.assertFalse((self.folder("feat/third") / "briefs").exists())
+        self.assertEqual(self.world.gh_calls(), [])
+
+    def test_brief_no_review(self):
+        checkout, _ = self.branch("feat/no-review")
+        self.assert_refused(checkout, "feat/no-review", (
+            "REFUSED brief.no-review: no defect review is saved, so there is nothing to call back\n"
+            "Next: deliver.py brief defect --model <id>\n"), args=("callback", "defect"))
+
+    def test_brief_no_fix(self):
+        checkout, read, _ = self.reviewed("feat/no-fix")
+        self.world.git(checkout, "reset", "-q", "--hard", read)
+        before = self.briefs("feat/no-fix")
+        self.assert_ends(self.brief(checkout, "callback", "defect"), 10, (
+            f"REFUSED brief.no-fix: HEAD {read[:7]} is the commit the defect reviewer last read, so there is no fix "
+            "to call back\n"
+            "Next: commit the fix, run its checks and deliver.py pr, then deliver.py brief callback defect\n"))
+        self.assertEqual(self.briefs("feat/no-fix"), before)
 
 
 if __name__ == "__main__":

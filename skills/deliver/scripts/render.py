@@ -171,9 +171,10 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
         refuse_secret(f"The {name} given to the renderer", name, text)
     records = _records(folder)
     found = findings.all_findings(records)
+    states = {f["number"]: findings.state(f, records) for f in found}
     for finding in found:
         refuse_secret(f"Finding {finding['number']}", "finding",
-                      "\n".join((finding["where"], finding["text"], finding["evidence"])))
+                      "\n".join((finding["where"], finding["text"], finding["evidence"], states[finding["number"]])))
     source, ticket, quote = read_source(texts["request"])
     plan = read_plan(texts["plan"])
     evidence = evidence_lines(plan.requirements, records)
@@ -208,7 +209,7 @@ def description(folder: Path, *, blast: tuple[str, str] | None = None, door: tup
         for f in found:
             text = f"`{f['where']}`: {f['text'].rstrip('.')}" + (f"; {f['evidence']}" if f["proven"] else "")
             out.append(f"| {f['number']} | {findings.REPORTERS[f['reviewer']]} | {_cell(shown(text))} | {f['scope']} "
-                       f"| {findings.state(f)} |")
+                       f"| {_cell(shown(states[f['number']]))} |")
     else:
         out.append("No review: small edit.")
     if block:

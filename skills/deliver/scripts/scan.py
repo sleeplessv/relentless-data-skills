@@ -96,8 +96,8 @@ note that says so.
 
 Other harnesses. A session on Codex, Cortex Code, Cursor or Antigravity gets
 a row of the same columns, plus effort. Only the token columns, total_tokens,
-model, effort and helpers can be read, and every other figure is blank. The
-scan only reads local files: it starts no process and opens no connection.
+model, effort and helpers can be read, and every other figure is blank. These
+readers only read local files: they start no process and open no connection.
 
 - codex: SESSION is the thread id (CODEX_THREAD_ID). The log is
   $CODEX_HOME/sessions/**/rollout-*<id>.jsonl (default ~/.codex). The token
@@ -121,7 +121,9 @@ A helper's tokens count in total_tokens. A session with no figures, or with a
 helper whose figures are missing, gets blank token columns: a blank is never
 a zero, and the report leaves the row out of its token figures and counts it.
 A ready call on one of these harnesses gets the same deliver record, without
-agents, when deliver.py ready hands its run to the refresh it starts.
+agents. As these harnesses leave no log of the call, deliver.py ready writes
+the session's row with the call's time, branch and folder before it starts the
+refresh, so a refresh finds the call even when one was already running.
 
 --refresh refreshes every record that is not final, and makes a record for
 each session log with a ready call. A log whose session is gone keeps its
@@ -488,7 +490,6 @@ MISS_LABEL = "miss"  # the stack settings' default name for the owner's miss lab
 PR_FIELDS = "number,url,state,isDraft,mergedAt,closedAt,body,labels,reviews,baseRefName,headRefName"
 REFRESH_LOCK = "scan-refresh.lock"
 LOCK_FD = "DELIVER_SCAN_LOCK_FD"  # the lock a background start hands to the refresh it starts
-RUN = "DELIVER_SCAN_RUN"  # the ready call of a run on another harness, which a background start hands to the refresh
 CLAUDE_CODE = "claude-code"
 
 
@@ -717,10 +718,9 @@ def read_rows() -> dict[str, dict]:
     return {row["session"]: row for row in found if row and isinstance(row.get("session"), str)}
 
 
-def deliver_row(session: str, log: Path | None, rows: dict[str, dict], harness: str = CLAUDE_CODE,
-                call: dict | None = None) -> dict | None:
+def deliver_row(session: str, log: Path | None, rows: dict[str, dict], harness: str = CLAUDE_CODE) -> dict | None:
     """The session's row, with the record of its PR when it called ready; None when its record is final. A session on
-    another harness has no log for the scan to find its ready call in: `call` gives it, or its earlier record does."""
+    another harness has no log for the scan to find its ready call in: its record, as record_ready wrote it, holds it."""
     old = (rows.get(session) or {}).get("deliver")
     if isinstance(old, dict) and old.get("final"):
         return None
@@ -728,9 +728,9 @@ def deliver_row(session: str, log: Path | None, rows: dict[str, dict], harness: 
         old = None
     if harness != CLAUDE_CODE:
         row = {"session": session, "harness": harness, **scan_harness.read(harness, session)}
-        if call is None and old is None:
+        if old is None:
             return row
-        call = call or {"ready_at": old.get("ready_at"), "branch": old.get("branch"), "cwd": None}
+        call = {"ready_at": old.get("ready_at"), "branch": old.get("branch"), "cwd": old.get("cwd")}
     elif not log.is_file():
         if old is None:
             return scan(session, log)
@@ -798,24 +798,21 @@ def refresh() -> int:
         return 0
     try:
         rows = read_rows()
-        targets: dict[str, tuple[Path | None, str, dict | None]] = {}  # each session's log, harness and ready call
-        handed = json_object(os.environ.pop(RUN, "").encode())
-        if handed:
-            targets[handed["session"]] = (None, handed["harness"], handed)
+        targets: dict[str, tuple[Path | None, str]] = {}  # each session's log and harness
         for log in sorted((config_dir() / "projects").glob("*/*.jsonl")):
             try:
                 text = log.read_bytes().decode(errors="replace")
             except OSError:
                 continue
             if READY_WORDS.search(text):
-                targets.setdefault(log.stem, (log, CLAUDE_CODE, None))
+                targets.setdefault(log.stem, (log, CLAUDE_CODE))
         for session, row in rows.items():
             if isinstance(row.get("deliver"), dict) and not row["deliver"].get("final"):
                 harness = row.get("harness") if row.get("harness") in scan_harness.READERS else CLAUDE_CODE
-                targets.setdefault(session, (resolve(session)[1] if harness == CLAUDE_CODE else None, harness, None))
-        for session, (log, harness, call) in targets.items():
+                targets.setdefault(session, (resolve(session)[1] if harness == CLAUDE_CODE else None, harness))
+        for session, (log, harness) in targets.items():
             try:
-                row = deliver_row(session, log, rows, harness, call)
+                row = deliver_row(session, log, rows, harness)
             except SystemExit as error:  # a log the first half cannot read: the other records go on
                 print(f"scan: {session}: {error.code}", file=sys.stderr)
                 continue
@@ -827,10 +824,23 @@ def refresh() -> int:
         os.close(lock)
 
 
+def record_ready(harness: str, run: object) -> None:
+    """Write the row of a ready call made now, by `run` (a core.Run) on a harness other than Claude Code, with a
+    record of the call's time, branch and folder that a refresh asks gh about. The session id is the harness's own,
+    or the run's id when the harness gives none."""
+    variable = scan_harness.SESSION_VARIABLES[harness]
+    session = variable and os.environ.get(variable) or run.mark["run"]
+    old = (read_rows().get(session) or {}).get("deliver")
+    write_row({"session": session, "harness": harness, **scan_harness.read(harness, session),
+               "deliver": {**(old if isinstance(old, dict) else {}), "ready_at": datetime.now(timezone.utc).isoformat(),
+                           "branch": run.mark["branch"], "cwd": str(run.checkout), "note": None}})
+
+
 def start_background(harness: str | None = CLAUDE_CODE, run: object = None) -> bool:
-    """Start a refresh in the background and return at once; False, starting nothing, while one runs. `run`, the
-    core.Run of a ready call made now on `harness`, is handed to the refresh when that harness keeps no log the
-    refresh can find the call in: its session id is the harness's own, or the run's id when it gives none."""
+    """Start a refresh in the background and return at once; False, starting nothing, while one runs. A ready call on
+    another harness, made now by `run`, is written first, so the refresh that runs or the next one finds it."""
+    if harness in scan_harness.READERS and run is not None:
+        record_ready(harness, run)
     state = state_dir()
     descriptor = os.open(state / REFRESH_LOCK, os.O_WRONLY | os.O_CREAT, 0o600)
     try:
@@ -838,18 +848,12 @@ def start_background(harness: str | None = CLAUDE_CODE, run: object = None) -> b
             fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             return False
-        env = {**os.environ, LOCK_FD: str(descriptor)}
-        if harness in scan_harness.READERS and run is not None:
-            variable = scan_harness.SESSION_VARIABLES[harness]
-            env[RUN] = json.dumps({"session": variable and os.environ.get(variable) or run.mark["run"],
-                                   "harness": harness, "ready_at": datetime.now(timezone.utc).isoformat(),
-                                   "branch": run.mark["branch"], "cwd": str(run.checkout)})
         with open(state / "scan-refresh.log", "a") as log:
             os.chmod(log.name, 0o600)
             # The refresh shares this lock, so it is held from now until the refresh ends.
             subprocess.Popen([sys.executable, str(Path(__file__).with_name("deliver.py")), "scan", "--refresh"],
                              stdin=subprocess.DEVNULL, stdout=log, stderr=log, cwd=state, start_new_session=True,
-                             pass_fds=(descriptor,), env=env)
+                             pass_fds=(descriptor,), env={**os.environ, LOCK_FD: str(descriptor)})
         return True
     finally:
         os.close(descriptor)

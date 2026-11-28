@@ -662,51 +662,67 @@ class TestOtherHarnesses(OtherHarnessTest):
                 "The figures come\n  from the local stats file, ~/.snowflake/cortex/stats/usage.json, never from\n"
                 "  Snowflake's usage view",
                 "Cursor keeps no token count on disk, so every figure is blank.",
-                "The scan only reads local files: it starts no process and opens no connection.",
+                "These readers only read local files: they start no process and open no connection.",
+                "deliver.py ready writes the session's row with the call's time, branch and folder before it starts "
+                "the refresh, so a refresh finds the call even when one was already running.",
                 "a blank is never\na zero, and the report leaves the row out of its token figures and counts it."):
             self.assertIn(" ".join(sentence.split()), " ".join(help_text.split()))
 
 
 class TestOtherHarnessRecords(OtherHarnessTest):
-    def handed(self, harness: str, session: str) -> str:
-        return json.dumps({"session": session, "harness": harness, "ready_at": stamp(READY_AT), "branch": BRANCH,
-                           "cwd": str(self.world.work)})
+    def ready_on(self, harness: str | None, variables: dict | None = None) -> bool:
+        """Make the background start that deliver.py ready makes for a run on `harness`, in this process, with the
+        world's home and machine directory; the refresh it would start is not started."""
+        scan = deliver_kit.load("scan")
+        run = SimpleNamespace(mark={"run": "run-1", "branch": BRANCH}, checkout=self.world.work)
+        with mock.patch.dict(os.environ, {"HOME": str(self.world.home), "DELIVER_STATE_DIR": str(self.world.state),
+                                          **(variables or {})}), \
+                mock.patch.object(scan.subprocess, "Popen"):
+            return scan.start_background(harness, run)
 
-    def test_a_ready_call_on_codex_handed_to_the_refresh_gets_its_record_and_later_refreshes(self) -> None:
+    def test_a_ready_call_on_codex_gets_its_record_and_later_refreshes(self) -> None:
         self.codex_log()
-        result = self.scan("--refresh", DELIVER_SCAN_RUN=self.handed("codex", THREAD))
+        self.assertTrue(self.ready_on("codex", {"CODEX_THREAD_ID": THREAD}))
+        result = self.scan("--refresh")
         self.assertEqual(result.returncode, 0, result.stderr)
         row = self.rows()[THREAD]
-        self.assertEqual((row["harness"], row["total_tokens"], row["deliver"]["pr"], row["deliver"]["ready_at"]),
-                         ("codex", 3400, URL, stamp(READY_AT)))
+        self.assertEqual((row["harness"], row["total_tokens"], row["deliver"]["pr"], row["deliver"]["branch"]),
+                         ("codex", 3400, URL, BRANCH))
         self.assertNotIn("agents", row["deliver"])
+        self.assertEqual(self.world.gh_calls()[0]["cwd"], str(self.world.work))
         self.answer_pr(pr(labels=[{"name": "miss"}]))
-        self.assertEqual(self.scan("--refresh").returncode, 0)  # nothing handed: the row's harness says how
+        self.assertEqual(self.scan("--refresh").returncode, 0)
         row = self.rows()[THREAD]
         self.assertEqual((row["total_tokens"], row["deliver"]["miss"]), (3400, True))
 
-    def test_a_cursor_run_handed_to_the_refresh_keeps_its_time_and_miss_with_blank_tokens(self) -> None:
-        self.answer_pr(pr(labels=[{"name": "miss"}]))
-        self.assertEqual(self.scan("--refresh", DELIVER_SCAN_RUN=self.handed("cursor", "run-1")).returncode, 0)
-        row = self.rows()["run-1"]
-        self.assertEqual((row["total_tokens"], row["deliver"]["ready_at"], row["deliver"]["miss"]),
-                         (None, stamp(READY_AT), True))
+    def test_a_ready_call_on_another_harness_made_while_a_refresh_runs_gets_its_record_from_a_later_one(self) -> None:
+        self.codex_log()
+        self.world.state.mkdir(mode=0o700, exist_ok=True)
+        with (self.world.state / "scan-refresh.lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            self.assertFalse(self.ready_on("codex", {"CODEX_THREAD_ID": THREAD}))
+        result = self.scan("--refresh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.rows()[THREAD]["deliver"]["pr"], URL)
+        self.assertEqual(stat_mode(self.world.state / "scan-rows.jsonl"), 0o600)
 
-    def test_a_background_start_hands_the_run_on_another_harness_to_the_refresh(self) -> None:
-        scan = deliver_kit.load("scan")
-        run = SimpleNamespace(mark={"run": "run-1", "branch": BRANCH}, checkout=self.world.work)
-        handed = {}
-        for harness, variables in (("codex", {"CODEX_THREAD_ID": THREAD}), ("cursor", {}), ("claude-code", {}),
-                                   (None, {})):
-            with self.subTest(harness=harness), \
-                    mock.patch.dict(os.environ, {"DELIVER_STATE_DIR": str(self.world.state), **variables}), \
-                    mock.patch.object(scan.subprocess, "Popen") as popen:
-                self.assertTrue(scan.start_background(harness, run))
-                handed[harness] = json.loads(popen.call_args.kwargs["env"].get("DELIVER_SCAN_RUN", "null"))
-        self.assertEqual({harness: found and (found["session"], found["harness"], found["branch"], found["cwd"])
-                          for harness, found in handed.items()},
-                         {"codex": (THREAD, "codex", BRANCH, str(self.world.work)),
-                          "cursor": ("run-1", "cursor", BRANCH, str(self.world.work)), "claude-code": None, None: None})
+    def test_a_cursor_run_keeps_its_time_and_miss_with_blank_tokens(self) -> None:
+        self.answer_pr(pr(labels=[{"name": "miss"}]))
+        self.assertTrue(self.ready_on("cursor"))
+        self.assertEqual(self.scan("--refresh").returncode, 0)
+        row = self.rows()["run-1"]
+        self.assertEqual((row["harness"], row["total_tokens"], row["deliver"]["miss"]), ("cursor", None, True))
+        self.assertIsNotNone(row["deliver"]["ready_at"])
+
+    def test_a_ready_call_on_claude_code_writes_no_row_before_the_refresh(self) -> None:
+        for harness in ("claude-code", None):
+            with self.subTest(harness=harness):
+                self.assertTrue(self.ready_on(harness))
+                self.assertFalse((self.world.state / "scan-rows.jsonl").exists())
+
+
+def stat_mode(path: Path) -> int:
+    return path.stat().st_mode & 0o777
 
 
 if __name__ == "__main__":

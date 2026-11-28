@@ -1582,16 +1582,16 @@ class DeliverVersionTest(unittest.TestCase):
                 "and file tools may read the folder past the read block.",
                 "They may not write it: a permission deny rule, Edit(//<folder>/**), holds the file tools off it, "
                 "and sandbox.filesystem.denyWrite holds sandboxed commands off it.",
-                "Its sandboxed commands may also read, through sandbox.filesystem.allowRead, the paths in Claude "
-                "Code's folder ($CLAUDE_CONFIG_DIR, else ~/.claude) that deliver's preflight reads, where they exist: "
-                "settings.json, agents/, skills/deliver, skills/code-review, skills/ponytail-review and skills/pr, "
-                "plugins/installed_plugins.json and plugins/known_marketplaces.json, and, for each plugin install "
-                "that applies to the clone, its hooks/hooks.json, its manifests and the hook files they name, its "
-                "skills folders and its marketplace's manifest.",
-                "Where one of these paths, or a role file in agents/, is a link, the path it leads to may be read "
-                "too.",
+                "Its sandboxed commands may also read, through sandbox.filesystem.allowRead, each path under the "
+                "home folder, outside the folders above, that deliver's preflight opens, lists or stats, and the path "
+                "that a link among them leads to.",
+                "To find them, the replay runs preflight's Claude Code checks once before the session, with the "
+                "session's environment, and notes each such path that exists, leaving out a folder that is only "
+                "stat'ed.",
+                "They are paths in Claude Code's folder ($CLAUDE_CONFIG_DIR, else ~/.claude) and the places its links "
+                "lead to: settings.json, agents/, the upstream skills, and the plugin files preflight reads.",
                 "Each of them is also in sandbox.filesystem.denyWrite, which holds sandboxed commands off it.",
-                "Nothing else in Claude Code's folder opens, and the trust record, ~/.claude.json, stays closed.",
+                "Nothing else in the home folder opens, and the trust record, ~/.claude.json, stays closed.",
                 "Its prompt is the typed command /deliver:deliver TICKET.",
                 "Its environment also leaves out every variable whose name, in any case, starts with GH_ or holds "
                 "GITHUB.",
@@ -1620,8 +1620,8 @@ from pathlib import Path
 sys.path[:0] = [sys.argv[1], sys.argv[2]]
 import replay, preflight
 home, clone = Path.home(), Path(sys.argv[3])
-reads = replay.claude_reads(clone)
 filesystem = replay.settings(clone, "deliver")["sandbox"]["filesystem"]
+reads = filesystem["allowRead"][len(replay.CACHES) + 2:]  # after the clone, the caches and the plugin
 checks = [c for c in preflight.CHECKS if c.__module__ in ("checks_claude", "deps")]
 real_stat, real_lstat = os.stat, os.lstat
 allowed, refused, opened, busy = [], [], [], []
@@ -1631,7 +1631,7 @@ def inside(path, folders):
     return any(path == folder or path.startswith(folder + os.sep) for folder in folders)
 
 
-def police(path, follow=True):
+def police(path, follow=True, listed=True):
     if isinstance(path, int) or path is None or busy:  # busy: this function's own lstat calls
         return
     busy.append(True)
@@ -1639,10 +1639,12 @@ def police(path, follow=True):
         path = os.path.abspath(os.fsdecode(path))
         if not inside(path, [str(home)]) or not os.path.lexists(path):
             return
+        if not listed and os.path.isdir(path) and (follow or not os.path.islink(path)):
+            return  # the sandbox lets a folder's metadata through
         where = os.path.realpath(path) if follow else os.path.join(os.path.realpath(os.path.dirname(path)),
                                                                      os.path.basename(path))
         if inside(path, allowed) and inside(where, allowed):
-            opened.append(path)
+            opened.extend((path, where))
             return
     finally:
         busy.clear()
@@ -1656,8 +1658,8 @@ def hook(event, args):
 
 
 sys.addaudithook(hook)
-os.stat = lambda path, *a, **k: (police(path, k.get("follow_symlinks", True)), real_stat(path, *a, **k))[1]
-os.lstat = lambda path, *a, **k: (police(path, False), real_lstat(path, *a, **k))[1]
+os.stat = lambda path, *a, **k: (police(path, k.get("follow_symlinks", True), False), real_stat(path, *a, **k))[1]
+os.lstat = lambda path, *a, **k: (police(path, False, False), real_lstat(path, *a, **k))[1]
 runs = []
 for dropped in [None, *reads]:
     allowed[:] = [entry for entry in filesystem["allowRead"] if entry != dropped]
@@ -1687,17 +1689,23 @@ class ClaudeReadsTest(unittest.TestCase):
         self.config = self.home / ".claude"
         self.install = install = self.config / "plugins" / "cache" / "market" / "helper" / "1.0"
         self.market = market = self.config / "plugins" / "marketplaces" / "market"
+        self.idle = self.config / "plugins" / "cache" / "market" / "idle" / "1.0"
         self.target = self.home / ".agents" / "skills" / "code-review"
         self.role = self.home / "dotfiles" / "linked-role.md"
         objects = {
             self.config / "settings.json": {"enabledPlugins": {"helper@market": True}},
+            # idle comes after helper, which holds pr, and is not enabled: preflight reads its manifest for the skills
+            # it declares, and opens neither its hooks nor its skills.
             self.config / "plugins" / "installed_plugins.json":
-                {"plugins": {"helper@market": [{"scope": "user", "installPath": str(install)}]}},
+                {"plugins": {"helper@market": [{"scope": "user", "installPath": str(install)}],
+                             "idle@market": [{"scope": "user", "installPath": str(self.idle)}]}},
             self.config / "plugins" / "known_marketplaces.json": {"market": {"installLocation": str(market)}},
             market / ".claude-plugin" / "marketplace.json": {"plugins": [{"name": "helper", "skills": ["listed"]}]},
             install / "hooks" / "hooks.json": {"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": []}]}},
             install / ".claude-plugin" / "plugin.json": {"name": "helper", "hooks": "more-hooks.json", "skills": "more"},
             install / "more-hooks.json": {"hooks": {}},
+            self.idle / "hooks" / "hooks.json": {"hooks": {"PostToolUse": [{"matcher": "Write", "hooks": []}]}},
+            self.idle / ".claude-plugin" / "plugin.json": {"name": "idle"},
             # Decoys: the trust record and a credential store.
             self.home / ".claude.json": {"projects": {str(self.clone): {"hasTrustDialogAccepted": True}}},
             self.config / ".credentials.json": {"token": "made-up"},
@@ -1708,6 +1716,7 @@ class ClaudeReadsTest(unittest.TestCase):
             install / "skills" / "SKILL.md": "---\nname: helper-skill\n---\n",
             install / "more" / "SKILL.md": "---\nname: other-skill\n---\n",
             install / "listed" / "pr" / "SKILL.md": "---\nname: pr\n---\n",
+            self.idle / "skills" / "pr" / "SKILL.md": "---\nname: pr\n---\n",
             self.config / "agents" / "helper-role.md": "---\nname: helper-role\n---\n",
             self.role: "---\nname: linked-role\n---\n",
             # Decoys: history, a transcript, a key elsewhere in the home folder.
@@ -1721,23 +1730,45 @@ class ClaudeReadsTest(unittest.TestCase):
             path.write_text(text)
         (self.config / "skills" / "code-review").symlink_to(self.target)
         (self.config / "agents" / "linked-role.md").symlink_to(self.role)
+        self.out = self.sandboxed(self.home, self.clone)
+
+    def sandboxed(self, home: Path, clone: Path) -> dict:
+        """PREFLIGHT_SANDBOXED's output for a made-up home folder."""
         env = {key: value for key, value in os.environ.items() if not key.startswith("CLAUDE")}
-        env.update(HOME=str(self.home), CLAUDE_CODE_ENTRYPOINT="sdk-cli", CLAUDE_CODE_EFFORT_LEVEL="medium",
-                   DELIVER_STATE_DIR=str(root / "state"))
+        env.update(HOME=str(home), CLAUDE_CODE_ENTRYPOINT="sdk-cli", CLAUDE_CODE_EFFORT_LEVEL="medium",
+                   DELIVER_STATE_DIR=str(home.parent / "state"))
         result = subprocess.run([sys.executable, "-c", PREFLIGHT_SANDBOXED, str(SCRIPTS), str(PLUGIN / "scripts"),
-                                 str(self.clone)], env=env, capture_output=True, text=True, timeout=60)
+                                 str(clone)], env=env, capture_output=True, text=True, timeout=60)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.out = json.loads(result.stdout)
+        return json.loads(result.stdout)
 
     def test_the_reads_are_the_files_preflight_reads_and_the_real_place_of_each_link(self) -> None:
         config, install = self.config, self.install
+        # deps.find opens SKILL.md in each skills folder it passes on the way to pr, and hashes the folder it finds.
         self.assertEqual(self.out["reads"], sorted(str(path) for path in (
             config / "settings.json", config / "agents", self.role,
             config / "skills" / "code-review", self.target, config / "skills" / "ponytail-review",
             config / "plugins" / "installed_plugins.json", config / "plugins" / "known_marketplaces.json",
             self.market / ".claude-plugin" / "marketplace.json", install / "hooks" / "hooks.json",
-            install / ".claude-plugin" / "plugin.json", install / "more-hooks.json", install / "skills",
-            install / "more", install / "listed")))
+            install / ".claude-plugin" / "plugin.json", install / "more-hooks.json", install / "skills" / "SKILL.md",
+            install / "more" / "SKILL.md", install / "listed" / "pr", self.idle / ".claude-plugin" / "plugin.json")))
+
+    def test_each_read_is_one_preflight_opens(self) -> None:
+        opened = self.out["runs"][0]["opened"]
+        for read in self.out["reads"]:
+            with self.subTest(read=read):
+                self.assertTrue([path for path in opened if path == read or path.startswith(read + os.sep)])
+
+    def test_with_the_skills_in_claude_code_s_folder_and_no_plugin_on_no_plugin_file_is_read(self) -> None:
+        settings = self.config / "settings.json"
+        settings.write_text(json.dumps({"enabledPlugins": {"helper@market": False}}))
+        (self.config / "skills" / "pr").mkdir()
+        (self.config / "skills" / "pr" / "SKILL.md").write_text("---\nname: pr\n---\n")
+        out = self.sandboxed(self.home, self.clone)
+        self.assertEqual(out["reads"], sorted(str(path) for path in (
+            settings, self.config / "agents", self.role, self.config / "skills" / "code-review", self.target,
+            self.config / "skills" / "ponytail-review", self.config / "skills" / "pr")))
+        self.assertEqual(out["runs"][0]["refused"], [])
 
     def test_preflight_s_claude_code_checks_pass_reading_only_the_allowed_paths(self) -> None:
         full = self.out["runs"][0]

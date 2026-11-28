@@ -41,8 +41,6 @@ ORIGIN = "replay-origin.git"  # the clone's remote, inside its .git/
 # and gh-calls.jsonl, and state/, the session's DELIVER_STATE_DIR. Under .git/, none of it is in the version's commit.
 PLUGIN = Path(__file__).resolve().parent.parent / "skills" / "deliver"
 STAND_IN = "replay-deliver"
-# The upstream skills deliver's preflight looks for: deps.REQUIRED.
-UPSTREAM = ("code-review", "ponytail-review", "pr")
 
 HELP = f"""\
 Rerun one ticket of the replay set with one agent, as its `{VERSION}` version or
@@ -130,19 +128,19 @@ session, through --add-dir, so the session's commands and file tools may read
 the folder past the read block. They may not write it: a permission deny rule,
 Edit(//<folder>/**), holds the file tools off it, and
 sandbox.filesystem.denyWrite holds sandboxed commands off it. Its sandboxed
-commands may also read, through sandbox.filesystem.allowRead, the paths in
-Claude Code's folder ($CLAUDE_CONFIG_DIR, else ~/.claude) that deliver's
-preflight reads, where they exist: settings.json, agents/, skills/deliver,
-skills/code-review, skills/ponytail-review and skills/pr,
-plugins/installed_plugins.json and plugins/known_marketplaces.json, and, for
-each plugin install that applies to the clone, its hooks/hooks.json, its
-manifests and the hook files they name, its skills folders and its
-marketplace's manifest. Where one of these paths, or a role file in agents/,
-is a link, the path it leads to may be read too. Each of them is also in
-sandbox.filesystem.denyWrite, which holds sandboxed commands off it. Nothing
-else in Claude Code's folder opens, and the trust record, ~/.claude.json,
-stays closed. Its prompt is the typed command /deliver:deliver TICKET. Its
-environment also leaves out every variable whose name, in any case, starts with GH_ or holds GITHUB.
+commands may also read, through sandbox.filesystem.allowRead, each path under
+the home folder, outside the folders above, that deliver's preflight opens,
+lists or stats, and the path that a link among them leads to. To find them, the
+replay runs preflight's Claude Code checks once before the session, with the
+session's environment, and notes each such path that exists, leaving out a
+folder that is only stat'ed. They are paths in Claude Code's folder
+($CLAUDE_CONFIG_DIR, else ~/.claude) and the places its links lead to:
+settings.json, agents/, the upstream skills, and the plugin files preflight
+reads. Each of them is also in sandbox.filesystem.denyWrite, which holds
+sandboxed commands off it. Nothing else in the home folder opens, and the trust
+record, ~/.claude.json, stays closed. Its prompt is the typed command
+/deliver:deliver TICKET. Its environment also leaves out every variable whose
+name, in any case, starts with GH_ or holds GITHUB.
 Before setup, the replay copies the stand-in gh, scripts/replay_gh.py, to
 .git/replay-deliver/bin/gh in the clone, and the session finds it first on its
 PATH. The stand-in answers issue view with the ticket's title and body from the
@@ -237,59 +235,60 @@ def repo(drawer: draw.Draw, label: str) -> dict:
     return found
 
 
-def _object(path: Path | None) -> dict:
-    """A JSON object file's contents; {} for a file that is missing, unreadable or not an object."""
+# Run by claude_reads in a child Python: deliver's own Claude Code checks from preflight, as a print-mode session runs
+# them in the clone, under an audit hook that notes each path under the home folder they open, list or stat. A path
+# under a folder the session may already read is left out, as are a missing path, which the sandbox reports missing
+# either way, and a folder that is only stat'ed, whose metadata the sandbox lets through. It prints the paths as JSON.
+RECORD = r"""
+import json, os, stat, sys, types
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import checks_claude, preflight
+home, clone, open_already = sys.argv[2], Path(sys.argv[3]), sys.argv[4:]
+os.environ[checks_claude.ENTRYPOINT_VAR] = checks_claude.PRINT_ENTRYPOINT
+real_stat, real_lstat, seen, busy = os.stat, os.lstat, set(), []
+def within(path, folder):
+    return path == folder or path.startswith(folder + os.sep)
+def note(path, follow=True, listed=False):
+    if busy or path is None or isinstance(path, int):
+        return
+    busy.append(True)  # the stat below would note itself
     try:
-        data = json.loads(path.read_text(encoding="utf-8")) if path else {}
-    except (OSError, ValueError):
-        return {}
-    return data if isinstance(data, dict) else {}
+        path = os.path.abspath(os.fsdecode(path))
+        if within(path, home) and not any(within(path, folder) for folder in open_already):
+            try:
+                mode = (real_stat if follow else real_lstat)(path).st_mode
+            except OSError:
+                return
+            if listed or not stat.S_ISDIR(mode):
+                seen.add(path)
+    finally:
+        busy.clear()
+def hook(event, args):
+    if event in ("open", "os.scandir", "os.listdir") and args:
+        note(args[0], listed=event != "open")
+sys.addaudithook(hook)
+os.stat = lambda path, *a, **k: (note(path, k.get("follow_symlinks", True)), real_stat(path, *a, **k))[1]
+os.lstat = lambda path, *a, **k: (note(path, False), real_lstat(path, *a, **k))[1]
+ctx = preflight.Context(types.SimpleNamespace(checkout=clone))
+for check in preflight.CHECKS:
+    if check.__module__ in ("checks_claude", "deps"):
+        check(ctx)
+print(json.dumps(sorted(seen)))
+"""
 
 
-def _applies(install: dict, clone: Path) -> bool:
-    """Whether a plugin install applies to the clone, as either of checks_claude.py and deps.py reads it: one for the
-    user or the organisation, or for a project folder that is the clone or holds it, as given or resolved."""
-    project = install.get("projectPath")
-    if install.get("scope") in ("user", "managed"):
-        return True
-    return isinstance(project, str) and any(given in (folder, *folder.parents) for given in (Path(project),
-                                            Path(project).resolve()) for folder in (clone, clone.resolve()))
-
-
-def claude_reads(clone: Path) -> list[str]:
-    """The paths in Claude Code's folder that deliver's preflight reads on a print-mode session in `clone`, found as
-    checks_claude.py and deps.py find them, each also at its real place when a link leads there. Only paths that
-    exist: the sandbox reports a missing path as missing whether or not it may be read. Never the trust record,
-    which preflight does not read in print mode."""
-    config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
-    # The session inherits no CLAUDE_CODE_PLUGIN_CACHE_DIR or CLAUDE_CODE_USE_COWORK_PLUGINS, so deps reads this folder.
-    registry = config / "plugins"
-    agents = config / "agents"
-    paths = [config / "settings.json", agents, config / "skills" / "deliver", registry / "installed_plugins.json",
-             registry / "known_marketplaces.json", *(config / "skills" / name for name in UPSTREAM),
-             # check_roles reads each role file in agents/, so a linked one is also read where it leads.
-             *(Path(os.path.realpath(Path(top) / name)) for top, _, names in os.walk(agents) for name in names
-               if name.endswith(".md") and os.path.islink(Path(top) / name))]
-    known = _object(registry / "known_marketplaces.json")
-    plugins = _object(registry / "installed_plugins.json").get("plugins")
-    for plugin_id, installs in plugins.items() if isinstance(plugins, dict) else ():
-        plugin, _, marketplace = plugin_id.partition("@")
-        for install in installs if isinstance(installs, list) else ():
-            with contextlib.suppress(AttributeError, KeyError, TypeError):  # a malformed entry opens nothing
-                if not _applies(install, clone):
-                    continue
-                root = Path(install["installPath"])
-                manifests = (root / ".claude-plugin" / "plugin.json", root / "plugin.json")
-                hooks = [_object(manifest).get("hooks") for manifest in manifests]
-                location = known.get(marketplace, {}).get("installLocation")
-                market = Path(location) / ".claude-plugin" / "marketplace.json" if location else None
-                entry = next((e for e in _object(market).get("plugins", []) if e.get("name") == plugin), {})
-                skills = [_object(manifests[0]).get("skills", []), entry.get("skills", [])]
-                paths += [root / "hooks" / "hooks.json", *manifests, root / "skills", *([market] if market else []),
-                          *(root / item for given in hooks + skills
-                            for item in (given if isinstance(given, list) else [given]) if isinstance(item, str))]
-    return sorted({str(found) for path in paths if os.path.lexists(path)
-                   for found in (path, Path(os.path.realpath(path)))})
+def claude_reads(clone: Path, open_already: list[str]) -> list[str]:
+    """The paths under the home folder that deliver's preflight opens, lists or stats on the deliver version's
+    session, outside `open_already`, found by running its Claude Code checks here with the session's environment,
+    each also at its real place when a link leads there, and none inside another. The trust record is not among them:
+    preflight does not read it in print mode."""
+    result = subprocess.run([sys.executable, "-I", "-c", RECORD, str(PLUGIN / "scripts"), str(Path.home()), str(clone),
+                             *open_already], env=environment(clone, "deliver"), capture_output=True, text=True)
+    if result.returncode:
+        raise ReplayError(f"deliver's Claude Code checks failed before the session: {result.stderr.strip()}")
+    found = {path for seen in json.loads(result.stdout) for path in (seen, os.path.realpath(seen))}
+    return sorted(path for path in found if not any(path.startswith(other + os.sep) for other in found))
 
 
 def settings(clone: Path, version: str = VERSION) -> dict:
@@ -297,7 +296,8 @@ def settings(clone: Path, version: str = VERSION) -> dict:
     runs its hook, and its commands may read what preflight reads in Claude Code's folder and may not write it."""
     home, deliver = Path.home(), version == "deliver"
     caches = [str(home / cache) for cache in CACHES]
-    claude = claude_reads(clone) if deliver else []
+    opened = [str(clone), *caches, *([str(PLUGIN)] if deliver else [])]
+    claude = claude_reads(clone, opened) if deliver else []
     return {
         "sandbox": {
             "enabled": True,
@@ -305,7 +305,7 @@ def settings(clone: Path, version: str = VERSION) -> dict:
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
             "filesystem": {"denyRead": [str(home)],
-                           "allowRead": [str(clone), *caches, *([str(PLUGIN)] if deliver else []), *claude],
+                           "allowRead": [*opened, *claude],
                            "allowWrite": caches,
                            # --add-dir makes the plugin folder writable to sandboxed commands; this takes it back.
                            # Nothing grants a write in Claude Code's folder: its entries are a second hold.

@@ -34,9 +34,10 @@ deny, which Cursor also reads from the Claude Code hook; Cursor's `permission`; 
 hook prints no decision. A refusal gives the exact command, names the mark file and the
 `finish` command, and appends one line to `guard-refusals.jsonl` in `$DELIVER_STATE_DIR`: time,
 guard, command class, `permission_mode`, run id and harness, and no session id. On Cursor both
-the Claude Code hook and Cursor's own can refuse one command; the first to create
-`guard-seen/<hash>` in the same folder logs it, the hash being of the run id, the
-`conversation_id` and the command, so one command logs once per run and conversation.
+the Claude Code hook and Cursor's own can refuse one command. Any input carrying Cursor's
+`conversation_id`, whichever harness it is read as, is logged only by the first call to create
+`guard-seen/<hash>` in the same folder, the hash being of the run id, the `conversation_id` and
+the command, so one command logs once per run and conversation.
 
 Commands are read as shell words, so text inside quotes never matches. Where the words cannot
 be read, or the text holds `$(` or a backtick, the raw text is searched as well, so a doubt
@@ -233,7 +234,7 @@ def log(cls: str, mark: Path, data: dict, harness: str, command: str) -> None:
     try:
         state.mkdir(parents=True, exist_ok=True)
         conversation = data.get("conversation_id")
-        if harness == "cursor" and isinstance(conversation, str):
+        if isinstance(conversation, str):
             key = hashlib.sha256(json.dumps([run, conversation, command]).encode()).hexdigest()
             (state / SEEN).mkdir(exist_ok=True)
             try:

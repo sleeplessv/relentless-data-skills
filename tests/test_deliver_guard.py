@@ -10,7 +10,10 @@ replaced; each test sets `cwd` and the command. `one-way-commands.json` holds th
 The folders `cortex/`, `codex/`, `cursor/` and `antigravity/` hold one input per case, each in
 the shape the stage 2 probe kit's stand-in guard logged from that harness on a real run
 (Cortex Code X1; Codex D2 and D6; Cursor X1; Antigravity A6, with the agent file its session
-wrote), with ids zeroed, paths replaced by `<cwd>` and `<brain>`, and the command of the case.
+wrote), with ids zeroed, `user_email` dropped, and the command of the case. Paths, model
+names and other private values are placeholders in angle brackets; the tests replace `<cwd>` and
+`<brain>`, and the rest (`<transcript>`, `<home>`, `<model>`, `<version>`, `<summary>`,
+`<description>`) stay as literal text.
 A shape no run has logged ends `_not_yet_seen`: an agent's call on Cortex Code, and the
 project's Claude Code hook as Cursor runs it.
 
@@ -359,6 +362,15 @@ class Harnesses(unittest.TestCase):
                 self.assertEqual(claude, own)
                 self.assertEqual(self.saved("cursor", name), own)
         self.assertEqual([(r["class"], r["harness"]) for r in self.refusals()], [(CASES[n], "cursor") for n in refused])
+
+    def test_cursor_logs_one_line_whatever_harness_the_claude_form_input_is_read_as(self):
+        # A Claude-form input from Cursor without `cursor_version` is read as Claude Code's; it still
+        # carries Cursor's conversation_id, and the command is logged once.
+        data = json.loads(self.claude_form(guard.PROBE))
+        del data["cursor_version"]
+        self.assertEqual(self.saved("cursor", "probe")[0], "deny")
+        self.assertEqual(answer("claude", self.run_guard(json.dumps(data)))[0], "deny")
+        self.assertEqual([(r["class"], r["harness"]) for r in self.refusals()], [("probe", "cursor")])
 
     def test_cursor_logs_a_command_again_in_another_run_or_conversation(self):
         self.saved("cursor", "probe")

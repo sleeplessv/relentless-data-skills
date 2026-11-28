@@ -127,9 +127,20 @@ the clone's project settings. That folder is also a working directory of the
 session, through --add-dir, so the session's commands and file tools may read
 the folder past the read block. They may not write it: a permission deny rule,
 Edit(//<folder>/**), holds the file tools off it, and
-sandbox.filesystem.denyWrite holds sandboxed commands off it. Its prompt
-is the typed command /deliver:deliver TICKET. Its environment also leaves out
-every variable whose name, in any case, starts with GH_ or holds GITHUB.
+sandbox.filesystem.denyWrite holds sandboxed commands off it. Its sandboxed
+commands may also read, through sandbox.filesystem.allowRead, each path under
+the home folder, outside the folders above, that deliver's preflight opens,
+lists or stats, and the path that a link among them leads to. To find them, the
+replay runs preflight's Claude Code checks once before the session, with the
+session's environment, and notes each such path that exists, leaving out a
+folder that is only stat'ed. They are paths in Claude Code's folder
+($CLAUDE_CONFIG_DIR, else ~/.claude) and the places its links lead to:
+settings.json, agents/, the upstream skills, and the plugin files preflight
+reads. Each of them is also in sandbox.filesystem.denyWrite, which holds
+sandboxed commands off it. Nothing else in the home folder opens, and the trust
+record, ~/.claude.json, stays closed. Its prompt is the typed command
+/deliver:deliver TICKET. Its environment also leaves out every variable whose
+name, in any case, starts with GH_ or holds GITHUB.
 Before setup, the replay copies the stand-in gh, scripts/replay_gh.py, to
 .git/replay-deliver/bin/gh in the clone, and the session finds it first on its
 PATH. The stand-in answers issue view with the ticket's title and body from the
@@ -224,11 +235,69 @@ def repo(drawer: draw.Draw, label: str) -> dict:
     return found
 
 
+# Run by claude_reads in a child Python: deliver's own Claude Code checks from preflight, as a print-mode session runs
+# them in the clone, under an audit hook that notes each path under the home folder they open, list or stat. A path
+# under a folder the session may already read is left out, as are a missing path, which the sandbox reports missing
+# either way, and a folder that is only stat'ed, whose metadata the sandbox lets through. It prints the paths as JSON.
+RECORD = r"""
+import json, os, stat, sys, types
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import checks_claude, preflight
+home, clone, open_already = sys.argv[2], Path(sys.argv[3]), sys.argv[4:]
+os.environ[checks_claude.ENTRYPOINT_VAR] = checks_claude.PRINT_ENTRYPOINT
+real_stat, real_lstat, seen, busy = os.stat, os.lstat, set(), []
+def within(path, folder):
+    return path == folder or path.startswith(folder + os.sep)
+def note(path, follow=True, listed=False):
+    if busy or path is None or isinstance(path, int):
+        return
+    busy.append(True)  # the stat below would note itself
+    try:
+        path = os.path.abspath(os.fsdecode(path))
+        if within(path, home) and not any(within(path, folder) for folder in open_already):
+            try:
+                mode = (real_stat if follow else real_lstat)(path).st_mode
+            except OSError:
+                return
+            if listed or not stat.S_ISDIR(mode):
+                seen.add(path)
+    finally:
+        busy.clear()
+def hook(event, args):
+    if event in ("open", "os.scandir", "os.listdir") and args:
+        note(args[0], listed=event != "open")
+sys.addaudithook(hook)
+os.stat = lambda path, *a, **k: (note(path, k.get("follow_symlinks", True)), real_stat(path, *a, **k))[1]
+os.lstat = lambda path, *a, **k: (note(path, False), real_lstat(path, *a, **k))[1]
+ctx = preflight.Context(types.SimpleNamespace(checkout=clone))
+for check in preflight.CHECKS:
+    if check.__module__ in ("checks_claude", "deps"):
+        check(ctx)
+print(json.dumps(sorted(seen)))
+"""
+
+
+def claude_reads(clone: Path, open_already: list[str]) -> list[str]:
+    """The paths under the home folder that deliver's preflight opens, lists or stats on the deliver version's
+    session, outside `open_already`, found by running its Claude Code checks here with the session's environment,
+    each also at its real place when a link leads there, and none inside another. The trust record is not among them:
+    preflight does not read it in print mode."""
+    result = subprocess.run([sys.executable, "-I", "-c", RECORD, str(PLUGIN / "scripts"), str(Path.home()), str(clone),
+                             *open_already], env=environment(clone, "deliver"), capture_output=True, text=True)
+    if result.returncode:
+        raise ReplayError(f"deliver's Claude Code checks failed before the session: {result.stderr.strip()}")
+    found = {path for seen in json.loads(result.stdout) for path in (seen, os.path.realpath(seen))}
+    return sorted(path for path in found if not any(path.startswith(other + os.sep) for other in found))
+
+
 def settings(clone: Path, version: str = VERSION) -> dict:
     """The confinement every session starts with; the deliver version's also reads its plugin, may not write it, and
-    runs its hook."""
+    runs its hook, and its commands may read what preflight reads in Claude Code's folder and may not write it."""
     home, deliver = Path.home(), version == "deliver"
     caches = [str(home / cache) for cache in CACHES]
+    opened = [str(clone), *caches, *([str(PLUGIN)] if deliver else [])]
+    claude = claude_reads(clone, opened) if deliver else []
     return {
         "sandbox": {
             "enabled": True,
@@ -236,10 +305,11 @@ def settings(clone: Path, version: str = VERSION) -> dict:
             "allowUnsandboxedCommands": False,
             "excludedCommands": [],
             "filesystem": {"denyRead": [str(home)],
-                           "allowRead": [str(clone), *caches, *([str(PLUGIN)] if deliver else [])],
+                           "allowRead": [*opened, *claude],
                            "allowWrite": caches,
                            # --add-dir makes the plugin folder writable to sandboxed commands; this takes it back.
-                           **({"denyWrite": [str(PLUGIN)]} if deliver else {})},
+                           # Nothing grants a write in Claude Code's folder: its entries are a second hold.
+                           **({"denyWrite": [str(PLUGIN), *claude]} if deliver else {})},
             "network": {"allowedDomains": list(REGISTRIES), "strictAllowlist": True, "allowLocalBinding": True,
                         "allowUnixSockets": list(SOCKETS)},
         },

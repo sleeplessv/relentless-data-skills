@@ -1,0 +1,22 @@
+{
+  "artifactDirectoryPath": "<brain>/00000000-0000-4000-8000-000000000000",
+  "conversationId": "00000000-0000-4000-8000-000000000000",
+  "cwd": "<cwd>",
+  "hookEventName": "PreToolUse",
+  "lastUserInput": "",
+  "modelName": "<model>",
+  "stepIdx": 4,
+  "toolCall": {
+    "args": {
+      "CommandLine": "git status --short",
+      "WaitMsBeforeAsync": 10000,
+      "toolSummary": "<summary>"
+    },
+    "id": "call_0",
+    "name": "run_command"
+  },
+  "transcriptPath": "<brain>/00000000-0000-4000-8000-000000000000/.system_generated/logs/transcript_full.jsonl",
+  "workspacePaths": [
+    "<cwd>"
+  ]
+}

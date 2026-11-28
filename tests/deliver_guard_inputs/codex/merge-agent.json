@@ -1,0 +1,16 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000000",
+  "turn_id": "00000000-0000-4000-8000-000000000002",
+  "agent_id": "00000000-0000-4000-8000-000000000001",
+  "agent_type": "deliver-reader",
+  "transcript_path": "<transcript>",
+  "cwd": "<cwd>",
+  "hook_event_name": "PreToolUse",
+  "model": "<model>",
+  "permission_mode": "default",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "uv run --python 3.13 --no-project /x/scripts/deliver.py merge"
+  },
+  "tool_use_id": "exec-00000000-0000-4000-8000-000000000000"
+}

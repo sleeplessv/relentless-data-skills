@@ -1,0 +1,12 @@
+{
+  "conversationId": "00000000-0000-4000-8000-000000000001",
+  "subagentDescriptor": {
+    "typeName": "deliver-reader",
+    "role": "deliver-reader"
+  },
+  "state": "SUBAGENT_STATE_ALIVE",
+  "spawnStepIndex": 2,
+  "workspaceUris": [
+    "file://<cwd>"
+  ]
+}

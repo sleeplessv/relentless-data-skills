@@ -10,8 +10,12 @@ prints it. The script is never installed. It reuses the probe kit's Herdr calls:
 Each task runs in a fresh clone of the fixture, under a terminal name unique on the machine. Each
 task also gets its own machine directory for deliver (`DELIVER_STATE_DIR`), so the refusal log holds
 that run only. G is a plain prompt that lists the guard commands in order. T1 is the typed skill
-with the first paragraph of the fixture's `tasks/small-edit.md`. A task fails past its time limit,
-300 seconds for G and 600 for T1, and the driver ends its terminal. The driver judges G from
+with the first paragraph of the fixture's `tasks/small-edit.md`. On Cursor the terminal's shell runs
+`deliver.py install cursor` in the clone before the harness starts, not the driver's own process,
+which may run inside a Claude Code session, where install refuses. Install keeps its ledger in the
+machine directory. On the other harnesses the owner runs `deliver.py install <harness>` once
+beforehand, or preflight stops. A task fails past its time limit, 300 seconds for G and 600 for T1,
+and the driver ends its terminal. The driver judges G from
 deliver's records in the clone and the refusal log. The refusal log is the hook's log: the guard
 hook writes one line to it per refusal. The driver judges T1 from the PR the run opened, found on
 GitHub, because `deliver.py finish` removes the records after a merge. It reads that PR's state and
@@ -149,7 +153,10 @@ def started_agent(events: list[dict], harness: str) -> bool:
 def tokens(events: list[dict], harness: str) -> str:
     fields = probe_kit.OUTPUT_FIELDS[harness]
     usage = probe_kit.last_at(events, fields["tokens"], False)
-    usage = usage if isinstance(usage, dict) else {}
+    usage = dict(usage) if isinstance(usage, dict) else {}
+    if harness == "codex":  # Codex counts cached input inside input_tokens. Print the rest, as the scan does.
+        cached, given = usage.get("cached_input_tokens"), usage.get("input_tokens")
+        usage["input_tokens"] = given - cached if type(cached) is int and type(given) is int and cached <= given else None
     shown = [str(usage[key]) if type(usage.get(key)) is int else "blank" for key in fields["counts"]]
     return f"tokens: {shown[0]} in, {shown[1]} out"
 
@@ -263,6 +270,18 @@ def prs(fixture: str) -> list[dict] | None:
     return got if isinstance(got, list) else None
 
 
+def install_failed(path: Path) -> str | None:
+    """What stopped `deliver.py install cursor`, from its output with its exit status last; None when it passed."""
+    said = path.read_text(errors="replace").splitlines() if path.is_file() else []
+    if said[-1:] == ["0"]:
+        return None
+    if not said:
+        return "deliver.py install cursor did not run"
+    refused = re.match(r"REFUSED ([\w.-]+):", said[0])  # core.Refused's line; the rest can name local paths
+    return (f"deliver.py install cursor refused {refused[1]}" if refused
+            else f"deliver.py install cursor exited {said[-1]}")
+
+
 def listed(items: list[str]) -> str:
     return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
 
@@ -276,8 +295,8 @@ def heads(url: str, cwd: Path) -> dict[str, str] | None:
 
 
 class Driver:
-    def __init__(self, args: argparse.Namespace, saved: Path) -> None:
-        self.args, self.saved = args, saved
+    def __init__(self, args: argparse.Namespace, saved: Path, machine: Path) -> None:
+        self.args, self.saved, self.machine = args, saved, machine
 
     def task(self, task: str) -> tuple[bool, str, str | None]:
         """Run one task, then reset the fixture; return whether it passed, its line and what stopped the reset."""
@@ -339,10 +358,6 @@ class Driver:
             prompt = g_prompt(harness)
         else:
             prompt = t1_prompt(harness, run.clone)
-        if harness == "cursor":
-            install = run_quiet([*shlex.split(DELIVER), "install", "cursor"], run.clone)
-            if install.returncode != 0:
-                return [(False, f"deliver.py install cursor exited {install.returncode}")]
         argv = [part.replace("{prompt}", prompt) for part in COMMANDS[harness]]
         if harness == "cortex":
             argv += ["-c", self.args.connection]
@@ -350,6 +365,11 @@ class Driver:
         relayed = [sys.executable, str(Path(probe_kit.__file__).resolve()), "--relay", str(out), str(err),
                    self.args.connection or "", *argv]
         line = shlex.join(["env", f"DELIVER_STATE_DIR={run.state}", *relayed])
+        installed = run.root / "install.txt"
+        if harness == "cursor":  # install runs in the terminal's plain shell, its ledger in the machine directory
+            install = shlex.join(["env", f"DELIVER_STATE_DIR={self.machine}", *shlex.split(DELIVER), "install", "cursor"])
+            said = shlex.quote(str(installed))
+            line = f"{install} >{said} 2>&1; s=$?; printf '\\n%s\\n' $s >>{said}; [ $s -eq 0 ] || exit $s; {line}"
         name = f"xh-{harness}-{task.lower()}-{os.getpid()}-{secrets.token_hex(3)}"
         started = probe_kit.hc("run", "--bg", "--no-notify", "--name", name, "--cwd", str(run.clone),
                                "bash", "-c", line)
@@ -370,6 +390,8 @@ class Driver:
             return [(False, f"no finish within {limit:g} seconds, terminal ended")]
         probe_kit.hc("rm", address)
         run.exit_code = info.get("exit_code")
+        if harness == "cursor" and (refused := install_failed(installed)):
+            return [(False, refused)]
         facts = judge_g(run) if task == "G" else judge_t1(run, self.args.fixture)
         if run.exit_code != 0:
             facts.append((False, f"the harness exited {run.exit_code}"))
@@ -422,7 +444,7 @@ def run(args: argparse.Namespace) -> int:
     run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + f"-{os.getpid()}"
     saved = state / "cross-harness" / run_id
     saved.mkdir(mode=0o700, parents=True)
-    driver, failed, stop = Driver(args, saved), False, None
+    driver, failed, stop = Driver(args, saved, state), False, None
     for task in tasks:
         if stop:
             print(f"{task} {args.harness} not run: {stop}", flush=True)

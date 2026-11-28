@@ -40,7 +40,7 @@ COMMAND_NAMES = {"claude": "claude", "cortex": "cortex", "codex": "codex", "curs
 
 # Knobs, comma-separated in STANDIN: drop=<class>|<class> leaves those refusals out of the log;
 # no-control, oneway-ran, no-warning, no-finish, preflight-stop, no-agent-probe, harness=<name>;
-# agent starts an agent, agent-event prints an event an agent made; no-small-test, merge-owner, not-merged, no-merge, denied, no-usage.
+# agent starts an agent, agent-event prints an event an agent made, no-cached leaves Codex's cached count out; no-small-test, merge-owner, not-merged, no-merge, denied, no-usage.
 HARNESS = (r'''#!{python}
 import json, os, re, subprocess, sys, time
 from pathlib import Path
@@ -153,7 +153,8 @@ elif name == "codex":
     emit(type="thread.started", thread_id=SESSION)
     if starting:
         emit(type="item.started", item={"type": "collab_tool_call", "tool": "spawn_agent"})
-    emit(type="turn.completed", usage=usage)
+    cached = {} if "no-cached" in knobs else {"cached_input_tokens": 8}  # 20 in, 8 of them from the cache
+    emit(type="turn.completed", usage=usage and {**usage, "input_tokens": 20, **cached})
 elif name == "agy":
     emit(event="init", init={"model": "standin-model", "cwd": str(cwd)})
     if starting:
@@ -215,11 +216,16 @@ os.environ["STANDIN_UV"] = " ".join(sys.argv[1:5])
 os.execv(sys.executable, [sys.executable, *sys.argv[5:]])
 '''
 
-# The stand-in deliver.py the driver runs for `install cursor`.
+# The stand-in deliver.py the driver runs for `install cursor`. Like install.py, it refuses inside a
+# Claude Code session, which sets CLAUDECODE.
 DELIVER = r'''import json, os, sys
 from pathlib import Path
 with open(os.environ["STANDIN_DELIVER_LOG"], "a") as log:
-    log.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "uv": os.environ.get("STANDIN_UV")}) + "\n")
+    log.write(json.dumps({"args": sys.argv[1:], "cwd": os.getcwd(), "uv": os.environ.get("STANDIN_UV"),
+                          "state_dir": os.environ.get("DELIVER_STATE_DIR")}) + "\n")
+if os.environ.get("CLAUDECODE"):
+    print("REFUSED install.wrong-harness: this session runs on claude-code, not cursor, at " + os.getcwd())
+    sys.exit(10)
 if sys.argv[1:] == ["install", "cursor"]:
     (Path.cwd() / ".cursor/agents").mkdir(parents=True)
     (Path.cwd() / ".cursor/agents/deliver-reader.md").write_text("reader\n")
@@ -379,8 +385,23 @@ class CrossHarnessTest(unittest.TestCase):
         install, = lines(self.world.root / "deliver.jsonl")
         start, = self.world.starts()
         self.assertEqual(install, {"args": ["install", "cursor"], "cwd": start["cwd"],
-                                   "uv": "run --python 3.13 --no-project"})
+                                   "uv": "run --python 3.13 --no-project", "state_dir": str(self.world.state)})
         self.assertTrue(start["cursor_agents"])
+        run, = [call for call in lines(self.world.root / "hc" / "calls.jsonl") if call[0] == "run"]
+        words = shlex.split(run[-1])  # in the terminal's shell, not the driver's process, given the machine directory
+        given = words.index(f"DELIVER_STATE_DIR={self.world.state}")
+        self.assertEqual(words[given - 1:given + 8], ["env", f"DELIVER_STATE_DIR={self.world.state}", "uv", "run",
+                                                      "--python", "3.13", "--no-project",
+                                                      f"{self.world.tree}/skills/deliver/scripts/deliver.py", "install"])
+
+    def test_a_failed_install_on_cursor_names_its_refusal_and_starts_no_session(self):
+        code, out = self.run_on("cursor", "T1", CLAUDECODE="1")
+        self.assertEqual(out, ["T1 cursor failed: deliver.py install cursor refused install.wrong-harness; "
+                               "tokens: blank in, blank out"])
+        self.assertEqual(code, 1)
+        self.assertEqual(self.world.starts(), [])
+        code, out = self.run_on("cursor", "T1", STANDIN_INSTALL_EXIT="3")
+        self.assertEqual(out, ["T1 cursor failed: deliver.py install cursor exited 3; tokens: blank in, blank out"])
 
     def test_t1_types_the_skill_with_the_small_edit_text(self):
         text = ("Reword the docstring of `add` in `calc.py` so it says what the function returns. "
@@ -464,6 +485,9 @@ class CrossHarnessTest(unittest.TestCase):
         self.assertEqual(out, ["T1 codex passed: one session and no agent; the small test passed; the session merged "
                                "PR 6; tokens: blank in, blank out"])
         self.assertEqual(code, 0)
+        code, out = self.run_on("codex", "T1", STANDIN="no-cached")  # the scan's rule: no cached count, no input
+        self.assertEqual(out, ["T1 codex passed: one session and no agent; the small test passed; the session merged "
+                               "PR 8; tokens: blank in, 340 out"])
 
     def test_a_run_past_its_limit_fails_its_terminal_is_ended_and_the_fixture_reset(self):
         code, out = self.run_on("claude", "G", "T1", "--time-limit", "1", STANDIN_SLEEP="30")
